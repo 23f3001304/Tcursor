@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)] pub struct Rgb { pub r: u8, pub g: u8, pub b: u8 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)] pub struct FramePoint { pub x: i32, pub y: i32 }
+#[derive(Clone, Copy, Debug, PartialEq)] pub struct RectF { pub x: f32, pub y: f32, pub w: f32, pub h: f32 }
 #[derive(Clone, Copy, Debug, PartialEq)] pub struct Camera { pub cx: f32, pub cy: f32, pub scale: f32 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -15,9 +16,9 @@ pub struct ZoomConfig {
 }
 impl Default for ZoomConfig {
     fn default() -> Self {
-        Self { target_scale: 1.8, zoom_in_ms: 350, zoom_out_ms: 450, idle_release_ms: 1200,
+        Self { target_scale: 2.2, zoom_in_ms: 350, zoom_out_ms: 450, idle_release_ms: 2200,
             clicks_to_trigger: 1, merge_window_ms: 600, merge_radius_px: 240,
-            follow_damping: 0.12, dead_zone_px: 60, easing: Easing::Smooth }
+            follow_damping: 0.10, dead_zone_px: 60, easing: Easing::Smooth }
     }
 }
 
@@ -37,12 +38,12 @@ impl Default for Background {
 
 #[derive(Clone, Copy, Debug)]
 pub struct Layout { pub out_w: u32, pub out_h: u32, pub pad_px: u32 }
-impl Default for Layout { fn default() -> Self { Self { out_w: 1920, out_h: 1080, pad_px: 64 } } }
+impl Default for Layout { fn default() -> Self { Self { out_w: 3840, out_h: 2160, pad_px: 120 } } }
 
 #[derive(Clone, Copy, Debug)] pub enum OverlayShape { Circle, Rounded { radius: u32 }, Rect }
 #[derive(Clone, Copy, Debug)] pub enum OverlayPos { BottomLeft, BottomRight, TopLeft, TopRight, Custom { x: u32, y: u32 } }
 #[derive(Clone, Copy, Debug)]
 pub struct OverlayLayout { pub shape: OverlayShape, pub pos: OverlayPos, pub size_px: u32, pub margin_px: u32, pub enabled: bool }
 impl Default for OverlayLayout {
-    fn default() -> Self { Self { shape: OverlayShape::Circle, pos: OverlayPos::BottomLeft, size_px: 200, margin_px: 32, enabled: true } }
+    fn default() -> Self { Self { shape: OverlayShape::Circle, pos: OverlayPos::BottomLeft, size_px: 420, margin_px: 80, enabled: true } }
 }

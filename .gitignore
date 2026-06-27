@@ -13,6 +13,9 @@ dist-ssr
 *.local
 target/
 
+# Bundled ffmpeg/ffprobe (large static binaries; copied locally, bundled into the installer)
+src-tauri/resources/*.exe
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

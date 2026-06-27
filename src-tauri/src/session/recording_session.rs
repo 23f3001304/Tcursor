@@ -10,21 +10,24 @@ pub struct RecordingSession {
     sink: Box<dyn FrameSink>,
     state: SessionState,
     frames: u64,
+    frame_ts: Vec<u64>,
 }
 
 impl RecordingSession {
     pub fn new(source: Box<dyn FrameSource>, sink: Box<dyn FrameSink>) -> Self {
-        Self { source, sink, state: SessionState::Recording, frames: 0 }
+        Self { source, sink, state: SessionState::Recording, frames: 0, frame_ts: Vec::new() }
     }
     pub fn state(&self) -> SessionState { self.state }
     pub fn frames_written(&self) -> u64 { self.frames }
+    /// Capture timestamps (ms) of each successfully encoded frame, in order.
+    pub fn frame_timestamps(&self) -> &[u64] { &self.frame_ts }
 
     /// Pull one frame and write it. Returns false when the source is exhausted.
     pub fn pump_once(&mut self) -> bool {
         match self.source.next_frame() {
             Some(frame) => {
                 match self.sink.push(&frame) {
-                    Ok(()) => self.frames += 1,
+                    Ok(()) => { self.frames += 1; self.frame_ts.push(frame.ts.0); }
                     Err(e) => eprintln!("frame sink push failed: {e}"),
                 }
                 true

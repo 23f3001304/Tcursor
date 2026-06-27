@@ -1,21 +1,9 @@
 use wgpu::util::DeviceExt;
 use crate::export::compositor::Compositor;
 use crate::export::gpu::Gpu;
-use crate::export::types::{Camera, Layout, OverlayLayout, OverlayPos, OverlayShape};
-
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct Uniforms {
-    inset_min: [f32; 2],
-    inset_max: [f32; 2],
-    crop_min: [f32; 2],
-    crop_max: [f32; 2],
-    ov_min: [f32; 2],
-    ov_max: [f32; 2],
-    overlay_enabled: f32,
-    is_circle: f32,
-    _pad: [f32; 2],
-}
+use crate::export::gpu_uniforms::build_uniforms;
+use crate::export::scene::Scene;
+use crate::export::types::{Camera, Layout};
 
 pub struct GpuCompositor {
     gpu: Gpu,
@@ -29,48 +17,6 @@ impl GpuCompositor {
     }
 }
 
-/// Build the uniform: inset rect (output-UV), crop rect (screen-UV), overlay rect.
-fn build_uniforms(
-    sw: u32, sh: u32, cam: Camera, layout: &Layout,
-    overlay: &OverlayLayout, has_webcam: bool,
-) -> Uniforms {
-    let (ow, oh) = (layout.out_w as f32, layout.out_h as f32);
-    let pad = layout.pad_px as f32;
-    // Inset rect in output UV (mirror of CpuCompositor's pad blit).
-    let inset_min = [pad / ow, pad / oh];
-    let inset_max = [(ow - pad) / ow, (oh - pad) / oh];
-
-    // Crop rect in screen UV (mirror of CpuCompositor's resize_crop).
-    let cw = (sw as f32 / cam.scale).round();
-    let ch = (sh as f32 / cam.scale).round();
-    let cx0 = (cam.cx - cw / 2.0).clamp(0.0, (sw as f32 - cw).max(0.0));
-    let cy0 = (cam.cy - ch / 2.0).clamp(0.0, (sh as f32 - ch).max(0.0));
-    let crop_min = [cx0 / sw as f32, cy0 / sh as f32];
-    let crop_max = [(cx0 + cw) / sw as f32, (cy0 + ch) / sh as f32];
-
-    // Overlay rect in output UV (mirror of overlay_origin + size).
-    let sz = overlay.size_px as f32;
-    let m = overlay.margin_px as f32;
-    let (ox, oy) = match overlay.pos {
-        OverlayPos::BottomLeft => (m, (oh - sz - m).max(0.0)),
-        OverlayPos::BottomRight => ((ow - sz - m).max(0.0), (oh - sz - m).max(0.0)),
-        OverlayPos::TopLeft => (m, m),
-        OverlayPos::TopRight => ((ow - sz - m).max(0.0), m),
-        OverlayPos::Custom { x, y } => (x as f32, y as f32),
-    };
-    let enabled = overlay.enabled && has_webcam;
-    let is_circle = matches!(overlay.shape, OverlayShape::Circle);
-
-    Uniforms {
-        inset_min, inset_max, crop_min, crop_max,
-        ov_min: [ox / ow, oy / oh],
-        ov_max: [(ox + sz) / ow, (oy + sz) / oh],
-        overlay_enabled: if enabled { 1.0 } else { 0.0 },
-        is_circle: if is_circle { 1.0 } else { 0.0 },
-        _pad: [0.0, 0.0],
-    }
-}
-
 impl Compositor for GpuCompositor {
     fn composite(
         &self,
@@ -78,7 +24,7 @@ impl Compositor for GpuCompositor {
         webcam: Option<(&[u8], u32, u32)>,
         cam: Camera, bg: &[u8],
         layout: &Layout,
-        overlay: &OverlayLayout,
+        scene: &Scene,
     ) -> Vec<u8> {
         let g = &self.gpu;
         let (ow, oh) = (self.out_w, self.out_h);
@@ -92,7 +38,7 @@ impl Compositor for GpuCompositor {
         let bv = bg_tex.create_view(&Default::default());
         let wv = wc_tex.create_view(&Default::default());
 
-        let u = build_uniforms(sw, sh, cam, layout, overlay, webcam.is_some());
+        let u = build_uniforms(scene, cam, layout, webcam.is_some());
         let ubuf = g.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("uniforms"),
             contents: bytemuck::bytes_of(&u),
@@ -170,28 +116,54 @@ impl Compositor for GpuCompositor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::export::types::{Camera, Layout, OverlayLayout};
+    use crate::export::scene::{Panel, Scene};
+    use crate::export::types::{Camera, Layout, RectF};
 
     fn solid(w: u32, h: u32, px: [u8; 4]) -> Vec<u8> {
         let mut v = vec![0u8; (w * h * 4) as usize];
-        for c in v.chunks_mut(4) { c.copy_from_slice(&px); }
-        v
+        for c in v.chunks_mut(4) { c.copy_from_slice(&px); } v
     }
 
     #[test]
-    fn composites_onto_background_at_inset() {
-        // Mirror of CpuCompositor::composites_onto_background_at_inset; skip if no GPU.
+    fn screen_panel_composites_onto_background() {
         let c = match GpuCompositor::new(8, 8) { Some(c) => c, None => return };
-        let sw = 4u32; let sh = 4u32;
-        let screen = solid(sw, sh, [0, 0, 255, 255]); // red (BGRA)
-        let bg = solid(8, 8, [255, 0, 0, 255]);        // blue (BGRA)
+        let screen = solid(4, 4, [0, 0, 255, 255]);
+        let bg = solid(8, 8, [255, 0, 0, 255]);
         let layout = Layout { out_w: 8, out_h: 8, pad_px: 1 };
-        let overlay = OverlayLayout { enabled: false, ..OverlayLayout::default() };
-        let cam = Camera { cx: 2.0, cy: 2.0, scale: 1.0 };
-        let out = c.composite(&screen, sw, sh, None, cam, &bg, &layout, &overlay);
+        let scene = Scene {
+            screen: Panel { rect: RectF { x: 2.0, y: 2.0, w: 4.0, h: 4.0 }, radius: 0.0, alpha: 1.0 },
+            camera: Panel { rect: RectF { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }, radius: 0.0, alpha: 0.0 },
+        };
+        let cam = Camera { cx: 4.0, cy: 4.0, scale: 1.0 };
+        let out = c.composite(&screen, 4, 4, None, cam, &bg, &layout, &scene);
         assert_eq!(out.len(), 8 * 8 * 4);
         assert_eq!(&out[0..4], &[255, 0, 0, 255], "corner must be bg blue");
         let i = ((3 * 8 + 3) * 4) as usize;
-        assert_eq!(&out[i..i + 4], &[0, 0, 255, 255], "inset (3,3) must be screen red");
+        assert_eq!(&out[i..i + 4], &[0, 0, 255, 255], "panel interior must be screen red");
+    }
+
+    #[test]
+    fn cpu_gpu_parity_two_panels() {
+        use crate::export::compositor::{Compositor, CpuCompositor};
+        let g = match GpuCompositor::new(64, 48) { Some(c) => c, None => return };
+        let screen = solid(32, 24, [10, 20, 200, 255]);   // BGRA-ish
+        let webcam = solid(16, 16, [200, 30, 10, 255]);
+        let bg = solid(64, 48, [40, 40, 40, 255]);
+        let layout = Layout { out_w: 64, out_h: 48, pad_px: 4 };
+        let scene = Scene {
+            screen: Panel { rect: RectF { x: 8.0, y: 6.0, w: 30.0, h: 22.0 }, radius: 0.0, alpha: 1.0 },
+            camera: Panel { rect: RectF { x: 40.0, y: 26.0, w: 18.0, h: 18.0 }, radius: 0.0, alpha: 1.0 },
+        };
+        let cam = Camera { cx: 32.0, cy: 24.0, scale: 1.0 };
+        let cpu = CpuCompositor.composite(&screen, 32, 24, Some((&webcam, 16, 16)), cam, &bg, &layout, &scene);
+        let gpu = g.composite(&screen, 32, 24, Some((&webcam, 16, 16)), cam, &bg, &layout, &scene);
+        // Interior sample points (centers of bg / screen panel / camera panel) must match within quantization.
+        for &(x, y) in &[(2u32, 2u32), (20, 14), (48, 34)] {
+            let i = ((y * 64 + x) * 4) as usize;
+            for c in 0..4 {
+                let d = (cpu[i + c] as i32 - gpu[i + c] as i32).abs();
+                assert!(d <= 2, "CPU/GPU mismatch at ({x},{y}) ch {c}: {} vs {}", cpu[i + c], gpu[i + c]);
+            }
+        }
     }
 }

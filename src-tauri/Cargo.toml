@@ -31,6 +31,7 @@ fast_image_resize = "5"
 wgpu = "22"
 bytemuck = { version = "1", features = ["derive"] }
 pollster = "0.3"
+ab_glyph = "0.2"
 
 [dependencies.windows]
 version = "0.58"

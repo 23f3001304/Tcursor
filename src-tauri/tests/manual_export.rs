@@ -1,7 +1,8 @@
 // Run explicitly:
 //   cargo test --test manual_export -- --ignored --nocapture
-// Finds the newest recording under %USERPROFILE%\Videos\CursorZoom that has a
-// video.mp4 + events.json, exports it, and verifies final.mp4 is produced.
+// Finds the newest recording under %USERPROFILE%\Videos\TCursor (or the legacy
+// CursorZoom) that has a video.mp4 + events.json, exports it, and verifies
+// final.mp4 is produced.
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -11,9 +12,11 @@ use cursor_zoom_lib::session::paths::ProjectPaths;
 #[test]
 #[ignore]
 fn exports_latest_recording_to_final_mp4() {
-    let videos = PathBuf::from(std::env::var("USERPROFILE").unwrap())
-        .join("Videos")
-        .join("CursorZoom");
+    let home = PathBuf::from(std::env::var("USERPROFILE").unwrap()).join("Videos");
+    let videos = [home.join("TCursor"), home.join("CursorZoom")]
+        .into_iter()
+        .find(|d| newest_recording(d).is_some())
+        .unwrap_or_else(|| home.join("TCursor"));
     let Some(name) = newest_recording(&videos) else {
         eprintln!("no recording with video.mp4 + events.json under {videos:?}; skipping");
         return;

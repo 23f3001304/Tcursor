@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "tcursor-scaffold",
+  "productName": "TCursor",
   "version": "0.1.0",
   "identifier": "com.coehe.tcursor-scaffold",
   "build": {
@@ -13,7 +13,8 @@
     "windows": [
       {
         "label": "main",
-        "title": "CursorZoom",
+        "title": "TCursor",
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --use-fake-ui-for-media-stream",
         "width": 860,
         "height": 132,
         "resizable": false,
@@ -31,6 +32,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": ["resources/ffmpeg.exe", "resources/ffprobe.exe"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

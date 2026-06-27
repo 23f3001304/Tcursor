@@ -1,16 +1,17 @@
-// Single-pass compositor: bg -> screen (inset, cropped) -> webcam overlay.
-// All textures are Bgra8Unorm so bytes stay BGRA end-to-end.
+// Two-panel compositor: zoom the base scene (background + screen panel) toward a
+// point, then draw the fixed camera panel on top. Every panel is a rounded rect
+// (circle = radius min(w,h)/2). All textures Bgra8Unorm so bytes stay BGRA.
 
 struct Uniforms {
-    inset_min: vec2<f32>,   // output-UV rect for the screen inset
-    inset_max: vec2<f32>,
-    crop_min: vec2<f32>,    // screen-UV rect (camera crop)
-    crop_max: vec2<f32>,
-    ov_min: vec2<f32>,      // output-UV rect for the webcam overlay
-    ov_max: vec2<f32>,
-    overlay_enabled: f32,
-    is_circle: f32,
-    _pad: vec2<f32>,
+    screen_min: vec2<f32>, screen_max: vec2<f32>,
+    cam_min: vec2<f32>, cam_max: vec2<f32>,
+    zoom_center: vec2<f32>,
+    inv_scale: f32,
+    screen_r: f32, camera_r: f32,
+    screen_a: f32, camera_a: f32,
+    screen_w: f32, screen_h: f32,
+    cam_w: f32, cam_h: f32,
+    _pad: f32,
 };
 
 @group(0) @binding(0) var bg_tex: texture_2d<f32>;
@@ -19,18 +20,14 @@ struct Uniforms {
 @group(0) @binding(3) var samp: sampler;
 @group(0) @binding(4) var<uniform> u: Uniforms;
 
-struct VsOut {
-    @builtin(position) pos: vec4<f32>,
-    @location(0) uv: vec2<f32>,
-};
+struct VsOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> };
 
-// Fullscreen triangle: 3 vertices, no vertex buffer.
 @vertex
 fn vs_main(@builtin(vertex_index) vi: u32) -> VsOut {
     var out: VsOut;
-    let x = f32((vi << 1u) & 2u);   // 0,2,0
-    let y = f32(vi & 2u);           // 0,0,2
-    out.uv = vec2<f32>(x, y);       // 0..2 in UV space
+    let x = f32((vi << 1u) & 2u);
+    let y = f32(vi & 2u);
+    out.uv = vec2<f32>(x, y);
     out.pos = vec4<f32>(x * 2.0 - 1.0, 1.0 - y * 2.0, 0.0, 1.0);
     return out;
 }
@@ -39,24 +36,32 @@ fn inside(p: vec2<f32>, lo: vec2<f32>, hi: vec2<f32>) -> bool {
     return p.x >= lo.x && p.x < hi.x && p.y >= lo.y && p.y < hi.y;
 }
 
+// Rounded-rect coverage at point `p` (same UV space as lo/hi), feathered inward ~1px.
+fn rrect_cov(p: vec2<f32>, lo: vec2<f32>, hi: vec2<f32>, w: f32, h: f32, r: f32) -> f32 {
+    let local = (p - lo) / (hi - lo) * vec2<f32>(w, h);
+    let half = vec2<f32>(w, h) * 0.5;
+    let rr = min(r, min(w, h) * 0.5);
+    let q = abs(local - half) - (half - vec2<f32>(rr, rr));
+    let d = min(max(q.x, q.y), 0.0) + length(max(q, vec2<f32>(0.0, 0.0))) - rr;
+    return clamp(0.5 - d, 0.0, 1.0);
+}
+
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = in.uv;
-    var color = textureSample(bg_tex, samp, p);
-
-    if (inside(p, u.inset_min, u.inset_max)) {
-        let t = (p - u.inset_min) / (u.inset_max - u.inset_min);
-        let screen_uv = u.crop_min + t * (u.crop_max - u.crop_min);
-        color = textureSample(screen_tex, samp, screen_uv);
+    let base_uv = u.zoom_center + (p - vec2<f32>(0.5, 0.5)) * u.inv_scale;
+    var color = textureSample(bg_tex, samp, base_uv);
+    // Screen panel: in the zoomed base scene.
+    if (u.screen_a > 0.001 && inside(base_uv, u.screen_min, u.screen_max)) {
+        let suv = (base_uv - u.screen_min) / (u.screen_max - u.screen_min);
+        let cov = rrect_cov(base_uv, u.screen_min, u.screen_max, u.screen_w, u.screen_h, u.screen_r) * u.screen_a;
+        color = mix(color, textureSample(screen_tex, samp, suv), cov);
     }
-
-    if (u.overlay_enabled > 0.5 && inside(p, u.ov_min, u.ov_max)) {
-        let t = (p - u.ov_min) / (u.ov_max - u.ov_min);
-        let local = t * 2.0 - vec2<f32>(1.0, 1.0); // [-1,1]
-        if (!(u.is_circle > 0.5 && length(local) > 1.0)) {
-            color = textureSample(webcam_tex, samp, t);
-        }
+    // Camera panel: fixed in OUTPUT space, on top (not zoomed).
+    if (u.camera_a > 0.001 && inside(p, u.cam_min, u.cam_max)) {
+        let cuv = (p - u.cam_min) / (u.cam_max - u.cam_min);
+        let cov = rrect_cov(p, u.cam_min, u.cam_max, u.cam_w, u.cam_h, u.camera_r) * u.camera_a;
+        color = mix(color, textureSample(webcam_tex, samp, cuv), cov);
     }
-
     return color;
 }

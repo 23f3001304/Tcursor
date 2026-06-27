@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { AnimatePresence, MotionConfig, motion } from "motion/react";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { listen } from "@tauri-apps/api/event";
@@ -9,9 +10,11 @@ import { useCameraDevices } from "./useCameraDevices";
 import { useMicWaveform } from "./useMicWaveform";
 import { formatTimer } from "./formatTimer";
 import { Dropdown } from "./Dropdown";
-import { Grip, Monitor, Mic, MicOff, Speaker, SpeakerOff, Camera, MinIcon, CloseIcon } from "./icons";
+import { Grip, Monitor, Mic, MicOff, Speaker, SpeakerOff, Camera, MinIcon, CloseIcon, Gear } from "./icons";
 import { startRecording, stopRecording, pauseRecording, resumeRecording, saveWebcam, exportProject } from "../lib/ipc";
 import { useWebcamRecorder } from "./useWebcamRecorder";
+import { Settings } from "./SettingsPanel";
+import { morphWindow } from "./morph";
 
 const WIDTH = 860;
 
@@ -28,13 +31,23 @@ export function Hud() {
   const [sysOn, setSysOn] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [pct, setPct] = useState(0);
+  const [err, setErr] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [barShown, setBarShown] = useState(true);
   const lastFolder = useRef<string>("");
   const webcam = useWebcamRecorder();
   const elapsed = useRecordingTimer(recording, paused);
   const levels = useMicWaveform(recording && !paused);
   const win = getCurrentWindow();
 
-  useEffect(() => { win.setSize(new LogicalSize(WIDTH, menu ? 430 : 132)); }, [menu]);
+  const BOX_W = 360, BOX_H = 440; // 16px body top-padding + 420 box + a little slack
+  const barSize = () => new LogicalSize(WIDTH, menu ? 430 : 132);
+  // The box<->bar window resize is driven by openSettings and the settings exit
+  // (restoreBar via onExitComplete) so the spring-out is never clipped; this
+  // effect only tracks the dropdown height while the bar is showing.
+  useEffect(() => { if (barShown) win.setSize(barSize()); }, [menu]);
+  function openSettings() { setBarShown(false); setSettingsOpen(true); void morphWindow(WIDTH, menu ? 430 : 132, BOX_W, BOX_H, 200); }
+  function restoreBar() { void morphWindow(BOX_W, BOX_H, WIDTH, menu ? 430 : 132, 200).then(() => setBarShown(true)); }
 
   useEffect(() => {
     const unsubs: Promise<() => void>[] = [];
@@ -52,8 +65,14 @@ export function Hud() {
 
   async function toggle() {
     if (!recording) {
-      await startRecording(`rec-${Date.now()}`, micOn ? sel.micId : null, sysOn);
-      if (camOn) webcam.start(cam.ref.current?.srcObject as MediaStream | null);
+      setErr(null);
+      try {
+        await startRecording(`rec-${Date.now()}`, micOn ? sel.micId : null, sysOn);
+      } catch (e) {
+        setErr(String(e));
+        return;
+      }
+      if (camOn) webcam.start(cam.stream());
       setRecording(true);
     } else {
       const res = await stopRecording();
@@ -75,52 +94,71 @@ export function Hud() {
   const camOpts = cameras.length ? cameras.map((c) => ({ id: c.id, label: c.label })) : [{ id: "", label: "Camera" }];
 
   return (
-    <div className="hud">
-      <div className="titlebar" data-tauri-drag-region>
-        <span className="brand">CursorZoom</span>
-        <span className="winctrls">
-          <button className="winbtn" title="Minimize" onClick={() => win.minimize()}><MinIcon /></button>
-          <button className="winbtn close" title="Close" onClick={() => win.close()}><CloseIcon /></button>
-        </span>
-      </div>
-
-      <div className="row">
-        <div className="grip" data-tauri-drag-region><Grip /></div>
-
-        <button className="camtoggle" title={recording ? "Camera locked while recording" : camOn ? "Turn camera off" : "Turn camera on"} onClick={() => { if (!recording) setCamOn((v) => !v); }}>
-          <video ref={cam.ref} className={`cam ${camOn && cam.on ? "" : "off"}`} autoPlay muted playsInline />
-          {!(camOn && cam.on) && <span className="camoff"><Camera /></span>}
-        </button>
-
-        {exporting ? (
-          <span className="exporting">Exporting… {pct}%</span>
-        ) : !recording ? (
-          <>
-            <Dropdown icon={<Camera />} value={camId ?? cameras[0]?.id ?? ""} options={camOpts}
-              open={menu === "cam"} onToggle={() => tg("cam")} onPick={(id) => { setCamId(id || null); setMenu(null); }} />
-            <div className="divider" />
-            <Dropdown icon={<Monitor />} value={String(sel.displayId ?? "")} options={displays.map((d) => ({ id: String(d.id), label: d.label }))}
-              open={menu === "screen"} onToggle={() => tg("screen")} onPick={(id) => { setSel({ ...sel, displayId: Number(id) }); setMenu(null); }} />
-            <Dropdown icon={<Mic />} value={sel.micId ?? ""} options={mics.map((m) => ({ id: m.id, label: m.label }))}
-              open={menu === "mic"} onToggle={() => tg("mic")} onPick={(id) => { setSel({ ...sel, micId: id }); setMenu(null); }} />
-            <button className={`toggle ${micOn ? "on" : ""}`} title={micOn ? "Microphone on" : "Microphone off"} onClick={() => setMicOn(v => !v)}>{micOn ? <Mic /> : <MicOff />}</button>
-            <button className={`toggle ${sysOn ? "on" : ""}`} title={sysOn ? "System audio on" : "System audio off"} onClick={() => setSysOn(v => !v)}>{sysOn ? <Speaker /> : <SpeakerOff />}</button>
-          </>
-        ) : (
-          <div className="recmeter">
-            <span className="ico"><Mic /></span>
-            <div className="wave">{levels.map((l, i) => <span key={i} style={{ height: `${3 + l * 18}px` }} />)}</div>
-          </div>
+    <MotionConfig reducedMotion="user">
+    <div className={`hud ${barShown ? "" : "as-box"}`}>
+      <AnimatePresence onExitComplete={restoreBar}>
+        {settingsOpen && (
+          <motion.div key="settings" className="settings-wrap" style={{ originX: 1, originY: 0 }}
+            initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }}
+            transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}>
+            <Settings onClose={() => setSettingsOpen(false)} />
+          </motion.div>
         )}
+      </AnimatePresence>
+      {barShown && (
+        <>
+          <div className="titlebar" data-tauri-drag-region>
+            <span className="brand">TCursor</span>
+            {err && <span style={{ color: "#ff6b6b", fontSize: 11, marginLeft: 10 }} title={err}>⚠ couldn’t start recording (is ffmpeg available?)</span>}
+            <span className="winctrls">
+              {!recording && !exporting && (
+                <button className="winbtn gear" title="Settings" onClick={openSettings}><Gear /></button>
+              )}
+              <button className="winbtn" title="Minimize" onClick={() => win.minimize()}><MinIcon /></button>
+              <button className="winbtn close" title="Close" onClick={() => win.close()}><CloseIcon /></button>
+            </span>
+          </div>
 
-        <div className="spacer" />
+          <div className="row">
+            <div className="grip" data-tauri-drag-region><Grip /></div>
 
-        {recording && <span className="timer">{formatTimer(elapsed)}</span>}
-        {recording && <button className="btn" onClick={togglePause}>{paused ? "Resume" : "Pause"}</button>}
-        <button className={`btn rec ${recording ? "is-rec" : ""}`} onClick={toggle} disabled={exporting}>
-          <span className="dot" />{recording ? "Stop" : "Record"}
-        </button>
-      </div>
+            <button className="camtoggle" title={recording ? "Camera locked while recording" : camOn ? "Turn camera off" : "Turn camera on"} onClick={() => { if (!recording) setCamOn((v) => !v); }}>
+              <video ref={cam.ref} className={`cam ${camOn && cam.on ? "" : "off"}`} autoPlay muted playsInline />
+              {!(camOn && cam.on) && <span className="camoff"><Camera /></span>}
+            </button>
+
+            {exporting ? (
+              <span className="exporting">Exporting… {pct}%</span>
+            ) : !recording ? (
+              <>
+                <Dropdown icon={<Camera />} value={camId ?? cameras[0]?.id ?? ""} options={camOpts}
+                  open={menu === "cam"} onToggle={() => tg("cam")} onPick={(id) => { setCamId(id || null); setMenu(null); }} />
+                <div className="divider" />
+                <Dropdown icon={<Monitor />} value={String(sel.displayId ?? "")} options={displays.map((d) => ({ id: String(d.id), label: d.label }))}
+                  open={menu === "screen"} onToggle={() => tg("screen")} onPick={(id) => { setSel({ ...sel, displayId: Number(id) }); setMenu(null); }} />
+                <Dropdown icon={<Mic />} value={sel.micId ?? ""} options={mics.map((m) => ({ id: m.id, label: m.label }))}
+                  open={menu === "mic"} onToggle={() => tg("mic")} onPick={(id) => { setSel({ ...sel, micId: id }); setMenu(null); }} />
+                <button className={`toggle ${micOn ? "on" : ""}`} title={micOn ? "Microphone on" : "Microphone off"} onClick={() => setMicOn(v => !v)}>{micOn ? <Mic /> : <MicOff />}</button>
+                <button className={`toggle ${sysOn ? "on" : ""}`} title={sysOn ? "System audio on" : "System audio off"} onClick={() => setSysOn(v => !v)}>{sysOn ? <Speaker /> : <SpeakerOff />}</button>
+              </>
+            ) : (
+              <div className="recmeter">
+                <span className="ico"><Mic /></span>
+                <div className="wave">{levels.map((l, i) => <span key={i} style={{ height: `${3 + l * 18}px` }} />)}</div>
+              </div>
+            )}
+
+            <div className="spacer" />
+
+            {recording && <span className="timer">{formatTimer(elapsed)}</span>}
+            {recording && <button className="btn" onClick={togglePause}>{paused ? "Resume" : "Pause"}</button>}
+            <button className={`btn rec ${recording ? "is-rec" : ""}`} onClick={toggle} disabled={exporting}>
+              <span className="dot" />{recording ? "Stop" : "Record"}
+            </button>
+          </div>
+        </>
+      )}
     </div>
+    </MotionConfig>
   );
 }

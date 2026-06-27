@@ -1,7 +1,18 @@
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crate::audio::wav_writer::WavWriter;
+use crate::domain::time::Clock;
+
+/// Capture-time of the first sample in `now_ms`'s clock: `now` minus the stream's
+/// reported capture->callback latency (the device input latency the OS knows about),
+/// so the mic aligns to when the sound was actually captured — not when the callback
+/// ran. Falls back to `now` when the backend reports no timestamp.
+fn capture_ms(now_ms: u64, info: &cpal::InputCallbackInfo) -> u64 {
+    let ts = info.timestamp();
+    let lat = ts.callback.duration_since(&ts.capture).unwrap_or_default();
+    now_ms.saturating_sub(lat.as_millis() as u64)
+}
 
 pub struct CpalMicHandle {
     stream: cpal::Stream,
@@ -21,10 +32,15 @@ pub struct CpalMic;
 impl CpalMic {
     /// Open an input device by name (or the default if None). While `paused` is set,
     /// incoming samples are dropped so paused time is excluded from the WAV.
+    /// `started` is stamped once with the first sample's CAPTURE time (see
+    /// `capture_ms`), cancelling the device input latency so the mic lines up with
+    /// the screen without a manual offset.
     pub fn open(
         device_name: Option<&str>,
         wav_path: &str,
         paused: Arc<AtomicBool>,
+        started: Arc<AtomicU64>,
+        clock: Arc<dyn Clock>,
     ) -> anyhow::Result<CpalMicHandle> {
         let host = cpal::default_host();
         let device = match device_name {
@@ -49,8 +65,11 @@ impl CpalMic {
         let stream = match config.sample_format() {
             cpal::SampleFormat::F32 => device.build_input_stream(
                 &config.into(),
-                move |data: &[f32], _| {
+                move |data: &[f32], info: &cpal::InputCallbackInfo| {
                     if paused.load(Ordering::SeqCst) { return; }
+                    if started.load(Ordering::SeqCst) == 0 {
+                        started.store(capture_ms(clock.now_ms(), info), Ordering::SeqCst);
+                    }
                     let s: Vec<i16> = data.iter()
                         .map(|&x| (x.clamp(-1.0, 1.0) * i16::MAX as f32) as i16).collect();
                     if let Some(w) = w2.lock().unwrap().as_mut() { w.write(&s); }
@@ -58,8 +77,11 @@ impl CpalMic {
                 err_fn, None)?,
             cpal::SampleFormat::I16 => device.build_input_stream(
                 &config.into(),
-                move |data: &[i16], _| {
+                move |data: &[i16], info: &cpal::InputCallbackInfo| {
                     if paused.load(Ordering::SeqCst) { return; }
+                    if started.load(Ordering::SeqCst) == 0 {
+                        started.store(capture_ms(clock.now_ms(), info), Ordering::SeqCst);
+                    }
                     if let Some(w) = w2.lock().unwrap().as_mut() { w.write(data); }
                 },
                 err_fn, None)?,
@@ -70,6 +92,7 @@ impl CpalMic {
     }
 
     pub fn default_input(wav_path: &str) -> anyhow::Result<CpalMicHandle> {
-        Self::open(None, wav_path, Arc::new(AtomicBool::new(false)))
+        Self::open(None, wav_path, Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicU64::new(0)), Arc::new(crate::domain::time::SystemClock::new()))
     }
 }

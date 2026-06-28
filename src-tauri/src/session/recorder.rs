@@ -29,6 +29,7 @@ struct Running {
     keyboard: Option<KeyboardTracker>,
     events_path: PathBuf,
     actions_path: PathBuf,
+    typing_path: PathBuf,
     screen: ScreenInfo,
     started_unix_ms: u64,
     events_ms: u64,
@@ -50,6 +51,7 @@ pub fn start_recording(
     project_name: String,
     mic_id: Option<String>,
     system_audio: bool,
+    game_mode: bool,
     recorder: tauri::State<'_, Recorder>,
 ) -> Result<(), String> {
     let mut guard = recorder.inner.lock().unwrap_or_else(|e| e.into_inner());
@@ -69,7 +71,7 @@ pub fn start_recording(
 
     let fps = crate::win::display::primary_refresh_hz().min(60);
     let clock: Arc<dyn Clock> = Arc::new(SystemClock::new());
-    let mut source = WgcFrameSource::for_primary_display(clock.clone(), fps).map_err(|e| e.to_string())?;
+    let mut source = WgcFrameSource::for_primary_display(clock.clone(), fps, snap.cursor.style.captures_os_cursor()).map_err(|e| e.to_string())?;
     let (w, h) = source.dimensions();
 
     // Start every capture input (mouse, keyboard, mic, system audio) BEFORE the
@@ -93,7 +95,7 @@ pub fn start_recording(
         stop.clone(), paused.clone(), clock.clone(), system_start.clone(),
     );
 
-    // Now the slow part — the screen encoder — while the inputs above already run.
+    // Now the slow part - the screen encoder - while the inputs above already run.
     let video_path = paths.video().to_string_lossy().into_owned();
     let sink = FfmpegFrameSink::new(&video_path, w, h, fps).map_err(|e| e.to_string())?;
     println!("recording {w}x{h} @ {fps}fps");
@@ -101,6 +103,7 @@ pub fn start_recording(
     let video_halt = source.halt_handle();
     let video_stopper = source.take_stopper();
     let actions_path = paths.actions();
+    let typing_path = paths.typing();
     let screen = ScreenInfo { w, h, origin_x: 0, origin_y: 0 };
     let started_unix_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -110,11 +113,16 @@ pub fn start_recording(
 
     let video_stop = stop.clone();
     let video_paused = paused.clone();
+    let video_clock = clock.clone();
     let video_thread = std::thread::Builder::new()
         .name("video".into())
         .spawn(move || {
             let mut session = RecordingSession::new(Box::new(source), Box::new(sink));
-            session.run(&video_stop, &video_paused);
+            if game_mode {
+                session.run_paced(&video_stop, &video_paused, video_clock.as_ref(), fps);
+            } else {
+                session.run(&video_stop, &video_paused);
+            }
             let frame_ts = session.frame_timestamps().to_vec();
             let n = session.stop_and_finalize()?;
             Ok((n, frame_ts))
@@ -123,8 +131,8 @@ pub fn start_recording(
 
     *guard = Some(Running {
         stop, paused, video_halt, video_stopper, video_thread,
-        mic_thread, system_thread, mouse, keyboard, events_path, actions_path, screen, started_unix_ms,
-        events_ms, mic_start, system_start, folder,
+        mic_thread, system_thread, mouse, keyboard, events_path, actions_path, typing_path,
+        screen, started_unix_ms, events_ms, mic_start, system_start, folder,
     });
     Ok(())
 }
@@ -168,8 +176,9 @@ pub fn stop_recording(recorder: tauri::State<'_, Recorder>) -> Result<RecordingR
     }
 
     if let Some(kb) = running.keyboard {
-        let log = ActionLog { actions: kb.stop() };
-        if let Err(e) = log.save(&running.actions_path) { eprintln!("actions.json save failed: {e}"); }
+        let (actions, typing) = kb.stop();
+        if let Err(e) = (ActionLog { actions }).save(&running.actions_path) { eprintln!("actions.json save failed: {e}"); }
+        crate::events::typing::TypingLog { ms: typing }.save(&running.typing_path).ok();
     }
 
     let (frames, frame_ts) = running.video_thread

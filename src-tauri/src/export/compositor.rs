@@ -120,7 +120,7 @@ mod tests {
         // 4x4 red screen into a 4x4 panel at (2,2) of an 8x8 blue output, no zoom, no camera.
         let screen = solid(4, 4, [0, 0, 255, 255]); // BGRA red
         let bg = solid(8, 8, [255, 0, 0, 255]);      // BGRA blue
-        let layout = Layout { out_w: 8, out_h: 8, pad_px: 1 };
+        let layout = Layout { out_w: 8, out_h: 8, pad_px: 1, screen_scale: 1.0, screen_radius_px: 8.0 * 0.016 };
         let scene = Scene { screen: panel(2.0, 2.0, 4.0, 4.0, 1.0), camera: panel(0.0, 0.0, 0.0, 0.0, 0.0) };
         let cam = Camera { cx: 4.0, cy: 4.0, scale: 1.0 };
         let out = CpuCompositor.composite(&screen, 4, 4, None, cam, &bg, &layout, &scene);
@@ -135,7 +135,7 @@ mod tests {
         let screen = solid(8, 8, [0, 0, 255, 255]);
         let webcam = solid(4, 4, [0, 255, 0, 255]);
         let bg = solid(8, 8, [255, 0, 0, 255]);
-        let layout = Layout { out_w: 8, out_h: 8, pad_px: 1 };
+        let layout = Layout { out_w: 8, out_h: 8, pad_px: 1, screen_scale: 1.0, screen_radius_px: 8.0 * 0.016 };
         // camera panel larger than output + screen disabled: must not OOB or panic.
         let scene = Scene { screen: panel(0.0, 0.0, 8.0, 8.0, 0.0), camera: panel(2.0, 2.0, 20.0, 20.0, 1.0) };
         let cam = Camera { cx: 4.0, cy: 4.0, scale: 1.0 };

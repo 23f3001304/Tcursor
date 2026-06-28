@@ -8,22 +8,24 @@ pub fn to_frame(screen: &ScreenInfo, x: i32, y: i32) -> FramePoint {
 }
 
 /// The screen inset rectangle `(x, y, w, h)` in output pixels: the screen fitted
-/// inside the padded area preserving its aspect ratio, centered. Shared by the
-/// compositors and `to_base` so the geometry stays consistent.
+/// inside the padded area preserving aspect ratio, scaled by `layout.screen_scale`
+/// about the output center. Shared by the compositors and `to_base`.
 pub fn inset_rect(sw: u32, sh: u32, layout: &Layout) -> (u32, u32, u32, u32) {
     let aw = layout.out_w.saturating_sub(2 * layout.pad_px).max(1) as f32;
     let ah = layout.out_h.saturating_sub(2 * layout.pad_px).max(1) as f32;
     let sa = sw.max(1) as f32 / sh.max(1) as f32;
-    let (iw, ih) = if aw / ah > sa { (ah * sa, ah) } else { (aw, aw / sa) };
+    let (mut iw, mut ih) = if aw / ah > sa { (ah * sa, ah) } else { (aw, aw / sa) };
+    let s = layout.screen_scale.clamp(0.1, 1.0);
+    iw *= s; ih *= s;
     let ix = (layout.out_w as f32 - iw) / 2.0;
     let iy = (layout.out_h as f32 - ih) / 2.0;
     (ix.round() as u32, iy.round() as u32, iw.round() as u32, ih.round() as u32)
 }
 
-/// Corner radius (output pixels) for the rounded screen inset, scaled to the
-/// output height and clamped so it never exceeds half the inset.
+/// Corner radius (output pixels) for the rounded screen inset: the layout's
+/// `screen_radius_px`, clamped so it never exceeds half the inset min side.
 pub fn corner_radius(layout: &Layout, iw: u32, ih: u32) -> f32 {
-    (layout.out_h as f32 * 0.016).min(iw.min(ih) as f32 / 2.0)
+    layout.screen_radius_px.min(iw.min(ih) as f32 / 2.0)
 }
 
 /// Map a screen-local point into the composited base frame (output pixels),
@@ -77,7 +79,7 @@ mod tests {
 
     #[test]
     fn to_base_centers_screen_and_insets_corner() {
-        let layout = Layout { out_w: 1920, out_h: 1080, pad_px: 60 };
+        let layout = Layout { out_w: 1920, out_h: 1080, pad_px: 60, screen_scale: 1.0, screen_radius_px: 1080.0 * 0.016 };
         // screen center -> output center
         let c = to_base(FramePoint { x: 960, y: 540 }, 1920, 1080, &layout);
         assert!((c.x - 960).abs() <= 1 && (c.y - 540).abs() <= 1);
@@ -113,5 +115,23 @@ mod tests {
         assert!((c.0 - 960.0).abs() < 1.0 && (c.1 - 540.0).abs() < 1.0);
         let tl = project(480.0, 270.0, cam, 1920, 1080); // crop top-left -> (0,0)
         assert!(tl.0.abs() < 1.0 && tl.1.abs() < 1.0);
+    }
+
+    #[test]
+    fn inset_scales_about_center_with_screen_scale() {
+        let mut layout = Layout { out_w: 1920, out_h: 1080, pad_px: 0, screen_scale: 1.0, screen_radius_px: 0.0 };
+        let (_, _, fw, fh) = inset_rect(1920, 1080, &layout);   // full inset at scale 1.0
+        layout.screen_scale = 0.5;
+        let (hx, hy, hw, hh) = inset_rect(1920, 1080, &layout);
+        assert!((hw as f32 - fw as f32 * 0.5).abs() <= 1.0);
+        assert!((hh as f32 - fh as f32 * 0.5).abs() <= 1.0);
+        assert!((hx as f32 - (1920.0 - hw as f32) / 2.0).abs() <= 1.0); // recentered
+        assert!((hy as f32 - (1080.0 - hh as f32) / 2.0).abs() <= 1.0);
+    }
+    #[test]
+    fn corner_radius_uses_layout_value_and_clamps() {
+        let layout = Layout { out_w: 1000, out_h: 1000, pad_px: 0, screen_scale: 1.0, screen_radius_px: 40.0 };
+        assert_eq!(corner_radius(&layout, 400, 300), 40.0);   // honored
+        assert_eq!(corner_radius(&layout, 50, 60), 25.0);     // clamped to min(w,h)/2
     }
 }

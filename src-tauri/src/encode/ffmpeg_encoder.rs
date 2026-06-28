@@ -47,7 +47,15 @@ fn h264_encoder() -> &'static str {
 /// first recording's sink creation is fast and audio capture isn't delayed behind
 /// it. Cached afterward, so later calls are free.
 pub fn prewarm() {
-    let _ = h264_encoder();
+    let enc = h264_encoder();
+    // Record whether ffmpeg actually launches (the encoder probe silently swallows a
+    // missing/AV-blocked binary) into the same diagnostic log written at startup.
+    let runs = ffcmd("ffmpeg").arg("-version").stdout(Stdio::null()).stderr(Stdio::null()).status();
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true)
+        .open(std::env::temp_dir().join("tcursor-ffmpeg.log"))
+    {
+        let _ = f.write_all(format!("encoder={enc} ffmpeg_runs={runs:?}\n").as_bytes());
+    }
 }
 
 impl FfmpegFrameSink {

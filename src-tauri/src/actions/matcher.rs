@@ -82,6 +82,8 @@ fn push_arm(arms: &mut Vec<Arm>, s: &str, on_down: ActionKind, on_up: Option<Act
 pub fn arming_from_settings(h: &HotkeySettings) -> Vec<Arm> {
     let mut arms = Vec::new();
     push_arm(&mut arms, &h.zoom_hold, ActionKind::ZoomHoldStart, Some(ActionKind::ZoomHoldEnd));
+    push_arm(&mut arms, &h.spotlight_hold, ActionKind::SpotlightHoldStart, Some(ActionKind::SpotlightHoldEnd));
+    push_arm(&mut arms, &h.video_fx_hold, ActionKind::VideoFxHoldStart, Some(ActionKind::VideoFxHoldEnd));
     push_arm(&mut arms, &h.layout_screen, ActionKind::SetLayout(LayoutId::Screen), None);
     push_arm(&mut arms, &h.layout_camera, ActionKind::SetLayout(LayoutId::Camera), None);
     push_arm(&mut arms, &h.layout_presenter, ActionKind::SetLayout(LayoutId::Presenter), None);
@@ -139,7 +141,7 @@ mod tests {
         let mut m = ActionMatcher::new(arming_from_settings(&HotkeySettings::default()));
         let vkz = 'Z' as u32; // default zoom_hold = Ctrl+Alt+Z
         assert_eq!(m.on_key(true, vkz, ca(), 0).unwrap().kind, ActionKind::ZoomHoldStart);
-        // release Z after the user already let go of Ctrl/Alt — still pairs by vk
+        // release Z after the user already let go of Ctrl/Alt - still pairs by vk
         let end = m.on_key(false, vkz, Mods::default(), 500).unwrap();
         assert_eq!(end.kind, ActionKind::ZoomHoldEnd);
         // a second release with nothing held is a no-op
@@ -150,5 +152,27 @@ mod tests {
     fn unarmed_key_is_ignored() {
         let mut m = ActionMatcher::new(arming_from_settings(&HotkeySettings::default()));
         assert!(m.on_key(true, 'Q' as u32, ca(), 0).is_none());
+    }
+
+    #[test]
+    fn spotlight_hold_pairs_start_then_end_even_if_mods_released_first() {
+        let mut m = ActionMatcher::new(arming_from_settings(&HotkeySettings::default()));
+        let vks = 'S' as u32; // default spotlight_hold = Ctrl+Alt+S
+        assert_eq!(m.on_key(true, vks, ca(), 0).unwrap().kind, ActionKind::SpotlightHoldStart);
+        // release S after the user already let go of Ctrl/Alt - still pairs by vk
+        let end = m.on_key(false, vks, Mods::default(), 500).unwrap();
+        assert_eq!(end.kind, ActionKind::SpotlightHoldEnd);
+        // a second release with nothing held is a no-op
+        assert!(m.on_key(false, vks, Mods::default(), 600).is_none());
+    }
+
+    #[test]
+    fn arming_includes_spotlight_hold_arm() {
+        let arms = arming_from_settings(&HotkeySettings::default());
+        let arm = arms.iter().find(|a| a.on_down == ActionKind::SpotlightHoldStart)
+            .expect("spotlight hold arm must be present");
+        assert_eq!(arm.chord.vk, 'S' as u32);
+        assert!(arm.chord.mods.ctrl && arm.chord.mods.alt);
+        assert_eq!(arm.on_up, Some(ActionKind::SpotlightHoldEnd));
     }
 }

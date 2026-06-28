@@ -6,12 +6,13 @@ import { Back } from "./icons";
 import { SettingsZoom } from "./SettingsZoom";
 import { SettingsHotkeys } from "./SettingsHotkeys";
 import { SettingsClickFx } from "./SettingsClickFx";
+import { SettingsAppearance } from "./SettingsAppearance";
 import { Field, Slider } from "./SettingsControls";
 import "./settings.css";
 
-type Tab = "zoom" | "keys" | "fx";
+type Tab = "zoom" | "keys" | "fx" | "frame";
 const TABS: { id: Tab; label: string }[] = [
-  { id: "zoom", label: "Zoom" }, { id: "keys", label: "Keys" }, { id: "fx", label: "FX" },
+  { id: "zoom", label: "Zoom" }, { id: "keys", label: "Keys" }, { id: "fx", label: "FX" }, { id: "frame", label: "Frame" },
 ];
 
 /** Small settings box: a back arrow, segmented tabs, and one section at a time.
@@ -51,6 +52,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
           )}
           {tab === "keys" && <SettingsHotkeys value={draft.hotkeys} onChange={(hotkeys) => patch({ ...draft, hotkeys })} />}
           {tab === "fx" && <SettingsClickFx value={draft.clickfx} onChange={(clickfx) => patch({ ...draft, clickfx })} />}
+          {tab === "frame" && <SettingsAppearance value={draft.appearance} onChange={(appearance) => patch({ ...draft, appearance })} />}
         </motion.div>
         </AnimatePresence>
       </div>

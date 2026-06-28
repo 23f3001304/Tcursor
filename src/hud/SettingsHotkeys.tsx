@@ -3,6 +3,8 @@ import type { HotkeySettings } from "./settings";
 
 const ROWS: { key: keyof HotkeySettings; label: string }[] = [
   { key: "zoom_hold", label: "Hold to zoom" },
+  { key: "spotlight_hold", label: "Spotlight hold" },
+  { key: "video_fx_hold", label: "Video effect hold" },
   { key: "layout_screen", label: "Layout: Screen" },
   { key: "layout_camera", label: "Layout: Camera" },
   { key: "layout_presenter", label: "Layout: Presenter" },

@@ -29,15 +29,11 @@ pub fn run() {
         ])
         .setup(|app| {
             use tauri::Manager;
-            // Use the bundled ffmpeg/ffprobe (installed builds); dev falls back to PATH.
-            if let Ok(res) = app.path().resource_dir() {
-                for cand in [res.join("resources"), res] {
-                    if cand.join("ffmpeg.exe").exists() {
-                        crate::win::proc::set_ffmpeg_dir(cand);
-                        break;
-                    }
-                }
-            }
+            // Resolve the bundled ffmpeg/ffprobe from the app exe dir (robust on
+            // installed builds where resource_dir() may not); dev falls back to PATH.
+            // The diagnostic log explains "ffmpeg not available" failures on any PC.
+            let diag = crate::win::proc::init_ffmpeg(app.path().resource_dir().ok());
+            let _ = std::fs::write(std::env::temp_dir().join("tcursor-ffmpeg.log"), diag);
             // Probe the encoder off-thread now so the first recording's ffmpeg sink
             // is fast — audio capture must not start behind a slow first ffmpeg launch.
             std::thread::spawn(crate::encode::ffmpeg_encoder::prewarm);

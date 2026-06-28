@@ -74,12 +74,11 @@ body { display: flex; align-items: flex-start; justify-content: center; overflow
 .dd-item-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dd-check { color: var(--accent); flex: none; display: flex; }
 
-/* camera tile doubles as on/off toggle */
+/* camera preview tile (the on/off toggle is the camera icon in the controls row) */
 .camtoggle {
   position: relative; width: 40px; height: 40px; border-radius: 8px; border: 1px solid var(--line);
-  background: #0b0b0d; overflow: hidden; cursor: pointer; padding: 0; flex: none; transition: border-color 0.14s ease;
+  background: #0b0b0d; overflow: hidden; padding: 0; flex: none;
 }
-.camtoggle:hover { border-color: rgba(0, 0, 0, 0.18); }
 .cam { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); display: block; }
 .cam.off { display: none; }
 .camoff { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--surface); color: var(--muted); }

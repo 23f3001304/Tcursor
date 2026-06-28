@@ -4,13 +4,28 @@ use ab_glyph::{Font, FontRef, Glyph, point, PxScale, ScaleFont};
 
 const FONT: &[u8] = include_bytes!("../../assets/fonts/Inter-SemiBold.ttf");
 
+/// Caption lifetime in ms (moved from fxdraw).
+const CAP_MS: u32 = 1300;
+
+/// Draw the active caption (if `enabled`) onto the composited BGRA frame. Runs in
+/// both FX render paths - captions are always a CPU ab_glyph blit.
+pub fn overlay(out: &mut [u8], ow: u32, oh: u32, actions: &[crate::actions::model::ActionEvent],
+    keys: &crate::settings::model::HotkeySettings, et: u32, enabled: bool) {
+    if !enabled { return; }
+    if let Some((text, a)) = caption_at(actions, keys, et, CAP_MS) {
+        draw_caption(out, ow, oh, &text, a);
+    }
+}
+
 /// The chord caption to show at event-time `et`, plus its fade alpha, or `None`.
 /// The most-recent action within `life_ms` wins; a `ZoomHoldEnd` clears the caption.
 pub fn caption_at(actions: &[ActionEvent], keys: &HotkeySettings, et: u32, life_ms: u32) -> Option<(String, f32)> {
     let a = actions.iter().filter(|a| a.t <= et && et - a.t < life_ms).next_back()?;
     let text = match a.kind {
-        ActionKind::ZoomHoldEnd => return None,
+        ActionKind::ZoomHoldEnd | ActionKind::SpotlightHoldEnd | ActionKind::VideoFxHoldEnd => return None,
         ActionKind::ZoomHoldStart => keys.zoom_hold.clone(),
+        ActionKind::SpotlightHoldStart => keys.spotlight_hold.clone(),
+        ActionKind::VideoFxHoldStart => keys.video_fx_hold.clone(),
         ActionKind::SetLayout(id) => match id {
             LayoutId::Screen => keys.layout_screen.clone(),
             LayoutId::Camera => keys.layout_camera.clone(),

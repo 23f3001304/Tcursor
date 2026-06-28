@@ -9,11 +9,12 @@ pub struct GpuCompositor {
     gpu: Gpu,
     out_w: u32,
     out_h: u32,
+    bg_tex: std::sync::OnceLock<wgpu::Texture>,
 }
 
 impl GpuCompositor {
     pub fn new(out_w: u32, out_h: u32) -> Option<GpuCompositor> {
-        Some(GpuCompositor { gpu: Gpu::new(out_w, out_h)?, out_w, out_h })
+        Some(GpuCompositor { gpu: Gpu::new(out_w, out_h)?, out_w, out_h, bg_tex: std::sync::OnceLock::new() })
     }
 }
 
@@ -30,7 +31,8 @@ impl Compositor for GpuCompositor {
         let (ow, oh) = (self.out_w, self.out_h);
 
         let screen_tex = g.upload_tex("screen", screen, sw, sh);
-        let bg_tex = g.upload_tex("bg", bg, ow, oh);
+        // The background is constant for the whole export -- upload it once, reuse it.
+        let bg_tex = self.bg_tex.get_or_init(|| g.upload_tex("bg", bg, ow, oh));
         let (wc_data, ww, wh) = webcam.unwrap_or((&[0u8; 4], 1, 1));
         let wc_tex = g.upload_tex("webcam", wc_data, ww, wh);
 
@@ -129,7 +131,7 @@ mod tests {
         let c = match GpuCompositor::new(8, 8) { Some(c) => c, None => return };
         let screen = solid(4, 4, [0, 0, 255, 255]);
         let bg = solid(8, 8, [255, 0, 0, 255]);
-        let layout = Layout { out_w: 8, out_h: 8, pad_px: 1 };
+        let layout = Layout { out_w: 8, out_h: 8, pad_px: 1, screen_scale: 1.0, screen_radius_px: 8.0 * 0.016 };
         let scene = Scene {
             screen: Panel { rect: RectF { x: 2.0, y: 2.0, w: 4.0, h: 4.0 }, radius: 0.0, alpha: 1.0 },
             camera: Panel { rect: RectF { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }, radius: 0.0, alpha: 0.0 },
@@ -149,7 +151,7 @@ mod tests {
         let screen = solid(32, 24, [10, 20, 200, 255]);   // BGRA-ish
         let webcam = solid(16, 16, [200, 30, 10, 255]);
         let bg = solid(64, 48, [40, 40, 40, 255]);
-        let layout = Layout { out_w: 64, out_h: 48, pad_px: 4 };
+        let layout = Layout { out_w: 64, out_h: 48, pad_px: 4, screen_scale: 1.0, screen_radius_px: 48.0 * 0.016 };
         let scene = Scene {
             screen: Panel { rect: RectF { x: 8.0, y: 6.0, w: 30.0, h: 22.0 }, radius: 0.0, alpha: 1.0 },
             camera: Panel { rect: RectF { x: 40.0, y: 26.0, w: 18.0, h: 18.0 }, radius: 0.0, alpha: 1.0 },

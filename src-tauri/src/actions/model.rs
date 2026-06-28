@@ -11,7 +11,7 @@ pub enum LayoutId { Screen, Camera, Presenter, ScreenOnly, CameraOnly }
 /// toggle (down only); the zoom hold is a held pair (start on press, end on release).
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum ActionKind { SetLayout(LayoutId), ZoomHoldStart, ZoomHoldEnd }
+pub enum ActionKind { SetLayout(LayoutId), ZoomHoldStart, ZoomHoldEnd, SpotlightHoldStart, SpotlightHoldEnd, VideoFxHoldStart, VideoFxHoldEnd }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ActionEvent { pub t: u32, pub kind: ActionKind }

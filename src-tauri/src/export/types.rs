@@ -37,13 +37,13 @@ impl Default for Background {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct Layout { pub out_w: u32, pub out_h: u32, pub pad_px: u32 }
-impl Default for Layout { fn default() -> Self { Self { out_w: 3840, out_h: 2160, pad_px: 120 } } }
+pub struct Layout { pub out_w: u32, pub out_h: u32, pub pad_px: u32, pub screen_scale: f32, pub screen_radius_px: f32 }
+impl Default for Layout { fn default() -> Self { Self { out_w: 3840, out_h: 2160, pad_px: 120, screen_scale: 1.0, screen_radius_px: 2160.0 * 0.016 } } }
 
-#[derive(Clone, Copy, Debug)] pub enum OverlayShape { Circle, Rounded { radius: u32 }, Rect }
+#[derive(Clone, Copy, Debug)] pub enum OverlayShape { Circle, Rounded { frac: f32 }, Rect }
 #[derive(Clone, Copy, Debug)] pub enum OverlayPos { BottomLeft, BottomRight, TopLeft, TopRight, Custom { x: u32, y: u32 } }
 #[derive(Clone, Copy, Debug)]
-pub struct OverlayLayout { pub shape: OverlayShape, pub pos: OverlayPos, pub size_px: u32, pub margin_px: u32, pub enabled: bool }
+pub struct OverlayLayout { pub shape: OverlayShape, pub pos: OverlayPos, pub size_px: u32, pub margin_x_px: u32, pub margin_y_px: u32, pub enabled: bool }
 impl Default for OverlayLayout {
-    fn default() -> Self { Self { shape: OverlayShape::Circle, pos: OverlayPos::BottomLeft, size_px: 420, margin_px: 80, enabled: true } }
+    fn default() -> Self { Self { shape: OverlayShape::Circle, pos: OverlayPos::BottomLeft, size_px: 420, margin_x_px: 80, margin_y_px: 80, enabled: true } }
 }

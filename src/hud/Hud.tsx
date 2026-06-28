@@ -10,13 +10,13 @@ import { useCameraDevices } from "./useCameraDevices";
 import { useMicWaveform } from "./useMicWaveform";
 import { formatTimer } from "./formatTimer";
 import { Dropdown } from "./Dropdown";
-import { Grip, Monitor, Mic, MicOff, Speaker, SpeakerOff, Camera, MinIcon, CloseIcon, Gear } from "./icons";
+import { Grip, Monitor, Mic, MicOff, Speaker, SpeakerOff, Camera, CameraOff, MinIcon, CloseIcon, Gear, Gamepad } from "./icons";
 import { startRecording, stopRecording, pauseRecording, resumeRecording, saveWebcam, exportProject } from "../lib/ipc";
 import { useWebcamRecorder } from "./useWebcamRecorder";
 import { Settings } from "./SettingsPanel";
 import { morphWindow } from "./morph";
 
-const WIDTH = 860;
+const WIDTH = 980;
 
 export function Hud() {
   const { displays, mics, sel, setSel } = useDevices();
@@ -29,6 +29,7 @@ export function Hud() {
   const [menu, setMenu] = useState<string | null>(null);
   const [micOn, setMicOn] = useState(true);
   const [sysOn, setSysOn] = useState(false);
+  const [gameMode, setGameMode] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [pct, setPct] = useState(0);
   const [err, setErr] = useState<string | null>(null);
@@ -67,7 +68,7 @@ export function Hud() {
     if (!recording) {
       setErr(null);
       try {
-        await startRecording(`rec-${Date.now()}`, micOn ? sel.micId : null, sysOn);
+        await startRecording(`rec-${Date.now()}`, micOn ? sel.micId : null, sysOn, gameMode);
       } catch (e) {
         setErr(String(e));
         return;
@@ -122,10 +123,10 @@ export function Hud() {
           <div className="row">
             <div className="grip" data-tauri-drag-region><Grip /></div>
 
-            <button className="camtoggle" title={recording ? "Camera locked while recording" : camOn ? "Turn camera off" : "Turn camera on"} onClick={() => { if (!recording) setCamOn((v) => !v); }}>
+            <div className="camtoggle" title="Camera preview">
               <video ref={cam.ref} className={`cam ${camOn && cam.on ? "" : "off"}`} autoPlay muted playsInline />
               {!(camOn && cam.on) && <span className="camoff"><Camera /></span>}
-            </button>
+            </div>
 
             {exporting ? (
               <span className="exporting">Exporting… {pct}%</span>
@@ -138,8 +139,10 @@ export function Hud() {
                   open={menu === "screen"} onToggle={() => tg("screen")} onPick={(id) => { setSel({ ...sel, displayId: Number(id) }); setMenu(null); }} />
                 <Dropdown icon={<Mic />} value={sel.micId ?? ""} options={mics.map((m) => ({ id: m.id, label: m.label }))}
                   open={menu === "mic"} onToggle={() => tg("mic")} onPick={(id) => { setSel({ ...sel, micId: id }); setMenu(null); }} />
+                <button className={`toggle ${camOn ? "on" : ""}`} title={camOn ? "Camera on" : "Camera off"} onClick={() => setCamOn(v => !v)}>{camOn ? <Camera /> : <CameraOff />}</button>
                 <button className={`toggle ${micOn ? "on" : ""}`} title={micOn ? "Microphone on" : "Microphone off"} onClick={() => setMicOn(v => !v)}>{micOn ? <Mic /> : <MicOff />}</button>
                 <button className={`toggle ${sysOn ? "on" : ""}`} title={sysOn ? "System audio on" : "System audio off"} onClick={() => setSysOn(v => !v)}>{sysOn ? <Speaker /> : <SpeakerOff />}</button>
+                <button className={`toggle ${gameMode ? "on" : ""}`} title={gameMode ? "Game mode: smooth 60fps capture (on)" : "Game mode: smooth capture for games / variable-FPS apps"} onClick={() => setGameMode(v => !v)}><Gamepad /></button>
               </>
             ) : (
               <div className="recmeter">

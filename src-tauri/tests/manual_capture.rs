@@ -11,7 +11,7 @@ use cursor_zoom_lib::encode::frame_sink::FrameSink;
 #[ignore]
 fn record_two_seconds_of_primary_display() {
     let clock: Arc<dyn Clock> = Arc::new(SystemClock::new());
-    let mut src = WgcFrameSource::for_primary_display(clock, 30).unwrap();
+    let mut src = WgcFrameSource::for_primary_display(clock, 30, true).unwrap();
     let (w, h) = src.dimensions();
     let out = std::env::temp_dir().join("m1_capture.mp4");
     let mut sink: Box<dyn FrameSink> =

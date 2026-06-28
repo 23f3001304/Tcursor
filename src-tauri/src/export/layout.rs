@@ -3,7 +3,8 @@ use crate::actions::model::LayoutId;
 use crate::export::coordmap::to_panel;
 use crate::export::easing::ease;
 use crate::export::scene::{resolve, Scene};
-use crate::export::types::{Easing, Layout, OverlayLayout, ZoomRegion};
+use crate::export::types::{Easing, ZoomRegion};
+use crate::settings::appearance::{layout_for, overlay_for, AppearanceSettings};
 
 /// Resolves the active `Scene` at any time from the recording's `SetLayout`
 /// actions, cross-fading from the previous preset over `transition_ms` (eased).
@@ -13,12 +14,16 @@ pub struct LayoutTrack {
 }
 
 impl LayoutTrack {
-    pub fn new(actions: &[ActionEvent], layout: &Layout, overlay: &OverlayLayout,
+    pub fn new(actions: &[ActionEvent], app: &AppearanceSettings, ow: u32, oh: u32,
                sw: u32, sh: u32, transition_ms: u32) -> Self {
-        let mut switches = vec![(0u32, resolve(LayoutId::Screen, layout, overlay, sw, sh))];
+        let scene_for = |id: LayoutId| {
+            let ma = app.for_id(id);
+            resolve(id, &layout_for(ma, ow, oh), &overlay_for(ma, ow, oh, true), sw, sh)
+        };
+        let mut switches = vec![(0u32, scene_for(LayoutId::Screen))];
         for a in actions {
             if let ActionKind::SetLayout(id) = a.kind {
-                switches.push((a.t, resolve(id, layout, overlay, sw, sh)));
+                switches.push((a.t, scene_for(id)));
             }
         }
         Self { switches, transition_ms }
@@ -54,43 +59,46 @@ pub fn anchor_regions(raw: Vec<ZoomRegion>, track: &LayoutTrack, sw: u32, sh: u3
 mod tests {
     use super::*;
     use crate::actions::model::{ActionEvent, ActionKind, LayoutId};
-    use crate::export::scene::resolve;
-    use crate::export::types::{Layout, OverlayLayout};
+    use crate::export::scene::{resolve, Scene};
+    use crate::settings::appearance::{layout_for, overlay_for, AppearanceSettings};
 
-    fn fixtures() -> (Layout, OverlayLayout) { (Layout::default(), OverlayLayout::default()) }
+    fn scene_of(app: &AppearanceSettings, id: LayoutId) -> Scene {
+        let ma = app.for_id(id);
+        resolve(id, &layout_for(ma, 3840, 2160), &overlay_for(ma, 3840, 2160, true), 1920, 1080)
+    }
 
     #[test]
     fn no_actions_is_screenfocus_everywhere() {
-        let (l, ov) = fixtures();
-        let track = LayoutTrack::new(&[], &l, &ov, 1920, 1080, 350);
-        let screen = resolve(LayoutId::Screen, &l, &ov, 1920, 1080);
+        let app = AppearanceSettings::default();
+        let track = LayoutTrack::new(&[], &app, 3840, 2160, 1920, 1080, 350);
+        let screen = scene_of(&app, LayoutId::Screen);
         assert_eq!(track.scene_at(0), screen);
         assert_eq!(track.scene_at(100_000), screen);
     }
 
     #[test]
     fn switch_transitions_then_settles() {
-        let (l, ov) = fixtures();
+        let app = AppearanceSettings::default();
         let acts = vec![ActionEvent { t: 1000, kind: ActionKind::SetLayout(LayoutId::Camera) }];
-        let track = LayoutTrack::new(&acts, &l, &ov, 1920, 1080, 400);
-        let screen = resolve(LayoutId::Screen, &l, &ov, 1920, 1080);
-        let camera = resolve(LayoutId::Camera, &l, &ov, 1920, 1080);
-        assert_eq!(track.scene_at(999), screen);   // before the switch
-        assert_eq!(track.scene_at(1000), screen);  // t=0 of transition == previous
-        assert_eq!(track.scene_at(1400), camera);  // transition complete
-        let mid = track.scene_at(1200);            // strictly between the two screen-panel widths
+        let track = LayoutTrack::new(&acts, &app, 3840, 2160, 1920, 1080, 400);
+        let screen = scene_of(&app, LayoutId::Screen);
+        let camera = scene_of(&app, LayoutId::Camera);
+        assert_eq!(track.scene_at(999), screen);
+        assert_eq!(track.scene_at(1000), screen);
+        assert_eq!(track.scene_at(1400), camera);
+        let mid = track.scene_at(1200);
         let (lo, hi) = (camera.screen.rect.w.min(screen.screen.rect.w), camera.screen.rect.w.max(screen.screen.rect.w));
         assert!(mid.screen.rect.w > lo && mid.screen.rect.w < hi);
     }
 
     #[test]
     fn latest_switch_wins() {
-        let (l, ov) = fixtures();
+        let app = AppearanceSettings::default();
         let acts = vec![
             ActionEvent { t: 100, kind: ActionKind::SetLayout(LayoutId::Camera) },
             ActionEvent { t: 200, kind: ActionKind::SetLayout(LayoutId::Presenter) },
         ];
-        let track = LayoutTrack::new(&acts, &l, &ov, 1920, 1080, 0); // 0 = no transition
-        assert_eq!(track.scene_at(10_000), resolve(LayoutId::Presenter, &l, &ov, 1920, 1080));
+        let track = LayoutTrack::new(&acts, &app, 3840, 2160, 1920, 1080, 0);
+        assert_eq!(track.scene_at(10_000), scene_of(&app, LayoutId::Presenter));
     }
 }

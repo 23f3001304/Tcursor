@@ -17,7 +17,7 @@ pub struct WgcFrameSource {
 }
 
 impl WgcFrameSource {
-    pub fn for_primary_display(clock: Arc<dyn Clock>, fps: u32) -> anyhow::Result<Self> {
+    pub fn for_primary_display(clock: Arc<dyn Clock>, fps: u32, with_cursor: bool) -> anyhow::Result<Self> {
         use windows_capture::{
             capture::{Context, GraphicsCaptureApiHandler},
             frame::Frame as WgcFrame,
@@ -77,7 +77,7 @@ impl WgcFrameSource {
         let (tx, rx) = channel();
         let settings = Settings::new(
             monitor,
-            CursorCaptureSettings::WithCursor,
+            if with_cursor { CursorCaptureSettings::WithCursor } else { CursorCaptureSettings::WithoutCursor },
             DrawBorderSettings::WithoutBorder,
             SecondaryWindowSettings::Default,
             // Match the encoder framerate (caller passes the display refresh, capped).
@@ -114,5 +114,11 @@ impl FrameSource for WgcFrameSource {
 
     fn next_frame(&mut self) -> Option<Frame> {
         self.rx.recv().ok()
+    }
+
+    fn drain_latest(&mut self) -> Option<Frame> {
+        let mut last = None;
+        while let Ok(f) = self.rx.try_recv() { last = Some(f); }
+        last
     }
 }

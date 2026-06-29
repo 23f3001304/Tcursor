@@ -20,25 +20,20 @@ export function Switch({ on, onChange }: { on: boolean; onChange: (v: boolean) =
   );
 }
 
-/** Range slider with a formatted value readout. */
-export function Slider({ value, min, max, step, onChange, fmt }: {
-  value: number; min: number; max: number; step: number; onChange: (v: number) => void; fmt: (v: number) => string;
-}) {
-  return (
-    <div className="sl">
-      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(parseFloat(e.target.value))} />
-      <span className="sl-val">{fmt(value)}</span>
-    </div>
-  );
-}
-
-/** Compact numeric control: label left, value once on the right, slim slider below. */
-export function Range({ label, value, min, max, step, onChange, fmt }: {
-  label: string; value: number; min: number; max: number; step: number; onChange: (v: number) => void; fmt: (v: number) => string;
+/** Compact numeric control: label left, value once on the right, slim slider below.
+ *  Optional hint renders next to the value (muted, same .sf-hint style). */
+export function Range({ label, value, min, max, step, onChange, fmt, hint }: {
+  label: string; value: number; min: number; max: number; step: number; onChange: (v: number) => void; fmt: (v: number) => string; hint?: string;
 }) {
   return (
     <label className="rng">
-      <span className="rng-head"><span className="rng-label">{label}</span><span className="rng-val">{fmt(value)}</span></span>
+      <span className="rng-head">
+        <span className="rng-label">{label}</span>
+        <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+          {hint && <span className="sf-hint">{hint}</span>}
+          <span className="rng-val">{fmt(value)}</span>
+        </span>
+      </span>
       <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(parseFloat(e.target.value))} />
     </label>
   );

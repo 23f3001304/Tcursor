@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TCursor</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.7.0/dist/tabler-icons.min.css">
+<style>
+  :root{
+    --bg:#09090b; --surface:#0e0e11; --card:#161619; --soft:#1c1c20;
+    --border:#262629; --border2:#1e1e21;
+    --fg:#fafafa; --mut:#a1a1aa; --dim:#71717a;
+    --primary:#ef4444; --primaryh:#dc2626; --zoom:#7c7ce6; --ai:#7c6cf0; --radius:9px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:#060607;font-family:"Inter",-apple-system,"Segoe UI",system-ui,sans-serif;color:var(--fg);
+    letter-spacing:-.013em;display:flex;align-items:center;justify-content:center;padding:22px;-webkit-font-smoothing:antialiased}
+  .ti{font-size:18px;line-height:1}
+  .app{position:relative;width:1180px;max-width:97vw;height:760px;background:var(--bg);border-radius:14px;border:1px solid var(--border);
+    box-shadow:0 40px 110px rgba(0,0,0,.6);display:flex;flex-direction:column;overflow:hidden}
+
+  .bar{height:50px;flex:none;display:flex;align-items:center;gap:11px;padding:0 14px;border-bottom:1px solid var(--border2)}
+  .brand{display:flex;align-items:center;gap:9px;font-weight:600;font-size:13px}
+  .mark{width:18px;height:18px;border-radius:5px;background:var(--primary);display:flex;align-items:center;justify-content:center;color:#fff}
+  .mark .ti{font-size:11px}
+  .proj{color:var(--dim);font-size:12px;font-weight:400}
+  .sp{flex:1}
+  .gst{width:30px;height:30px;border:none;background:transparent;color:var(--mut);border-radius:7px;display:flex;align-items:center;justify-content:center;cursor:pointer}
+  .gst:hover{background:var(--soft);color:var(--fg)}
+  .primary{height:32px;padding:0 15px;border:none;border-radius:var(--radius);background:var(--primary);color:#fff;font-weight:500;font-size:13px;display:flex;align-items:center;gap:7px;cursor:pointer}
+  .primary:hover{background:var(--primaryh)}
+
+  .body{flex:1;display:flex;min-height:0}
+  .rail{width:56px;flex:none;display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:5px;border-right:1px solid var(--border2)}
+  .ric{width:40px;height:40px;border-radius:9px;border:none;background:transparent;color:var(--dim);display:flex;align-items:center;justify-content:center;cursor:pointer}
+  .ric .ti{font-size:20px}
+  .ric:hover{background:var(--soft);color:var(--fg)}
+  .ric.on{background:var(--soft);color:var(--fg)}
+  .ric.ai.on{color:var(--ai)}
+
+  .panel{width:312px;flex:none;border-right:1px solid var(--border2);overflow:hidden;padding:22px}
+  .panel h2{font-size:16px;font-weight:600;margin:0 0 6px}
+  .lede{font-size:12.5px;color:var(--mut);line-height:1.55;margin:0 0 20px}
+  .sel{display:flex;align-items:center;justify-content:space-between;height:40px;padding:0 13px;border:1px solid var(--border);background:transparent;border-radius:var(--radius);margin-bottom:9px;cursor:pointer}
+  .sel:hover{background:var(--soft)}
+  .sel .l{font-size:13px;color:var(--mut)}
+  .sel .v{font-size:13px;font-weight:500;display:flex;align-items:center;gap:7px}
+  .sel .v .ti{font-size:15px;color:var(--dim)}
+  .sel .v .lc{width:6px;height:6px;border-radius:50%;background:#22c55e}
+  .status{width:100%;height:42px;border-radius:var(--radius);background:var(--soft);border:1px solid var(--border);color:var(--fg);font-size:13px;font-weight:500;
+    display:flex;align-items:center;justify-content:center;gap:9px;margin:16px 0 20px}
+  .status .d{width:8px;height:8px;border-radius:50%;background:var(--ai);animation:pulse 1.3s ease-in-out infinite}
+  .sum{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:11px}
+  .sum li{display:flex;align-items:center;gap:11px;font-size:13px;color:var(--fg);opacity:0}
+  .sum li:nth-child(1){animation:s1 10s linear infinite}
+  .sum li:nth-child(2){animation:s2 10s linear infinite}
+  .sum li:nth-child(3){animation:s3 10s linear infinite}
+  .sum li .ic{width:28px;height:28px;border-radius:8px;background:var(--soft);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--mut);flex:none}
+  .sum li .ic .ti{font-size:15px}
+
+  .stagewrap{flex:1;position:relative;display:flex;align-items:center;justify-content:center;min-width:0;padding:32px;background:var(--surface)}
+  .ftool{position:absolute;top:18px;left:50%;transform:translateX(-50%);display:flex;gap:2px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:4px;z-index:6}
+  .ftool button{width:34px;height:32px;border:none;background:transparent;color:var(--mut);border-radius:7px;display:flex;align-items:center;justify-content:center;cursor:pointer}
+  .ftool button:hover{background:var(--soft);color:var(--fg)}
+  .stage{position:relative;width:100%;height:100%;border-radius:12px;display:flex;align-items:center;justify-content:center;overflow:hidden;
+    background:linear-gradient(150deg,#54607f,#454a63 55%,#4b455f);border:1px solid var(--border)}
+  .screen{position:relative;width:70%;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 30px 70px rgba(0,0,0,.45);
+    animation:cam 10s cubic-bezier(.5,0,.2,1) infinite}
+  .schrome{height:26px;background:#f1f2f4;border-bottom:1px solid #e6e7ea;display:flex;align-items:center;gap:6px;padding:0 12px}
+  .schrome span{width:8px;height:8px;border-radius:50%}
+  .sbody{padding:20px 26px;display:flex;gap:24px}
+  .scol{flex:1;display:flex;flex-direction:column;gap:9px}
+  .ln{height:7px;border-radius:3px;background:#ebecef}
+  .ln.t{height:10px;width:50%;background:#d2d5db}
+  .ln.a{background:#ffd2d2}
+  .cam{position:absolute;left:6.5%;bottom:8%;width:80px;height:80px;border-radius:50%;background:#0c1018;border:3px solid rgba(255,255,255,.9);
+    display:flex;align-items:center;justify-content:center;color:#565d70;box-shadow:0 12px 30px rgba(0,0,0,.35)}
+  .cam .ti{font-size:32px}
+  .cur{position:absolute;left:52%;top:45%;filter:drop-shadow(0 2px 3px rgba(0,0,0,.4))}
+
+  .transport{height:50px;flex:none;border-top:1px solid var(--border2);display:flex;align-items:center;gap:11px;padding:0 16px;font-size:13px;color:var(--mut)}
+  .pill{height:31px;padding:0 12px;border:1px solid var(--border);background:transparent;border-radius:var(--radius);display:flex;align-items:center;gap:7px;font:inherit;font-size:12.5px;color:var(--fg);cursor:pointer}
+  .pill:hover{background:var(--soft)}
+  .tg{width:31px;height:31px;border:none;background:transparent;color:var(--mut);border-radius:7px;display:flex;align-items:center;justify-content:center;cursor:pointer}
+  .tg:hover{background:var(--soft);color:var(--fg)}
+  .time{font-variant-numeric:tabular-nums;color:var(--fg);font-weight:500}
+  .play{width:34px;height:34px;border-radius:50%;background:var(--fg);color:#0a0a0a;border:none;display:flex;align-items:center;justify-content:center;cursor:pointer}
+
+  .timeline{height:150px;flex:none;border-top:1px solid var(--border2);background:var(--surface);padding:10px 16px 15px;position:relative}
+  .ruler{display:flex;justify-content:space-between;font-size:10.5px;color:var(--dim);font-variant-numeric:tabular-nums;margin-bottom:8px}
+  .clip{height:42px;border-radius:9px;border:1px solid var(--border);overflow:hidden;display:flex;align-items:center;gap:2.5px;padding:0 6px;margin-bottom:10px;background:var(--card)}
+  .clip i{flex:1;background:rgba(255,255,255,.06);border-radius:2px}
+  .zoomlane{position:relative;height:42px}
+  .zblk{position:absolute;top:0;height:42px;border-radius:8px;background:var(--zoom);display:flex;align-items:center;justify-content:center;gap:5px;color:#fff;font-size:11px;font-weight:500;opacity:.9}
+  .zblk.sel{outline:1.5px solid var(--fg);outline-offset:-1px;opacity:1}
+  .zblk.drag{animation:drag 10s cubic-bezier(.5,0,.2,1) infinite}
+  .zblk.new{opacity:0;animation:appear 10s cubic-bezier(.4,0,.2,1) infinite}
+  .ph{position:absolute;top:5px;bottom:11px;width:1.5px;background:var(--primary);z-index:5}
+  .ph i{position:absolute;top:-2px;left:-4.5px;width:10px;height:8px;background:var(--primary);border-radius:2.5px}
+
+  .aicur{position:absolute;z-index:60;left:18%;top:44%;pointer-events:none;animation:aimove 10s cubic-bezier(.45,0,.25,1) infinite;filter:drop-shadow(0 4px 13px rgba(124,108,240,.5))}
+  .aicur .lab{position:absolute;left:14px;top:17px;background:var(--ai);color:#fff;font-size:10px;font-weight:500;padding:2px 7px;border-radius:6px;display:flex;align-items:center;gap:3px;white-space:nowrap}
+  .aicur .lab .ti{font-size:11px}
+
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  @keyframes aimove{
+    0%{left:18%;top:44%;opacity:0} 5%{left:18%;top:44%;opacity:1}
+    20%{left:62%;top:89%} 30%{left:66.5%;top:89%}
+    42%{left:60%;top:42%} 58%{left:63%;top:44%}
+    74%{left:82%;top:89%} 90%{left:82%;top:89%} 100%{left:18%;top:44%;opacity:1}
+  }
+  @keyframes cam{
+    0%,38%{transform:perspective(1800px) rotateY(-6deg) rotateX(2deg) scale(1) translate(0,0)}
+    50%,60%{transform:perspective(1800px) rotateY(-3deg) rotateX(1deg) scale(1.4) translate(-9%,-7%)}
+    72%,100%{transform:perspective(1800px) rotateY(-6deg) rotateX(2deg) scale(1) translate(0,0)}
+  }
+  @keyframes drag{0%,16%{transform:translateX(0) scaleX(1)} 30%{transform:translateX(13px) scaleX(1.12)} 38%,100%{transform:translateX(9px) scaleX(1.08)}}
+  @keyframes appear{0%,70%{opacity:0;transform:scale(.5)} 82%,100%{opacity:.9;transform:scale(1)}}
+  @keyframes s1{0%,22%{opacity:0;transform:translateY(5px)} 28%,100%{opacity:1;transform:none}}
+  @keyframes s2{0%,50%{opacity:0;transform:translateY(5px)} 56%,100%{opacity:1;transform:none}}
+  @keyframes s3{0%,78%{opacity:0;transform:translateY(5px)} 84%,100%{opacity:1;transform:none}}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="bar">
+    <div class="brand"><span class="mark"><i class="ti ti-pointer"></i></span>TCursor<span class="proj">screen-rec-2026-06-29</span></div>
+    <div class="sp"></div>
+    <button class="gst"><i class="ti ti-arrow-back-up"></i></button>
+    <button class="gst"><i class="ti ti-arrow-forward-up"></i></button>
+    <button class="gst" title="Open source on GitHub"><i class="ti ti-brand-github"></i></button>
+    <button class="primary"><i class="ti ti-download" style="font-size:15px"></i>Export</button>
+  </div>
+
+  <div class="body">
+    <div class="rail">
+      <button class="ric ai on" title="AI Director"><i class="ti ti-sparkles"></i></button>
+      <button class="ric" title="Background"><i class="ti ti-photo"></i></button>
+      <button class="ric" title="Cursor"><i class="ti ti-pointer"></i></button>
+      <button class="ric" title="Camera"><i class="ti ti-camera"></i></button>
+      <button class="ric" title="Captions"><i class="ti ti-letter-case"></i></button>
+      <button class="ric" title="Audio"><i class="ti ti-volume"></i></button>
+      <button class="ric" title="Effects"><i class="ti ti-wand"></i></button>
+    </div>
+
+    <div class="panel">
+      <h2>AI Director</h2>
+      <p class="lede">Edits from your recording events. Clicks, keystrokes, cursor. Runs on your machine.</p>
+      <div class="sel"><span class="l">Engine</span><span class="v"><span class="lc"></span>Ollama<i class="ti ti-chevron-down"></i></span></div>
+      <div class="sel"><span class="l">Style</span><span class="v">Demo<i class="ti ti-chevron-down"></i></span></div>
+      <div class="status"><span class="d"></span>Editing</div>
+      <ul class="sum">
+        <li><span class="ic"><i class="ti ti-zoom-in"></i></span>Placed a zoom on your click</li>
+        <li><span class="ic"><i class="ti ti-video"></i></span>Punched the camera in</li>
+        <li><span class="ic"><i class="ti ti-cut"></i></span>Trimmed an idle gap</li>
+      </ul>
+    </div>
+
+    <div class="stagewrap">
+      <div class="ftool">
+        <button title="Aspect ratio"><i class="ti ti-aspect-ratio"></i></button>
+        <button title="Cursor"><i class="ti ti-click"></i></button>
+        <button title="Captions"><i class="ti ti-typography"></i></button>
+        <button title="3D camera"><i class="ti ti-video"></i></button>
+      </div>
+      <div class="stage">
+        <div class="screen">
+          <div class="schrome"><span style="background:#ff5f57"></span><span style="background:#febc2e"></span><span style="background:#28c840"></span></div>
+          <div class="sbody">
+            <div class="scol"><div class="ln t"></div><div class="ln"></div><div class="ln" style="width:92%"></div><div class="ln a" style="width:56%"></div><div class="ln" style="width:80%"></div><div class="ln" style="width:88%"></div><div class="ln" style="width:46%"></div></div>
+            <div class="scol"><div class="ln t" style="width:38%"></div><div class="ln" style="width:90%"></div><div class="ln" style="width:78%"></div><div class="ln" style="width:84%"></div><div class="ln a" style="width:42%"></div><div class="ln" style="width:68%"></div></div>
+          </div>
+        </div>
+        <div class="cam"><i class="ti ti-user"></i></div>
+        <svg class="cur" width="19" height="25" viewBox="0 0 13 17"><path d="M1 1 L1 13 L4.5 9.8 L7 15 L9 14 L6.6 9 L11 9 Z" fill="#fff" stroke="#15171c" stroke-width="1.1" stroke-linejoin="round"/></svg>
+      </div>
+    </div>
+  </div>
+
+  <div class="transport">
+    <button class="pill"><i class="ti ti-plus" style="font-size:15px"></i>Add layer</button>
+    <button class="tg"><i class="ti ti-scissors"></i></button>
+    <div class="sp"></div>
+    <button class="tg"><i class="ti ti-player-skip-back"></i></button>
+    <button class="play"><i class="ti ti-player-play"></i></button>
+    <button class="tg"><i class="ti ti-player-skip-forward"></i></button>
+    <span class="time">0:40 / 1:00</span>
+    <div class="sp"></div>
+    <button class="tg"><i class="ti ti-volume"></i></button>
+    <button class="tg"><i class="ti ti-arrows-maximize"></i></button>
+    <span style="font-size:12px">100%</span>
+  </div>
+
+  <div class="timeline">
+    <div class="ruler"><span>0:05</span><span>0:10</span><span>0:20</span><span>0:30</span><span>0:40</span><span>0:50</span><span>1:00</span></div>
+    <div class="clip"><i style="height:55%"></i><i style="height:38%"></i><i style="height:70%"></i><i style="height:28%"></i><i style="height:52%"></i><i style="height:78%"></i><i style="height:42%"></i><i style="height:62%"></i><i style="height:33%"></i><i style="height:68%"></i><i style="height:48%"></i><i style="height:58%"></i><i style="height:38%"></i><i style="height:74%"></i><i style="height:46%"></i><i style="height:60%"></i><i style="height:36%"></i><i style="height:70%"></i><i style="height:50%"></i><i style="height:64%"></i></div>
+    <div class="zoomlane">
+      <span class="zblk" style="left:1%;width:11%"><i class="ti ti-zoom-in" style="font-size:13px"></i>1.8×</span>
+      <span class="zblk" style="left:22%;width:6%"><i class="ti ti-zoom-in" style="font-size:13px"></i></span>
+      <span class="zblk" style="left:33%;width:7%"><i class="ti ti-zoom-in" style="font-size:13px"></i></span>
+      <span class="zblk" style="left:45%;width:6%"><i class="ti ti-zoom-in" style="font-size:13px"></i></span>
+      <span class="zblk sel drag" style="left:62%;width:9%"><i class="ti ti-zoom-in" style="font-size:13px"></i>2.0×</span>
+      <span class="zblk new" style="left:79%;width:8%"><i class="ti ti-zoom-in" style="font-size:13px"></i>2.4×</span>
+    </div>
+    <div class="ph" style="left:64%"><i></i></div>
+  </div>
+
+  <div class="aicur">
+    <svg width="22" height="28" viewBox="0 0 13 17"><path d="M1 1 L1 13 L4.5 9.8 L7 15 L9 14 L6.6 9 L11 9 Z" fill="#7c6cf0" stroke="#fff" stroke-width="1" stroke-linejoin="round"/></svg>
+    <span class="lab"><i class="ti ti-sparkles"></i>AI</span>
+  </div>
+
+</div>
+</body>
+</html>

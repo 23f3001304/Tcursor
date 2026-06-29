@@ -33,3 +33,15 @@ export const SHAPES: [CamShape, string][] = [["circle", "Circle"], ["rounded", "
 export const CORNERS: [CamCorner, string][] = [["bottom_left", "BL"], ["bottom_right", "BR"], ["top_left", "TL"], ["top_right", "TR"]];
 
 export const pct = (v: number) => `${Math.round(v * 100)}%`;
+
+const bubble: import("./settings").ModeAppearance = {
+  pad: 0.03125, screen_size: 1.0, screen_radius: 0.016,
+  cam_size: 0.1944, cam_shape: "circle", cam_radius: 0.04,
+  cam_corner: "bottom_left", cam_margin_x: 0.0208, cam_margin_y: 0.037,
+};
+const big: import("./settings").ModeAppearance = {
+  ...bubble, cam_size: 0.889, cam_shape: "rounded",
+};
+export const DEFAULT_APPEARANCE: import("./settings").AppearanceSettings = {
+  screen: bubble, screen_only: bubble, camera: big, camera_only: big, presenter: big,
+};

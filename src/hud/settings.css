@@ -1,6 +1,6 @@
 /* Gear matches the window buttons. */
 .winbtn.gear { color: var(--muted); }
-.winbtn.gear:hover { background: rgba(0, 0, 0, 0.06); color: var(--fg); }
+.winbtn.gear:hover { background: var(--hover); color: var(--fg); }
 
 /* Settings box: replaces the bar. The open/close spring and tab transitions are
    driven by Motion (AnimatePresence) in the components -- transform/opacity only, no blur. */
@@ -19,11 +19,11 @@
 .settings-body { flex: 1; overflow-y: auto; padding: 2px 16px 16px; }
 .tab-panel { display: flex; flex-direction: column; gap: 16px; }
 
-/* Custom thin scrollbar (WebView2 is Chromium). */
-.settings-body::-webkit-scrollbar { width: 6px; }
+/* Inset rounded-pill scrollbar (WebView2 is Chromium). */
+.settings-body::-webkit-scrollbar { width: 11px; }
 .settings-body::-webkit-scrollbar-track { background: transparent; }
-.settings-body::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.14); border-radius: 999px; }
-.settings-body::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.28); }
+.settings-body::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 999px; border: 3px solid var(--bg); background-clip: padding-box; min-height: 40px; }
+.settings-body:hover::-webkit-scrollbar-thumb { background: var(--fg); background-clip: padding-box; }
 
 /* Section + control styles (reused by the section components). */
 .sec { display: flex; flex-direction: column; gap: 11px; }
@@ -34,14 +34,10 @@
 .sf-hint { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .sf-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 
-.sw { width: 38px; height: 22px; border-radius: 999px; border: none; background: #d4d4d8; cursor: pointer; padding: 0; position: relative; transition: background 0.16s ease; flex: none; }
+.sw { width: 38px; height: 22px; border-radius: 999px; border: none; background: var(--switch-off); cursor: pointer; padding: 0; position: relative; transition: background 0.16s ease; flex: none; }
 .sw.on { background: var(--accent); }
 .sw-knob { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.25); transition: transform 0.16s ease; }
 .sw.on .sw-knob { transform: translateX(16px); }
-
-.sl { display: flex; align-items: center; gap: 10px; }
-.sl input[type="range"] { flex: 1; accent-color: var(--accent); height: 4px; }
-.sl-val { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 46px; text-align: right; }
 
 .hk-chord { font-family: "SF Mono", ui-monospace, monospace; font-size: 12px; font-weight: 600;
   padding: 5px 10px; border-radius: 7px; border: 1px solid var(--line); background: var(--surface);
@@ -55,7 +51,7 @@
 .seg-btn { flex: 1; padding: 6px 0; border: none; border-radius: 6px; background: transparent; color: var(--muted); font: inherit; font-size: 12px; font-weight: 600; text-transform: capitalize; cursor: pointer; transition: background 0.14s ease, color 0.14s ease; }
 .seg-btn.on { background: var(--surface); color: var(--fg); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); }
 .swatches { display: flex; gap: 8px; }
-.swatch { width: 26px; height: 26px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1); }
+.swatch { width: 26px; height: 26px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; box-shadow: inset 0 0 0 1px var(--line); }
 .swatch.on { border-color: var(--fg); }
 
 /* Even option grid (Style / Mode / Video effect) - equal pills, proper labels. */
@@ -71,7 +67,7 @@
 .rng-head { display: flex; align-items: baseline; justify-content: space-between; }
 .rng-label { font-size: 13px; font-weight: 550; color: var(--fg); }
 .rng-val { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.rng input[type="range"] { width: 100%; accent-color: var(--accent); height: 4px; }
+.rng input[type="range"] { width: 100%; box-sizing: border-box; display: block; accent-color: var(--accent); height: 4px; }
 
 .adv { display: flex; flex-direction: column; }
 .adv-tog { align-self: flex-start; padding: 2px 0; border: none; background: none; color: var(--muted);
@@ -80,3 +76,10 @@
 .adv-caret { transition: transform 0.16s ease; display: inline-block; }
 .adv-tog.open .adv-caret { transform: rotate(90deg); }
 .adv-body { display: flex; flex-direction: column; gap: 11px; padding-top: 11px; }
+
+/* Layout preview stage */
+.lp-stage { position: relative; width: 100%; padding-top: 56.25%; border-radius: 8px;
+  background: linear-gradient(135deg, #3c4a66, #232c40);
+  overflow: hidden; }
+.lp-screen { background: #e9ebf0; border: 1px solid rgba(255,255,255,0.25); box-sizing: border-box; }
+.lp-cam { background: #2a2a2e; border: 1px solid rgba(255,255,255,0.18); box-sizing: border-box; }

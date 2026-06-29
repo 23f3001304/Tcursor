@@ -9,8 +9,10 @@ export interface AppearanceSettings {
   screen: ModeAppearance; screen_only: ModeAppearance; camera: ModeAppearance;
   camera_only: ModeAppearance; presenter: ModeAppearance;
 }
+export type ThemeMode = "light" | "dark" | "system";
+export interface InterfaceSettings { theme: ThemeMode; accent: [number, number, number] }
 export type CursorStyle = "system" | "enhanced" | "hidden";
-export interface CursorSettings { style: CursorStyle; size: number; motion_blur: number; click_bounce: boolean }
+export interface CursorSettings { style: CursorStyle; size: number; motion_blur: number; click_bounce: boolean; bounce_intensity: number }
 export type ClickFxStyle = "none" | "ripple" | "pulse" | "glow" | "shockwave" | "particles" | "neon";
 export type SpotlightMode = "classic" | "blur" | "halo" | "breathing" | "nebula" | "vignette";
 export type VideoFxMode = "nebulawash" | "cinematicdim" | "screenfocus" | "colorpop";
@@ -21,4 +23,4 @@ export interface HotkeySettings {
   layout_presenter: string; layout_screen_only: string; layout_camera_only: string;
   spotlight_hold: string; video_fx_hold: string;
 }
-export interface Settings { zoom: ZoomSettings; clickfx: ClickFxSettings; hotkeys: HotkeySettings; appearance: AppearanceSettings; cursor: CursorSettings; audio_offset_ms: number }
+export interface Settings { zoom: ZoomSettings; clickfx: ClickFxSettings; hotkeys: HotkeySettings; appearance: AppearanceSettings; cursor: CursorSettings; ui: InterfaceSettings; audio_offset_ms: number }

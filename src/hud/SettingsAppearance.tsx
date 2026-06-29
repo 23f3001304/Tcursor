@@ -1,7 +1,8 @@
 import { useState } from "react";
 import type { AppearanceSettings, ModeAppearance } from "./settings";
 import { Field, Range } from "./SettingsControls";
-import { MODES, MODE_SLIDERS, MODE_HAS_SHAPE, MODE_HAS_CORNER, SLIDERS, SHAPES, CORNERS, pct, type ModeKey } from "./appearanceFields";
+import { MODES, MODE_SLIDERS, MODE_HAS_SHAPE, MODE_HAS_CORNER, SLIDERS, SHAPES, CORNERS, pct, DEFAULT_APPEARANCE, type ModeKey } from "./appearanceFields";
+import { LayoutPreview } from "./LayoutPreview";
 
 /** Even pill grid (modes) - reuses the FX tab's `.optg`/`.opt` styles. */
 function Pills<T extends string>({ items, on, pick }: { items: [T, string][]; on: T; pick: (v: T) => void }) {
@@ -25,6 +26,7 @@ export function SettingsAppearance({ value, onChange }: { value: AppearanceSetti
     <section className="sec">
       <h3 className="sec-title">Frame appearance</h3>
       <Pills items={MODES} on={mode} pick={setMode} />
+      <LayoutPreview mode={mode} ma={ma} />
       {MODE_SLIDERS[mode].map((k) => {
         const s = SLIDERS[k];
         return <Range key={k} label={s.label} value={ma[k]} min={s.min} max={s.max} step={s.step}
@@ -40,6 +42,8 @@ export function SettingsAppearance({ value, onChange }: { value: AppearanceSetti
       {MODE_HAS_CORNER[mode] && (
         <Field label="Webcam corner"><Seg items={CORNERS} on={ma.cam_corner} pick={(v) => set("cam_corner", v)} /></Field>
       )}
+      <button type="button" className="adv-tog" onClick={() => onChange(DEFAULT_APPEARANCE)}
+        style={{ marginTop: 6, alignSelf: "flex-start" }}>Reset to defaults</button>
     </section>
   );
 }

@@ -1,3 +1,4 @@
+pub mod ai;
 pub mod domain;
 pub mod capture;
 pub mod encode;
@@ -9,6 +10,7 @@ pub mod events;
 pub mod actions;
 pub mod export;
 pub mod settings;
+pub mod edit;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -26,6 +28,10 @@ pub fn run() {
             commands::export_project,
             commands::get_settings,
             commands::set_settings,
+            edit::commands::get_edit,
+            edit::commands::apply_edit_op,
+            edit::commands::save_edit,
+            ai::commands::ai_autoedit,
         ])
         .setup(|app| {
             use tauri::Manager;

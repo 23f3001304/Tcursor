@@ -10,10 +10,13 @@ import { useCameraDevices } from "./useCameraDevices";
 import { useMicWaveform } from "./useMicWaveform";
 import { formatTimer } from "./formatTimer";
 import { Dropdown } from "./Dropdown";
-import { Grip, Monitor, Mic, MicOff, Speaker, SpeakerOff, Camera, CameraOff, MinIcon, CloseIcon, Gear, Gamepad } from "./icons";
-import { startRecording, stopRecording, pauseRecording, resumeRecording, saveWebcam, exportProject } from "../lib/ipc";
+import { Grip, Monitor, Mic, MicOff, Speaker, SpeakerOff, Camera, CameraOff, MinIcon, CloseIcon, Gear, Gamepad, Palette } from "./icons";
+import { startRecording, stopRecording, pauseRecording, resumeRecording, saveWebcam, exportProject, getSettings } from "../lib/ipc";
+import { applyTheme } from "./applyTheme";
+import type { ThemeMode } from "./settings";
 import { useWebcamRecorder } from "./useWebcamRecorder";
 import { Settings } from "./SettingsPanel";
+import { Preferences } from "./Preferences";
 import { morphWindow } from "./morph";
 
 const WIDTH = 980;
@@ -33,9 +36,10 @@ export function Hud() {
   const [exporting, setExporting] = useState(false);
   const [pct, setPct] = useState(0);
   const [err, setErr] = useState<string | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [panel, setPanel] = useState<"settings" | "preferences" | null>(null);
   const [barShown, setBarShown] = useState(true);
   const lastFolder = useRef<string>("");
+  const themeRef = useRef<{ theme: ThemeMode; accent: [number, number, number] }>({ theme: "light", accent: [239, 68, 68] });
   const webcam = useWebcamRecorder();
   const elapsed = useRecordingTimer(recording, paused);
   const levels = useMicWaveform(recording && !paused);
@@ -47,7 +51,20 @@ export function Hud() {
   // (restoreBar via onExitComplete) so the spring-out is never clipped; this
   // effect only tracks the dropdown height while the bar is showing.
   useEffect(() => { if (barShown) win.setSize(barSize()); }, [menu]);
-  function openSettings() { setBarShown(false); setSettingsOpen(true); void morphWindow(WIDTH, menu ? 430 : 132, BOX_W, BOX_H, 200); }
+
+  // Apply theme on mount and keep System mode tracking the OS preference.
+  useEffect(() => {
+    getSettings().then(s => {
+      themeRef.current = { theme: s.ui.theme, accent: s.ui.accent };
+      applyTheme(s.ui.theme, s.ui.accent);
+    });
+    const mq = matchMedia("(prefers-color-scheme: dark)");
+    const onMqChange = () => applyTheme(themeRef.current.theme, themeRef.current.accent);
+    mq.addEventListener("change", onMqChange);
+    return () => mq.removeEventListener("change", onMqChange);
+  }, []);
+
+  function openPanel(p: "settings" | "preferences") { setBarShown(false); setPanel(p); void morphWindow(WIDTH, menu ? 430 : 132, BOX_W, BOX_H, 200); }
   function restoreBar() { void morphWindow(BOX_W, BOX_H, WIDTH, menu ? 430 : 132, 200).then(() => setBarShown(true)); }
 
   useEffect(() => {
@@ -98,11 +115,13 @@ export function Hud() {
     <MotionConfig reducedMotion="user">
     <div className={`hud ${barShown ? "" : "as-box"}`}>
       <AnimatePresence onExitComplete={restoreBar}>
-        {settingsOpen && (
-          <motion.div key="settings" className="settings-wrap" style={{ originX: 1, originY: 0 }}
+        {panel && (
+          <motion.div key={panel} className="settings-wrap" style={{ originX: 1, originY: 0 }}
             initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }}
             transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}>
-            <Settings onClose={() => setSettingsOpen(false)} />
+            {panel === "settings"
+              ? <Settings onClose={() => setPanel(null)} />
+              : <Preferences onClose={() => setPanel(null)} onThemeChange={(t, a) => { themeRef.current = { theme: t, accent: a }; applyTheme(t, a); }} />}
           </motion.div>
         )}
       </AnimatePresence>
@@ -110,11 +129,12 @@ export function Hud() {
         <>
           <div className="titlebar" data-tauri-drag-region>
             <span className="brand">TCursor</span>
-            {err && <span style={{ color: "#ff6b6b", fontSize: 11, marginLeft: 10 }} title={err}>⚠ couldn’t start recording (is ffmpeg available?)</span>}
+            {err && <span style={{ color: "#ff6b6b", fontSize: 11, marginLeft: 10 }} title={err}>⚠ recording failed: {err}</span>}
             <span className="winctrls">
-              {!recording && !exporting && (
-                <button className="winbtn gear" title="Settings" onClick={openSettings}><Gear /></button>
-              )}
+              {!recording && !exporting && (<>
+                <button className="winbtn" title="Preferences" onClick={() => openPanel("preferences")}><Palette /></button>
+                <button className="winbtn gear" title="Settings" onClick={() => openPanel("settings")}><Gear /></button>
+              </>)}
               <button className="winbtn" title="Minimize" onClick={() => win.minimize()}><MinIcon /></button>
               <button className="winbtn close" title="Close" onClick={() => win.close()}><CloseIcon /></button>
             </span>

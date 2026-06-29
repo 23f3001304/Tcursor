@@ -70,6 +70,17 @@ impl Default for HotkeySettings {
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+pub enum ThemeMode { Light, Dark, System }
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(default)]
+pub struct InterfaceSettings { pub theme: ThemeMode, pub accent: [u8; 3] }
+impl Default for InterfaceSettings {
+    fn default() -> Self { Self { theme: ThemeMode::Light, accent: [239, 68, 68] } }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
 pub enum CursorStyle { System, Enhanced, Hidden }
 impl CursorStyle {
     /// Whether WGC should bake the OS cursor into the capture. Only `System` does;
@@ -81,12 +92,13 @@ impl CursorStyle {
 #[serde(default)]
 pub struct CursorSettings {
     pub style: CursorStyle,
-    pub size: f32,        // scale of the base cursor size (1.0 = default)
-    pub motion_blur: f32, // 0..1 trail strength (0 = off)
+    pub size: f32,             // scale of the base cursor size (1.0 = default)
+    pub motion_blur: f32,      // 0..1 trail strength (0 = off)
     pub click_bounce: bool,
+    pub bounce_intensity: f32, // 0..1 dip depth (0.5 = ~0.18 dip, 1.0 = 0.36 dip)
 }
 impl Default for CursorSettings {
-    fn default() -> Self { Self { style: CursorStyle::System, size: 1.0, motion_blur: 0.35, click_bounce: true } }
+    fn default() -> Self { Self { style: CursorStyle::System, size: 1.0, motion_blur: 0.35, click_bounce: true, bounce_intensity: 0.5 } }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
@@ -97,6 +109,7 @@ pub struct Settings {
     pub hotkeys: HotkeySettings,
     pub appearance: AppearanceSettings,
     pub cursor: CursorSettings,
+    pub ui: InterfaceSettings,
     /// Manual mic-vs-video sync nudge in ms (negative pulls the mic earlier, to
     /// cancel the mic's device input latency). 0 = off. Applied to the mic at mux.
     pub audio_offset_ms: i32,
@@ -148,8 +161,13 @@ mod tests {
         // old JSON without cursor loads the System default (cursor stays baked-in)
         assert_eq!(back.cursor, crate::settings::model::CursorSettings::default());
         assert_eq!(back.cursor.style, CursorStyle::System);
+        assert_eq!(CursorSettings::default().bounce_intensity, 0.5);
         assert!(CursorStyle::System.captures_os_cursor());
         assert!(!CursorStyle::Enhanced.captures_os_cursor());
         assert!(!CursorStyle::Hidden.captures_os_cursor());
+        // old JSON without ui loads the Light theme + red accent defaults
+        assert_eq!(back.ui, crate::settings::model::InterfaceSettings::default());
+        assert_eq!(back.ui.theme, ThemeMode::Light);
+        assert_eq!(back.ui.accent, [239, 68, 68]);
     }
 }

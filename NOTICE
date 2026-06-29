@@ -1,0 +1,6 @@
+TCursor bundles third-party assets under their own licenses.
+
+Cursor sprites — src-tauri/assets/cursors/*.png
+  Capitaine Cursors. Copyright (c) 2016 Keefer Rourke <keefer.rourke@gmail.com> and others.
+  Licensed under LGPL-3.0. Source: https://github.com/keeferrourke/capitaine-cursors
+  Rasterized from the upstream SVG sources to PNG; otherwise unmodified.

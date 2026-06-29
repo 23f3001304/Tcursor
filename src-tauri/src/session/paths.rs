@@ -15,6 +15,8 @@ impl ProjectPaths {
     pub fn settings(&self) -> PathBuf { self.folder.join("settings.json") }
     pub fn actions(&self) -> PathBuf { self.folder.join("actions.json") }
     pub fn typing(&self) -> PathBuf { self.folder.join("typing.json") }
+    pub fn cursor(&self) -> PathBuf { self.folder.join("cursor.json") }
+    pub fn edit(&self) -> PathBuf { self.folder.join("edit.json") }
     pub fn ensure(&self) -> std::io::Result<()> { std::fs::create_dir_all(&self.folder) }
 }
 
@@ -50,5 +52,15 @@ mod tests {
     fn builds_typing_path() {
         let p = ProjectPaths::new(std::path::Path::new("C:/base"), "rec1");
         assert!(p.typing().ends_with("typing.json"));
+    }
+    #[test]
+    fn builds_cursor_path() {
+        let p = ProjectPaths::new(std::path::Path::new("C:/base"), "rec1");
+        assert!(p.cursor().ends_with("cursor.json"));
+    }
+    #[test]
+    fn builds_edit_path() {
+        let p = ProjectPaths::new(std::path::Path::new("C:/base"), "rec1");
+        assert!(p.edit().ends_with("edit.json"));
     }
 }

@@ -1,50 +1,26 @@
 // Synthetic cursor drawing: sprite decode, click-bounce curve, alpha blit with trail.
 // CPU-only - the cursor occupies a small region of the frame.
-
-use crate::events::model::EventKind;
-use crate::settings::model::CursorStyle;
-
-/// Pre-computed state for Enhanced cursor drawing, allocated once before the export loop.
-pub struct CursorPrep {
-    pub sprite: CursorSprite,
-    pub click_ms: Vec<u32>,
-    pub recent: std::collections::VecDeque<(f32, f32)>,
-}
-
-/// Build a CursorPrep if the cursor style is Enhanced; returns None for System/Hidden.
-pub fn prep(
-    cursor: &crate::settings::model::CursorSettings,
-    events: &[crate::events::model::MouseEvent],
-    png: &[u8],
-) -> Option<CursorPrep> {
-    if cursor.style != CursorStyle::Enhanced { return None; }
-    let sprite = decode_sprite(png)?;
-    let click_ms: Vec<u32> = events.iter()
-        .filter(|e| e.kind == EventKind::Down).map(|e| e.t).collect();
-    let recent = std::collections::VecDeque::new();
-    Some(CursorPrep { sprite, click_ms, recent })
-}
+// The per-type sprite set + theme invert live in `cursorset`; this file is the draw seam.
 
 pub struct CursorSprite {
     pub bgra: Vec<u8>,
     pub w: u32,
     pub h: u32,
+    pub hot: (f32, f32),
+    pub canvas_h: u32,
 }
 
-/// Decode the bundled pointer PNG to a native-size BGRA CursorSprite.
-/// The PNG is 114x174 (white arrow, hotspot at top-left tip).
-/// Returns None if decode fails.
-pub fn decode_sprite(png: &[u8]) -> Option<CursorSprite> {
-    match crate::export::ffio::decode_image(png, 114, 174) {
-        Ok(bgra) => Some(CursorSprite { bgra, w: 114, h: 174 }),
-        Err(_) => None,
-    }
+/// Decode a cursor PNG to a content-tight sprite; `hot` (canvas-fraction) is re-based to content.
+pub fn decode_sprite(png: &[u8], hot: (f32, f32)) -> Option<CursorSprite> {
+    let (bgra, w, h, hot, canvas_h) = crate::export::ffio::decode_cursor(png, hot)?;
+    Some(CursorSprite { bgra, w, h, hot, canvas_h })
 }
 
 /// Scale factor for the cursor at time `t_ms`, given the list of click timestamps.
 /// - Returns 1.0 when `enabled` is false, or no click is within 180 ms before `t_ms`.
-/// - Otherwise: linearly dips from ~0.82 at t=click to 1.0 at t=click+180ms.
-pub fn bounce_scale(click_ms: &[u32], t_ms: u32, enabled: bool) -> f32 {
+/// - Otherwise: linearly dips after a click; dip depth = 0.36 * intensity.clamp(0,1).
+///   At default intensity 0.5 this reproduces the original ~0.18 dip.
+pub fn bounce_scale(click_ms: &[u32], t_ms: u32, enabled: bool, intensity: f32) -> f32 {
     if !enabled || click_ms.is_empty() {
         return 1.0;
     }
@@ -57,7 +33,7 @@ pub fn bounce_scale(click_ms: &[u32], t_ms: u32, enabled: bool) -> f32 {
             if dt > 180 {
                 1.0
             } else {
-                1.0 - 0.18 * (1.0 - dt as f32 / 180.0)
+                1.0 - 0.36 * intensity.clamp(0.0, 1.0) * (1.0 - dt as f32 / 180.0)
             }
         }
     }
@@ -67,17 +43,19 @@ pub fn bounce_scale(click_ms: &[u32], t_ms: u32, enabled: bool) -> f32 {
 /// `top_left`: output pixel coordinate of the sprite's top-left corner.
 /// `scale`: sprite height in output pixels / sprite natural height.
 /// `alpha_mul`: multiplier on the sprite's alpha channel (0.0 = invisible, 1.0 = full).
+/// `clip`: output bounds (x0,y0,x1,y1) the blit is confined to (the screen panel rect).
 fn blit(out: &mut [u8], ow: u32, oh: u32, spr: &CursorSprite,
-        top_left: (f32, f32), scale: f32, alpha_mul: f32) {
+        top_left: (f32, f32), scale: f32, alpha_mul: f32, clip: (i32, i32, i32, i32)) {
     let tw = (spr.w as f32 * scale).max(1.0).round() as i32;
     let th = (spr.h as f32 * scale).max(1.0).round() as i32;
     let tx0 = top_left.0.round() as i32;
     let ty0 = top_left.1.round() as i32;
 
-    let ox_start = tx0.max(0);
-    let oy_start = ty0.max(0);
-    let ox_end = (tx0 + tw).min(ow as i32);
-    let oy_end = (ty0 + th).min(oh as i32);
+    // Confine to the clip rect (screen panel) as well as the frame.
+    let ox_start = tx0.max(0).max(clip.0);
+    let oy_start = ty0.max(0).max(clip.1);
+    let ox_end = (tx0 + tw).min(ow as i32).min(clip.2);
+    let oy_end = (ty0 + th).min(oh as i32).min(clip.3);
 
     if ox_start >= ox_end || oy_start >= oy_end {
         return;
@@ -107,19 +85,22 @@ fn blit(out: &mut [u8], ow: u32, oh: u32, spr: &CursorSprite,
 }
 
 /// Draw the cursor sprite (and its motion trail) onto `out` (BGRA, `ow x oh`).
-/// `pos`: on-screen position of the cursor hotspot (top-left tip ~6%x, 4%y of sprite).
+/// `pos`: on-screen position of the cursor hotspot (sprite-supplied; see CursorSprite.hot).
 /// `recent`: previous hotspot positions for the motion trail (newest first after caller reverses).
-/// `size_px`: target height of the sprite in output pixels.
+/// `size_px`: target full-canvas height in output px; content scales within it (canvas-relative).
 /// `blur`: trail strength 0..1 (0 = no trail).
 /// `bounce`: scale multiplier from bounce_scale (dip on click).
+/// `clip`: output bounds (x0,y0,x1,y1) the cursor + trail are confined to (the screen panel).
 pub fn draw_cursor(out: &mut [u8], ow: u32, oh: u32, spr: &CursorSprite,
                    pos: (f32, f32), recent: &[(f32, f32)],
-                   size_px: f32, blur: f32, bounce: f32) {
-    let th = (size_px * bounce).max(1.0);
-    let scale = th / spr.h as f32;
+                   size_px: f32, blur: f32, bounce: f32, clip: (i32, i32, i32, i32)) {
+    // Scale by the full canvas so every pack cursor keeps its authored relative size
+    // (a wide resize arrow stays wide, not stretched to the pointer's height).
+    let scale = (size_px * bounce / spr.canvas_h as f32).max(0.0001);
+    let th = spr.h as f32 * scale;
     let tw = spr.w as f32 * scale;
-    let hx = 0.06 * tw;
-    let hy = 0.04 * th;
+    let hx = spr.hot.0 * tw;
+    let hy = spr.hot.1 * th;
     let top_left = (pos.0 - hx, pos.1 - hy);
 
     // Draw trail (older positions = more faded)
@@ -129,20 +110,16 @@ pub fn draw_cursor(out: &mut [u8], ow: u32, oh: u32, spr: &CursorSprite,
             let fade = 1.0 - i as f32 / n as f32;
             let alpha = (blur * fade * 0.5).clamp(0.0, 1.0);
             let rtl = (rp.0 - hx, rp.1 - hy);
-            blit(out, ow, oh, spr, rtl, scale, alpha);
+            blit(out, ow, oh, spr, rtl, scale, alpha, clip);
         }
     }
 
     // Draw the main cursor on top
-    blit(out, ow, oh, spr, top_left, scale, 1.0);
+    blit(out, ow, oh, spr, top_left, scale, 1.0, clip);
 }
 
-/// Per-frame helper: updates `recent` trail, computes bounce + size, and calls draw_cursor.
-/// `pos_px`: projected on-screen cursor position (output pixels).
-/// `recent`: mutable trail deque (oldest first); capped at `trail_cap` entries.
-/// `click_ms`: timestamps of Down events for bounce.
-/// `ev_t`: current export frame time in ms (event-relative).
-/// `oh`: output frame height (used to derive default cursor height from `size`).
+/// Per-frame helper: updates trail, computes bounce + size, calls draw_cursor.
+/// `oh` used to derive cursor height from `size`; `bounce_intensity` scales dip depth.
 pub fn apply_enhanced(
     out: &mut [u8], ow: u32, oh: u32,
     spr: &CursorSprite,
@@ -154,43 +131,52 @@ pub fn apply_enhanced(
     size: f32,
     blur: f32,
     click_bounce: bool,
+    bounce_intensity: f32,
+    panel: f32,
+    clip: (i32, i32, i32, i32),
 ) {
     if recent.len() >= trail_cap { recent.pop_front(); }
     recent.push_back(pos_px);
-    let bounce = bounce_scale(click_ms, ev_t, click_bounce);
-    let size_px = size.clamp(0.4, 3.0) * oh as f32 * 0.022;
+    let bounce = bounce_scale(click_ms, ev_t, click_bounce, bounce_intensity);
+    let size_px = size.clamp(0.4, 3.0) * oh as f32 * 0.033 * panel;
     let trail: Vec<(f32, f32)> = recent.iter().rev().skip(1).copied().collect();
-    draw_cursor(out, ow, oh, spr, pos_px, &trail, size_px, blur.clamp(0.0, 1.0), bounce);
+    draw_cursor(out, ow, oh, spr, pos_px, &trail, size_px, blur.clamp(0.0, 1.0), bounce, clip);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn spr() -> CursorSprite { CursorSprite { bgra: vec![255u8; 4 * 4 * 4], w: 4, h: 4 } }
+    fn spr() -> CursorSprite { CursorSprite { bgra: vec![255u8; 4 * 4 * 4], w: 4, h: 4, hot: (0.0, 0.0), canvas_h: 4 } }
 
     #[test]
     fn bounce_is_identity_when_disabled_or_idle() {
-        assert_eq!(bounce_scale(&[], 1000, true), 1.0);
-        assert_eq!(bounce_scale(&[500], 1000, false), 1.0); // disabled
-        assert_eq!(bounce_scale(&[100], 5000, true), 1.0);  // click long past -> recovered
+        assert_eq!(bounce_scale(&[], 1000, true, 0.5), 1.0);
+        assert_eq!(bounce_scale(&[500], 1000, false, 0.5), 1.0); // disabled
+        assert_eq!(bounce_scale(&[100], 5000, true, 0.5), 1.0);  // click long past -> recovered
     }
     #[test]
     fn bounce_dips_right_after_a_click() {
-        let s = bounce_scale(&[1000], 1010, true); // 10ms after a click
+        let s = bounce_scale(&[1000], 1010, true, 0.5); // 10ms after a click
         assert!(s < 1.0 && s > 0.5, "dips below 1.0 just after a click, got {s}");
+    }
+    #[test]
+    fn higher_intensity_produces_deeper_dip() {
+        let deep = bounce_scale(&[1000], 1000, true, 1.0);
+        let shallow = bounce_scale(&[1000], 1000, true, 0.3);
+        assert!(deep < shallow, "intensity 1.0 should dip deeper than 0.3, got {deep} vs {shallow}");
     }
     #[test]
     fn draws_pixels_at_the_position() {
         let (w, h) = (40u32, 40u32);
         let mut out = vec![0u8; (w * h * 4) as usize];
-        draw_cursor(&mut out, w, h, &spr(), (20.0, 20.0), &[], 8.0, 0.0, 1.0);
+        draw_cursor(&mut out, w, h, &spr(), (20.0, 20.0), &[], 8.0, 0.0, 1.0, (0, 0, w as i32, h as i32));
         assert!(out.iter().any(|&b| b > 0), "cursor blit wrote visible pixels");
     }
     #[test]
     fn offscreen_position_is_safe_noop() {
         let (w, h) = (40u32, 40u32);
         let mut out = vec![0u8; (w * h * 4) as usize];
-        draw_cursor(&mut out, w, h, &spr(), (1000.0, 1000.0), &[], 8.0, 0.0, 1.0); // must not panic / OOB
+        draw_cursor(&mut out, w, h, &spr(), (1000.0, 1000.0), &[], 8.0, 0.0, 1.0, (0, 0, w as i32, h as i32)); // must not panic / OOB
         assert!(out.iter().all(|&b| b == 0));
     }
 }

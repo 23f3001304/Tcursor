@@ -17,13 +17,11 @@ use crate::export::ffio::{decode_image, probe_dims, RawDecoder};
 use crate::export::timeline::build_timeline;
 use crate::actions::model::LayoutId;
 use crate::export::types::{Background, Camera, Layout};
-use crate::export::{autozoom, gpu, gpu_compositor::GpuCompositor};
+use crate::export::{gpu, gpu_compositor::GpuCompositor};
 use crate::session::paths::ProjectPaths;
 
 /// Bundled default background (a macOS-style gradient wallpaper).
 const BG_MESH: &[u8] = include_bytes!("../../assets/backgrounds/bg.jpg");
-/// Bundled CC0 pointer sprite (114x174, white arrow, hotspot at top-left tip).
-const POINTER_PNG: &[u8] = include_bytes!("../../assets/cursors/pointer.png");
 
 /// Constant output frame rate; the variable-rate capture is resampled to this.
 const OUT_FPS: u64 = 60;
@@ -32,26 +30,26 @@ const OUT_FPS: u64 = 60;
 /// 0..=100 as frames are encoded.
 pub fn export(paths: &ProjectPaths, fps: u32, on_progress: impl Fn(u8)) -> Result<()> {
     let log = EventLog::load(&paths.events()).context("load events.json")?;
-    let settings: crate::settings::model::Settings = std::fs::read(paths.settings())
-        .ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    // Persisted edit plan (seeded on first export): render its zooms + layout.
+    let doc = crate::edit::seed::load_or_seed(paths);
+    let settings = &doc.settings; // the recording's settings snapshot
     let cfg = settings.zoom.to_zoom_config();
     let video = paths.video();
     let (sw, sh) = probe_dims(&video)?;
     let layout = Layout::default();
     const TRANSITION_MS: u32 = 350;
+    // `actions` still drives FX overlays + camera-shrink; the layout track now comes
+    // from `doc.layout` (its SetLayout track), falling back to `actions` if empty.
     let actions = crate::actions::model::ActionLog::load(&paths.actions())
         .map(|a| a.actions).unwrap_or_default();
+    let layout_acts = crate::export::fromedit::layout_segs_from_doc(&doc);
     let track = crate::export::layout::LayoutTrack::new(
-        &actions, &settings.appearance, layout.out_w, layout.out_h, sw, sh, TRANSITION_MS);
+        layout_acts.as_deref().unwrap_or(&actions), &settings.appearance,
+        layout.out_w, layout.out_h, sw, sh, TRANSITION_MS);
 
-    // Click + manual hold-to-zoom regions; manual comes last so active hold wins.
-    let typing = crate::events::typing::TypingLog::load(&paths.typing()).ms;
-    let mut raw = if settings.zoom.enabled {
-        autozoom::generate(&log.events, &log.screen, &cfg, &typing, settings.zoom.smart_hold)
-    } else {
-        Vec::new()
-    };
-    raw.extend(crate::export::manual::from_actions(&actions, &log.events, &log.screen, &cfg));
+    // Zoom regions taken from the edit doc (seeded = today's auto + manual zooms), then
+    // re-anchored into the active screen panel exactly as before.
+    let raw = crate::export::fromedit::regions_from_doc(&doc, sw, sh);
     let regions = crate::export::layout::anchor_regions(raw, &track, sw, sh);
 
     // The real capture timeline (ms per frame) + audio/event start offsets.
@@ -66,8 +64,11 @@ pub fn export(paths: &ProjectPaths, fps: u32, on_progress: impl Fn(u8)) -> Resul
     let fx_renderer = crate::export::fx_state::select_fx(layout.out_w, layout.out_h);
     let mut sim = CameraSim::new(layout.out_w, layout.out_h);
     let mut cursor = Cursor::new(&log.events, &log.screen);
-    // Synthetic cursor: decode sprite + collect click timestamps (Enhanced only).
-    let mut cprep = crate::export::cursordraw::prep(&settings.cursor, &log.events, POINTER_PNG);
+    // Synthetic cursor: decode the per-type sprite set + collect click timestamps (Enhanced
+    // only). Theme picks the color (dark inverts black->white); track drives per-frame shape.
+    let cursor_track = crate::events::cursortype::CursorTrack::load(&paths.cursor());
+    let dark = crate::win::theme::resolve_dark(settings.ui.theme);
+    let mut cprep = crate::export::cursorset::prep(&settings.cursor, &log.events, cursor_track, dark);
 
     let screen_bytes = (sw * sh * 4) as usize;
     let mut screen_dec = RawDecoder::spawn(&video, 0.0, false, None, None, screen_bytes)?;
@@ -138,9 +139,8 @@ pub fn export(paths: &ProjectPaths, fps: u32, on_progress: impl Fn(u8)) -> Resul
         crate::export::fx_state::render(&*fx_renderer, &mut out, layout.out_w, layout.out_h,
             &settings.clickfx, &log.events, &actions, &scene, cam, cur, sw, sh, ev_t, &settings.hotkeys);
         if let Some(cp) = &mut cprep {
-            let pos = crate::export::coordmap::project(cur.x as f32, cur.y as f32, cam, layout.out_w, layout.out_h);
-            crate::export::cursordraw::apply_enhanced(&mut out, layout.out_w, layout.out_h, &cp.sprite,
-                pos, &mut cp.recent, 6, &cp.click_ms, ev_t, settings.cursor.size, settings.cursor.motion_blur, settings.cursor.click_bounce);
+            crate::export::cursorset::draw(cp, &mut out, layout.out_w, layout.out_h, cur, cam, &scene.screen,
+                crate::export::coordmap::inset_rect(sw, sh, &layout).2 as f32, ev_t, &settings.cursor);
         }
         t_comp += c0.elapsed().as_micros();
         let s0 = std::time::Instant::now();

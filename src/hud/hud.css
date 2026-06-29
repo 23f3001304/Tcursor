@@ -1,6 +1,10 @@
 :root {
   --bg: #fafafa; --fg: #18181b; --muted: #71717a; --line: rgba(0, 0, 0, 0.08);
-  --surface: #ffffff; --hover: #f4f4f5; --accent: #ef4444;
+  --surface: #ffffff; --hover: #f4f4f5; --accent: #ef4444; --switch-off: #d4d4d8;
+}
+:root[data-theme="dark"] {
+  --bg: #1c1c1e; --fg: #f5f5f7; --muted: #8e8e93; --line: rgba(255, 255, 255, 0.10);
+  --surface: #3a3a3c; --hover: #2c2c2e; --switch-off: #48484a;
 }
 
 html, body, #root { height: 100%; }
@@ -19,7 +23,7 @@ body { display: flex; align-items: flex-start; justify-content: center; overflow
 
 .titlebar {
   display: flex; align-items: center; justify-content: space-between;
-  height: 28px; padding: 0 7px 0 13px; border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  height: 28px; padding: 0 7px 0 13px; border-bottom: 1px solid var(--line);
 }
 .brand { color: var(--muted); font-size: 11px; font-weight: 600; }
 .winctrls { display: flex; gap: 2px; }
@@ -28,17 +32,17 @@ body { display: flex; align-items: flex-start; justify-content: center; overflow
   border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease;
 }
-.winbtn:hover { background: rgba(0, 0, 0, 0.06); color: var(--fg); }
+.winbtn:hover { background: var(--hover); color: var(--fg); }
 .winbtn.close:hover { background: var(--accent); color: #fff; }
 
 .row { display: flex; align-items: center; gap: 6px; padding: 12px; }
 
 .grip {
   display: flex; align-items: center; justify-content: center; width: 22px; height: 40px;
-  color: #c4c4cc; cursor: grab; flex: none; border-radius: 8px;
+  color: var(--muted); cursor: grab; flex: none; border-radius: 8px;
   transition: color 0.15s ease, background 0.15s ease;
 }
-.grip:hover { color: #9a9aa0; background: var(--hover); }
+.grip:hover { color: var(--fg); background: var(--hover); }
 .grip:active { cursor: grabbing; }
 /* let clicks on the icon/title fall through to the drag region */
 .grip svg, .brand { pointer-events: none; }
@@ -54,7 +58,7 @@ body { display: flex; align-items: flex-start; justify-content: center; overflow
 .dd.open .dd-trigger { border-color: var(--line); }
 .dd-trigger .ico { color: var(--muted); flex: none; display: flex; }
 .dd-label { font-weight: 550; font-size: 13px; max-width: 132px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dd-trigger .chev { color: #b4b4bb; flex: none; display: flex; transition: transform 0.18s ease; }
+.dd-trigger .chev { color: var(--muted); flex: none; display: flex; transition: transform 0.18s ease; }
 .dd.open .dd-trigger .chev { transform: rotate(180deg); }
 
 .dd-menu {
@@ -89,7 +93,7 @@ body { display: flex; align-items: flex-start; justify-content: center; overflow
 .recmeter { display: flex; align-items: center; gap: 8px; padding: 0 6px; }
 .recmeter .ico { color: var(--muted); display: flex; }
 .wave { display: flex; align-items: flex-end; gap: 2px; height: 22px; width: 80px; }
-.wave span { flex: 1; min-height: 3px; border-radius: 2px; background: #c4c4cb; transition: height 0.09s ease-out; }
+.wave span { flex: 1; min-height: 3px; border-radius: 2px; background: var(--muted); transition: height 0.09s ease-out; }
 
 .timer { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 14px; padding: 0 8px; min-width: 50px; text-align: center; }
 .exporting { font-family: "SF Mono", ui-monospace, monospace; font-size: 12px; color: var(--muted); padding: 0 8px; }
@@ -103,9 +107,9 @@ body { display: flex; align-items: flex-start; justify-content: center; overflow
 .btn:hover { background: var(--hover); }
 .btn:active { transform: scale(0.97); }
 .btn.rec { background: var(--accent); border-color: transparent; color: #fff; padding: 0 18px; }
-.btn.rec:hover { background: #dc2626; }
+.btn.rec:hover { filter: brightness(0.92); }
 .btn.rec .dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; }
-.btn.rec.is-rec { background: var(--fg); }
+.btn.rec.is-rec { background: var(--fg); color: var(--bg); }
 .btn.rec.is-rec .dot { border-radius: 2px; background: var(--accent); animation: blink 1.3s ease-in-out infinite; }
 @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
@@ -115,4 +119,4 @@ body { display: flex; align-items: flex-start; justify-content: center; overflow
   font-size: 15px; flex: none; transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
 .toggle:hover { background: var(--hover); color: var(--fg); }
-.toggle.on { background: var(--fg); color: #fff; border-color: var(--fg); }
+.toggle.on { background: var(--fg); color: var(--bg); border-color: var(--fg); }

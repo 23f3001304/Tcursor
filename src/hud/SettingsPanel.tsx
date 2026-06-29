@@ -6,13 +6,13 @@ import { Back } from "./icons";
 import { SettingsZoom } from "./SettingsZoom";
 import { SettingsHotkeys } from "./SettingsHotkeys";
 import { SettingsClickFx } from "./SettingsClickFx";
-import { SettingsAppearance } from "./SettingsAppearance";
-import { Field, Slider } from "./SettingsControls";
+import { SettingsCursor } from "./SettingsCursor";
+import { Range } from "./SettingsControls";
 import "./settings.css";
 
-type Tab = "zoom" | "keys" | "fx" | "frame";
+type Tab = "zoom" | "cursor" | "keys" | "fx";
 const TABS: { id: Tab; label: string }[] = [
-  { id: "zoom", label: "Zoom" }, { id: "keys", label: "Keys" }, { id: "fx", label: "FX" }, { id: "frame", label: "Frame" },
+  { id: "zoom", label: "Zoom" }, { id: "cursor", label: "Cursor" }, { id: "keys", label: "Keys" }, { id: "fx", label: "FX" },
 ];
 
 /** Small settings box: a back arrow, segmented tabs, and one section at a time.
@@ -43,16 +43,14 @@ export function Settings({ onClose }: { onClose: () => void }) {
           {tab === "zoom" && (
             <>
               <SettingsZoom value={draft.zoom} onChange={(zoom) => patch({ ...draft, zoom })} />
-              <Field label="Mic sync offset" hint="- earlier · + later">
-                <Slider value={draft.audio_offset_ms} min={-300} max={300} step={10}
-                  onChange={(v) => patch({ ...draft, audio_offset_ms: Math.round(v) })}
-                  fmt={(v) => `${v > 0 ? "+" : ""}${Math.round(v)} ms`} />
-              </Field>
+              <Range label="Mic sync offset" hint="- earlier - + later" value={draft.audio_offset_ms} min={-300} max={300} step={10}
+                onChange={(v) => patch({ ...draft, audio_offset_ms: Math.round(v) })}
+                fmt={(v) => `${v > 0 ? "+" : ""}${Math.round(v)} ms`} />
             </>
           )}
+          {tab === "cursor" && <SettingsCursor value={draft.cursor} onChange={(cursor) => patch({ ...draft, cursor })} />}
           {tab === "keys" && <SettingsHotkeys value={draft.hotkeys} onChange={(hotkeys) => patch({ ...draft, hotkeys })} />}
           {tab === "fx" && <SettingsClickFx value={draft.clickfx} onChange={(clickfx) => patch({ ...draft, clickfx })} />}
-          {tab === "frame" && <SettingsAppearance value={draft.appearance} onChange={(appearance) => patch({ ...draft, appearance })} />}
         </motion.div>
         </AnimatePresence>
       </div>

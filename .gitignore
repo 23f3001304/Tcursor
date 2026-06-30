@@ -13,6 +13,10 @@ dist-ssr
 *.local
 target/
 
+# docs-hover VS Code extension build output (node_modules already ignored above)
+tools/docs-hover/out/
+tools/docs-hover/*.vsix
+
 # Bundled ffmpeg/ffprobe (large static binaries; copied locally, bundled into the installer)
 src-tauri/resources/*.exe
 

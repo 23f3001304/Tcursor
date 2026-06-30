@@ -24,6 +24,15 @@ pub struct Speed { pub id: String, pub start_ms: u32, pub end_ms: u32, pub facto
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct LayoutSeg { pub id: String, pub start_ms: u32, pub end_ms: u32, pub layout: String }
 
+/// An editable effect region on the timeline. v1 covers Spotlight; the kind grows over phases.
+/// Params default from settings for now (per-region overrides are a later addition).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum EffectKind { Spotlight }
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct EffectRegion { pub id: String, pub kind: EffectKind, pub start_ms: u32, pub end_ms: u32 }
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct EditDoc {
@@ -33,11 +42,13 @@ pub struct EditDoc {
     pub zooms: Vec<Zoom>,
     pub speed: Vec<Speed>,
     pub layout: Vec<LayoutSeg>,
+    #[serde(default)]
+    pub effects: Vec<EffectRegion>,
     pub settings: crate::settings::model::Settings,
 }
 impl Default for EditDoc {
     fn default() -> Self {
-        Self { version: 1, trim: Trim::default(), cuts: vec![], zooms: vec![], speed: vec![], layout: vec![], settings: crate::settings::model::Settings::default() }
+        Self { version: 1, trim: Trim::default(), cuts: vec![], zooms: vec![], speed: vec![], layout: vec![], effects: vec![], settings: crate::settings::model::Settings::default() }
     }
 }
 
@@ -69,6 +80,7 @@ mod tests {
             zooms: vec![Zoom { id: "z1".into(), start_ms: 200, end_ms: 800, target: ZoomTarget::Cursor, scale: 2.2, easing: "ease".into() }],
             speed: vec![Speed { id: "s1".into(), start_ms: 1000, end_ms: 2000, factor: 2.0 }],
             layout: vec![LayoutSeg { id: "l1".into(), start_ms: 0, end_ms: 5000, layout: "screen".into() }],
+            effects: vec![],
             settings: crate::settings::model::Settings::default(),
         }
     }

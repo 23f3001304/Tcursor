@@ -1,0 +1,60 @@
+# src-tauri/src/export/compositor.rs
+
+Defines the `Compositor` trait shared by the CPU and GPU implementations, and provides the software `CpuCompositor` that blends the background, screen, and webcam panels using `fast_image_resize` and a per-pixel rounded-box SDF. CPU only - the GPU path lives in `gpu_compositor.rs`.
+
+## Compositor
+
+```rust
+pub trait Compositor: Send + Sync {
+    fn composite(
+        &self,
+        screen: &[u8], sw: u32, sh: u32,
+        webcam: Option<(&[u8], u32, u32)>,
+        cam: Camera, bg: &[u8],
+        layout: &Layout,
+        scene: &Scene,
+    ) -> Vec<u8>;
+}
+```
+
+Common interface for software and hardware compositors.
+
+### Inputs
+
+- `screen: &[u8]` - BGRA bytes of the captured screen frame, `sw * sh * 4` bytes. *Why:* the raw decoded frame is passed by slice to avoid a per-frame copy.
+- `sw: u32, sh: u32` - capture source dimensions. *Why:* needed to set up the resize crop.
+- `webcam: Option<(&[u8], u32, u32)>` - optional `(bytes, width, height)` for the webcam frame. *Why:* `None` when there is no webcam, or after EOF; the compositor skips the camera panel in that case.
+- `cam: Camera` - the virtual camera center and scale for whole-scene zoom. *Why:* drives the crop rectangle that simulates zoom on the base image.
+- `bg: &[u8]` - BGRA background image, `out_w * out_h * 4` bytes. *Why:* used as the bottom layer; the screen panel is composited on top of it.
+- `layout: &Layout` - output dimensions and padding. *Why:* determines the output buffer size and the inset geometry.
+- `scene: &Scene` - the two panels (screen + camera) with rects, radii, and alphas. *Why:* drives placement, clipping, and blend weight for each panel.
+
+### Returns
+
+`Vec<u8>` of BGRA pixels, `out_w * out_h * 4` bytes. Allocated fresh each call.
+
+### Used by
+
+- `src-tauri/src/export/exporter.rs` - calls `compositor.composite(...)` in the frame loop.
+- `src-tauri/src/export/gpu_compositor.rs` - `GpuCompositor` implements this trait.
+
+## CpuCompositor
+
+```rust
+pub struct CpuCompositor;
+```
+
+Software compositor with no GPU dependency; zero interior state, trivially `Send + Sync`.
+
+### Implementation of `composite`
+
+1. Copy `bg` into a working buffer `base` (`out_w * out_h * 4` bytes).
+2. Draw the screen panel onto `base` via `draw_panel`: resize `screen` to `panel.rect` dimensions and alpha-blend with rounded-rect SDF coverage.
+3. Compute the zoom crop via `coordmap::crop(cam, ow, oh)` and resize `base` (crop -> full output) to simulate the camera zoom. This zooms the entire base including the screen panel but not what will be drawn on top.
+4. Draw the camera panel on top of the zoomed result via `draw_panel`; the camera is not subject to zoom.
+5. Return the composited output.
+
+### Behaviors worth knowing
+
+- `screen_panel_composites_onto_background` (unit test): a 4x4 red screen placed at (2,2) in an 8x8 blue background leaves the corner blue and the panel interior red.
+- `disabled_and_degenerate_panels_do_not_panic` (unit test): a camera panel larger than the output and a disabled screen must not trigger out-of-bounds access or panic.

@@ -6,19 +6,15 @@ use crate::edit::model::{Cut, EditDoc, Speed, Trim, Zoom, ZoomTarget};
 pub enum EditOp {
     AddZoom { at_ms: u32, dur_ms: u32 },
     AddZoomFull { at_ms: u32, dur_ms: u32, scale: f32 },
-    UpdateZoom {
-        id: String,
-        start_ms: Option<u32>,
-        end_ms: Option<u32>,
-        scale: Option<f32>,
-        target: Option<ZoomTarget>,
-        easing: Option<String>,
-    },
+    UpdateZoom { id: String, start_ms: Option<u32>, end_ms: Option<u32>, scale: Option<f32>, target: Option<ZoomTarget>, easing: Option<String> },
     RemoveZoom { id: String },
     SetTrim { in_ms: u32, out_ms: u32 },
     AddCut { start_ms: u32, end_ms: u32 },
     SetSpeed { start_ms: u32, end_ms: u32, factor: f32 },
     SetLayoutSeg { id: String, layout: String },
+    AddEffect { kind: crate::edit::model::EffectKind, start_ms: u32, end_ms: u32 },
+    UpdateEffect { id: String, start_ms: Option<u32>, end_ms: Option<u32> },
+    RemoveEffect { id: String },
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -88,6 +84,8 @@ pub fn apply(doc: &mut EditDoc, op: EditOp) {
                 seg.layout = layout;
             }
         }
+        op @ (EditOp::AddEffect { .. } | EditOp::UpdateEffect { .. } | EditOp::RemoveEffect { .. }) =>
+            crate::edit::effects::apply_effect(doc, op),
     }
 }
 

@@ -44,3 +44,23 @@ pub fn get_settings() -> crate::settings::model::Settings {
 pub fn set_settings(settings: crate::settings::model::Settings) -> Result<(), String> {
     crate::settings::store::save(&settings).map_err(|e| e.to_string())
 }
+
+/// Toggle whether the app window appears in screen capture / screenshots. The HUD
+/// stays excluded (hidden from recordings); the editor calls this to opt back in.
+/// Resolves the "main" window via the app handle so it targets the exact HWND the
+/// startup exclusion was applied to (avoids any window-handle mismatch).
+#[tauri::command]
+pub fn set_capturable(app: tauri::AppHandle, capturable: bool) -> bool {
+    #[cfg(windows)]
+    {
+        use tauri::Manager;
+        if let Some(win) = app.get_webview_window("main") {
+            if let Ok(h) = win.hwnd() {
+                return crate::win::capture_exclusion::set_capture_exclusion(h.0 as isize, !capturable);
+            }
+        }
+        false
+    }
+    #[cfg(not(windows))]
+    { let _ = (app, capturable); false }
+}

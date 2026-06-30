@@ -1,6 +1,21 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
+
+static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// A unique temp sibling of `out` (same directory, original extension preserved so ffmpeg still
+/// infers the container) so an ffmpeg pass can write fully and then atomically `rename` into
+/// place - a concurrent reader of `out` (e.g. the editor opening while the post-record pre-warm
+/// is still running) never sees a half-written file. Unique per call (pid + counter) so two
+/// racing writers don't clobber one temp; the final `rename` replaces any existing output
+/// atomically on the same volume.
+pub fn tmp_sibling(out: &Path) -> PathBuf {
+    let k = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+    let name = out.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    out.with_file_name(format!(".part-{}-{k}-{name}", std::process::id()))
+}
 
 /// Directory holding the bundled ffmpeg/ffprobe, set once at startup. Unset under
 /// `cargo`/dev runs, where we fall back to PATH.

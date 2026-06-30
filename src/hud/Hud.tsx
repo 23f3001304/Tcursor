@@ -11,7 +11,7 @@ import { useMicWaveform } from "./useMicWaveform";
 import { formatTimer } from "./formatTimer";
 import { Dropdown } from "./Dropdown";
 import { Grip, Monitor, Mic, MicOff, Speaker, SpeakerOff, Camera, CameraOff, MinIcon, CloseIcon, Gear, Gamepad, Palette } from "./icons";
-import { startRecording, stopRecording, pauseRecording, resumeRecording, saveWebcam, exportProject, getSettings } from "../lib/ipc";
+import { startRecording, stopRecording, pauseRecording, resumeRecording, saveWebcam, getSettings } from "../lib/ipc";
 import { applyTheme } from "./applyTheme";
 import type { ThemeMode } from "./settings";
 import { useWebcamRecorder } from "./useWebcamRecorder";
@@ -21,7 +21,7 @@ import { morphWindow } from "./morph";
 
 const WIDTH = 980;
 
-export function Hud() {
+export function Hud({ onEdit }: { onEdit?: (folder: string) => void }) {
   const { displays, mics, sel, setSel } = useDevices();
   const [camId, setCamId] = useState<string | null>(null);
   const [camOn, setCamOn] = useState(true);
@@ -99,9 +99,7 @@ export function Hud() {
       lastFolder.current = res.folder;
       setRecording(false);
       setPaused(false);
-      setPct(0);
-      setExporting(true);
-      await exportProject(res.folder);
+      onEdit?.(res.folder); // open the editor; export now happens from there
     }
   }
   async function togglePause() {

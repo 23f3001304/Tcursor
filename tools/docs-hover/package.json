@@ -1,0 +1,27 @@
+{
+  "name": "tcursor-docs-hover",
+  "displayName": "TCursor Docs Hover",
+  "description": "Project IntelliSense: shows external Markdown docs for TCursor functions on hover, so the source stays free of docstrings.",
+  "version": "0.1.1",
+  "private": true,
+  "publisher": "tcursor",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "activationEvents": [
+    "onLanguage:rust",
+    "onLanguage:typescript",
+    "onLanguage:typescriptreact"
+  ],
+  "main": "./out/extension.js",
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -w -p ./",
+    "validate": "tsc -p ./ && node out/validate.js ../..",
+    "test": "tsc -p ./ && node out/pure.test.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.0"
+  }
+}

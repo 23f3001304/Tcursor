@@ -6,6 +6,7 @@ use crate::export::scene::Scene;
 use crate::export::spotlight::hold_alpha;
 use crate::export::types::{Camera, FramePoint};
 use crate::settings::model::{ClickFxSettings, ClickFxStyle, HotkeySettings, SpotlightMode, VideoFxMode};
+use crate::edit::model::{EffectKind, EffectRegion};
 
 /// Click lifetime + spotlight fade, ported verbatim from the old fxdraw overlay.
 const LIFE_MS: u32 = 600;
@@ -39,16 +40,29 @@ pub struct FxState {
     pub video: Option<VideoFx>,
 }
 
+/// Spotlight alpha contributed by editable effect regions: a fade-in/out ramp over any
+/// Spotlight region covering `et`, max-ed across regions. Unioned with the settings + hotkey
+/// spotlight so editor regions and recorded holds both light up the export.
+fn spotlight_region_alpha(effects: &[EffectRegion], et: u32, fade: u32) -> f32 {
+    effects.iter().filter(|e| matches!(e.kind, EffectKind::Spotlight)).map(|e| {
+        if et < e.start_ms || et >= e.end_ms { return 0.0; }
+        let inn = (et - e.start_ms) as f32 / fade.max(1) as f32;
+        let outn = (e.end_ms - et) as f32 / fade.max(1) as f32;
+        inn.min(outn).clamp(0.0, 1.0)
+    }).fold(0.0_f32, f32::max)
+}
+
 /// Build the FX state at event-time `et`. `None` when nothing is active (no
 /// spotlight and no live clicks) so a renderer can skip the frame entirely.
 /// `cur` is the cursor's base/scene point the exporter already computed.
 #[allow(clippy::too_many_arguments)]
 pub fn fx_state_at(
-    fx: &ClickFxSettings, events: &[MouseEvent], actions: &[ActionEvent],
+    fx: &ClickFxSettings, events: &[MouseEvent], actions: &[ActionEvent], effects: &[EffectRegion],
     scene: &Scene, cam: Camera, cur: FramePoint,
     sw: u32, sh: u32, ow: u32, oh: u32, et: u32,
 ) -> Option<FxState> {
-    let s_alpha = (if fx.spotlight { 1.0_f32 } else { 0.0 }).max(hold_alpha(actions, et, FADE_MS));
+    let s_alpha = (if fx.spotlight { 1.0_f32 } else { 0.0 })
+        .max(hold_alpha(actions, et, FADE_MS)).max(spotlight_region_alpha(effects, et, FADE_MS));
     let spot = if s_alpha > 0.0 {
         let (cx, cy) = project(cur.x as f32, cur.y as f32, cam, ow, oh);
         Some(Spot { cx, cy, dim: fx.spotlight_dim, radius_frac: fx.spotlight_radius,
@@ -75,7 +89,7 @@ pub fn fx_state_at(
 }
 
 /// Draws an `FxState` onto a composited BGRA frame.
-pub trait FxRenderer {
+pub trait FxRenderer: Send {
     fn apply(&self, out: &mut [u8], ow: u32, oh: u32, state: &FxState);
 }
 
@@ -91,11 +105,11 @@ pub fn select_fx(ow: u32, oh: u32) -> Box<dyn FxRenderer> {
 #[allow(clippy::too_many_arguments)]
 pub fn render(
     r: &dyn FxRenderer, out: &mut [u8], ow: u32, oh: u32, fx: &ClickFxSettings,
-    events: &[MouseEvent], actions: &[ActionEvent], scene: &Scene, cam: Camera, cur: FramePoint,
+    events: &[MouseEvent], actions: &[ActionEvent], effects: &[EffectRegion], scene: &Scene, cam: Camera, cur: FramePoint,
     sw: u32, sh: u32, et: u32, keys: &HotkeySettings,
 ) {
     if !fx.enabled { return; }
-    if let Some(state) = fx_state_at(fx, events, actions, scene, cam, cur, sw, sh, ow, oh, et) {
+    if let Some(state) = fx_state_at(fx, events, actions, effects, scene, cam, cur, sw, sh, ow, oh, et) {
         r.apply(out, ow, oh, &state);
     }
     crate::export::caption::overlay(out, ow, oh, actions, keys, et, fx.captions);
@@ -127,12 +141,12 @@ mod tests {
 
     #[test]
     fn nothing_active_is_none() {
-        assert!(fx_state_at(&fx(ClickFxStyle::Ripple, false), &[], &[], &full_scene(100,100), cam(),
+        assert!(fx_state_at(&fx(ClickFxStyle::Ripple, false), &[], &[], &[], &full_scene(100,100), cam(),
             FramePoint{x:50,y:50}, 100,100,100,100, 0).is_none());
     }
     #[test]
     fn spotlight_toggle_makes_a_spot_at_cursor() {
-        let s = fx_state_at(&fx(ClickFxStyle::None, true), &[], &[], &full_scene(100,100), cam(),
+        let s = fx_state_at(&fx(ClickFxStyle::None, true), &[], &[], &[], &full_scene(100,100), cam(),
             FramePoint{x:50,y:50}, 100,100,100,100, 0).unwrap();
         let spot = s.spot.unwrap();
         assert!((spot.alpha - 1.0).abs() < 1e-6);
@@ -141,21 +155,21 @@ mod tests {
     }
     #[test]
     fn a_click_makes_a_hit_in_output_space() {
-        let s = fx_state_at(&fx(ClickFxStyle::Ripple, false), &[down(0)], &[], &full_scene(100,100), cam(),
+        let s = fx_state_at(&fx(ClickFxStyle::Ripple, false), &[down(0)], &[], &[], &full_scene(100,100), cam(),
             FramePoint{x:50,y:50}, 100,100,100,100, 300).unwrap();
         assert_eq!(s.hits.len(), 1);
         assert!((s.hits[0].x - 50.0).abs() < 1.0 && s.hits[0].progress > 0.0);
     }
     #[test]
     fn style_none_suppresses_click_hits() {
-        let s = fx_state_at(&fx(ClickFxStyle::None, true), &[down(0)], &[], &full_scene(100,100), cam(),
+        let s = fx_state_at(&fx(ClickFxStyle::None, true), &[down(0)], &[], &[], &full_scene(100,100), cam(),
             FramePoint{x:50,y:50}, 100,100,100,100, 100).unwrap();
         assert!(s.hits.is_empty() && s.spot.is_some());
     }
     #[test]
     fn hold_action_ramps_spot_alpha() {
         let acts = vec![ActionEvent { t: 1000, kind: ActionKind::SpotlightHoldStart }];
-        let s = fx_state_at(&fx(ClickFxStyle::None, false), &[], &acts, &full_scene(100,100), cam(),
+        let s = fx_state_at(&fx(ClickFxStyle::None, false), &[], &acts, &[], &full_scene(100,100), cam(),
             FramePoint{x:50,y:50}, 100,100,100,100, 1125).unwrap(); // 125ms into 250ms ramp
         assert!((s.spot.unwrap().alpha - 0.5).abs() < 0.05);
     }

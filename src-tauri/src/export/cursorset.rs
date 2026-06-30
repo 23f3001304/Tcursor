@@ -9,7 +9,7 @@ use crate::export::scene::Panel;
 use crate::export::types::{Camera, FramePoint, RectF};
 
 // (CursorType, sprite PNG, hotspot as canvas-fraction). Adding a cursor = add a row.
-const SPRITES: &[(CursorType, &[u8], (f32, f32))] = &[
+pub(crate) const SPRITES: &[(CursorType, &[u8], (f32, f32))] = &[
     (CursorType::Arrow,       include_bytes!("../../assets/cursors/pointer.png"),       (0.155, 0.045)),
     (CursorType::Hand,        include_bytes!("../../assets/cursors/hand.png"),          (0.49, 0.22)),
     (CursorType::IBeam,       include_bytes!("../../assets/cursors/ibeam.png"),         (0.50, 0.50)),

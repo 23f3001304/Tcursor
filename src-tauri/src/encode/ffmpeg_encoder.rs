@@ -59,27 +59,36 @@ pub fn prewarm() {
 }
 
 impl FfmpegFrameSink {
-    /// Realtime-quality encode (used while recording).
+    /// Realtime CFR encode (game mode): a steady `fps` so variable-FPS sources record smoothly.
     pub fn new(out_path: &str, width: u32, height: u32, fps: u32) -> std::io::Result<Self> {
-        Self::spawn(out_path, width, height, fps as f64, false)
+        Self::spawn(out_path, width, height, fps as f64, false, false)
     }
 
-    /// High-quality encode for offline export (slower preset, near-lossless).
+    /// Realtime VFR encode (normal recording): each frame is stamped with its real arrival
+    /// (wall-clock) time, so `video.mp4` plays at true speed even when the capture rate dips below
+    /// the display refresh (a fixed-`-framerate` CFR file would otherwise play sped up).
+    pub fn new_vfr(out_path: &str, width: u32, height: u32) -> std::io::Result<Self> {
+        Self::spawn(out_path, width, height, 0.0, false, true)
+    }
+
+    /// High-quality CFR encode for offline export (slower preset, near-lossless).
     /// `fps` is f64 so the exporter can reinterpret a mislabeled source rate.
     pub fn new_hq(out_path: &str, width: u32, height: u32, fps: f64) -> std::io::Result<Self> {
-        Self::spawn(out_path, width, height, fps, true)
+        Self::spawn(out_path, width, height, fps, true, false)
     }
 
-    fn spawn(out_path: &str, width: u32, height: u32, fps: f64, hq: bool) -> std::io::Result<Self> {
+    fn spawn(out_path: &str, width: u32, height: u32, fps: f64, hq: bool, vfr: bool) -> std::io::Result<Self> {
         let encoder = h264_encoder();
         let size = format!("{width}x{height}");
         let fr = format!("{fps:.4}");
         let mut cmd = ffcmd("ffmpeg");
-        cmd.args([
-            "-y", "-f", "rawvideo", "-pixel_format", "bgra",
-            "-video_size", &size, "-framerate", &fr,
-            "-i", "pipe:0", "-c:v", encoder, "-pix_fmt", "yuv420p",
-        ]);
+        cmd.args(["-y", "-f", "rawvideo", "-pixel_format", "bgra", "-video_size", &size]);
+        // VFR: stamp each frame with its real arrival (wall-clock) time so the file plays at true
+        // speed even when capture dips below the display refresh. CFR: a fixed input rate.
+        // `passthrough` keeps every frame (no drops), so the frame<->sync.json map stays 1:1.
+        if vfr { cmd.args(["-use_wallclock_as_timestamps", "1"]); } else { cmd.args(["-framerate", &fr]); }
+        cmd.args(["-i", "pipe:0", "-c:v", encoder, "-pix_fmt", "yuv420p"]);
+        if vfr { cmd.args(["-fps_mode", "passthrough"]); }
         match (encoder, hq) {
             ("libx264", true) => cmd.args(["-preset", "slow", "-crf", "16"]),
             ("libx264", false) => cmd.args(["-preset", "ultrafast", "-crf", "26"]),

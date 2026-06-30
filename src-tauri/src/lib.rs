@@ -17,6 +17,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(session::recorder::Recorder::default())
+        .manage(export::preview::PreviewSession::default())
         .invoke_handler(tauri::generate_handler![
             commands::list_displays,
             commands::list_audio_inputs,
@@ -32,6 +33,19 @@ pub fn run() {
             edit::commands::apply_edit_op,
             edit::commands::save_edit,
             ai::commands::ai_autoedit,
+            export::preview::preview_frame,
+            export::preview::preview_bg,
+            export::preview_track::camera_track,
+            export::preview_track::preview_layout,
+            export::preview_track::click_track,
+            export::preview_track::spotlight_holds,
+            export::preview_track::ensure_proxy,
+            export::cursorpreview::cursor_sprites,
+            export::cursorpreview::cursor_kinds,
+            export::thumbs::ensure_thumbs,
+            export::thumbs::ensure_waveform,
+            export::thumbs::ensure_preview_audio,
+            commands::set_capturable,
         ])
         .setup(|app| {
             use tauri::Manager;
@@ -51,7 +65,7 @@ pub fn run() {
                     const CAPTURE_EXCLUDE: bool = true;
                     if CAPTURE_EXCLUDE {
                         if let Ok(hwnd) = win.hwnd() {
-                            let ok = win::capture_exclusion::exclude_from_capture(hwnd.0 as isize);
+                            let ok = win::capture_exclusion::set_capture_exclusion(hwnd.0 as isize, true);
                             if ok {
                                 println!("capture exclusion applied");
                             } else {

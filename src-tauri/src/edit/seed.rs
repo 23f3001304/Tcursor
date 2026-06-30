@@ -107,6 +107,7 @@ fn build_default(paths: &ProjectPaths) -> EditDoc {
         zooms: zooms_from_regions(&raw),
         speed: vec![],
         layout: layout_from_actions(&actions, dur_ms),
+        effects: vec![],
         settings,
     }
 }

@@ -101,7 +101,8 @@ pub fn start_recording(
 
     // Now the slow part - the screen encoder - while the inputs above already run.
     let video_path = paths.video().to_string_lossy().into_owned();
-    let sink = FfmpegFrameSink::new(&video_path, w, h, fps).map_err(|e| format!("video encoder spawn: {e}"))?;
+    // Normal recording encodes VFR (true per-frame timing -> plays at true speed); game mode keeps uniform CFR pacing.
+    let sink = (if game_mode { FfmpegFrameSink::new(&video_path, w, h, fps) } else { FfmpegFrameSink::new_vfr(&video_path, w, h) }).map_err(|e| format!("video encoder spawn: {e}"))?;
     println!("recording {w}x{h} @ {fps}fps");
 
     let video_halt = source.halt_handle();
@@ -175,11 +176,9 @@ pub fn stop_recording(recorder: tauri::State<'_, Recorder>) -> Result<RecordingR
     if let Some(t) = running.system_thread { let _ = t.join(); }
 
     // Save inputs before the video join's ?-propagation so they survive a finalize error.
-    save_inputs(
-        running.mouse, running.keyboard, running.cursor,
+    save_inputs(running.mouse, running.keyboard, running.cursor,
         &running.events_path, &running.actions_path, &running.typing_path, &running.cursor_path,
-        running.screen, running.started_unix_ms,
-    );
+        running.screen, running.started_unix_ms);
 
     let (frames, frame_ts) = running.video_thread
         .join().map_err(|_| "video thread panicked".to_string())?
@@ -187,14 +186,14 @@ pub fn stop_recording(recorder: tauri::State<'_, Recorder>) -> Result<RecordingR
 
     // Persist the real capture timeline so export can rebuild it (fps-agnostic).
     let pick = |c: &AtomicU64| { let v = c.load(Ordering::SeqCst); (v > 0).then_some(v) };
-    let sync = crate::session::sync::SyncLog {
-        frames: frame_ts,
-        events_ms: running.events_ms,
-        mic_ms: pick(&running.mic_start),
-        system_ms: pick(&running.system_start),
-    };
+    let sync = crate::session::sync::SyncLog { frames: frame_ts, events_ms: running.events_ms,
+        mic_ms: pick(&running.mic_start), system_ms: pick(&running.system_start) };
     let sync_path = std::path::Path::new(&running.folder).join("sync.json");
     if let Err(e) = sync.save(&sync_path) { eprintln!("sync.json save failed: {e}"); }
+
+    // Capture has fully stopped: pre-generate the editor's heavy media off-thread (instant editor open).
+    let pf = running.folder.clone();
+    std::thread::spawn(move || crate::export::thumbs::prewarm(pf));
 
     Ok(RecordingResult { folder: running.folder, frames })
 }

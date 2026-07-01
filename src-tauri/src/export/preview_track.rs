@@ -8,7 +8,7 @@ use crate::actions::model::ActionKind;
 use crate::export::preview::{with_warm, PreviewSession};
 use crate::export::render::OUT_FPS;
 use crate::session::paths::ProjectPaths;
-use crate::win::proc::ffcmd;
+use crate::win::proc::ffcmd_bg;
 
 /// One sample of the camera curve: output time `t` (ms), the zoom as scale + center, and the
 /// cursor position - `cx`/`cy`/`curx`/`cury` are 0..1 fractions of the SCREEN content, so the
@@ -114,7 +114,7 @@ pub fn ensure_proxy(folder: String, height: u32) -> Result<String, String> {
     let paths = ProjectPaths { folder: PathBuf::from(&folder) };
     let h = height.clamp(240, 2160) & !1; // even
     let proxy = paths.folder.join(format!("preview_{h}_rt.mp4"));
-    if !proxy.exists() {
+    crate::win::proc::generate_once(&proxy, || {
         // The capture encoder writes CFR at a nominal fps usually faster than the real capture
         // rate, so video.mp4 plays sped up. Stretch the proxy to the real recording duration
         // (trim.out_ms - the exact span the export spans) via setpts, so the preview plays at
@@ -128,7 +128,7 @@ pub fn ensure_proxy(folder: String, height: u32) -> Result<String, String> {
         let k = real / enc;
         let vf = if (k - 1.0).abs() > 0.02 { format!("scale=-2:{h},setpts={k:.6}*PTS") } else { format!("scale=-2:{h}") };
         let tmp = crate::win::proc::tmp_sibling(&proxy); // write then atomic-rename (no partial reads)
-        let status = ffcmd("ffmpeg")
+        let status = ffcmd_bg("ffmpeg")
             .args(["-v", "error", "-y", "-i"]).arg(paths.video())
             .args(["-vf", &vf, "-c:v", "libx264", "-preset", "veryfast",
                 "-crf", "27", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an"])
@@ -136,6 +136,7 @@ pub fn ensure_proxy(folder: String, height: u32) -> Result<String, String> {
             .status().map_err(|e| e.to_string())?;
         if !status.success() { let _ = std::fs::remove_file(&tmp); return Err("preview proxy transcode failed".into()); }
         std::fs::rename(&tmp, &proxy).map_err(|e| e.to_string())?;
-    }
+        Ok(())
+    })?;
     Ok(proxy.to_string_lossy().to_string())
 }

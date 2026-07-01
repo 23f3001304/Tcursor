@@ -3,7 +3,6 @@ use crate::events::model::MouseEvent;
 use crate::export::clickfx::hits_at;
 use crate::export::coordmap::{project, to_panel};
 use crate::export::scene::Scene;
-use crate::export::spotlight::hold_alpha;
 use crate::export::types::{Camera, FramePoint};
 use crate::settings::model::{ClickFxSettings, ClickFxStyle, HotkeySettings, SpotlightMode, VideoFxMode};
 use crate::edit::model::{EffectKind, EffectRegion};
@@ -40,9 +39,10 @@ pub struct FxState {
     pub video: Option<VideoFx>,
 }
 
-/// Spotlight alpha contributed by editable effect regions: a fade-in/out ramp over any
-/// Spotlight region covering `et`, max-ed across regions. Unioned with the settings + hotkey
-/// spotlight so editor regions and recorded holds both light up the export.
+/// Spotlight alpha contributed by editable effect regions: a fade-in/out ramp over any Spotlight
+/// region covering `et`, max-ed across regions, unioned with the settings toggle. Recorded hotkey
+/// holds are seeded into the edit doc as Spotlight regions (see `edit::seed`), so regions + the
+/// settings toggle are the only spotlight sources - editing/removing a region fully controls it.
 fn spotlight_region_alpha(effects: &[EffectRegion], et: u32, fade: u32) -> f32 {
     effects.iter().filter(|e| matches!(e.kind, EffectKind::Spotlight)).map(|e| {
         if et < e.start_ms || et >= e.end_ms { return 0.0; }
@@ -62,7 +62,7 @@ pub fn fx_state_at(
     sw: u32, sh: u32, ow: u32, oh: u32, et: u32,
 ) -> Option<FxState> {
     let s_alpha = (if fx.spotlight { 1.0_f32 } else { 0.0 })
-        .max(hold_alpha(actions, et, FADE_MS)).max(spotlight_region_alpha(effects, et, FADE_MS));
+        .max(spotlight_region_alpha(effects, et, FADE_MS));
     let spot = if s_alpha > 0.0 {
         let (cx, cy) = project(cur.x as f32, cur.y as f32, cam, ow, oh);
         Some(Spot { cx, cy, dim: fx.spotlight_dim, radius_frac: fx.spotlight_radius,
@@ -119,7 +119,6 @@ pub fn render(
 mod tests {
     use super::*;
     use crate::events::model::{Button, EventKind, MouseEvent};
-    use crate::actions::model::{ActionEvent, ActionKind};
     use crate::export::scene::{Panel, Scene};
     use crate::export::types::{Camera, FramePoint, RectF};
     use crate::settings::model::{ClickFxSettings, ClickFxStyle, SpotlightMode};
@@ -165,12 +164,5 @@ mod tests {
         let s = fx_state_at(&fx(ClickFxStyle::None, true), &[down(0)], &[], &[], &full_scene(100,100), cam(),
             FramePoint{x:50,y:50}, 100,100,100,100, 100).unwrap();
         assert!(s.hits.is_empty() && s.spot.is_some());
-    }
-    #[test]
-    fn hold_action_ramps_spot_alpha() {
-        let acts = vec![ActionEvent { t: 1000, kind: ActionKind::SpotlightHoldStart }];
-        let s = fx_state_at(&fx(ClickFxStyle::None, false), &[], &acts, &[], &full_scene(100,100), cam(),
-            FramePoint{x:50,y:50}, 100,100,100,100, 1125).unwrap(); // 125ms into 250ms ramp
-        assert!((s.spot.unwrap().alpha - 0.5).abs() < 0.05);
     }
 }

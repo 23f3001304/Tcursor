@@ -110,7 +110,7 @@ Complete renderer-agnostic description of all active FX at one output frame. Bui
 - `color` - *user-configured effect color as RGB bytes.*
 - `intensity` - *user-configured effect strength scalar.*
 - `hits` - *zero or more active click effects; always empty when `style` is `ClickFxStyle::None`.*
-- `spot` - *`None` when neither the spotlight toggle nor any hold action is active at this frame.*
+- `spot` - *`None` when neither the spotlight toggle nor any Spotlight effect region is active at this frame.*
 - `video` - *`None` when no `VideoFxHold` pair is active at this frame.*
 
 ### Used by
@@ -136,7 +136,7 @@ Builds the FX state at event-time `et`. Returns `None` when nothing is active so
 
 - `fx: &ClickFxSettings` - user FX settings (spotlight toggle, dim, radius, feather, click style, color, intensity, video FX mode). *Why:* single source of all user-tunables; no hidden globals.*
 - `events: &[MouseEvent]` - full mouse log. *Why:* `hits_at` scans this to find clicks within `LIFE_MS` of `et`.*
-- `actions: &[ActionEvent]` - action track. *Why:* `hold_alpha` derives spotlight and video FX fade ramps from `SpotlightHoldStart`/`SpotlightHoldEnd` and `VideoFxHoldStart`/`VideoFxHoldEnd` pairs.*
+- `actions: &[ActionEvent]` - action track. *Why:* `hold_alpha` derives the video FX fade ramp from `VideoFxHoldStart`/`VideoFxHoldEnd` pairs. Spotlight is no longer hold-driven here - recorded holds are seeded as editable Spotlight regions (`edit::seed`), so the spotlight comes from the effect regions + the settings toggle.*
 - `scene: &Scene` - active layout scene at `et`. *Why:* click screen coordinates must be converted to panel-local coordinates before projection into output space.*
 - `cam: Camera` - camera transform at `et` (center + scale). *Why:* `project` maps panel-local coordinates to output pixels using this transform.*
 - `cur: FramePoint` - cursor's pre-computed frame position. *Why:* the spotlight tracks the cursor; the exporter already computed this position so it is passed directly.*

@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { getEdit, aiAutoedit, exportProject, applyEditOp, setCapturable, cameraTrack, previewLayout, clickTrack, spotlightHolds, previewBg, cursorSprites, cursorKinds, ensureThumbs, ensureWaveform, ensurePreviewAudio, ensureProxy, fileSrc } from "../lib/ipc";
+import { getEdit, aiAutoedit, exportProject, applyEditOp, setCapturable, cameraTrack, previewLayout, clickTrack, previewBg, cursorSprites, cursorKinds, ensureThumbs, ensureWaveform, ensurePreviewAudio, ensureProxy, fileSrc } from "../lib/ipc";
 import type { EditDoc, EditOp } from "../lib/edit";
-import type { CamSample, ClickSample, CursorSpriteDto, CursorKindSample, PreviewLayout, HoldSpan } from "../lib/ipc";
+import type { CamSample, ClickSample, CursorSpriteDto, CursorKindSample, PreviewLayout } from "../lib/ipc";
 import { TopBar } from "./TopBar";
 import { ResizeEdges } from "./ResizeEdges";
 import { Rail, type Tab } from "./Rail";
@@ -22,7 +22,6 @@ export function Editor({ folder, onClose }: { folder: string; onClose: () => voi
   const [track, setTrack] = useState<CamSample[]>([]);
   const [layout, setLayout] = useState<PreviewLayout | null>(null);
   const [clicks, setClicks] = useState<ClickSample[]>([]);
-  const [spotHolds, setSpotHolds] = useState<HoldSpan[]>([]);
   const [bgUrl, setBgUrl] = useState("");
   const [cursorSpr, setCursorSpr] = useState<CursorSpriteDto[]>([]);
   const [cursorKnd, setCursorKnd] = useState<CursorKindSample[]>([]);
@@ -55,8 +54,6 @@ export function Editor({ folder, onClose }: { folder: string; onClose: () => voi
   // Click ripples + the exact export background - neither changes with edits, so fetch once
   // per folder (refetching on every edit was part of the add-effect lag).
   useEffect(() => { clickTrack(folder).then(setClicks).catch(() => {}); }, [folder]);
-  // Recorded spotlight holds (hotkey-held during capture) - immutable, so fetch once per folder.
-  useEffect(() => { spotlightHolds(folder).then(setSpotHolds).catch(() => {}); }, [folder]);
   useEffect(() => { previewBg(folder).then(setBgUrl).catch(() => {}); }, [folder]);
   // Cursor sprite pack + type track (don't change with edits) so the preview cursor matches export.
   useEffect(() => { cursorSprites(folder).then(setCursorSpr).catch(() => {}); cursorKinds(folder).then(setCursorKnd).catch(() => {}); }, [folder]);
@@ -148,7 +145,7 @@ export function Editor({ folder, onClose }: { folder: string; onClose: () => voi
             <p className="e-lede">{tab} settings land here next.</p>
           </div>
         )}
-        <Stage src={srcUrl} webcamSrc={fileSrc(`${folder}\\webcam.webm`)} track={track} layout={layout} clicks={clicks} bgUrl={bgUrl} cursorSprites={cursorSpr} cursorKinds={cursorKnd} cursor={doc.settings.cursor} effects={doc.effects} spotlightHolds={spotHolds} clickfx={doc.settings.clickfx} audioSrc={audioUrl} muted={muted} timeMs={timeMs} playing={playing} onTime={onTime} onDuration={setVidDurMs} onZoomAt={zoomAt} />
+        <Stage src={srcUrl} webcamSrc={fileSrc(`${folder}\\webcam.webm`)} track={track} layout={layout} clicks={clicks} bgUrl={bgUrl} cursorSprites={cursorSpr} cursorKinds={cursorKnd} cursor={doc.settings.cursor} effects={doc.effects} spotlightHolds={[]} clickfx={doc.settings.clickfx} audioSrc={audioUrl} muted={muted} timeMs={timeMs} playing={playing} onTime={onTime} onDuration={setVidDurMs} onZoomAt={zoomAt} />
       </div>
       <Transport timeMs={timeMs} dur={dur} playing={playing} onPlay={() => setPlaying((p) => !p)} onSeek={(ms) => { setPlaying(false); setTimeMs(ms); }} onAddZoom={addZoom} onAddSpotlight={addSpotlight}
         quality={quality} onQuality={() => setQuality((q) => (q === 480 ? 720 : q === 720 ? 1080 : 480))}

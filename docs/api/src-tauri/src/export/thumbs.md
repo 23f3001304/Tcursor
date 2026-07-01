@@ -1,6 +1,6 @@
 # src-tauri/src/export/thumbs.rs
 
-Editor-timeline media: cached ffmpeg helpers for the filmstrip thumbnails, the per-source audio waveform images, and a mixed preview-audio track. All mirror `ensure_proxy` (run once, cache by output existence). The recorder's proxy is silent; these give the editor frames to scrub, waveforms to show, and sound to play.
+Editor-timeline media: cached ffmpeg helpers for the filmstrip thumbnails, the per-source audio waveform images, and a mixed preview-audio track. All mirror `ensure_proxy` (run once, cache by output existence) and wrap their ffmpeg pass in `win::proc::generate_once` (so the post-record pre-warm and the editor's lazy `ensure_*` never transcode the same file twice or storm the CPU with concurrent passes right as the editor opens) run via `ffcmd_bg` (below-normal priority, so the one serialized multi-threaded pass yields to the UI instead of freezing it). The recorder's proxy is silent; these give the editor frames to scrub, waveforms to show, and sound to play.
 
 ## ensure_thumbs
 
@@ -32,7 +32,7 @@ N evenly-spaced JPEG thumbnails (height 64) for the filmstrip, cached in `folder
 pub fn ensure_waveform(folder: String, which: String) -> Result<String, String>
 ```
 
-A waveform PNG for one source (`"system"` or `"mic"`), cached as `folder/wave_<which>.png`.
+A waveform PNG for one source (`"system"` or `"mic"`), cached as `folder/wf_<which>.png`.
 
 ### Inputs (what, and why it is needed)
 
@@ -45,7 +45,7 @@ A waveform PNG for one source (`"system"` or `"mic"`), cached as `folder/wave_<w
 
 ### Implementation
 
-ffmpeg `showwavespic=s=1180x26:colors=#6b6b86 -frames:v 1` over the wav. Cached by file existence; the PNG is written to a `tmp_sibling` and atomically renamed, so a concurrent reader (the editor opening during the post-record pre-warm) never loads a half-written image.
+ffmpeg `dynaudnorm,showwavespic=s=1180x26:colors=#6b6b86:scale=sqrt -frames:v 1` over the wav - `dynaudnorm` normalizes loudness and the `sqrt` scale emphasizes low amplitudes, so a quiet mic shows a visible waveform instead of a flat, invisible line (the export mic is audible regardless). Cached by file existence (the `wf_` prefix invalidates older flat `wave_*` caches); the PNG is written to a `tmp_sibling` and atomically renamed, so a concurrent reader never loads a half-written image.
 
 ## ensure_preview_audio
 

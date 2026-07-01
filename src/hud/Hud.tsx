@@ -160,7 +160,7 @@ export function Hud({ onEdit }: { onEdit?: (folder: string) => void }) {
                 <button className={`toggle ${camOn ? "on" : ""}`} title={camOn ? "Camera on" : "Camera off"} onClick={() => setCamOn(v => !v)}>{camOn ? <Camera /> : <CameraOff />}</button>
                 <button className={`toggle ${micOn ? "on" : ""}`} title={micOn ? "Microphone on" : "Microphone off"} onClick={() => setMicOn(v => !v)}>{micOn ? <Mic /> : <MicOff />}</button>
                 <button className={`toggle ${sysOn ? "on" : ""}`} title={sysOn ? "System audio on" : "System audio off"} onClick={() => setSysOn(v => !v)}>{sysOn ? <Speaker /> : <SpeakerOff />}</button>
-                <button className={`toggle ${gameMode ? "on" : ""}`} title={gameMode ? "Game mode: smooth 60fps capture (on)" : "Game mode: smooth capture for games / variable-FPS apps"} onClick={() => setGameMode(v => !v)}><Gamepad /></button>
+                <button className={`toggle ${gameMode ? "on" : ""}`} title={gameMode ? "Compatibility encoder (on): legacy CPU recording" : "Compatibility encoder: switch on only if GPU recording has issues"} onClick={() => setGameMode(v => !v)}><Gamepad /></button>
               </>
             ) : (
               <div className="recmeter">

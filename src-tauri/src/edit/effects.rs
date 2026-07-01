@@ -2,13 +2,29 @@
 // v1 handles Spotlight regions; the kind set grows in later phases. `api::apply` delegates the
 // effect ops here.
 use crate::edit::api::EditOp;
-use crate::edit::model::{EditDoc, EffectRegion};
+use crate::edit::model::{EditDoc, EffectKind, EffectRegion};
 
 fn next_effect_id(doc: &EditDoc) -> String {
     let n = doc.effects.iter()
         .filter_map(|e| e.id.strip_prefix('e').and_then(|s| s.parse::<u32>().ok()))
         .max().map(|m| m + 1).unwrap_or(doc.effects.len() as u32);
     format!("e{}", n)
+}
+
+/// Convert an always-on `clickfx.spotlight` toggle into one full-span, editable Spotlight region so
+/// the editor timeline can trim or remove it - the region then drives both preview and export
+/// (`fx_state` maxes the toggle with the region alpha, and the toggle is set off here). No-op if the
+/// toggle is already off or a Spotlight region already exists. Returns whether the doc changed; the
+/// seed calls this on BOTH fresh and older docs so an always-on spotlight is always editable.
+pub fn lift_always_on_spotlight(doc: &mut EditDoc) -> bool {
+    if !doc.settings.clickfx.spotlight || doc.trim.out_ms == 0
+        || doc.effects.iter().any(|e| matches!(e.kind, EffectKind::Spotlight)) {
+        return false; // out_ms == 0 is a degenerate (no-event-log) doc: don't disable the toggle for a [0,0] region
+    }
+    let id = next_effect_id(doc);
+    doc.effects.push(EffectRegion { id, kind: EffectKind::Spotlight, start_ms: 0, end_ms: doc.trim.out_ms });
+    doc.settings.clickfx.spotlight = false;
+    true
 }
 
 /// Apply an effect-region op. No-op for non-effect ops (the match arm in `api::apply` only
@@ -69,5 +85,35 @@ mod tests {
         let id = doc.effects[0].id.clone();
         apply_effect(&mut doc, EditOp::RemoveEffect { id });
         assert_eq!(doc.effects.len(), 0);
+    }
+
+    #[test]
+    fn lifts_always_on_spotlight_to_full_span_region_and_disables_toggle() {
+        let mut doc = empty();
+        doc.trim.out_ms = 8000;
+        doc.settings.clickfx.spotlight = true;
+        assert!(lift_always_on_spotlight(&mut doc)); // changed
+        assert_eq!(doc.effects.len(), 1);
+        assert!(matches!(doc.effects[0].kind, EffectKind::Spotlight));
+        assert_eq!((doc.effects[0].start_ms, doc.effects[0].end_ms), (0, 8000));
+        assert!(!doc.settings.clickfx.spotlight); // toggle now off - the region is the single source
+        assert!(!lift_always_on_spotlight(&mut doc)); // idempotent (a Spotlight region now exists)
+    }
+
+    #[test]
+    fn lift_is_noop_when_spotlight_toggle_off() {
+        let mut doc = empty();
+        doc.settings.clickfx.spotlight = false;
+        assert!(!lift_always_on_spotlight(&mut doc));
+        assert!(doc.effects.is_empty());
+    }
+
+    #[test]
+    fn lift_is_noop_on_zero_duration_doc() {
+        let mut doc = empty(); // trim.out_ms == 0 (degenerate no-event-log doc)
+        doc.settings.clickfx.spotlight = true;
+        assert!(!lift_always_on_spotlight(&mut doc)); // no un-grabbable [0,0] region...
+        assert!(doc.effects.is_empty());
+        assert!(doc.settings.clickfx.spotlight); // ...and the toggle is left on, not silently disabled
     }
 }

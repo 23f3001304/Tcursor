@@ -35,11 +35,14 @@ export function Stage({ src, webcamSrc, track, layout, clicks, bgUrl, cursorSpri
   const layoutRef = useRef(layout); layoutRef.current = layout;
   const clicksRef = useRef(clicks); clicksRef.current = clicks;
   const bgImg = useRef<HTMLImageElement | null>(null);
+  const dirtyRef = useRef(true); // paused: recomposite once per change, not 60fps over a static frame
+  const lastReportRef = useRef(0); // throttle 60fps time -> React state (playhead/label); canvas stays live
 
   // Decode the export background (a data URL) once per change into an <img> the canvas draws.
   useEffect(() => {
-    if (!bgUrl) { bgImg.current = null; return; }
+    if (!bgUrl) { bgImg.current = null; dirtyRef.current = true; return; }
     const img = new Image();
+    img.onload = () => { dirtyRef.current = true; };
     img.src = bgUrl;
     bgImg.current = img;
   }, [bgUrl]);
@@ -55,9 +58,14 @@ export function Stage({ src, webcamSrc, track, layout, clicks, bgUrl, cursorSpri
   const trailRef = useRef<[number, number][]>([]);
   useEffect(() => {
     const sprites = new Map<string, HTMLImageElement>(), hots = new Map<string, [number, number]>(), canvasH = new Map<string, number>();
-    for (const s of cursorSprites) { const img = new Image(); img.src = s.url; sprites.set(s.kind, img); hots.set(s.kind, s.hot); canvasH.set(s.kind, s.canvas_h); }
+    for (const s of cursorSprites) { const img = new Image(); img.onload = () => { dirtyRef.current = true; }; img.src = s.url; sprites.set(s.kind, img); hots.set(s.kind, s.hot); canvasH.set(s.kind, s.canvas_h); }
     spritesRef.current = { sprites, hots, canvasH };
+    dirtyRef.current = true;
   }, [cursorSprites]);
+
+  // Mark the canvas dirty on any draw-affecting change so the PAUSED rAF recomposites exactly once
+  // per change instead of redrawing the same static frame at 60fps (the idle/interaction-lag fix).
+  useEffect(() => { dirtyRef.current = true; }, [timeMs, playing, track, layout, clicks, effects, cursor, clickfx, cursorKinds]);
 
   useEffect(() => {
     const sv = screen.current, wv = webcam.current, av = audio.current;
@@ -84,25 +92,32 @@ export function Stage({ src, webcamSrc, track, layout, clicks, bgUrl, cursorSpri
   useEffect(() => {
     let raf = 0;
     const tick = () => {
-      const sv = screen.current, c = canvas.current;
-      if (sv && c) {
-        const t = playRef.current ? sv.currentTime * 1000 : timeRef.current;
-        if (playRef.current) {
-          onTimeRef.current(t);
+      const sv = screen.current, c = canvas.current, play = playRef.current;
+      // Paused + nothing changed: skip compositing entirely so the editor isn't burning 60fps
+      // redrawing a static frame (the idle/interaction-lag fix). Playback always composites.
+      if (sv && c && (play || dirtyRef.current)) {
+        dirtyRef.current = false;
+        const t = play ? sv.currentTime * 1000 : timeRef.current;
+        if (play) {
+          // Throttle the React state update to ~16fps - it re-renders the whole editor tree. The
+          // canvas itself stays 60fps because it reads sv.currentTime directly, not this state.
+          if (t < lastReportRef.current || t - lastReportRef.current >= 60) { onTimeRef.current(t); lastReportRef.current = t; }
           const wv = webcam.current, av = audio.current;
           if (wv && Math.abs(wv.currentTime - sv.currentTime) > 0.15) wv.currentTime = sv.currentTime;
           if (av && Math.abs(av.currentTime - sv.currentTime) > 0.18) av.currentTime = sv.currentTime;
         }
         const ctx = c.getContext("2d");
         if (ctx) {
-          const sp = spritesRef.current, cs = cursorRef.current, cf = clickfxRef.current;
-          const cur = { style: cs.style, size: cs.size, clickBounce: cs.click_bounce, bounceIntensity: cs.bounce_intensity,
-            motionBlur: cs.motion_blur, kinds: kindsRef.current, sprites: sp.sprites, hots: sp.hots, canvasH: sp.canvasH, recent: trailRef.current };
-          const spot = cf.enabled
-            ? { effects: effectsRef.current, holds: holdsRef.current, on: cf.spotlight, params: { dim: cf.spotlight_dim, radius: cf.spotlight_radius, feather: cf.spotlight_feather } }
-            : null;
-          drawPreview(ctx, c.width, c.height, sv, webcam.current, camAt(trackRef.current, t),
-            layoutRef.current, bgImg.current, clicksRef.current, t, cur, spot);
+          try {
+            const sp = spritesRef.current, cs = cursorRef.current, cf = clickfxRef.current;
+            const cur = { style: cs.style, size: cs.size, clickBounce: cs.click_bounce, bounceIntensity: cs.bounce_intensity,
+              motionBlur: cs.motion_blur, kinds: kindsRef.current, sprites: sp.sprites, hots: sp.hots, canvasH: sp.canvasH, recent: trailRef.current };
+            const spot = cf.enabled
+              ? { effects: effectsRef.current, holds: holdsRef.current, on: cf.spotlight, params: { dim: cf.spotlight_dim, radius: cf.spotlight_radius, feather: cf.spotlight_feather } }
+              : null;
+            drawPreview(ctx, c.width, c.height, sv, webcam.current, camAt(trackRef.current, t),
+              layoutRef.current, bgImg.current, clicksRef.current, t, cur, spot);
+          } catch (e) { if (import.meta.env.DEV) console.error("drawPreview", e); } // transient not-yet-decodable frame; a later tick redraws
         }
       }
       raf = requestAnimationFrame(tick);
@@ -144,7 +159,9 @@ export function Stage({ src, webcamSrc, track, layout, clicks, bgUrl, cursorSpri
           title="Click to add a zoom here" style={{ display: src ? "block" : "none", cursor: "zoom-in" }} />
         {src && (
           <video ref={screen} src={src} muted playsInline preload="auto" style={HIDDEN}
-            onLoadedData={() => setErr(null)}
+            onLoadedData={() => { setErr(null); dirtyRef.current = true; }}
+            onSeeked={() => { dirtyRef.current = true; }}
+            onEnded={() => { const v = screen.current; if (v && isFinite(v.duration)) onTimeRef.current(Math.round(v.duration * 1000)); }}
             onLoadedMetadata={(e) => {
               const v = e.currentTarget; const d = v.duration;
               if (isFinite(d) && d > 0) onDuration(Math.round(d * 1000));
@@ -153,7 +170,8 @@ export function Stage({ src, webcamSrc, track, layout, clicks, bgUrl, cursorSpri
             }}
             onError={(e) => setErr(MEDIA_ERR[e.currentTarget.error?.code ?? 0] || "load failed")} />
         )}
-        {webcamSrc && <video ref={webcam} src={webcamSrc} muted playsInline preload="auto" style={HIDDEN} />}
+        {webcamSrc && <video ref={webcam} src={webcamSrc} muted playsInline preload="auto" style={HIDDEN}
+          onLoadedData={() => { dirtyRef.current = true; }} onSeeked={() => { dirtyRef.current = true; }} />}
         {audioSrc && <audio ref={audio} src={audioSrc} preload="auto" />}
         {err && <div className="e-stage-empty" style={{ position: "absolute", inset: 0 }}>Preview unavailable - {err}</div>}
       </div>

@@ -2,7 +2,7 @@
 // load_or_seed returns an existing edit.json or seeds one from the same auto-zoom,
 // manual-zoom, layout-track and settings the exporter derives, then writes it.
 use crate::actions::model::{ActionEvent, ActionKind, LayoutId};
-use crate::edit::model::{EditDoc, LayoutSeg, Trim, Zoom, ZoomTarget};
+use crate::edit::model::{EditDoc, EffectKind, EffectRegion, LayoutSeg, Trim, Zoom, ZoomTarget};
 use crate::export::types::{Easing, ZoomRegion};
 use crate::session::paths::ProjectPaths;
 
@@ -63,15 +63,15 @@ pub fn layout_from_actions(actions: &[ActionEvent], dur_ms: u32) -> Vec<LayoutSe
     segs
 }
 
-/// Return an existing `edit.json`, else build the default `EditDoc` from the
-/// recording (same auto/manual zooms, layout track, settings and clip duration the
-/// exporter uses) and write it to `paths.edit()` before returning.
+/// Return an existing `edit.json`, else build the default `EditDoc` from the recording (same
+/// auto/manual zooms, layout track, settings, clip duration the exporter uses). An always-on
+/// spotlight is lifted to an editable region here (on fresh AND older docs); writes when changed.
 pub fn load_or_seed(paths: &ProjectPaths) -> EditDoc {
-    if let Some(doc) = EditDoc::load(&paths.edit()) {
-        return doc;
-    }
-    let doc = build_default(paths);
-    let _ = doc.save(&paths.edit());
+    let (mut doc, fresh) = match EditDoc::load(&paths.edit()) {
+        Some(d) => (d, false),
+        None => (build_default(paths), true),
+    };
+    if crate::edit::effects::lift_always_on_spotlight(&mut doc) || fresh { let _ = doc.save(&paths.edit()); }
     doc
 }
 
@@ -107,9 +107,19 @@ fn build_default(paths: &ProjectPaths) -> EditDoc {
         zooms: zooms_from_regions(&raw),
         speed: vec![],
         layout: layout_from_actions(&actions, dur_ms),
-        effects: vec![],
+        effects: spotlight_effects(&actions, dur_ms),
         settings,
     }
+}
+
+/// Recorded spotlight holds as editable Spotlight regions (event-time spans clamped to `[0, dur]`,
+/// the base seeded zooms use), so a hotkey-held spotlight is an editable/removable timeline pill.
+fn spotlight_effects(actions: &[ActionEvent], dur: u32) -> Vec<EffectRegion> {
+    crate::export::hold::hold_spans(actions, dur,
+        |k| matches!(k, ActionKind::SpotlightHoldStart), |k| matches!(k, ActionKind::SpotlightHoldEnd))
+        .into_iter().enumerate().filter(|(_, (s, e))| *e > 0 && *s < dur)
+        .map(|(i, (s, e))| EffectRegion { id: format!("e{i}"), kind: EffectKind::Spotlight, start_ms: s.min(dur), end_ms: e.min(dur) })
+        .collect()
 }
 
 /// Clip duration (ms) the exporter derives: `video_end - video_start` from the

@@ -1,6 +1,6 @@
 # src-tauri/src/edit/seed.rs
 
-Builds the first `EditDoc` from raw recording data so the editor opens with the same visual result as today's exporter, then writes it as `edit.json`. On subsequent opens `load_or_seed` returns the existing file untouched. The two public helpers (`zooms_from_regions`, `layout_from_actions`) are pure converters and are independently unit-tested.
+Builds the first `EditDoc` from raw recording data so the editor opens with the same visual result as today's exporter, then writes it as `edit.json`. On subsequent opens `load_or_seed` returns the existing file untouched. The two public helpers (`zooms_from_regions`, `layout_from_actions`) are pure converters and are independently unit-tested. `build_default` also seeds recorded spotlight holds as editable Spotlight effect regions (via `spotlight_effects` + `export::hold::hold_spans`), so a hotkey-held spotlight appears as an editable/removable timeline pill instead of being baked in.
 
 ## zooms_from_regions
 
@@ -67,7 +67,7 @@ Converts the `SetLayout` action track into consecutive, non-overlapping `LayoutS
 pub fn load_or_seed(paths: &ProjectPaths) -> EditDoc
 ```
 
-Returns the existing `EditDoc` for a project, or builds and persists a default one if none exists.
+Returns the existing `EditDoc` for a project, or builds and persists a default one if none exists. Either way it then runs `effects::lift_always_on_spotlight` so an always-on `clickfx.spotlight` becomes an editable full-span timeline region (a lightweight migration that also upgrades previously-saved docs), persisting the doc when that or a fresh seed changed it.
 
 ### Inputs
 
@@ -79,10 +79,10 @@ Returns the existing `EditDoc` for a project, or builds and persists a default o
 
 ### Implementation
 
-1. Try `EditDoc::load(paths.edit())`. On `Some`, return immediately.
-2. Call `build_default(paths)`.
-3. Attempt `doc.save(paths.edit())` (failure silently ignored - the caller still gets a valid doc).
-4. Return the built doc.
+1. Load `EditDoc::load(paths.edit())` if present (`fresh = false`), else `build_default(paths)` (`fresh = true`).
+2. Run `effects::lift_always_on_spotlight(&mut doc)` - converts an always-on spotlight toggle into an editable full-span region (idempotent; returns whether it changed the doc).
+3. If the doc was freshly seeded OR the lift changed it, attempt `doc.save(paths.edit())` (failure silently ignored - the caller still gets a valid doc).
+4. Return the doc.
 
 ### Used by
 

@@ -1,9 +1,26 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// Serialize + dedupe editor-media generation (proxy / thumbnails / waveforms / preview-audio).
+/// Right after recording stops, the background pre-warm AND the editor's lazy `ensure_*` both fire
+/// for the same files; without this they launch a storm of concurrent ffmpeg passes over the same
+/// 4K source (each ffmpeg is itself multi-threaded), oversubscribing every core exactly when the
+/// editor opens - the "lags while the preview loads" symptom. `gen` runs under one global lock so
+/// at most one pass runs at a time, and it is skipped entirely when `out` already exists (a racing
+/// caller produced it), so the second caller for a file just reuses the cached result.
+///
+/// INVARIANT: `gen` must NOT itself call `generate_once` - the lock is a non-reentrant `std::Mutex`
+/// held across the whole pass, so a nested call would self-deadlock the thread forever.
+pub fn generate_once<F: FnOnce() -> Result<(), String>>(out: &Path, gen: F) -> Result<(), String> {
+    static GEN: OnceLock<Mutex<()>> = OnceLock::new();
+    let _guard = GEN.get_or_init(|| Mutex::new(())).lock().unwrap_or_else(|e| e.into_inner());
+    if out.exists() { return Ok(()); } // a concurrent caller already generated it while we waited
+    gen()
+}
 
 /// A unique temp sibling of `out` (same directory, original extension preserved so ffmpeg still
 /// infers the container) so an ffmpeg pass can write fully and then atomically `rename` into
@@ -80,13 +97,28 @@ fn resolve(program: &str) -> PathBuf {
 /// A `Command` for a console tool (ffmpeg/ffprobe) that does NOT flash a console
 /// window on Windows. Prefers the bundled binary; falls back to PATH in dev.
 pub fn ffcmd(program: &str) -> Command {
+    ffcmd_prio(program, 0)
+}
+
+/// Like `ffcmd` but at BELOW_NORMAL_PRIORITY_CLASS. A single editor-media transcode (`ensure_proxy`
+/// / thumbnails / waveforms) is itself multi-threaded and grabs every core; at normal priority that
+/// freezes the WebView (and starves it from even decoding the raw preview - a blank frame) until the
+/// pass finishes. Below-normal lets the OS preempt ffmpeg for the normal-priority UI, so the editor
+/// stays responsive while the media loads in the background. Used by the pre-warm + the editor's
+/// lazy `ensure_*`, NOT the user-initiated export (which should run at full speed via `ffcmd`).
+pub fn ffcmd_bg(program: &str) -> Command {
+    ffcmd_prio(program, 0x0000_4000) // BELOW_NORMAL_PRIORITY_CLASS
+}
+
+fn ffcmd_prio(program: &str, extra_flags: u32) -> Command {
     let mut c = Command::new(resolve(program));
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        c.creation_flags(CREATE_NO_WINDOW);
+        c.creation_flags(0x0800_0000 | extra_flags); // CREATE_NO_WINDOW | caller's priority class
     }
+    #[cfg(not(windows))]
+    let _ = extra_flags;
     c
 }
 

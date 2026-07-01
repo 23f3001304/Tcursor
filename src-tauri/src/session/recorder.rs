@@ -4,10 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use serde::Serialize;
 
-use crate::capture::frame_source::FrameSource;
-use crate::capture::windows_capture::WgcFrameSource;
 use crate::domain::time::{Clock, SystemClock};
-use crate::encode::ffmpeg_encoder::FfmpegFrameSink;
 use crate::events::cursortracker::CursorTypeTracker;
 use crate::events::model::ScreenInfo;
 use crate::events::tracker::MouseTracker;
@@ -15,14 +12,12 @@ use crate::actions::keyboard::KeyboardTracker;
 use crate::actions::matcher::arming_from_settings;
 use crate::session::paths::ProjectPaths;
 use crate::session::recorder_threads::{save_inputs, spawn_mic_thread, spawn_system_thread};
-use crate::session::recording_session::RecordingSession;
+use crate::session::video_sink::{start_video, VideoSink};
 
 struct Running {
     stop: Arc<AtomicBool>,
     paused: Arc<AtomicBool>,
-    video_halt: Arc<AtomicBool>,
-    video_stopper: Option<Box<dyn FnOnce() + Send>>,
-    video_thread: JoinHandle<std::io::Result<(u64, Vec<u64>)>>,
+    video: VideoSink,
     mic_thread: Option<JoinHandle<()>>,
     system_thread: Option<JoinHandle<()>>,
     mouse: Option<MouseTracker>,
@@ -73,14 +68,11 @@ pub fn start_recording(
 
     let fps = crate::win::display::primary_refresh_hz().min(60);
     let clock: Arc<dyn Clock> = Arc::new(SystemClock::new());
-    let mut source = WgcFrameSource::for_primary_display(clock.clone(), fps, snap.cursor.style.captures_os_cursor()).map_err(|e| format!("screen capture init: {e}"))?;
-    let (w, h) = source.dimensions();
 
-    // Start every capture input (mouse, keyboard, mic, system audio) BEFORE the
-    // ffmpeg sink. Creating the sink can take seconds on the first recording (the
-    // bundled ffmpeg is scanned / encoders are probed); anything spawned after it
-    // would miss that long and land seconds late in the export. These threads run
-    // concurrently with the slow sink setup, so they start ~when the screen does.
+    // Start every capture input (mouse, keyboard, mic, system audio) BEFORE the screen video
+    // pipeline. Building the encoder can take a moment (first ffmpeg scan / MF setup); anything
+    // spawned after it would miss that gap and land late in the export. These run concurrently
+    // with the slow setup, so they start ~when the screen does.
     let stop = Arc::new(AtomicBool::new(false));
     let paused = Arc::new(AtomicBool::new(false));
     let mic_start = Arc::new(AtomicU64::new(0));
@@ -99,46 +91,25 @@ pub fn start_recording(
         stop.clone(), paused.clone(), clock.clone(), system_start.clone(),
     );
 
-    // Now the slow part - the screen encoder - while the inputs above already run.
+    // Slow part - the screen video pipeline - while the inputs above already run. GPU-native
+    // (Media Foundation, no readback) by default; the compatibility toggle (game_mode) or a
+    // GPU-encoder init failure falls back to the legacy ffmpeg path. Returns the captured (w, h).
     let video_path = paths.video().to_string_lossy().into_owned();
-    // Normal recording encodes VFR (true per-frame timing -> plays at true speed); game mode keeps uniform CFR pacing.
-    let sink = (if game_mode { FfmpegFrameSink::new(&video_path, w, h, fps) } else { FfmpegFrameSink::new_vfr(&video_path, w, h) }).map_err(|e| format!("video encoder spawn: {e}"))?;
+    let (video, w, h) = start_video(game_mode, clock.clone(), stop.clone(), paused.clone(),
+        fps, snap.cursor.style.captures_os_cursor(), &video_path)?;
     println!("recording {w}x{h} @ {fps}fps");
 
-    let video_halt = source.halt_handle();
-    let video_stopper = source.take_stopper();
-    let actions_path = paths.actions();
-    let typing_path = paths.typing();
-    let cursor_path = paths.cursor();
     let screen = ScreenInfo { w, h, origin_x: 0, origin_y: 0 };
     let started_unix_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
-    let events_path = paths.events();
-
-    let video_stop = stop.clone();
-    let video_paused = paused.clone();
-    let video_clock = clock.clone();
-    let video_thread = std::thread::Builder::new()
-        .name("video".into())
-        .spawn(move || {
-            let mut session = RecordingSession::new(Box::new(source), Box::new(sink));
-            if game_mode {
-                session.run_paced(&video_stop, &video_paused, video_clock.as_ref(), fps);
-            } else {
-                session.run(&video_stop, &video_paused);
-            }
-            let frame_ts = session.frame_timestamps().to_vec();
-            let n = session.stop_and_finalize()?;
-            Ok((n, frame_ts))
-        })
-        .map_err(|e| e.to_string())?;
 
     *guard = Some(Running {
-        stop, paused, video_halt, video_stopper, video_thread,
+        stop, paused, video,
         mic_thread, system_thread, mouse, keyboard, cursor,
-        events_path, actions_path, typing_path, cursor_path,
+        events_path: paths.events(), actions_path: paths.actions(),
+        typing_path: paths.typing(), cursor_path: paths.cursor(),
         screen, started_unix_ms, events_ms, mic_start, system_start, folder,
     });
     Ok(())
@@ -167,22 +138,18 @@ pub fn stop_recording(recorder: tauri::State<'_, Recorder>) -> Result<RecordingR
     let running = recorder.inner.lock().unwrap_or_else(|e| e.into_inner())
         .take().ok_or("not recording")?;
 
-    // Stop WGC capture promptly, then signal all threads via shared flag.
-    running.video_halt.store(true, Ordering::SeqCst);
-    if let Some(stopper) = running.video_stopper { stopper(); }
+    // Signal the audio threads to stop; the video pipeline is stopped below.
     running.stop.store(true, Ordering::SeqCst);
-
     if let Some(t) = running.mic_thread { let _ = t.join(); }
     if let Some(t) = running.system_thread { let _ = t.join(); }
 
-    // Save inputs before the video join's ?-propagation so they survive a finalize error.
+    // Save inputs before the video stop's ?-propagation so they survive a finalize error.
     save_inputs(running.mouse, running.keyboard, running.cursor,
         &running.events_path, &running.actions_path, &running.typing_path, &running.cursor_path,
         running.screen, running.started_unix_ms);
 
-    let (frames, frame_ts) = running.video_thread
-        .join().map_err(|_| "video thread panicked".to_string())?
-        .map_err(|e| e.to_string())?;
+    // Stop + finalize the video pipeline (GPU: end capture + finish the MP4; ffmpeg: WM_QUIT + join).
+    let (frames, frame_ts) = running.video.stop_and_collect()?;
 
     // Persist the real capture timeline so export can rebuild it (fps-agnostic).
     let pick = |c: &AtomicU64| { let v = c.load(Ordering::SeqCst); (v > 0).then_some(v) };

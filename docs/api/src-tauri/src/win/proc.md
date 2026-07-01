@@ -32,6 +32,31 @@ A unique temporary path in the same directory as `out` (so a `rename` into place
 
 - `src-tauri/src/export/preview_track.rs` (`ensure_proxy`) and `src-tauri/src/export/thumbs.rs` (`ensure_waveform`, `ensure_preview_audio`) - so the editor opening mid `prewarm` never loads a partial proxy/waveform/audio file.
 
+## generate_once
+
+```rust
+pub fn generate_once<F: FnOnce() -> Result<(), String>>(out: &Path, gen: F) -> Result<(), String>
+```
+
+Serializes and de-duplicates editor-media generation across concurrent callers. Runs `gen` under one process-global `Mutex`, and skips it entirely when `out` already exists.
+
+### Inputs
+
+- `out: &Path` - the final output whose existence means "already generated". Checked *inside* the lock, so a caller that waited behind another producer sees the freshly-created file and skips its own pass.
+- `gen: FnOnce() -> Result<(), String>` - the actual generation (the ffmpeg pass + atomic rename). Only invoked when `out` is still missing.
+
+### Returns
+
+`Result<(), String>` - `Ok(())` if the output exists (already or after `gen`), else `gen`'s error.
+
+### Why
+
+Right after recording stops, the background `prewarm` **and** the editor's lazy `ensure_*` both fire for the same proxy/thumbnails/waveforms/preview-audio. Without this they launch a storm of concurrent ffmpeg passes over the same 4K source - each ffmpeg itself multi-threaded - oversubscribing every core exactly when the editor opens (the "editor lags while the preview loads" symptom). The global lock caps it at one pass at a time; the existence check means the second caller for a file reuses the first's result instead of transcoding again. `gen` stays idempotent (it still writes via `tmp_sibling` + atomic rename).
+
+### Used by
+
+- `src-tauri/src/export/preview_track.rs` (`ensure_proxy`) and `src-tauri/src/export/thumbs.rs` (`ensure_thumbs`, `ensure_waveform`, `ensure_preview_audio`) - every editor-media generator wraps its ffmpeg pass in this.
+
 ## set_ffmpeg_dir
 
 ```rust
@@ -161,10 +186,26 @@ Creates a `std::process::Command` for an ffmpeg-family tool, resolving the binar
 
 1. Call the private `resolve(program)`: if `FFMPEG_DIR` is set and the binary exists there, returns the full path; otherwise returns `PathBuf::from(program)` (PATH lookup). *Why check existence:* `FFMPEG_DIR` could be set to a valid directory that is missing one of the two binaries (e.g. a stripped bundle).
 2. `Command::new(resolved_path)`.
-3. (Windows only) `c.creation_flags(CREATE_NO_WINDOW)` via the `CommandExt` trait. *Why:* without this flag, each ffmpeg invocation momentarily flashes a black console window on the user's desktop.
+3. (Windows only, via the private `ffcmd_prio` helper) `c.creation_flags(CREATE_NO_WINDOW | <priority>)` through the `CommandExt` trait - `ffcmd` passes priority `0`. *Why the no-window flag:* without it, each ffmpeg invocation momentarily flashes a black console window on the user's desktop.
 
 ### Used by
 
 - `src-tauri/src/encode/ffmpeg_encoder.rs` - creates the encoding `Command` for every recording segment and for the `prewarm` probe
 - `src-tauri/src/export/audio_mux.rs` - runs ffmpeg for audio track muxing during export
 - `src-tauri/src/export/ffio.rs` - runs ffprobe (duration probe, format probe) and ffmpeg (remux, concat) throughout the export pipeline
+
+## ffcmd_bg
+
+```rust
+pub fn ffcmd_bg(program: &str) -> Command
+```
+
+Identical to `ffcmd` but adds `BELOW_NORMAL_PRIORITY_CLASS` (`0x0000_4000`) to the Windows creation flags, so the spawned ffmpeg runs at below-normal process priority.
+
+### Why
+
+A single editor-media transcode (`ensure_proxy`, thumbnails, waveforms) is itself multi-threaded and grabs every core. At normal priority that starves the normal-priority WebView - the editor freezes and can't even decode the raw preview (a blank frame) until the pass finishes. Below-normal lets the OS preempt ffmpeg for the UI, so the editor stays responsive while media loads in the background. This is only for background generation (the post-record `prewarm` + the editor's lazy `ensure_*`); the user-initiated **export** keeps `ffcmd` (full speed) because the user is actively waiting on it.
+
+### Used by
+
+- `src-tauri/src/export/preview_track.rs` (`ensure_proxy`) and `src-tauri/src/export/thumbs.rs` (`ensure_thumbs`, `ensure_waveform`, `ensure_preview_audio`) - every editor-media ffmpeg pass. Paired with `generate_once` (one pass at a time) so at most one below-normal ffmpeg runs, leaving the UI cores free.

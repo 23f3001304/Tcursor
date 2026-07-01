@@ -25,13 +25,17 @@ Composites and shows the current preview frame, driven by the native `<video>`'s
 - `audioSrc: string` / `muted: boolean` - the mixed preview-audio URL played by a hidden `<audio>`, and the mute toggle.
 - `timeMs: number` - the playhead; while paused it seeks the videos, while playing the video's own clock drives the frame.
 - `playing: boolean` - play/pause; starts/stops the `<video>`/`<audio>` elements.
-- `onTime: (ms: number) => void` - reports the video's current time each frame while playing (the editor's playhead source of truth).
+- `onTime: (ms: number) => void` - reports the video's current time while playing (the editor's playhead source of truth), throttled to ~16fps since it re-renders the whole editor tree; the canvas itself stays 60fps.
 - `onDuration: (ms: number) => void` - reports the `<video>`'s true duration once metadata loads (the encoded length can differ from the seeded timeline span).
 - `onZoomAt: (x: number, y: number) => void` - called with a 0..1 screen-content point when the canvas is clicked, so the editor adds a zoom focused there.
 
 ### Behavior
 
 **Compositing loop.** One `requestAnimationFrame` loop reads the time (the screen `<video>`'s `currentTime` while playing, else `timeMs` via a ref), keeps the webcam and audio roughly synced to the screen video, builds the cursor + spotlight inputs from refs, and calls `drawPreview`. Live props are mirrored into refs so the single long-lived loop always sees current values without re-subscribing.
+
+**Idle skip (perf).** When paused, the loop composites only when a draw-affecting input changed - a `dirtyRef` set by an effect on the draw inputs (`timeMs`, `track`, `layout`, `clicks`, `effects`, `cursor`, `clickfx`, `cursorKinds`, `playing`) and by the screen AND webcam videos' `loadeddata`/`seeked` (the webcam is composited every frame too, so a paused webcam seek must repaint) and the background/sprite `onload`. Otherwise it skips `drawPreview` entirely, so an open-but-idle editor doesn't burn 60fps redrawing the same static frame (this was the "editor lags at all times" bug).
+
+**Throttled clock (perf).** While playing, `onTime` - which sets `timeMs` and re-renders the whole editor tree (Stage + Transport + the heavy Timeline) - fires at ~16fps (a 60ms gate), not every frame. The canvas preview still updates at 60fps because it reads the video's `currentTime` directly, not this throttled state; only the playhead/time-label lag by up to a frame (a spring smooths it). The `drawPreview` call is wrapped so a transient not-yet-decodable frame can't throw out of the loop and permanently freeze the preview (in dev it logs the error rather than swallowing it silently). Because the throttle can gate out the *final* report as `currentTime` plateaus at the end, the screen `<video>`'s `onEnded` reports the exact rounded duration, so playback still auto-stops at the end (`onTime`'s `ms >= dur` check).
 
 **Paused seek.** A separate effect seeks the screen/webcam/audio elements to `timeMs` only when paused (guarded on `playRef.current`, not the captured `playing`, so a stale closure can't seek the video backward mid-play - the bug that made the playhead "loop" from the middle).
 

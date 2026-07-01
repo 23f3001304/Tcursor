@@ -8,9 +8,7 @@ Top-level recording controller. Owns one `Mutex<Option<Running>>` shared with Ta
 struct Running {
     stop: Arc<AtomicBool>,
     paused: Arc<AtomicBool>,
-    video_halt: Arc<AtomicBool>,
-    video_stopper: Option<Box<dyn FnOnce() + Send>>,
-    video_thread: JoinHandle<std::io::Result<(u64, Vec<u64>)>>,
+    video: VideoSink,
     mic_thread: Option<JoinHandle<()>>,
     system_thread: Option<JoinHandle<()>>,
     mouse: Option<MouseTracker>,
@@ -33,9 +31,7 @@ Private struct holding every live resource for one recording. Consumed in full b
 
 - `stop: Arc<AtomicBool>` - shared shutdown flag polled by the video, mic, and system-audio threads. *Why Arc:* each thread clone needs ownership; SeqCst writes in `stop_recording` ensure all threads see the flag before `join`.
 - `paused: Arc<AtomicBool>` - shared pause flag. *Why separate from stop:* pause is reversible; stop is terminal. The video encoding and audio threads both check this flag independently.
-- `video_halt: Arc<AtomicBool>` - WGC-specific halt flag obtained from `FrameSource::halt_handle`. *Why a second bool:* WGC requires its own tear-down signal distinct from the generic `stop` used by the recording loop.
-- `video_stopper: Option<Box<dyn FnOnce() + Send>>` - optional callback that invokes the WGC session's OS-level stop. *Why Option:* `take_stopper` may not produce one on all platforms; the field is consumed once in `stop_recording`.
-- `video_thread: JoinHandle<io::Result<(u64, Vec<u64>)>>` - the encoding thread; returns frame count and frame timestamps on success. *Why io::Result:* `FrameSink::finish` can fail (e.g. ffmpeg crash); the error is propagated to the frontend via `stop_recording`.
+- `video: VideoSink` - the live recording video pipeline: GPU-native Media Foundation by default (no readback), else the legacy ffmpeg fallback (see `video_sink.rs`). *Why an enum:* `stop_recording` stops + finalizes it uniformly via `stop_and_collect`, which returns the frame count + per-frame capture timestamps regardless of which path ran.
 - `mic_thread / system_thread: Option<JoinHandle<()>>` - `None` when mic/system-audio is off. *Why Option:* join is skipped cheaply for the disabled case.
 - `mouse / keyboard / cursor: Option<...>` - active input trackers; `None` when not started. `cursor` is only `Some` for `CursorStyle::Enhanced`. *Why Option:* the `save_inputs` helper skips each absent tracker individually.
 - `events_path / actions_path / typing_path / cursor_path: PathBuf` - destination paths passed to `save_inputs`. *Why stored here not in paths:* `Running` outlives the local `ProjectPaths` variable in `start_recording`.
@@ -115,12 +111,9 @@ Creates the project folder, starts all input trackers and audio threads, spawns 
 2. Resolve `base = dirs_next::video_dir() / "TCursor"`. Create `ProjectPaths`, call `ensure()`. *Why `dirs_next::video_dir`:* platform-native; falls back to `temp_dir` so recording never fails for lack of a video directory.
 3. Snapshot settings via `settings::store::load` and write to `paths.settings()`. *Why snapshot at start:* the user might change settings mid-session; the export always uses the settings active at record time, ensuring reproducibility.
 4. Query `primary_refresh_hz`, capped to 60. *Why cap:* 60fps is the practical ceiling for current targets; higher refresh rates would waste encoder bandwidth.
-5. Start `WgcFrameSource`. *Why before the encoder:* the source reports `(w, h)` needed by the encoder constructor; also starts OS capture at the same moment as the other inputs.
-6. Start `MouseTracker`, `KeyboardTracker`, and (if Enhanced style) `CursorTypeTracker`. Start `spawn_mic_thread` and `spawn_system_thread`. *Why before the encoder:* `FfmpegFrameSink::new` can take seconds on first run (ffmpeg probe). Starting inputs first ensures they capture from t=0 and do not miss that long startup gap.
-7. Construct the `FfmpegFrameSink`: `new_vfr` for normal recording (VFR - frames stamped with their real arrival time, so `video.mp4` plays at true speed even when the capture rate dips below the display refresh) or `new` for game mode (fixed CFR, since `run_paced` paces the source to that rate). *Why after inputs:* see step 6; the slow part is intentionally last. The export is unaffected by VFR - it times frames by `sync.json`, not the file's PTS.
-8. Obtain `video_halt` and `video_stopper` from the source before the source is moved into the video thread.
-9. Spawn the `"video"` thread: create `RecordingSession`, call `run_paced` or `run`, then `stop_and_finalize`. *Why its own thread:* the encoding loop is blocking; it must not run on the Tauri command thread.
-10. Store all resources in `Running`, assign to `*guard`.
+5. Start `MouseTracker`, `KeyboardTracker`, and (if Enhanced style) `CursorTypeTracker`. Start `spawn_mic_thread` and `spawn_system_thread`. *Why before the video pipeline:* building the encoder (first ffmpeg probe / Media Foundation setup) can take a moment. Starting inputs first ensures they capture from t=0 and do not miss that startup gap.
+6. Call `video_sink::start_video(game_mode, ..)` - the slow part. It builds the GPU-native `GpuRecorder` (Media Foundation, no readback) by default, or the legacy ffmpeg pipe when `game_mode` (the compatibility toggle) is set or the GPU encoder fails to init. Returns the `VideoSink` and the captured `(w, h)` (monitor dimensions). *Why after inputs:* see step 5; the slow part is intentionally last.
+7. Build `ScreenInfo` from `(w, h)`, stamp `started_unix_ms`, and store everything in `Running` (including `video: VideoSink`); assign to `*guard`.
 
 ## pause_recording
 
@@ -186,11 +179,10 @@ Signals all threads to stop, joins them in dependency order, persists input data
 ### Implementation
 
 1. Lock `recorder.inner` and `take` the `Running`. Return `Err("not recording")` if `None`. *Why `take`:* consumes the `Running`, making the state `None` so a subsequent `start_recording` is permitted.
-2. Set `video_halt = true` (SeqCst), call `video_stopper()` if present. *Why `video_halt` first:* WGC needs its own OS-level teardown signal before the generic `stop` flag; calling them in this order avoids a race where the capture loop races past `stop` before WGC finishes.
-3. Set `stop = true` (SeqCst). All threads are now converging to termination.
-4. Join `mic_thread` and `system_thread`. *Why join audio before video:* audio threads are lightweight (50ms sleep loop) and finish quickly; joining them first drains any buffered audio samples.
-5. Call `save_inputs`. *Why before the video join:* if `stop_and_finalize` returns an error, the `?` operator in the video join would propagate it and skip the `save_inputs` call; input data would be lost. Saving first ensures events and actions are always persisted.
-6. Join `video_thread`. Propagate thread panic or `io::Result` errors as `Err(String)`.
-7. Build `SyncLog` from `frame_ts`, `events_ms`, and the atomic audio start times (0 treated as absent). Save to `folder/sync.json`. *Why after the video join:* `frame_ts` is only complete once `stop_and_finalize` has returned.
-8. Spawn a detached background thread calling `export::thumbs::prewarm(folder)` to eagerly generate the editor's proxy/thumbnails/waveforms/preview-audio. *Why here, off-thread:* capture has fully stopped (all threads joined), so this heavy ffmpeg work cannot compete with the live capture; doing it now makes opening the editor instant instead of transcoding on open. Fire-and-forget - `stop_recording` returns immediately and the editor's lazy `ensure_*` re-attempts anything not yet finished.
-9. Return `RecordingResult { folder, frames }`.
+2. Set `stop = true` (SeqCst) - signals the audio threads (the video pipeline is stopped below).
+3. Join `mic_thread` and `system_thread`. *Why audio first:* lightweight (50ms loop), they finish quickly.
+4. Call `save_inputs`. *Why before the video stop:* if finalizing the video errors, the `?` would skip `save_inputs` and lose the events/actions; saving first guarantees they persist.
+5. `running.video.stop_and_collect()` - stop + finalize the video pipeline (GPU: end capture + `encoder.finish()`; ffmpeg: set halt + WM_QUIT to unblock the WGC thread + join), returning `(frames, frame_ts)`. Propagate errors as `Err(String)`.
+6. Build `SyncLog` from `frame_ts`, `events_ms`, and the atomic audio start times (0 treated as absent). Save to `folder/sync.json`. *Why after the video stop:* `frame_ts` is only complete once the pipeline has finalized.
+7. Spawn a detached background thread calling `export::thumbs::prewarm(folder)` to eagerly generate the editor's proxy/thumbnails/waveforms/preview-audio. *Why here, off-thread:* capture has fully stopped, so this heavy ffmpeg work cannot compete with the live capture; doing it now makes opening the editor instant. Fire-and-forget - `stop_recording` returns immediately.
+8. Return `RecordingResult { folder, frames }`.

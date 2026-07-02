@@ -95,3 +95,20 @@ fn read_webcam<'a>(
     if !still { *dec = None; return Ok(None); }
     Ok(Some((&*buf, size, size)))
 }
+
+#[cfg(test)]
+mod bench {
+    // Headless export runner for M4 perf/correctness verification (byte-identical gate). Ignored by
+    // default; run against a real recording folder with:
+    //   TCURSOR_REC=<folder> cargo test --lib export::exporter::bench::export_bench -- --ignored --nocapture
+    // then framemd5 the folder's final.mp4 to compare before/after a task.
+    #[test]
+    #[ignore]
+    fn export_bench() {
+        let folder = std::env::var("TCURSOR_REC").expect("set TCURSOR_REC to a recording folder");
+        let paths = crate::session::paths::ProjectPaths { folder: std::path::PathBuf::from(&folder) };
+        let t = std::time::Instant::now();
+        super::export(&paths, 60, |_| {}).expect("export failed");
+        eprintln!("export_bench: exported {folder} in {:?}", t.elapsed());
+    }
+}

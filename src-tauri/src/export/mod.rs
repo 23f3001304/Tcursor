@@ -26,6 +26,7 @@ pub mod layout;
 pub mod manual;
 pub mod fromedit;
 pub mod hold;
+pub mod pool;
 pub mod fx_state;
 pub mod fx_uniforms;
 pub mod fx_gpu;

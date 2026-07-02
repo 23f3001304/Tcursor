@@ -50,6 +50,12 @@ fn draw_panel(dst: &mut [u8], dw: u32, dh: u32, src: &[u8], sw: u32, sh: u32, pa
     let r = panel.radius.clamp(0.0, pw.min(ph) as f32 / 2.0);
     let (hw, hh) = (pw as f32 / 2.0, ph as f32 / 2.0);
     let a = panel.alpha.clamp(0.0, 1.0);
+    // For a fully-opaque panel, pixels safely inside the rounded corners always
+    // have coverage == 1.0 (see blit's opaque_inner doc); skip the sqrt SDF there.
+    let inner = if a >= 1.0 {
+        let ins = (r.ceil() as u32).saturating_add(2);
+        (pw > 2 * ins && ph > 2 * ins).then(|| (ins, ins, pw - ins, ph - ins))
+    } else { None };
     let cov = move |tx: u32, ty: u32| {
         let qx = ((tx as f32 + 0.5) - hw).abs() - (hw - r);
         let qy = ((ty as f32 + 0.5) - hh).abs() - (hh - r);
@@ -59,7 +65,7 @@ fn draw_panel(dst: &mut [u8], dw: u32, dh: u32, src: &[u8], sw: u32, sh: u32, pa
     };
     let ox = panel.rect.x.max(0.0).round() as u32;
     let oy = panel.rect.y.max(0.0).round() as u32;
-    blit(dst, dw, dh, &resized, pw, ph, ox, oy, cov);
+    blit(dst, dw, dh, &resized, pw, ph, ox, oy, inner, cov);
 }
 
 fn resize_crop(
@@ -80,11 +86,13 @@ fn blit(
     dst: &mut [u8], dst_w: u32, dst_h: u32,
     src: &[u8], src_w: u32, src_h: u32,
     ox: u32, oy: u32,
+    opaque_inner: Option<(u32, u32, u32, u32)>, // (x0,y0,x1,y1) where coverage is exactly 1.0
     alpha: impl Fn(u32, u32) -> f32,
 ) {
     for ty in 0..src_h {
         for tx in 0..src_w {
-            let a = alpha(tx, ty);
+            let inside = matches!(opaque_inner, Some((x0, y0, x1, y1)) if tx >= x0 && tx < x1 && ty >= y0 && ty < y1);
+            let a = if inside { 1.0 } else { alpha(tx, ty) }; // skip the sqrt SDF for guaranteed-opaque pixels
             if a <= 0.0 { continue; }
             let (dx, dy) = (ox + tx, oy + ty);
             if dx >= dst_w || dy >= dst_h { continue; }
@@ -141,5 +149,36 @@ mod tests {
         let cam = Camera { cx: 4.0, cy: 4.0, scale: 1.0 };
         let out = CpuCompositor.composite(&screen, 8, 8, Some((&webcam, 4, 4)), cam, &bg, &layout, &scene);
         assert_eq!(out.len(), 8 * 8 * 4);
+    }
+
+    #[test]
+    fn blit_opaque_inner_skip_is_byte_identical_to_full_sdf() {
+        // A 40x40 rounded (r=6) opaque panel blitted onto a 48x48 background at (4,4).
+        // Fast-path (opaque inner rect forced to a=1.0) must equal full-SDF (None) exactly,
+        // INCLUDING the antialiased corners outside the inner rect.
+        let (pw, ph, r) = (40u32, 40u32, 6.0f32);
+        // Non-uniform src so any wrong blend/copy would show.
+        let mut src = vec![0u8; (pw * ph * 4) as usize];
+        for (i, px) in src.chunks_mut(4).enumerate() {
+            px.copy_from_slice(&[(i % 251) as u8, (i * 3 % 251) as u8, (i * 7 % 251) as u8, 255]);
+        }
+        let (dw, dh, ox, oy) = (48u32, 48u32, 4u32, 4u32);
+        let (hw, hh) = (pw as f32 / 2.0, ph as f32 / 2.0);
+        let cov = move |tx: u32, ty: u32| {
+            let qx = ((tx as f32 + 0.5) - hw).abs() - (hw - r);
+            let qy = ((ty as f32 + 0.5) - hh).abs() - (hh - r);
+            let outside = (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt();
+            let d = qx.max(qy).min(0.0) + outside - r;
+            (0.5 - d).clamp(0.0, 1.0) * 1.0
+        };
+        let ins = (r.ceil() as u32) + 2;
+        let inner = (pw > 2 * ins && ph > 2 * ins).then(|| (ins, ins, pw - ins, ph - ins));
+        assert!(inner.is_some(), "inner rect must be non-empty for this test to mean anything");
+        let base = vec![30u8; (dw * dh * 4) as usize];
+        let mut fast = base.clone();
+        blit(&mut fast, dw, dh, &src, pw, ph, ox, oy, inner, cov);
+        let mut full = base.clone();
+        blit(&mut full, dw, dh, &src, pw, ph, ox, oy, None, cov);
+        assert_eq!(fast, full, "opaque-inner skip diverged from full SDF");
     }
 }

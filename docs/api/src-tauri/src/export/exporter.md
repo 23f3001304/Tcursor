@@ -1,6 +1,6 @@
 # src-tauri/src/export/exporter.rs
 
-Top-level export orchestrator: loads a `FrameRenderer` from `render.rs` (which owns all per-frame compositing state), spawns raw decoders and an encoder thread, drives the per-frame loop, and muxes audio into `final.mp4`. All per-frame render logic (camera sim, compositor, FX overlays, cursor) has been extracted into `render::FrameRenderer`; this file owns only the decoders, the encoder channel, the timing diagnostics, and the audio mux.
+Top-level export orchestrator and the **composite stage** of the 3-stage decode -> composite -> encode pipeline. It loads a `FrameRenderer` from `render.rs` (which owns all per-frame compositing state), starts the screen/webcam decode threads via `ScreenPipe`/`WebcamPipe` (`pipeline.rs`), spawns the encoder thread, drives the per-frame composite loop, and muxes audio into `final.mp4`. All per-frame render logic (camera sim, compositor, FX overlays, cursor) lives in `render::FrameRenderer`; the decode threads and the encoder each run concurrently, connected by bounded channels with recycled buffer pools (`pool.rs`), so decoding frame N+1 overlaps compositing frame N overlaps encoding frame N-1. Output is byte-identical to the old sequential loop - only the overlap and buffer recycling changed.
 
 ## export
 
@@ -18,41 +18,21 @@ Renders the recording at `paths` into `paths.folder/final.mp4`.
 
 ### Returns
 
-`Result<()>`. On success `final.mp4` exists at `paths.folder`. On error the raw `anyhow::Error` propagates to the caller.
+`Result<()>`. On success `final.mp4` exists at `paths.folder`. On error the raw `anyhow::Error` propagates to the caller (including any decode-thread error surfaced by `ScreenPipe`/`WebcamPipe`).
 
 ### Implementation
 
-1. Call `FrameRenderer::new(paths, Layout::default(), fps)` to get `(renderer, meta)`. The renderer owns the event log, settings, compositor, FX renderer, camera sim, cursor state, and background. `meta` carries everything needed to spawn decoders (`screen_bytes`, `webcam_size`, `video_start`, `tl`, `out_w`, `out_h`, `audio_offset_ms`).
-2. Spawn `RawDecoder` threads for the screen video and (if `paths.webcam()` exists) the webcam, using sizes from `meta`.
-3. Open a `FfmpegFrameSink` writing to `tmp_export.mp4`. Spawn an encoder thread draining a `sync_channel(4)` so compositing the next frame overlaps with encoding the previous one.
-4. Frame loop `0..=total_out` (derived from `meta.video_end - meta.video_start`): advance the screen decoder to the captured frame active at output time `t`; read one webcam frame via `read_webcam`; call `renderer.step_camera(t)` to get the `FramePose`; call `renderer.composite_at(&pose, &screen_buf, webcam)` to get the BGRA output; send `Frame` to the encoder channel.
-5. Drop the channel to signal the encoder; join the encoder thread (surfaces any encode panic).
-6. Write per-stage timing breakdown to `%TEMP%/tcursor-export-timing.txt` (decode / composite / encode-wait in ms).
+1. Call `FrameRenderer::new(paths, Layout::default(), fps)` to get `(renderer, meta)`. The renderer owns the event log, settings, compositor, FX renderer, camera sim, cursor state, and background. `meta` carries everything needed to drive the loop (`screen_bytes`, `webcam_size`, `video_start`, `tl`, `out_w`, `out_h`, `audio_offset_ms`).
+2. Open a `FfmpegFrameSink` writing to `tmp_export.mp4`. Build an `out_pool` (`BufPool`, `depth` output buffers) and spawn an encoder thread draining a `sync_channel(4)`; after pushing each `Frame` the encoder recycles its ~33 MB `bgra` buffer back into `out_pool`.
+3. Start the decode threads: `ScreenPipe::spawn` (screen video) and, if `paths.webcam()` exists, `WebcamPipe::spawn` (webcam). Spawn errors surface here. Allocate a zeroed `empty` screen buffer as the zero-frame fallback.
+4. Composite loop `0..=total_out` (derived from `meta.video_end - meta.video_start`): `spipe.next_at(t)` yields the captured screen frame active at output time `t` (or `empty` for a zero-frame video); `wpipe.next()` yields one webcam frame (or `None` at EOF); `renderer.step_camera(t)` gives the `FramePose`; take an output buffer from `out_pool`; `renderer.composite_at(&pose, screen, wc_ref, &mut out)` writes the BGRA output; send the `Frame` to the encoder channel; then `recycle` the webcam buffer.
+5. Drop the encoder channel; `join` both decode pipes (surfacing any stored decode error) and the encoder thread (surfacing any encode panic).
+6. Write per-stage timing breakdown to `%TEMP%/tcursor-export-timing.txt` - `decode` is time blocked on the decode channels, `composite` is `step_camera` + `composite_at`, `encode_wait` is the channel send. With overlap, total trends toward `max(decode, composite)` rather than their sum.
 7. Compute audio shift from `meta.tl.mic_ms`/`meta.tl.system_ms` and `meta.audio_offset_ms`; call `mux(&tmp, paths, mic_shift, sys_shift)`.
 
 ### Behaviors worth knowing
 
-- Camera shrink, CameraOnly identity override, and all per-frame compositing decisions are now inside `FrameRenderer`; the export loop only drives time and I/O.
-- The encoder thread panic is surfaced as `Err("encoder thread panicked")` via `join().map_err(...)??`.
-
-## read_webcam
-
-```rust
-fn read_webcam<'a>(
-    dec: &mut Option<RawDecoder>,
-    buf: &'a mut [u8],
-    size: u32,
-) -> Result<Option<(&'a [u8], u32, u32)>>
-```
-
-Reads one webcam frame into `buf`, returning a slice reference. On EOF or when no decoder is present, sets `*dec = None` and returns `Ok(None)` so all subsequent calls are no-ops.
-
-### Inputs
-
-- `dec: &mut Option<RawDecoder>` - the webcam decoder slot. *Why mutable Option:* on EOF the decoder is dropped in-place so the compositors cleanly skip the camera panel for all remaining frames without a separate EOF flag.
-- `buf: &'a mut [u8]` - pre-allocated buffer (`size * size * 4` bytes). *Why reused:* avoids a per-frame heap allocation for the largest panel in the output.
-- `size: u32` - square side length. *Why square:* webcam decode is capped to a square to bound memory; the compositor expects square input.
-
-### Returns
-
-`Result<Option<(&'a [u8], u32, u32)>>` - `Some((slice, size, size))` while frames remain; `None` on EOF.
+- Camera shrink, CameraOnly identity override, and all per-frame compositing decisions are inside `FrameRenderer`; the export loop only drives time and I/O.
+- The per-frame VFR screen-frame selection is the pure `pipeline::advance_index`, unit-tested independently; the decode threads move bytes without changing them, so output stays byte-identical.
+- Buffers are recycled through three `BufPool`s (screen decode, webcam decode, output), so the steady state allocates no new frame buffers; `BufPool::take` allocates a fresh one only under transient exhaustion rather than blocking.
+- The encoder thread panic is surfaced as `Err("encoder thread panicked")` via `join().map_err(...)??`; a decode thread panic likewise via each pipe's `join`.

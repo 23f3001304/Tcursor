@@ -4,39 +4,39 @@ use crate::export::scene::{Panel, Scene};
 use crate::export::types::{Camera, Layout};
 
 pub trait Compositor: Send + Sync {
-    fn composite(
+    fn composite_into(
         &self,
         screen: &[u8], sw: u32, sh: u32,
         webcam: Option<(&[u8], u32, u32)>,
         cam: Camera, bg: &[u8],
         layout: &Layout,
         scene: &Scene,
-    ) -> Vec<u8>;
+        out: &mut Vec<u8>,
+    );
 }
 
 pub struct CpuCompositor;
 
 impl Compositor for CpuCompositor {
-    fn composite(
+    fn composite_into(
         &self,
         screen: &[u8], sw: u32, sh: u32,
         webcam: Option<(&[u8], u32, u32)>,
         cam: Camera, bg: &[u8],
         layout: &Layout,
         scene: &Scene,
-    ) -> Vec<u8> {
+        out: &mut Vec<u8>,
+    ) {
         let (ow, oh) = (layout.out_w, layout.out_h);
-        // 1. Base scene: background + the screen panel (rounded rect, alpha).
         let mut base = bg.to_vec();
         draw_panel(&mut base, ow, oh, screen, sw, sh, scene.screen);
-        // 2. Zoom the WHOLE base scene toward the camera center (output coords).
         let (cx0, cy0, cw, ch) = crate::export::coordmap::crop(cam, ow, oh);
-        let mut out = resize_crop(&base, ow, oh, cx0 as f64, cy0 as f64, cw as f64, ch as f64, ow, oh);
-        // 3. Camera panel on top (fixed; not zoomed).
+        let resized = resize_crop(&base, ow, oh, cx0 as f64, cy0 as f64, cw as f64, ch as f64, ow, oh);
+        out.clear();
+        out.extend_from_slice(&resized);
         if let Some((wc, ww, wh)) = webcam {
-            draw_panel(&mut out, ow, oh, wc, ww, wh, scene.camera);
+            draw_panel(out, ow, oh, wc, ww, wh, scene.camera);
         }
-        out
     }
 }
 
@@ -131,7 +131,8 @@ mod tests {
         let layout = Layout { out_w: 8, out_h: 8, pad_px: 1, screen_scale: 1.0, screen_radius_px: 8.0 * 0.016 };
         let scene = Scene { screen: panel(2.0, 2.0, 4.0, 4.0, 1.0), camera: panel(0.0, 0.0, 0.0, 0.0, 0.0) };
         let cam = Camera { cx: 4.0, cy: 4.0, scale: 1.0 };
-        let out = CpuCompositor.composite(&screen, 4, 4, None, cam, &bg, &layout, &scene);
+        let mut out = Vec::new();
+        CpuCompositor.composite_into(&screen, 4, 4, None, cam, &bg, &layout, &scene, &mut out);
         assert_eq!(out.len(), 8 * 8 * 4);
         assert_eq!(&out[0..4], &[255, 0, 0, 255]);              // corner = bg blue
         let i = ((3 * 8 + 3) * 4) as usize;
@@ -147,7 +148,8 @@ mod tests {
         // camera panel larger than output + screen disabled: must not OOB or panic.
         let scene = Scene { screen: panel(0.0, 0.0, 8.0, 8.0, 0.0), camera: panel(2.0, 2.0, 20.0, 20.0, 1.0) };
         let cam = Camera { cx: 4.0, cy: 4.0, scale: 1.0 };
-        let out = CpuCompositor.composite(&screen, 8, 8, Some((&webcam, 4, 4)), cam, &bg, &layout, &scene);
+        let mut out = Vec::new();
+        CpuCompositor.composite_into(&screen, 8, 8, Some((&webcam, 4, 4)), cam, &bg, &layout, &scene, &mut out);
         assert_eq!(out.len(), 8 * 8 * 4);
     }
 

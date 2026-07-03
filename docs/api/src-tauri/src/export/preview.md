@@ -26,7 +26,7 @@ Renders one composited frame at `time_ms` and returns PNG bytes.
 2. Compute `k_target = time_ms as u64 * OUT_FPS / 1000`. Fast-forward the camera sim by calling `step_camera` for every `j` in `0..=k_target` at `video_start + j * 1000 / OUT_FPS`. This must ascend because `CameraSim` and the cursor index only move forward. The last returned `FramePose` is the preview pose. Cost: arithmetic only, no I/O.
 3. Spawn a `RawDecoder` on `paths.video()` seeked to `time_ms` (the screen file's frame 0 is `video_start`, so `time_ms` is the right offset), read one frame into a `screen_bytes`-sized buffer; bail if the read hits EOF (time past end of video).
 4. If `paths.webcam().exists()`, spawn a `RawDecoder` on the webcam seeked to `video_start + time_ms` (export pre-seeks the webcam by `video_start`, so its file-time is shifted) with `scale = Some(webcam_size)`, read one frame; else `webcam = None`.
-5. Call `renderer.composite_at(&pose, &screen_buf, webcam_ref)` to produce a BGRA buffer.
+5. Call `renderer.composite_at(&pose, &screen_buf, webcam_ref, &mut bgra)` to write a BGRA buffer into `bgra`.
 6. Call `png_encode(bgra, out_w, out_h)` to produce PNG bytes via ffmpeg.
 
 ## preview_frame
@@ -84,4 +84,4 @@ pub(crate) fn with_warm<T>(session: &PreviewSession, folder: &str,
     f: impl FnOnce(&mut Cached, &ProjectPaths) -> Result<T, String>) -> Result<T, String>
 ```
 
-Runs `f` with the warm `FrameRenderer` for `folder`, (re)building it when the folder, `edit.json` mtime, or preview size changes. The single place the preview cache is keyed - shared by every preview command (`preview_frame`, `preview_bg`, and the `preview_track.rs` commands `camera_track` / `preview_layout` / `click_track`) so the warm-up logic lives exactly once. The closure receives the cached renderer + the resolved `ProjectPaths`; its return value is owned (the mutex guard is dropped on return).
+Runs `f` with the warm `FrameRenderer` for `folder`. A full rebuild happens only when the folder or preview size changes; when just `edit.json`'s mtime changed (a zoom/spotlight edit) it calls `FrameRenderer::reload_edit` instead - refreshing the cheap edit-derived state in place while keeping the GPU device, FX, and background, so editing stays snappy (a full rebuild is ~seconds; the in-place refresh is ~microseconds). The single place the preview cache is keyed - shared by every preview command (`preview_frame`, `preview_bg`, and the `preview_track.rs` commands `camera_track` / `preview_layout` / `click_track`) so the warm-up logic lives exactly once. The closure receives the cached renderer + the resolved `ProjectPaths`; its return value is owned (the mutex guard is dropped on return).

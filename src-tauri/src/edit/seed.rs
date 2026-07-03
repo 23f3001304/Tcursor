@@ -99,7 +99,18 @@ fn build_default(paths: &ProjectPaths) -> EditDoc {
     };
     raw.extend(crate::export::manual::from_actions(&actions, &log.events, &log.screen, &cfg));
 
-    let dur_ms = clip_duration_ms(paths, &log);
+    // Auto/manual zoom regions come out in EVENT time (click/press timestamps); the editor
+    // timeline is OUTPUT time (0 = first video frame). Shift zooms onto the output clock so a
+    // seeded zoom lands where its pill sits - the same `out = et + events_ms - video_start`
+    // conversion clicks use - and so edited/added zooms (already output-time) stay consistent.
+    let tl = crate::export::timeline::build_timeline(paths, &log, 60);
+    let video_start = tl.frames.first().copied().unwrap_or(0);
+    let dur_ms = (tl.frames.last().copied().unwrap_or(video_start).max(video_start + 1) - video_start) as u32;
+    let shift = tl.events_ms as i64 - video_start as i64;
+    for r in &mut raw {
+        r.start_ms = (r.start_ms as i64 + shift).max(0) as u32;
+        r.end_ms = (r.end_ms as i64 + shift).max(0) as u32;
+    }
     EditDoc {
         version: 1,
         trim: Trim { in_ms: 0, out_ms: dur_ms },
@@ -120,15 +131,6 @@ fn spotlight_effects(actions: &[ActionEvent], dur: u32) -> Vec<EffectRegion> {
         .into_iter().enumerate().filter(|(_, (s, e))| *e > 0 && *s < dur)
         .map(|(i, (s, e))| EffectRegion { id: format!("e{i}"), kind: EffectKind::Spotlight, start_ms: s.min(dur), end_ms: e.min(dur) })
         .collect()
-}
-
-/// Clip duration (ms) the exporter derives: `video_end - video_start` from the
-/// real capture timeline (frame timestamps).
-fn clip_duration_ms(paths: &ProjectPaths, log: &crate::events::model::EventLog) -> u32 {
-    let tl = crate::export::timeline::build_timeline(paths, log, 60);
-    let start = tl.frames.first().copied().unwrap_or(0);
-    let end = tl.frames.last().copied().unwrap_or(start).max(start + 1);
-    (end - start) as u32
 }
 
 #[cfg(test)]

@@ -6,14 +6,15 @@ Defines the `Compositor` trait shared by the CPU and GPU implementations, and pr
 
 ```rust
 pub trait Compositor: Send + Sync {
-    fn composite(
+    fn composite_into(
         &self,
         screen: &[u8], sw: u32, sh: u32,
         webcam: Option<(&[u8], u32, u32)>,
         cam: Camera, bg: &[u8],
         layout: &Layout,
         scene: &Scene,
-    ) -> Vec<u8>;
+        out: &mut Vec<u8>,
+    );
 }
 ```
 
@@ -28,14 +29,15 @@ Common interface for software and hardware compositors.
 - `bg: &[u8]` - BGRA background image, `out_w * out_h * 4` bytes. *Why:* used as the bottom layer; the screen panel is composited on top of it.
 - `layout: &Layout` - output dimensions and padding. *Why:* determines the output buffer size and the inset geometry.
 - `scene: &Scene` - the two panels (screen + camera) with rects, radii, and alphas. *Why:* drives placement, clipping, and blend weight for each panel.
+- `out: &mut Vec<u8>` - caller-owned output buffer. *Why:* lets the caller reuse (e.g. pool) the same allocation across frames instead of the compositor allocating fresh each call.
 
 ### Returns
 
-`Vec<u8>` of BGRA pixels, `out_w * out_h * 4` bytes. Allocated fresh each call.
+Nothing (`()`). The impl resizes `out` to `out_w * out_h * 4` bytes and fully overwrites it with BGRA pixels.
 
 ### Used by
 
-- `src-tauri/src/export/exporter.rs` - calls `compositor.composite(...)` in the frame loop.
+- `src-tauri/src/export/exporter.rs` - calls `compositor.composite_into(...)` in the frame loop.
 - `src-tauri/src/export/gpu_compositor.rs` - `GpuCompositor` implements this trait.
 
 ## CpuCompositor
@@ -46,13 +48,13 @@ pub struct CpuCompositor;
 
 Software compositor with no GPU dependency; zero interior state, trivially `Send + Sync`.
 
-### Implementation of `composite`
+### Implementation of `composite_into`
 
 1. Copy `bg` into a working buffer `base` (`out_w * out_h * 4` bytes).
 2. Draw the screen panel onto `base` via `draw_panel`: resize `screen` to `panel.rect` dimensions and alpha-blend with rounded-rect SDF coverage.
-3. Compute the zoom crop via `coordmap::crop(cam, ow, oh)` and resize `base` (crop -> full output) to simulate the camera zoom. This zooms the entire base including the screen panel but not what will be drawn on top.
-4. Draw the camera panel on top of the zoomed result via `draw_panel`; the camera is not subject to zoom.
-5. Return the composited output.
+3. Compute the zoom crop via `coordmap::crop(cam, ow, oh)` and resize `base` (crop -> full output) into `resized`, simulating the camera zoom. This zooms the entire base including the screen panel but not what will be drawn on top.
+4. Clear `out` and copy `resized` into it.
+5. Draw the camera panel on top of `out` via `draw_panel`; the camera is not subject to zoom.
 
 ### Behaviors worth knowing
 

@@ -33,7 +33,7 @@ Packed uniform struct sent to the WGSL compositing shader. All coordinates are U
 
 ### Used by
 
-- `src-tauri/src/export/gpu_compositor.rs` - `GpuCompositor::composite` calls `build_uniforms` and uploads the result as binding 4.
+- `src-tauri/src/export/gpu_compositor.rs` - `GpuCompositor::composite_into` calls `build_uniforms` and uploads the result as binding 4.
 
 ## build_uniforms
 

@@ -52,7 +52,7 @@ Rasterizes the export background (solid, gradient at any angle, or image stub) i
 
 ## compositor
 
-Defines the `Compositor` trait shared by CPU and GPU implementations, and provides the software `CpuCompositor`. Key items: `Compositor` trait with `composite(screen, sw, sh, webcam, cam, bg, layout, scene) -> Vec<u8>`; `CpuCompositor` (zero-state, always available).
+Defines the `Compositor` trait shared by CPU and GPU implementations, and provides the software `CpuCompositor`. Key items: `Compositor` trait with `composite_into(screen, sw, sh, webcam, cam, bg, layout, scene, out: &mut Vec<u8>)`; `CpuCompositor` (zero-state, always available).
 
 ## gpu
 
@@ -60,7 +60,7 @@ wgpu device/pipeline initialization, GPU availability probe, and texture upload 
 
 ## gpu_compositor
 
-GPU-accelerated compositor implementing the `Compositor` trait via wgpu + a WGSL compositing shader. Key items: `GpuCompositor` (holds `Gpu` plus a `OnceLock` background texture), `GpuCompositor::new(out_w, out_h) -> Option<GpuCompositor>`, `GpuCompositor::composite`.
+GPU-accelerated compositor implementing the `Compositor` trait via wgpu + a WGSL compositing shader. Key items: `GpuCompositor` (holds `Gpu` plus a `OnceLock` background texture), `GpuCompositor::new(out_w, out_h) -> Option<GpuCompositor>`, `GpuCompositor::composite_into`.
 
 ## gpu_uniforms
 
@@ -84,11 +84,11 @@ Stateful cursor position tracker that interpolates between mouse samples and app
 
 ## exporter
 
-Top-level export orchestrator: calls `FrameRenderer::new`, spawns decoders and the encoder thread, drives the per-frame loop via `step_camera` + `composite_at`, and muxes audio. Key items: `export(paths, fps, on_progress) -> Result<()>` - single public entry point; `read_webcam(dec, buf, size)`.
+Top-level export orchestrator: calls `FrameRenderer::new`, spawns the screen/webcam decode threads (`ScreenPipe`/`WebcamPipe`) and the encoder thread, then drives the per-frame composite loop via `step_camera` + `composite_at` and muxes audio. Key items: `export(paths, fps, on_progress) -> Result<()>` - single public entry point.
 
 ## render
 
-Reusable per-frame renderer extracted from `exporter.rs`; owns all compositing state except raw decoders and the encoder sink. Key items: `OUT_FPS` constant (60); `RenderMeta` struct (decoder setup info returned by `new`); `FramePose` struct (resolved camera + scene for one frame); `FrameRenderer` struct, `FrameRenderer::new(paths, layout, fps) -> Result<(Self, RenderMeta)>`, `FrameRenderer::step_camera(t) -> FramePose`, `FrameRenderer::composite_at(pose, screen, webcam) -> Vec<u8>`; `select_compositor(layout) -> Box<dyn Compositor>`.
+Reusable per-frame renderer extracted from `exporter.rs`; owns all compositing state except raw decoders and the encoder sink. Key items: `OUT_FPS` constant (60); `RenderMeta` struct (decoder setup info returned by `new`); `FramePose` struct (resolved camera + scene for one frame); `FrameRenderer` struct, `FrameRenderer::new(paths, layout, fps) -> Result<(Self, RenderMeta)>`, `FrameRenderer::step_camera(t) -> FramePose`, `FrameRenderer::composite_at(pose, screen, webcam, out: &mut Vec<u8>)`; `select_compositor(layout) -> Box<dyn Compositor>`.
 
 ## run
 

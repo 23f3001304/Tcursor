@@ -66,7 +66,7 @@ The virtual camera state at one frame.
 ### Used by
 
 - `src-tauri/src/export/camera.rs` - `CameraSim::step` returns a `Camera`.
-- `src-tauri/src/export/compositor.rs` - `Compositor::composite` receives `cam: Camera`.
+- `src-tauri/src/export/compositor.rs` - `Compositor::composite_into` receives `cam: Camera`.
 - `src-tauri/src/export/gpu_uniforms.rs` - `build_uniforms` derives `zoom_center` and `inv_scale` from it.
 - `src-tauri/src/export/coordmap.rs` - `crop` and `project` use `Camera` to compute the zoom transform.
 
@@ -184,7 +184,7 @@ Output canvas and screen panel geometry.
 ### Used by
 
 - `src-tauri/src/export/coordmap.rs` - `inset_rect` and `corner_radius` derive the screen panel position from this.
-- `src-tauri/src/export/compositor.rs` - `Compositor::composite` takes `&Layout` for output sizing.
+- `src-tauri/src/export/compositor.rs` - `Compositor::composite_into` takes `&Layout` for output sizing.
 - `src-tauri/src/export/gpu_uniforms.rs` - `build_uniforms` normalizes rects using `out_w/out_h`.
 - `src-tauri/src/export/exporter.rs` - one `Layout::default()` per export (currently fixed at 4K).
 

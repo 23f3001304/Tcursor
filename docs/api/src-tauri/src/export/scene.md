@@ -36,7 +36,7 @@ The complete frame geometry at one instant: screen is the zoomed base layer, cam
 
 ### Used by
 
-- `src-tauri/src/export/compositor.rs` - `CpuCompositor::composite` draws screen then camera.
+- `src-tauri/src/export/compositor.rs` - `CpuCompositor::composite_into` draws screen then camera.
 - `src-tauri/src/export/gpu_compositor.rs` - passes both panels to the shader via uniforms.
 - `src-tauri/src/export/exporter.rs` - receives scene from `LayoutTrack::scene_at`; applies `shrink_camera` on `scene.camera`.
 - `src-tauri/src/export/layout.rs` - produces `Scene` values via `resolve`; interpolates them on transitions.

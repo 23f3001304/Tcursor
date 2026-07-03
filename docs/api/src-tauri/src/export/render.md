@@ -92,11 +92,20 @@ Private fields include:
 - `cprep: Option<CursorPrep>` - decoded cursor sprite set; `None` for non-Enhanced styles.
 - `actions: Vec<ActionEvent>` - action log; used by `fx_state::render` for spotlight/hold/caption.
 - `sw, sh: u32` - screen capture dimensions.
-- `events_ms: u64` - wall-clock offset of event-time 0; used to convert `t` to `ev_t`.
+- `events_ms: u64` - wall-clock offset of event-time 0; used to convert `t` to the event-relative `ev_t` (cursor, layout, FX).
+- `video_start: u64` - capture timestamp of frame 0; used to convert `t` to the output-time `out_t` the zoom sim keys on. *Why separate from `events_ms`:* zoom pills live in output time (`t - video_start`, 0 = first video frame) to match the editor timeline and `click_track`, while cursor/layout stay event-time (`t - events_ms`).
 
 ### Used by
 
 `exporter::export` (the export loop), and Task 2 `preview.rs` (the preview engine).
+
+## FrameRenderer::reload_edit
+
+```rust
+pub fn reload_edit(&mut self, paths: &ProjectPaths)
+```
+
+Refreshes only the `edit.json`-derived state (settings, zoom config, layout track, anchored regions, effects) in place, via `render_edit::EditState`. Called by `preview::with_warm` when only `edit.json` changed: it avoids a full `new()` - no new GPU device, no background decode, no video probe, no cursor prep - so an editor zoom/spotlight edit costs ~microseconds instead of rebuilding the renderer (~seconds). Cursor prep (`cprep`) is intentionally not refreshed: it is edit-independent for the metadata the live editor uses (only `composite_at` reads it, which the editor's canvas preview never calls), so a cursor-settings change would need a full rebuild to reflect in `composite_at`.
 
 ## FrameRenderer::new
 
@@ -104,7 +113,7 @@ Private fields include:
 pub fn new(paths: &ProjectPaths, layout: Layout, fps: u32) -> Result<(Self, RenderMeta)>
 ```
 
-Loads the edit doc and event log, resolves all per-export setup, and returns both the renderer and the metadata the caller needs to spawn decoders.
+Loads the edit doc and event log, resolves all per-export setup, and returns both the renderer and the metadata the caller needs to spawn decoders. The `edit.json`-derived state (settings, zoom config, layout track, anchored regions, effects) is built via `render_edit::EditState`, shared with `reload_edit` so a warm-preview edit can refresh it in place.
 
 ### Inputs (what, and why it is needed)
 
@@ -130,7 +139,7 @@ Advances the camera simulation to output time `t` and returns the resolved pose.
 
 ### Inputs (what, and why it is needed)
 
-- `t: u64` - output time in ms (wall-clock, same epoch as `RenderMeta.video_start`). *Why:* the camera sim and cursor interpolation both key on absolute time, then subtract `events_ms` to get the event-relative `ev_t`.
+- `t: u64` - output time in ms (wall-clock, same epoch as `RenderMeta.video_start`). *Why:* the pose is resolved on two clocks off this one absolute time - cursor and layout subtract `events_ms` for the event-relative `ev_t`, while the zoom sim subtracts `video_start` for the output-time `out_t` its (output-time) regions key on.
 
 ### Returns
 
@@ -138,33 +147,34 @@ Advances the camera simulation to output time `t` and returns the resolved pose.
 
 ### Implementation
 
-Replicates `Cursor::at` inline (index advance + exponential low-pass at `A=0.35`) using owned event data, because `FrameRenderer` owns the event log and cannot hold a `Cursor<'a>` that borrows from itself. Then calls `LayoutTrack::scene_at`, `to_panel`, `CameraSim::step`, applies the CameraOnly identity override (`scene.screen.alpha < 0.5`), and applies `shrink_camera` when enabled and the screen panel is dominant.
+Replicates `Cursor::at` inline (index advance + exponential low-pass at `A=0.35`) using owned event data, because `FrameRenderer` owns the event log and cannot hold a `Cursor<'a>` that borrows from itself. Cursor and `LayoutTrack::scene_at` sample at the event-relative `ev_t = t - events_ms`; `CameraSim::step` is then called at the output-time `out_t = t - video_start` (zoom regions are stored in output time), followed by the CameraOnly identity override (`scene.screen.alpha < 0.5`) and `shrink_camera` when enabled and the screen panel is dominant.
 
 ## FrameRenderer::composite_at
 
 ```rust
 pub fn composite_at(&mut self, pose: &FramePose, screen: &[u8],
-                    webcam: Option<(&[u8], u32, u32)>) -> Vec<u8>
+                    webcam: Option<(&[u8], u32, u32)>, out: &mut Vec<u8>)
 ```
 
-Runs the full compositor + FX + cursor pipeline for one frame. Expensive (GPU or multi-core CPU work). Returns a BGRA buffer of `out_w * out_h * 4` bytes.
+Runs the full compositor + FX + cursor pipeline for one frame, writing the result into `out`. Expensive (GPU or multi-core CPU work).
 
 ### Inputs (what, and why it is needed)
 
 - `pose: &FramePose` - the resolved pose from `step_camera`. *Why:* the compositor, FX renderer, and cursor draw all need the same scene/camera/cursor values; passing one struct keeps the call site clean.
 - `screen: &[u8]` - decoded screen frame as BGRA. *Why:* the compositor takes the raw screen pixels and places them into the output canvas.
 - `webcam: Option<(&[u8], u32, u32)>` - decoded webcam frame (bytes, width, height) or `None`. *Why:* the compositor uses this for the camera panel; `None` when webcam is absent or exhausted.
+- `out: &mut Vec<u8>` - caller-owned output buffer. *Why:* lets the caller (exporter, preview) reuse the same allocation across frames instead of allocating a fresh `Vec` each call; threaded straight through to `compositor.composite_into`.
 
 ### Returns
 
-`Vec<u8>` of BGRA pixels (`out_w * out_h * 4` bytes). Allocated by the compositor on each call.
+Nothing (`()`). On return, `out` holds BGRA pixels (`out_w * out_h * 4` bytes) - resized and fully overwritten by the compositor, then mutated in place by the FX and cursor stages.
 
 ### Implementation
 
 Three sequential stages (identical to the original exporter loop body, lines ~138-144):
-1. `compositor.composite(...)` - places screen + webcam onto the background with zoom crop and panel rounding.
-2. `fx_state::render(...)` - applies click rings, spotlight, video FX, and captions.
-3. `cursorset::draw(...)` (if `cprep.is_some()`) - blits the Enhanced cursor sprite with motion trail, bounce, and panel clipping.
+1. `compositor.composite_into(..., out)` - places screen + webcam into `out` with zoom crop and panel rounding.
+2. `fx_state::render(...)` - applies click rings, spotlight, video FX, and captions directly on `out`.
+3. `cursorset::draw(...)` (if `cprep.is_some()`) - blits the Enhanced cursor sprite with motion trail, bounce, and panel clipping, directly on `out`.
 
 ## FrameRenderer::bg
 

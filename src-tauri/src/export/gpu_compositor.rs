@@ -19,14 +19,15 @@ impl GpuCompositor {
 }
 
 impl Compositor for GpuCompositor {
-    fn composite(
+    fn composite_into(
         &self,
         screen: &[u8], sw: u32, sh: u32,
         webcam: Option<(&[u8], u32, u32)>,
         cam: Camera, bg: &[u8],
         layout: &Layout,
         scene: &Scene,
-    ) -> Vec<u8> {
+        out: &mut Vec<u8>,
+    ) {
         let g = &self.gpu;
         let (ow, oh) = (self.out_w, self.out_h);
 
@@ -101,7 +102,8 @@ impl Compositor for GpuCompositor {
         g.device.poll(wgpu::Maintain::Wait);
 
         let unpadded = (ow * 4) as usize;
-        let mut out = vec![0u8; unpadded * oh as usize];
+        out.clear();
+        out.resize(unpadded * oh as usize, 0);
         {
             let data = slice.get_mapped_range();
             for row in 0..oh as usize {
@@ -111,7 +113,6 @@ impl Compositor for GpuCompositor {
             }
         }
         g.readback.unmap();
-        out
     }
 }
 
@@ -137,7 +138,8 @@ mod tests {
             camera: Panel { rect: RectF { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }, radius: 0.0, alpha: 0.0 },
         };
         let cam = Camera { cx: 4.0, cy: 4.0, scale: 1.0 };
-        let out = c.composite(&screen, 4, 4, None, cam, &bg, &layout, &scene);
+        let mut out = Vec::new();
+        c.composite_into(&screen, 4, 4, None, cam, &bg, &layout, &scene, &mut out);
         assert_eq!(out.len(), 8 * 8 * 4);
         assert_eq!(&out[0..4], &[255, 0, 0, 255], "corner must be bg blue");
         let i = ((3 * 8 + 3) * 4) as usize;
@@ -157,8 +159,10 @@ mod tests {
             camera: Panel { rect: RectF { x: 40.0, y: 26.0, w: 18.0, h: 18.0 }, radius: 0.0, alpha: 1.0 },
         };
         let cam = Camera { cx: 32.0, cy: 24.0, scale: 1.0 };
-        let cpu = CpuCompositor.composite(&screen, 32, 24, Some((&webcam, 16, 16)), cam, &bg, &layout, &scene);
-        let gpu = g.composite(&screen, 32, 24, Some((&webcam, 16, 16)), cam, &bg, &layout, &scene);
+        let mut cpu = Vec::new();
+        CpuCompositor.composite_into(&screen, 32, 24, Some((&webcam, 16, 16)), cam, &bg, &layout, &scene, &mut cpu);
+        let mut gpu = Vec::new();
+        g.composite_into(&screen, 32, 24, Some((&webcam, 16, 16)), cam, &bg, &layout, &scene, &mut gpu);
         // Interior sample points (centers of bg / screen panel / camera panel) must match within quantization.
         for &(x, y) in &[(2u32, 2u32), (20, 14), (48, 34)] {
             let i = ((y * 64 + x) * 4) as usize;

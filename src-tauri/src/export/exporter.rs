@@ -1,5 +1,6 @@
-// Exporter: drives the frame loop with FrameRenderer, encodes to tmp mp4, muxes audio.
-// All per-frame render logic lives in render.rs; this file owns only the decoder/encoder.
+// Exporter: drives the composite stage of the 3-stage decode->composite->encode pipeline.
+// Screen/webcam decode run on their own threads (pipeline.rs); this file owns the composite
+// loop + encoder thread, joined by bounded channels with recycled buffer pools (pool.rs).
 use anyhow::{anyhow, Context, Result};
 
 use crate::capture::frame::Frame;
@@ -7,7 +8,8 @@ use crate::domain::time::Timestamp;
 use crate::encode::ffmpeg_encoder::FfmpegFrameSink;
 use crate::encode::frame_sink::FrameSink;
 use crate::export::audio_mux::mux;
-use crate::export::ffio::RawDecoder;
+use crate::export::pipeline::{ScreenPipe, WebcamPipe};
+use crate::export::pool::BufPool;
 use crate::export::render::{FrameRenderer, OUT_FPS};
 use crate::export::types::Layout; // needed for Layout::default()
 use crate::session::paths::ProjectPaths;
@@ -21,59 +23,63 @@ pub fn export(paths: &ProjectPaths, fps: u32, on_progress: impl Fn(u8)) -> Resul
     let screen_bytes = meta.screen_bytes;
     let size = meta.webcam_size;
     let wc_bytes = (size * size * 4) as usize;
-    let mut screen_dec = RawDecoder::spawn(&paths.video(), 0.0, false, None, None, screen_bytes)?;
-    let mut webcam_dec = if paths.webcam().exists() {
-        Some(RawDecoder::spawn(&paths.webcam(), OUT_FPS as f64, false,
-            Some(meta.video_start), Some(size), wc_bytes)?)
-    } else { None };
 
     let tmp = paths.folder.join("tmp_export.mp4");
     let tmp_str = tmp.to_str().ok_or_else(|| anyhow!("non-utf8 tmp path"))?;
     let (out_w, out_h) = (meta.out_w, meta.out_h);
     let sink = FfmpegFrameSink::new_hq(tmp_str, out_w, out_h, OUT_FPS as f64)
         .context("create encode sink")?;
+
+    let depth = 6; // covers the bounded channel (4) + in-flight buffers without allocating
+    let out_bytes = (out_w * out_h * 4) as usize;
+    let out_pool = BufPool::new(depth, out_bytes);
+    let out_returner = out_pool.returner();
+
     let (tx, rx) = std::sync::mpsc::sync_channel::<Frame>(4);
     let encoder = std::thread::spawn(move || -> Result<()> {
         let mut sink = sink;
-        for frame in rx { sink.push(&frame).context("encode push")?; }
+        for frame in rx {
+            sink.push(&frame).context("encode push")?;
+            let _ = out_returner.send(frame.bgra); // recycle the ~33MB output buffer
+        }
         Box::new(sink).finish().context("finish encoder")?;
         Ok(())
     });
 
-    let total_out = (((meta.video_end - meta.video_start) * OUT_FPS) / 1000).max(1);
-    let mut screen_buf = vec![0u8; screen_bytes];
-    let mut wc_buf = vec![0u8; wc_bytes];
-    let mut last_pct = u8::MAX;
-    let mut cap_idx = 0usize;
-    let mut have = screen_dec.read_frame(&mut screen_buf)?;
+    let mut spipe = ScreenPipe::spawn(&paths.video(), screen_bytes, meta.tl.frames.clone(), depth)?;
+    let mut wpipe = if paths.webcam().exists() {
+        Some(WebcamPipe::spawn(&paths.webcam(), meta.video_start, size, wc_bytes, depth)?)
+    } else { None };
+    let empty = vec![0u8; screen_bytes]; // zero-frame fallback (matches old zeroed screen_buf)
 
+    let total_out = (((meta.video_end - meta.video_start) * OUT_FPS) / 1000).max(1);
+    let mut last_pct = u8::MAX;
     let export_start = std::time::Instant::now();
     let (mut t_dec, mut t_comp, mut t_send) = (0u128, 0u128, 0u128);
     for k in 0..=total_out {
         let t = meta.video_start + k * 1000 / OUT_FPS;
         let d0 = std::time::Instant::now();
-        while have && cap_idx + 1 < meta.tl.frames.len() && meta.tl.frames[cap_idx + 1] <= t {
-            have = screen_dec.read_frame(&mut screen_buf)?;
-            if have { cap_idx += 1; }
-        }
-        let webcam = read_webcam(&mut webcam_dec, &mut wc_buf, size)?;
+        let screen = spipe.next_at(t)?.unwrap_or(&empty); // blocks on the screen decode channel
+        let webcam = match &mut wpipe { Some(w) => w.next()?, None => None };
         t_dec += d0.elapsed().as_micros();
         let c0 = std::time::Instant::now();
         let pose = r.step_camera(t);
-        let out = r.composite_at(&pose, &screen_buf, webcam);
+        let mut out = out_pool.take();
+        let wc_ref = webcam.as_ref().map(|(b, w, h)| (b.as_slice(), *w, *h));
+        r.composite_at(&pose, screen, wc_ref, &mut out);
         t_comp += c0.elapsed().as_micros();
         let s0 = std::time::Instant::now();
-        if tx.send(Frame { width: out_w, height: out_h, bgra: out, ts: Timestamp(t) }).is_err() {
-            break;
-        }
+        let sent = tx.send(Frame { width: out_w, height: out_h, bgra: out, ts: Timestamp(t) }).is_ok();
+        if let (Some(w), Some((buf, _, _))) = (wpipe.as_ref(), webcam) { w.recycle(buf); }
         t_send += s0.elapsed().as_micros();
+        if !sent { break; }
         let pct = ((k * 100 / total_out).min(100)) as u8;
         if pct != last_pct { on_progress(pct); last_pct = pct; }
     }
 
     drop(tx);
-    drop(screen_dec);
-    drop(webcam_dec);
+    spipe.join()?;
+    if let Some(w) = wpipe { w.join()?; }
     encoder.join().map_err(|_| anyhow!("encoder thread panicked"))??;
     let secs = export_start.elapsed().as_secs_f64().max(0.001);
     let _ = std::fs::write(std::env::temp_dir().join("tcursor-export-timing.txt"), format!(
@@ -83,17 +89,6 @@ pub fn export(paths: &ProjectPaths, fps: u32, on_progress: impl Fn(u8)) -> Resul
     let mic_shift = shift(meta.tl.mic_ms) + meta.audio_offset_ms as i64;
     mux(&tmp, paths, mic_shift, shift(meta.tl.system_ms))?;
     Ok(())
-}
-
-/// Read one webcam frame; on EOF drop the decoder so later frames have none.
-fn read_webcam<'a>(
-    dec: &mut Option<RawDecoder>,
-    buf: &'a mut [u8],
-    size: u32,
-) -> Result<Option<(&'a [u8], u32, u32)>> {
-    let still = match dec { Some(d) => d.read_frame(buf)?, None => false };
-    if !still { *dec = None; return Ok(None); }
-    Ok(Some((&*buf, size, size)))
 }
 
 #[cfg(test)]

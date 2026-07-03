@@ -51,7 +51,7 @@ Returns the screen panel rectangle `(x, y, w, h)` in output pixels: the screen a
 
 ### Used by
 
-- `src-tauri/src/export/compositor.rs` - `CpuCompositor::composite` uses the crop rect derived from this.
+- `src-tauri/src/export/compositor.rs` - `CpuCompositor::composite_into` uses the crop rect derived from this.
 - `src-tauri/src/export/scene.rs` - `resolve` computes the screen panel rect via this function.
 - `src-tauri/src/export/gpu_uniforms.rs` - called indirectly through `scene`.
 
@@ -154,7 +154,7 @@ Returns `(cx0, cy0, cw, ch)` - the crop rectangle in output pixels that the comp
 
 ### Used by
 
-- `src-tauri/src/export/compositor.rs` - `CpuCompositor::composite` passes to `resize_crop`.
+- `src-tauri/src/export/compositor.rs` - `CpuCompositor::composite_into` passes to `resize_crop`.
 - `src-tauri/src/export/coordmap.rs` - `project` calls this to compute the zoom transform.
 
 ## project

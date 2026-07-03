@@ -87,7 +87,7 @@ Implements `FxRenderer::apply`. Uploads `out` as the composited source texture, 
 3. Build a fresh `BindGroup` with the frame texture view at binding 0, sampler at 1, uniform buffer at 2.
 4. Begin a command encoder; open a render pass clearing `out_view` to black, set the pipeline and bind group, draw 3 vertices (full-screen triangle - no vertex buffer required).
 5. Encode `copy_texture_to_buffer` from `out_tex` into `readback` using the padded layout.
-6. Submit the encoder and call `device.poll(Maintain::Wait)` to synchronize. *Why synchronous:* the export pipeline is single-threaded and must have the result in `out` before encoding the frame.*
+6. Submit the encoder and call `device.poll(Maintain::Wait)` to synchronize. *Why synchronous:* the composite stage must have the result in `out` before handing the frame to the encoder.*
 7. Map `readback` for reading. For each of the `oh` rows, copy `ow * 4` bytes, skipping the `padded_bpr - ow*4` padding bytes, into `out`. *Why strip padding:* wgpu row-alignment padding must not appear in the raw frame written to the encoder.*
 8. Unmap `readback`.
 

@@ -67,7 +67,8 @@ fn render_frame(renderer: &mut FrameRenderer, meta: &RenderMeta, paths: &Project
     };
 
     let wc_ref = webcam.as_ref().map(|(b, w, h)| (b.as_slice(), *w, *h));
-    let bgra = renderer.composite_at(&pose, &screen_buf, wc_ref);
+    let mut bgra = Vec::new();
+    renderer.composite_at(&pose, &screen_buf, wc_ref, &mut bgra);
     png_encode(&bgra, out_w, out_h)
 }
 
@@ -95,9 +96,16 @@ pub(crate) fn with_warm<T>(session: &PreviewSession, folder: &str,
     let (out_w, out_h) = (1280u32, 720u32);
     let mtime = std::fs::metadata(paths.edit()).and_then(|m| m.modified()).ok();
     let mut guard = session.0.lock().unwrap();
-    let warm = matches!(guard.as_ref(),
-        Some(c) if c.folder == folder && c.mtime == mtime && c.out_w == out_w && c.out_h == out_h);
-    if !warm {
+    // Same recording + preview size already warm: an edit.json change only needs the cheap
+    // edit-derived state refreshed in place (zoom/layout/regions) - NOT a full renderer rebuild,
+    // which recreates the GPU device + decodes the background. This is what keeps editing zoom/
+    // spotlight snappy (the editor re-fetches camera_track/preview_layout on every edit).
+    let same = matches!(guard.as_ref(),
+        Some(c) if c.folder == folder && c.out_w == out_w && c.out_h == out_h);
+    if same {
+        let c = guard.as_mut().unwrap();
+        if c.mtime != mtime { c.renderer.reload_edit(&paths); c.mtime = mtime; }
+    } else {
         let (renderer, meta) = build_renderer(&paths, out_w, out_h).map_err(|e| e.to_string())?;
         *guard = Some(Cached { folder: folder.to_string(), mtime, out_w, out_h, renderer, meta });
     }

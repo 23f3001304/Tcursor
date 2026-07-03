@@ -15,9 +15,9 @@ pub struct GpuCompositor {
 
 GPU compositor holding device-lifetime state and a lazily-initialized background texture.
 
-- `gpu: Gpu` - device, queue, pipeline, output texture, and readback buffer. *Why:* all device-lifetime resources are held here and shared across every `composite` call.
+- `gpu: Gpu` - device, queue, pipeline, output texture, and readback buffer. *Why:* all device-lifetime resources are held here and shared across every `composite_into` call.
 - `out_w: u32, out_h: u32` - output frame dimensions in pixels. *Why:* needed to strip row padding during readback and to construct `Uniforms`.
-- `bg_tex: OnceLock<wgpu::Texture>` - the background texture is uploaded once on the first `composite` call and reused for the rest of the export. *Why:* the background is constant per export; re-uploading it each frame wastes bandwidth and time.
+- `bg_tex: OnceLock<wgpu::Texture>` - the background texture is uploaded once on the first `composite_into` call and reused for the rest of the export. *Why:* the background is constant per export; re-uploading it each frame wastes bandwidth and time.
 
 ### Used by
 
@@ -39,20 +39,21 @@ Constructs a `GpuCompositor` by calling `Gpu::new(out_w, out_h)`. Returns `None`
 
 `Some(GpuCompositor)` with an empty `bg_tex` lock; `None` if no GPU is found.
 
-## GpuCompositor::composite
+## GpuCompositor::composite_into
 
 ```rust
-fn composite(
+fn composite_into(
     &self,
     screen: &[u8], sw: u32, sh: u32,
     webcam: Option<(&[u8], u32, u32)>,
     cam: Camera, bg: &[u8],
     layout: &Layout,
     scene: &Scene,
-) -> Vec<u8>
+    out: &mut Vec<u8>,
+)
 ```
 
-Composites one frame entirely on the GPU and returns BGRA pixels of size `out_w * out_h * 4`.
+Composites one frame entirely on the GPU and writes BGRA pixels of size `out_w * out_h * 4` into `out`.
 
 ### Inputs
 
@@ -62,10 +63,11 @@ Composites one frame entirely on the GPU and returns BGRA pixels of size `out_w 
 - `bg: &[u8]` - background pixels. *Why:* uploaded via `OnceLock` on the first call only; subsequent calls reuse the cached texture.
 - `layout: &Layout` - output dimensions for UV normalization in `build_uniforms`.
 - `scene: &Scene` - both panel rects, radii, and alphas. *Why:* all per-frame compositing parameters are derived from this.
+- `out: &mut Vec<u8>` - caller-owned output buffer. *Why:* lets the caller reuse the same allocation across frames instead of the compositor allocating fresh each call.
 
 ### Returns
 
-`Vec<u8>` of BGRA pixels, `out_w * out_h * 4` bytes, with row padding stripped.
+Nothing (`()`). `out` is resized to `out_w * out_h * 4` bytes and fully overwritten with BGRA pixels, row padding stripped.
 
 ### Implementation
 
@@ -77,7 +79,7 @@ Composites one frame entirely on the GPU and returns BGRA pixels of size `out_w 
 6. Begin a command encoder; start a render pass that clears to black and draws 3 vertices (full-screen triangle - no vertex buffer needed).
 7. `copy_texture_to_buffer` from `out_tex` to `readback` using `padded_bpr`.
 8. Submit the encoder; poll with `Maintain::Wait` for synchronous completion.
-9. Map the readback buffer in read mode; strip row padding row-by-row (`padded_bpr` -> `out_w * 4`); collect into `out`; unmap.
+9. Map the readback buffer in read mode; clear and resize `out`; strip row padding row-by-row (`padded_bpr` -> `out_w * 4`) directly into `out`; unmap.
 
 ### Behaviors worth knowing
 

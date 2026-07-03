@@ -1,10 +1,30 @@
-use crate::export::types::{Camera, FramePoint, ZoomConfig, ZoomRegion};
+use crate::export::types::{Camera, Easing, FramePoint, ZoomConfig, ZoomRegion};
 
-/// A virtual camera that smoothly damps its zoom and center toward a per-frame
-/// setpoint derived from the active zoom region. The most-recent active region
-/// wins, so a new click preempts an older region's zoom-out instead of fighting
-/// it; scale and center are eased by exponential damping rather than recomputed
-/// absolutely, which keeps motion continuous across click transitions.
+/// Normalized easing curve `[0,1] -> [0,1]`. `Smooth` = smoothstep; `Linear` = identity;
+/// `Spring` = ease-out-back (a small overshoot past 1 near the end, then settle).
+fn ease(e: Easing, p: f32) -> f32 {
+    let p = p.clamp(0.0, 1.0);
+    match e {
+        Easing::Linear => p,
+        Easing::Smooth => p * p * (3.0 - 2.0 * p),
+        Easing::Spring { .. } => { let c = 1.70158; let q = p - 1.0; 1.0 + (c + 1.0) * q * q * q + c * q * q }
+    }
+}
+
+/// Shrink `(zi, zo)` proportionally so `zi + zo <= span`, keeping both ramps inside the pill.
+fn fit_durations(zi: u32, zo: u32, span: u32) -> (u32, u32) {
+    let total = zi + zo;
+    if total <= span || total == 0 { return (zi, zo); }
+    let f = span as f32 / total as f32;
+    ((zi as f32 * f) as u32, (zo as f32 * f) as u32)
+}
+
+/// A virtual camera whose zoom scale follows a deterministic eased curve contained
+/// entirely within each zoom region: it ramps 1 -> target over `zoom_in_ms`, holds,
+/// then ramps target -> 1 over `zoom_out_ms`, reaching 1 exactly at `end_ms` (so the
+/// timeline pill is an honest bound). The center eases toward the click point in
+/// lockstep on zoom-in, pans to keep the cursor in view during hold, and is recentred
+/// by the in-frame clamp as scale returns to 1. Most-recent active region wins.
 pub struct CameraSim { frame_w: u32, frame_h: u32, cx: f32, cy: f32, scale: f32 }
 
 impl CameraSim {
@@ -16,44 +36,39 @@ impl CameraSim {
         let (fw, fh) = (self.frame_w as f32, self.frame_h as f32);
         // Most-recent active region wins so a fresh click takes over immediately.
         let active = regions.iter().rev().find(|r| t_ms >= r.start_ms && t_ms <= r.end_ms);
-        let (target_scale, target_cx, target_cy) = match active {
-            None => (1.0, fw / 2.0, fh / 2.0),
+        match active {
+            None => { self.scale = 1.0; self.cx = fw / 2.0; self.cy = fh / 2.0; }
             Some(r) => {
-                let zin_end = r.start_ms + r.zoom_in_ms;
-                let zout_start = r.end_ms.saturating_sub(r.zoom_out_ms);
+                let span = r.end_ms.saturating_sub(r.start_ms).max(1);
+                let (zi, zo) = fit_durations(r.zoom_in_ms, r.zoom_out_ms, span);
+                let (zin_end, zout_start) = (r.start_ms + zi, r.end_ms.saturating_sub(zo));
+                let s = r.target_scale;
                 if t_ms < zin_end {
-                    // zoom in: home to the click point
-                    (r.target_scale, r.anchor.x as f32, r.anchor.y as f32)
+                    // zoom in: scale + center ease together toward the click point (lockstep).
+                    let e = ease(r.easing, (t_ms - r.start_ms) as f32 / zi.max(1) as f32);
+                    self.scale = 1.0 + (s - 1.0) * e;
+                    self.cx = fw / 2.0 + (r.anchor.x as f32 - fw / 2.0) * e;
+                    self.cy = fh / 2.0 + (r.anchor.y as f32 - fh / 2.0) * e;
                 } else if t_ms >= zout_start {
-                    // release: un-zoom in place; the clamp recenters as scale -> 1
-                    (1.0, self.cx, self.cy)
+                    // zoom out: contained in the pill; scale hits 1.0 exactly at end_ms. Center held
+                    // (the in-frame clamp below recenters as scale -> 1, so its value is moot).
+                    let e = ease(r.easing, (r.end_ms - t_ms) as f32 / zo.max(1) as f32);
+                    self.scale = 1.0 + (s - 1.0) * e;
                 } else {
-                    // hold: keep the cursor inside the zoomed viewport but stay put
-                    // while it roams the central region — pan only when it nears an
-                    // edge. Steady hold + smooth pan on big moves (no jitter chase).
-                    let mx = fw / (2.0 * r.target_scale) * 0.4;
-                    let my = fh / (2.0 * r.target_scale) * 0.4;
-                    let dx = cursor.x as f32 - self.cx;
-                    let dy = cursor.y as f32 - self.cy;
-                    let tx = if dx > mx { cursor.x as f32 - mx }
-                        else if dx < -mx { cursor.x as f32 + mx } else { self.cx };
-                    let ty = if dy > my { cursor.y as f32 - my }
-                        else if dy < -my { cursor.y as f32 + my } else { self.cy };
-                    (r.target_scale, tx, ty)
+                    // hold: fixed target scale; pan only when the cursor nears a viewport edge.
+                    self.scale = s;
+                    let (mx, my) = (fw / (2.0 * s) * 0.4, fh / (2.0 * s) * 0.4);
+                    let (dx, dy) = (cursor.x as f32 - self.cx, cursor.y as f32 - self.cy);
+                    let tx = if dx > mx { cursor.x as f32 - mx } else if dx < -mx { cursor.x as f32 + mx } else { self.cx };
+                    let ty = if dy > my { cursor.y as f32 - my } else if dy < -my { cursor.y as f32 + my } else { self.cy };
+                    let k = cfg.follow_damping.clamp(0.0, 1.0);
+                    self.cx += (tx - self.cx) * k;
+                    self.cy += (ty - self.cy) * k;
                 }
             }
-        };
-        // Exponential damping toward the setpoint. Scale and center use the SAME
-        // rate so the zoom-in and the pan move in lockstep — one coordinated push
-        // toward the point, instead of an awkward scale-then-pan (or pan-then-scale).
-        let k = cfg.follow_damping.clamp(0.0, 1.0);
-        let ks = k;
-        self.scale += (target_scale - self.scale) * ks;
-        self.cx += (target_cx - self.cx) * k;
-        self.cy += (target_cy - self.cy) * k;
+        }
         // Clamp the center so the view (frame / current scale) stays in-frame.
-        let half_w = fw / (2.0 * self.scale.max(0.01));
-        let half_h = fh / (2.0 * self.scale.max(0.01));
+        let (half_w, half_h) = (fw / (2.0 * self.scale.max(0.01)), fh / (2.0 * self.scale.max(0.01)));
         self.cx = self.cx.clamp(half_w, (fw - half_w).max(half_w));
         self.cy = self.cy.clamp(half_h, (fh - half_h).max(half_h));
         Camera { cx: self.cx, cy: self.cy, scale: self.scale }
@@ -79,16 +94,43 @@ mod tests {
     }
 
     #[test]
-    fn scale_damps_in_to_target_then_back_out() {
+    fn scale_is_one_at_region_end_and_after() {
         let mut s = CameraSim::new(800, 600);
         let cfg = ZoomConfig::default();
         let r = vec![region()];
-        let start = s.step(0, FramePoint { x: 400, y: 300 }, &r, &cfg).scale;
-        let mid = { let mut x = 0.0; for t in (0..600).step_by(16) { x = s.step(t, FramePoint { x: 400, y: 300 }, &r, &cfg).scale; } x };
-        let endp = { let mut x = 0.0; for t in (1700..2400).step_by(16) { x = s.step(t, FramePoint { x: 400, y: 300 }, &r, &cfg).scale; } x };
-        assert!(start < 1.5);              // damps in, not instantly at target
-        assert!((mid - 2.0).abs() < 0.05); // reached target during hold
-        assert!((endp - 1.0).abs() < 0.1); // damped back out by release end
+        // walk up to the end so the (stateful) center advances naturally
+        let mut sc = 0.0;
+        for t in (0..=2000).step_by(16) { sc = s.step(t, FramePoint { x: 400, y: 300 }, &r, &cfg).scale; }
+        assert!((s.step(2000, FramePoint { x: 400, y: 300 }, &r, &cfg).scale - 1.0).abs() < 1e-3, "scale must be exactly 1 at end_ms");
+        assert!((s.step(2100, FramePoint { x: 400, y: 300 }, &[], &cfg).scale - 1.0).abs() < 1e-3, "scale stays 1 after the region");
+        let _ = sc;
+    }
+
+    #[test]
+    fn scale_reaches_target_during_hold() {
+        let mut s = CameraSim::new(800, 600);
+        let c = s.step(1000, FramePoint { x: 400, y: 300 }, &[region()], &ZoomConfig::default());
+        assert!((c.scale - 2.0).abs() < 1e-3, "hold scale equals target");
+    }
+
+    #[test]
+    fn ramp_in_is_monotonic_and_bounded() {
+        let mut s = CameraSim::new(800, 600);
+        let cfg = ZoomConfig::default();
+        let r = vec![region()];
+        let a = s.step(0, FramePoint { x: 400, y: 300 }, &r, &cfg).scale;
+        let b = s.step(150, FramePoint { x: 400, y: 300 }, &r, &cfg).scale;
+        assert!(a < b && b < 2.0 && a >= 1.0, "in-ramp climbs from 1 toward target: a={a} b={b}");
+    }
+
+    #[test]
+    fn durations_that_exceed_span_are_scaled_to_fit() {
+        // in+out = 600 > span 400: must still reach 1.0 exactly at end and never NaN.
+        let mut s = CameraSim::new(800, 600);
+        let cfg = ZoomConfig::default();
+        let r = vec![ZoomRegion { start_ms: 0, end_ms: 400, ..region() }];
+        for t in (0..=400).step_by(16) { let _ = s.step(t, FramePoint { x: 400, y: 300 }, &r, &cfg); }
+        assert!((s.step(400, FramePoint { x: 400, y: 300 }, &r, &cfg).scale - 1.0).abs() < 1e-3);
     }
 
     #[test]

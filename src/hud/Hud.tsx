@@ -93,8 +93,9 @@ export function Hud({ onEdit }: { onEdit?: (folder: string) => void }) {
       if (camOn) webcam.start(cam.stream());
       setRecording(true);
     } else {
+      const webcamStopPromise = webcam.stop();
       const res = await stopRecording();
-      const bytes = await webcam.stop();
+      const bytes = await webcamStopPromise;
       if (bytes) await saveWebcam(res.folder, bytes);
       lastFolder.current = res.folder;
       setRecording(false);

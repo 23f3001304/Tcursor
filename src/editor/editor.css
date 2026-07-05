@@ -3,8 +3,12 @@
   --e-bg: #09090b; --e-surface: #0e0e11; --e-card: #161619; --e-soft: #1c1c20;
   --e-border: #262629; --e-border2: #1e1e21;
   --e-fg: #fafafa; --e-mut: #a1a1aa; --e-dim: #71717a;
-  --e-primary: #ef4444; --e-primaryh: #dc2626; --e-zoom: #7c7ce6; --e-ai: #7c6cf0;
-  --e-r: 9px; --e-r-lg: 12px; --e-r-sm: 7px;
+  --e-primary: #ef4444; --e-primaryh: #dc2626;
+  --e-zoom: #7c7ce6; --e-fx: #d99a2b; --e-layout: #2f9e8f; --e-ai: #7c6cf0; --e-ok: #22c55e;
+  --e-ring: rgba(250,250,250,.7); --e-focus: var(--e-dim);
+  --e-shadow-raise: 0 1px 2px rgba(0,0,0,.3);
+  --e-shadow-pop: 0 8px 24px rgba(0,0,0,.5), 0 2px 8px rgba(0,0,0,.35);
+  --e-r-sm: 6px; --e-r: 9px; --e-r-lg: 12px;
   position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column;
   background: var(--e-bg); color: var(--e-fg);
   font-family: "Inter Variable", -apple-system, "Segoe UI", system-ui, sans-serif;
@@ -51,6 +55,10 @@
 .e-panel { width: 320px; flex: none; border-right: 1px solid var(--e-border2); overflow-y: auto; padding: 22px; }
 .e-panel h2 { font-size: 16px; font-weight: 600; margin: 0 0 6px; }
 .e-lede { font-size: 12.5px; color: var(--e-mut); line-height: 1.55; margin: 0 0 20px; }
+/* Reusable panel primitives (consumed by the property-panel wave). */
+.e-switchrow { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  min-height: 32px; font-size: 13px; font-weight: 500; color: var(--e-fg); }
+.e-sec { border-top: 1px solid var(--e-border2); margin-top: 16px; padding-top: 16px; }
 .e-sel { display: flex; align-items: center; justify-content: space-between; height: 40px; width: 100%;
   padding: 0 13px; border: 1px solid var(--e-border); background: transparent; color: var(--e-fg);
   border-radius: var(--e-r); margin-bottom: 9px; transition: background .14s ease; }
@@ -103,7 +111,7 @@
 
 .e-timeline { flex: none; border-top: 1px solid var(--e-border2); background: var(--e-surface);
   padding: 8px 16px 14px; position: relative; }
-.e-ruler { position: relative; height: 14px; font-size: 10.5px; color: var(--e-dim);
+.e-ruler { position: relative; height: 14px; font-size: 11px; color: var(--e-dim);
   font-variant-numeric: tabular-nums; margin-bottom: 7px; }
 .e-ruler span { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
 .e-ruler span:first-child { transform: none; }
@@ -111,45 +119,55 @@
 /* Filmstrip clip: frame thumbnails filling the width, in an inset (3D) well. */
 .e-filmstrip { display: flex; height: 54px; border-radius: var(--e-r); margin-bottom: 8px; overflow: hidden;
   background: var(--e-card); border: 1px solid var(--e-border);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.05), inset 0 -8px 16px rgba(0,0,0,.28); }
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04), inset 0 -6px 12px rgba(0,0,0,.22); }
 .e-filmstrip img { height: 100%; object-fit: cover; display: block; pointer-events: none; }
-.e-filmstrip-empty { display: block; }
 /* Track stack: scrolls when many effect layers appear; ruler + filmstrip stay above. */
 .e-tracks { display: flex; flex-direction: column; gap: 6px; max-height: 130px; overflow-y: auto; overflow-x: hidden; }
+.e-tracks::-webkit-scrollbar { width: 11px; }
+.e-tracks::-webkit-scrollbar-track { background: transparent; }
+.e-tracks::-webkit-scrollbar-thumb { background: var(--e-dim); border-radius: 999px;
+  border: 3px solid var(--e-bg); background-clip: padding-box; min-height: 40px; }
+.e-tracks:hover::-webkit-scrollbar-thumb { background: var(--e-mut); background-clip: padding-box; }
 .e-zoomrow { position: relative; height: 34px; border-radius: var(--e-r);
-  background: var(--e-surface); box-shadow: inset 0 0 0 1px var(--e-border2), inset 0 2px 6px rgba(0,0,0,.22); }
-/* Zoom pill: glossy gradient + inset depth, with white side grip handles to retime. */
-.e-zblk { position: absolute; top: 0; height: 34px; border-radius: 8px; cursor: grab; overflow: hidden;
-  display: flex; align-items: stretch; user-select: none; touch-action: none;
-  background: linear-gradient(180deg, #9090f2, var(--e-zoom)); border: 1px solid rgba(255,255,255,.2);
-  box-shadow: 0 2px 7px rgba(60,60,160,.4), inset 0 1px 0 rgba(255,255,255,.4), inset 0 -6px 12px rgba(40,40,120,.45); }
-.e-zblk.drag { cursor: grabbing; box-shadow: 0 6px 16px rgba(60,60,160,.55), inset 0 1px 0 rgba(255,255,255,.45); }
-.e-zblk.sel { outline: 2px solid var(--e-fg); outline-offset: 1px; }
+  background: var(--e-surface); box-shadow: inset 0 0 0 1px var(--e-border2); }
+/* Zoom pill: flat fill, hairline border, faint raise; white side grips (on hover) to retime. */
+.e-zblk { position: absolute; top: 0; height: 34px; border-radius: var(--e-r); cursor: grab; overflow: hidden;
+  display: flex; align-items: stretch; user-select: none; touch-action: none; opacity: .9;
+  background: var(--e-zoom); border: 1px solid rgba(255,255,255,.14); box-shadow: var(--e-shadow-raise); }
+.e-zblk.drag { cursor: grabbing; z-index: 4; box-shadow: var(--e-shadow-pop); }
+.e-zblk.sel { opacity: 1; outline: 1.5px solid var(--e-ring); outline-offset: -1.5px; }
 .e-zlabel { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; color: #fff;
-  font-size: 11px; font-weight: 600; pointer-events: none; white-space: nowrap; overflow: hidden;
-  text-shadow: 0 1px 2px rgba(30,30,80,.5); }
+  font-size: 11px; font-weight: 600; pointer-events: none; white-space: nowrap; overflow: hidden; }
 .e-zh { width: 11px; flex: none; cursor: ew-resize; position: relative; touch-action: none; }
 .e-zh::after { content: ""; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-  width: 3px; height: 16px; border-radius: 2px; background: rgba(255,255,255,.9); box-shadow: 0 1px 2px rgba(0,0,0,.35); }
-.e-zh:hover::after { height: 20px; background: #fff; }
+  width: 2px; height: 12px; border-radius: 2px; background: rgba(255,255,255,.55); opacity: 0;
+  transition: opacity .14s ease; }
+.e-zblk:hover .e-zh::after { opacity: 1; }
+.e-zh:hover::after { height: 16px; background: rgba(255,255,255,.9); opacity: 1; }
 /* Audio track: quiet, low-contrast waveform with a small source icon (system vs mic). */
 .e-audiorow { position: relative; height: 26px; border-radius: var(--e-r); overflow: hidden;
   background: var(--e-surface); box-shadow: inset 0 0 0 1px var(--e-border2); }
 .e-audiorow img { width: 100%; height: 100%; object-fit: fill; opacity: .5; display: block; pointer-events: none; }
 .e-trackicon { position: absolute; left: 5px; top: 50%; transform: translateY(-50%); z-index: 2;
   color: var(--e-dim); display: flex; opacity: .85; pointer-events: none; }
-/* Effect layer row + spotlight pill (amber; same inset depth + white grip handles as zoom). */
+/* Effect layer row + spotlight pill (flat amber; white grip handles on hover, like zoom). */
 .e-fxrow { position: relative; height: 30px; border-radius: var(--e-r);
-  background: var(--e-surface); box-shadow: inset 0 0 0 1px var(--e-border2), inset 0 2px 6px rgba(0,0,0,.2); }
-.e-fxblk { position: absolute; top: 0; height: 30px; border-radius: 8px; cursor: grab; overflow: hidden;
-  display: flex; align-items: stretch; user-select: none; touch-action: none;
-  background: linear-gradient(180deg, #f0c061, #d99a2b); border: 1px solid rgba(255,255,255,.22);
-  box-shadow: 0 2px 7px rgba(150,110,30,.4), inset 0 1px 0 rgba(255,255,255,.45), inset 0 -6px 12px rgba(120,80,10,.4); }
-.e-fxblk.drag { cursor: grabbing; box-shadow: 0 6px 16px rgba(150,110,30,.55), inset 0 1px 0 rgba(255,255,255,.5); }
-.e-fxblk.sel { outline: 2px solid var(--e-fg); outline-offset: 1px; }
-.e-fxblk .e-zlabel { color: #3a2906; text-shadow: 0 1px 1px rgba(255,240,200,.4); }
-.e-ph { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--e-primary); z-index: 5; pointer-events: none; }
-.e-ph i { position: absolute; top: -2px; left: -5px; width: 12px; height: 9px; background: var(--e-primary); border-radius: 3px; }
+  background: var(--e-surface); box-shadow: inset 0 0 0 1px var(--e-border2); }
+.e-fxblk { position: absolute; top: 0; height: 30px; border-radius: var(--e-r); cursor: grab; overflow: hidden;
+  display: flex; align-items: stretch; user-select: none; touch-action: none; opacity: .9;
+  background: var(--e-fx); border: 1px solid rgba(255,255,255,.14); box-shadow: var(--e-shadow-raise); }
+.e-fxblk.drag { cursor: grabbing; z-index: 4; box-shadow: var(--e-shadow-pop); }
+.e-fxblk.sel { opacity: 1; outline: 1.5px solid var(--e-ring); outline-offset: -1.5px; }
+/* Layout segment row + pill (flat teal; white grip handles on hover, like zoom/fx). */
+.e-layrow { position: relative; height: 30px; border-radius: var(--e-r);
+  background: var(--e-surface); box-shadow: inset 0 0 0 1px var(--e-border2); }
+.e-layblk { position: absolute; top: 0; height: 30px; border-radius: var(--e-r); cursor: grab; overflow: hidden;
+  display: flex; align-items: stretch; user-select: none; touch-action: none; opacity: .9;
+  background: var(--e-layout); border: 1px solid rgba(255,255,255,.14); box-shadow: var(--e-shadow-raise); }
+.e-layblk.drag { cursor: grabbing; z-index: 4; box-shadow: var(--e-shadow-pop); }
+.e-layblk.sel { opacity: 1; outline: 1.5px solid var(--e-ring); outline-offset: -1.5px; }
+.e-ph { position: absolute; top: 0; bottom: 0; width: 1.5px; background: var(--e-primary); z-index: 5; pointer-events: none; }
+.e-ph i { position: absolute; top: -2px; left: -4.5px; width: 10px; height: 8px; background: var(--e-primary); border-radius: 2.5px; }
 
 /* Invisible resize grips for the frameless window (decorations:false → no OS border).
    Edges are 6px; corners 13px and stacked above edges so the diagonal cursor wins. */
@@ -175,22 +193,15 @@
 .e-fl b { color: var(--e-fg); font-weight: 600; font-variant-numeric: tabular-nums; }
 .e-field2 { display: flex; gap: 10px; }
 .e-field2 .e-field { flex: 1; }
-.e-insp input[type="number"] { height: 34px; padding: 0 10px; border: 1px solid var(--e-border); border-radius: var(--e-r-sm);
-  background: var(--e-soft); color: var(--e-fg); font: inherit; font-size: 13px; }
-.e-insp input[type="number"]:focus { outline: none; border-color: var(--e-zoom); }
-.e-insp input[type="number"]::-webkit-inner-spin-button { opacity: .5; }
-.e-insp input[type="range"] { -webkit-appearance: none; appearance: none; height: 5px; border-radius: 999px;
-  background: var(--e-soft); cursor: pointer; }
-.e-insp input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%;
-  background: var(--e-zoom); border: 2px solid var(--e-bg); box-shadow: 0 1px 3px rgba(0,0,0,.4); }
 .e-seg { display: flex; gap: 4px; background: var(--e-soft); border-radius: var(--e-r-sm); padding: 3px; }
 .e-seg button { flex: 1; height: 30px; border: none; background: transparent; color: var(--e-mut);
-  border-radius: 5px; font-size: 12.5px; font-weight: 500; transition: background .14s ease, color .14s ease; }
+  border-radius: var(--e-r-sm); font-size: 12.5px; font-weight: 500; transition: background .14s ease, color .14s ease; }
 .e-seg button.on { background: var(--e-card); color: var(--e-fg); box-shadow: 0 1px 2px rgba(0,0,0,.25); }
-.e-del { margin-top: 6px; height: 38px; border: 1px solid var(--e-border); border-radius: var(--e-r);
-  background: transparent; color: #f87171; font-size: 13px; font-weight: 500; display: flex; align-items: center;
-  justify-content: center; gap: 7px; transition: background .14s ease, border-color .14s ease; }
-.e-del:hover { background: rgba(239,68,68,.1); border-color: var(--e-primary); }
+.e-del { margin-top: 12px; height: 42px; border: 1px solid rgba(239, 68, 68, 0.2); border-radius: var(--e-r);
+  background: rgba(239, 68, 68, 0.05); color: #f87171; font-size: 13.5px; font-weight: 600; display: flex; align-items: center;
+  justify-content: center; gap: 8px; cursor: pointer; transition: background .15s ease, border-color .15s ease, transform 0.1s ease; }
+.e-del:hover { background: rgba(239, 68, 68, 0.12); border-color: rgba(239, 68, 68, 0.4); }
+.e-del:active { transform: scale(0.98); }
 
 /* Custom inset rounded-pill scrollbar for the scrolling rail panel (WebView2 = Chromium). */
 .e-panel::-webkit-scrollbar { width: 11px; }
@@ -198,3 +209,245 @@
 .e-panel::-webkit-scrollbar-thumb { background: var(--e-dim); border-radius: 999px;
   border: 3px solid var(--e-bg); background-clip: padding-box; min-height: 40px; }
 .e-panel:hover::-webkit-scrollbar-thumb { background: var(--e-mut); background-clip: padding-box; }
+
+/* Same custom scrollbar, scoped to the Picker dropdown menu (Controls.tsx) - its border/bg
+   differ from .e-panel's dark surface, so the thumb inset border matches its own background. */
+.e-picker-menu::-webkit-scrollbar { width: 11px; }
+.e-picker-menu::-webkit-scrollbar-track { background: transparent; }
+.e-picker-menu::-webkit-scrollbar-thumb { background: var(--e-dim); border-radius: 999px;
+  border: 3px solid var(--e-card); background-clip: padding-box; min-height: 40px; }
+.e-picker-menu:hover::-webkit-scrollbar-thumb { background: var(--e-mut); background-clip: padding-box; }
+
+.e-curve-pick {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+.e-curve-card {
+  flex: 1;
+  background: var(--e-soft);
+  border: 1px solid var(--e-border);
+  border-radius: var(--e-r-sm);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  color: var(--e-mut);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+.e-curve-card:hover {
+  border-color: var(--e-mut);
+  color: var(--e-fg);
+}
+.e-curve-card.on {
+  background: var(--e-card);
+  border-color: var(--e-fg);
+  color: var(--e-fg);
+  font-weight: 600;
+}
+.e-curve-svg {
+  width: 100%;
+  height: 48px;
+  overflow: visible;
+}
+
+/* Custom visual controls for settings panels */
+.e-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 8px;
+  margin-top: 4px;
+}
+.e-preset-circle {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  cursor: pointer;
+  padding: 0;
+  border: none;
+  outline: none;
+  transition: transform 0.12s ease, box-shadow 0.15s ease;
+}
+.e-preset-circle:hover {
+  transform: scale(1.12);
+}
+.e-preset-circle.on {
+  box-shadow: 0 0 0 2px var(--e-bg), 0 0 0 4px var(--accent, #ef4444);
+}
+
+.e-accent-list {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+}
+.e-accent-circle {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  cursor: pointer;
+  padding: 0;
+  border: none;
+  outline: none;
+  transition: transform 0.12s ease, box-shadow 0.15s ease;
+}
+.e-accent-circle:hover {
+  transform: scale(1.12);
+}
+.e-accent-circle.on {
+  box-shadow: 0 0 0 2px var(--e-bg), 0 0 0 4px var(--e-fg, #fff);
+}
+
+.e-pack-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  margin-top: 4px;
+}
+.e-pack-card {
+  height: 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border-radius: 8px;
+  background: var(--e-soft);
+  border: 1px solid var(--e-border);
+  cursor: pointer;
+  padding: 6px 0 4px;
+  outline: none;
+  transition: transform 0.1s ease, border-color 0.15s ease, background-color 0.15s ease;
+}
+.e-pack-card:hover {
+  transform: scale(1.05);
+  border-color: var(--e-mut);
+}
+.e-pack-card.on {
+  background: color-mix(in srgb, var(--accent, #ef4444) 8%, var(--e-soft));
+  border-color: var(--accent, #ef4444);
+  border-width: 1.5px;
+}
+.e-pack-card span {
+  font-size: 8.5px;
+  font-weight: 700;
+  color: var(--e-mut);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+}
+.e-pack-card.on span {
+  color: var(--accent, #ef4444);
+}
+
+.e-pack-add {
+  height: 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border-radius: 8px;
+  background: transparent;
+  border: 1px dashed var(--e-dim);
+  color: var(--e-dim);
+  cursor: pointer;
+  padding: 6px 0 4px;
+  outline: none;
+  transition: transform 0.1s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.e-pack-add:hover {
+  transform: scale(1.05);
+  border-color: var(--e-fg);
+  color: var(--e-fg);
+}
+.e-pack-add span {
+  font-size: 8.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.e-upload-dashed {
+  width: 100%;
+  height: 36px;
+  background: var(--e-soft);
+  border: 1px dashed var(--e-border);
+  border-radius: 6px;
+  color: var(--e-mut);
+  font-size: 12.5px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  border-style: dashed;
+  transition: border-color 0.15s, color 0.15s;
+}
+.e-upload-dashed:hover {
+  border-color: var(--e-fg);
+  color: var(--e-fg);
+}
+
+.e-sublist {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.e-subrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--e-soft);
+  border: 1px solid var(--e-border2);
+  border-radius: 6px;
+  padding: 6px 10px;
+  transition: border-color 0.15s ease;
+}
+.e-subrow:focus-within {
+  border-color: var(--accent, #ef4444);
+}
+.e-subtime {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--e-mut);
+  background: var(--e-card);
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.e-subinput {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--e-fg);
+  font-size: 12.5px;
+  outline: none;
+  padding: 0;
+}
+.e-subdel {
+  border: none;
+  background: transparent;
+  color: var(--e-dim);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: color 0.15s, background-color 0.15s;
+}
+.e-subdel:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}
+
+

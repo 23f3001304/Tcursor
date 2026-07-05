@@ -146,14 +146,14 @@ The complete editable state for one recording session. Loaded from `edit.json` i
 export type EditOp =
   | { op: "add_zoom"; at_ms: number; dur_ms: number }
   | { op: "add_zoom_full"; at_ms: number; dur_ms: number; scale: number }
-  | { op: "update_zoom"; id: string; start_ms?: number; end_ms?: number; scale?: number; target?: ZoomTarget; easing?: string }
+  | { op: "update_zoom"; id: string; start_ms?: number; end_ms?: number; scale?: number; target?: ZoomTarget; easing?: string; zoom_in_ms?: number; zoom_out_ms?: number }
   | { op: "remove_zoom"; id: string }
   | { op: "set_trim"; in_ms: number; out_ms: number }
   | { op: "add_cut"; start_ms: number; end_ms: number }
   | { op: "set_speed"; start_ms: number; end_ms: number; factor: number }
   | { op: "set_layout_seg"; id: string; layout: string }
   | { op: "add_effect"; kind: EffectKind; start_ms: number; end_ms: number }
-  | { op: "update_effect"; id: string; start_ms?: number; end_ms?: number }
+  | { op: "update_effect"; id: string; start_ms?: number; end_ms?: number; fade_in_ms?: number; fade_out_ms?: number; mode?: string; dim?: number; radius?: number; feather?: number }
   | { op: "remove_effect"; id: string }
 ```
 
@@ -183,7 +183,7 @@ The kind of an editable effect region (mirrors the Rust `EffectKind`). The set g
 ## EffectRegion
 
 ```ts
-export interface EffectRegion { id: string; kind: EffectKind; start_ms: number; end_ms: number }
+export interface EffectRegion { id: string; kind: EffectKind; start_ms: number; end_ms: number; fade_in_ms: number; fade_out_ms: number; mode?: string; dim?: number; radius?: number; feather?: number }
 ```
 
 An editable effect region on the timeline (v1: spotlight), held in `EditDoc.effects`. The `add_effect` / `update_effect` / `remove_effect` `EditOp`s mutate it; the timeline lays them into layers (`layoutRegions`) and draws each as a draggable pill.

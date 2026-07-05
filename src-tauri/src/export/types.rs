@@ -26,6 +26,8 @@ impl Default for ZoomConfig {
 pub struct ZoomRegion {
     pub start_ms: u32, pub end_ms: u32, pub zoom_in_ms: u32, pub zoom_out_ms: u32,
     pub target_scale: f32, pub anchor: FramePoint, pub easing: Easing,
+    /// Priority when this region overlaps another - higher wins (see `CameraSim::step`).
+    pub layer: u32,
 }
 
 #[derive(Clone, Debug)]

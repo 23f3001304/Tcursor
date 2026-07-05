@@ -160,7 +160,7 @@ pub fn stop_recording(recorder: tauri::State<'_, Recorder>) -> Result<RecordingR
 
     // Capture has fully stopped: pre-generate the editor's heavy media off-thread (instant editor open).
     let pf = running.folder.clone();
-    std::thread::spawn(move || crate::export::thumbs::prewarm(pf));
+    std::thread::spawn(move || crate::export::preview::thumbs::prewarm(pf));
 
     Ok(RecordingResult { folder: running.folder, frames })
 }

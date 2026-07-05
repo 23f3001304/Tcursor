@@ -15,7 +15,7 @@ export const pauseRecording = () => invoke<void>("pause_recording");
 export const resumeRecording = () => invoke<void>("resume_recording");
 export const stopRecording = () =>
   invoke<{ folder: string; frames: number }>("stop_recording");
-export const saveWebcam = (folder: string, bytes: number[]) =>
+export const saveWebcam = (folder: string, bytes: Uint8Array) =>
   invoke<void>("save_webcam", { folder, bytes });
 export const exportProject = (folder: string) =>
   invoke<void>("export_project", { folder });
@@ -29,8 +29,19 @@ export const aiAutoedit = (folder: string, model?: string) =>
 export const cameraTrack = (folder: string) => invoke<CamSample[]>("camera_track", { folder });
 /** The static export layout: screen rect + corner radius + webcam rect, as fractions of the
  *  output, so the canvas preview frames the screen + webcam from the export layout (not a guess). */
-export interface PreviewLayout { screen: [number, number, number, number]; radius: number; cam: [number, number, number, number, number] | null }
+export interface PreviewLayout { screen: [number, number, number, number]; radius: number; cam: [number, number, number, number, number] | null; screenAlpha?: number; camAlpha?: number }
 export const previewLayout = (folder: string) => invoke<PreviewLayout>("preview_layout", { folder });
+/** One panel's rect (fraction of output, [x, y, w, h]) + corner radius (fraction of output width)
+ *  + cross-dissolve alpha (0..1) - the same basis `PreviewLayout` uses. */
+export interface PanelRectDto { rect: [number, number, number, number]; radius: number; alpha: number }
+/** One layout preset's two panels: screen (zoomed base layer) + cam (fixed top layer). */
+export interface LayoutPresetDto { screen: PanelRectDto; cam: PanelRectDto }
+export type LayoutPresetName = "screen" | "camera" | "presenter" | "screen_only" | "camera_only";
+export type LayoutPresets = Record<LayoutPresetName, LayoutPresetDto>;
+/** All 5 layout presets' panel rects + alpha in one call, so the editor preview can cross-fade
+ *  between layout presets itself (mirroring the export's LayoutTrack) instead of only ever
+ *  showing the single static layout `previewLayout` returns. */
+export const previewLayouts = (folder: string) => invoke<LayoutPresets>("preview_layouts", { folder });
 /** One click ripple: output time (ms) + 0..1 screen-content position (same basis as CamSample's cursor). */
 export interface ClickSample { t: number; x: number; y: number }
 export const clickTrack = (folder: string) => invoke<ClickSample[]>("click_track", { folder });
@@ -40,6 +51,28 @@ export interface HoldSpan { start_ms: number; end_ms: number }
 export const spotlightHolds = (folder: string) => invoke<HoldSpan[]>("spotlight_holds", { folder });
 /** The export background (mesh/gradient) as a PNG data URL, so the canvas preview matches the export. */
 export const previewBg = (folder: string) => invoke<string>("preview_bg", { folder });
+/** Render the FX overlay (spotlight + click effects) using the exact export shaders.
+ *  Returns a PNG data URL of the overlay to composite on the preview canvas. */
+export interface FxOverlayParams {
+  ow: number; oh: number;
+  style: string; color: [number, number, number]; intensity: number;
+  hits: [number, number, number][];
+  spotCx?: number; spotCy?: number; spotDim?: number;
+  spotRadius?: number; spotFeather?: number; spotAlpha?: number;
+  spotMode?: string; spotTint?: [number, number, number]; spotT?: number;
+  videoMode?: string; videoAlpha?: number; videoT?: number;
+}
+export const previewFxOverlay = (p: FxOverlayParams) =>
+  invoke<string>("preview_fx_overlay", {
+    ow: p.ow, oh: p.oh, style: p.style, color: p.color, intensity: p.intensity,
+    hits: p.hits,
+    spotCx: p.spotCx ?? null, spotCy: p.spotCy ?? null, spotDim: p.spotDim ?? null,
+    spotRadius: p.spotRadius ?? null, spotFeather: p.spotFeather ?? null,
+    spotAlpha: p.spotAlpha ?? null, spotMode: p.spotMode ?? null,
+    spotTint: p.spotTint ?? null, spotT: p.spotT ?? null,
+    videoMode: p.videoMode ?? null, videoAlpha: p.videoAlpha ?? null,
+    videoT: p.videoT ?? null,
+  });
 /** One cursor sprite (Capitaine pack) for the canvas preview: lowercase type name, a PNG data
  *  URL (cropped + dark-inverted like the export), the hotspot (0..1 of the cropped sprite), and
  *  the original canvas height for uniform scaling. */

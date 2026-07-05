@@ -1,19 +1,22 @@
 use serde::{Deserialize, Serialize};
 use crate::edit::model::{Cut, EditDoc, Speed, Trim, Zoom, ZoomTarget};
+use crate::edit::region::{auto_layer, dur_bound};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "snake_case", tag = "op")]
 pub enum EditOp {
     AddZoom { at_ms: u32, dur_ms: u32 },
     AddZoomFull { at_ms: u32, dur_ms: u32, scale: f32 },
-    UpdateZoom { id: String, start_ms: Option<u32>, end_ms: Option<u32>, scale: Option<f32>, target: Option<ZoomTarget>, easing: Option<String> },
+    UpdateZoom { id: String, start_ms: Option<u32>, end_ms: Option<u32>, scale: Option<f32>, target: Option<ZoomTarget>, easing: Option<String>, zoom_in_ms: Option<u32>, zoom_out_ms: Option<u32>, layer: Option<u32> },
     RemoveZoom { id: String },
     SetTrim { in_ms: u32, out_ms: u32 },
     AddCut { start_ms: u32, end_ms: u32 },
     SetSpeed { start_ms: u32, end_ms: u32, factor: f32 },
-    SetLayoutSeg { id: String, layout: String },
+    AddLayoutSeg { at_ms: u32, dur_ms: u32, layout: String },
+    UpdateLayoutSeg { id: String, start_ms: Option<u32>, end_ms: Option<u32>, layout: Option<String>, transition_ms: Option<u32>, easing: Option<String> },
+    RemoveLayoutSeg { id: String },
     AddEffect { kind: crate::edit::model::EffectKind, start_ms: u32, end_ms: u32 },
-    UpdateEffect { id: String, start_ms: Option<u32>, end_ms: Option<u32> },
+    UpdateEffect { id: String, start_ms: Option<u32>, end_ms: Option<u32>, fade_in_ms: Option<u32>, fade_out_ms: Option<u32>, mode: Option<String>, dim: Option<f32>, radius: Option<f32>, feather: Option<f32>, layer: Option<u32> },
     RemoveEffect { id: String },
 }
 
@@ -39,31 +42,50 @@ fn next_speed_id(doc: &EditDoc) -> String {
     format!("s{}", n)
 }
 
+/// Known layout preset wire-names; anything else falls back to "screen".
+fn valid_layout(s: &str) -> String {
+    match s { "screen" | "camera" | "presenter" | "screen_only" | "camera_only" => s.to_string(), _ => "screen".into() }
+}
+fn valid_easing(s: &str) -> String {
+    match s { "linear" | "smooth" | "spring" => s.to_string(), _ => "smooth".into() }
+}
+fn next_layout_id(doc: &EditDoc) -> String {
+    let n = doc.layout.iter().filter_map(|s| s.id.strip_prefix('l').and_then(|d| d.parse::<u32>().ok()))
+        .max().map(|m| m + 1).unwrap_or(doc.layout.len() as u32);
+    format!("l{}", n)
+}
+
 pub fn apply(doc: &mut EditDoc, op: EditOp) {
     match op {
         EditOp::AddZoom { at_ms, dur_ms } => {
             let id = next_zoom_id(doc);
-            doc.zooms.push(Zoom {
-                id,
-                start_ms: at_ms,
-                end_ms: at_ms.saturating_add(dur_ms),
-                target: ZoomTarget::Cursor,
-                scale: 2.0,
-                easing: "smooth".into(),
-            });
+            let dur = dur_bound(doc);
+            let (start_ms, end_ms) = (at_ms.min(dur), at_ms.saturating_add(dur_ms).min(dur));
+            let existing: Vec<(u32, u32, u32)> = doc.zooms.iter().map(|z| (z.start_ms, z.end_ms, z.layer)).collect();
+            let layer = auto_layer(&existing, start_ms, end_ms);
+            doc.zooms.push(Zoom { id, start_ms, end_ms,
+                target: ZoomTarget::Cursor, scale: 2.0, easing: "smooth".into(), zoom_in_ms: 350, zoom_out_ms: 450, layer });
         }
         EditOp::AddZoomFull { at_ms, dur_ms, scale } => {
             let id = next_zoom_id(doc);
-            doc.zooms.push(Zoom { id, start_ms: at_ms, end_ms: at_ms.saturating_add(dur_ms),
-                target: ZoomTarget::Cursor, scale, easing: "smooth".into() });
+            let dur = dur_bound(doc);
+            let (start_ms, end_ms) = (at_ms.min(dur), at_ms.saturating_add(dur_ms).min(dur));
+            let existing: Vec<(u32, u32, u32)> = doc.zooms.iter().map(|z| (z.start_ms, z.end_ms, z.layer)).collect();
+            let layer = auto_layer(&existing, start_ms, end_ms);
+            doc.zooms.push(Zoom { id, start_ms, end_ms,
+                target: ZoomTarget::Cursor, scale, easing: "smooth".into(), zoom_in_ms: 350, zoom_out_ms: 450, layer });
         }
-        EditOp::UpdateZoom { id, start_ms, end_ms, scale, target, easing } => {
+        EditOp::UpdateZoom { id, start_ms, end_ms, scale, target, easing, zoom_in_ms, zoom_out_ms, layer } => {
+            let dur = dur_bound(doc);
             if let Some(z) = doc.zooms.iter_mut().find(|z| z.id == id) {
-                if let Some(v) = start_ms { z.start_ms = v; }
-                if let Some(v) = end_ms { z.end_ms = v; }
+                if let Some(v) = start_ms { z.start_ms = v.min(dur); }
+                if let Some(v) = end_ms { z.end_ms = v.min(dur); }
                 if let Some(v) = scale { z.scale = v; }
                 if let Some(v) = target { z.target = v; }
                 if let Some(v) = easing { z.easing = v; }
+                if let Some(v) = zoom_in_ms { z.zoom_in_ms = v; }
+                if let Some(v) = zoom_out_ms { z.zoom_out_ms = v; }
+                if let Some(v) = layer { z.layer = v; }
             }
         }
         EditOp::RemoveZoom { id } => {
@@ -79,11 +101,24 @@ pub fn apply(doc: &mut EditDoc, op: EditOp) {
             let id = next_speed_id(doc);
             doc.speed.push(Speed { id, start_ms, end_ms, factor });
         }
-        EditOp::SetLayoutSeg { id, layout } => {
-            if let Some(seg) = doc.layout.iter_mut().find(|s| s.id == id) {
-                seg.layout = layout;
+        EditOp::AddLayoutSeg { at_ms, dur_ms, layout } => {
+            let id = next_layout_id(doc);
+            let dur = crate::edit::region::dur_bound(doc);
+            doc.layout.push(crate::edit::model::LayoutSeg {
+                id, start_ms: at_ms.min(dur), end_ms: at_ms.saturating_add(dur_ms).min(dur),
+                layout: valid_layout(&layout), transition_ms: 350, easing: "smooth".into() });
+        }
+        EditOp::UpdateLayoutSeg { id, start_ms, end_ms, layout, transition_ms, easing } => {
+            let dur = crate::edit::region::dur_bound(doc);
+            if let Some(s) = doc.layout.iter_mut().find(|s| s.id == id) {
+                if let Some(v) = start_ms { s.start_ms = v.min(dur); }
+                if let Some(v) = end_ms { s.end_ms = v.min(dur); }
+                if let Some(v) = layout { s.layout = valid_layout(&v); }
+                if let Some(v) = transition_ms { s.transition_ms = v; }
+                if let Some(v) = easing { s.easing = valid_easing(&v); }
             }
         }
+        EditOp::RemoveLayoutSeg { id } => { doc.layout.retain(|s| s.id != id); }
         op @ (EditOp::AddEffect { .. } | EditOp::UpdateEffect { .. } | EditOp::RemoveEffect { .. }) =>
             crate::edit::effects::apply_effect(doc, op),
     }
@@ -108,91 +143,5 @@ pub fn metrics(doc: &EditDoc) -> Metrics {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::edit::model::{EditDoc, Trim, LayoutSeg};
-
-    fn empty() -> EditDoc { EditDoc::default() }
-
-    #[test]
-    fn add_zoom_appends_with_correct_span() {
-        let mut doc = empty();
-        apply(&mut doc, EditOp::AddZoom { at_ms: 500, dur_ms: 1000 });
-        let z = &doc.zooms[0];
-        assert_eq!((z.start_ms, z.end_ms, z.scale, z.easing.as_str()), (500, 1500, 2.0, "smooth"));
-    }
-
-    #[test]
-    fn add_zoom_yields_distinct_ids() {
-        let mut doc = empty();
-        apply(&mut doc, EditOp::AddZoom { at_ms: 0, dur_ms: 100 });
-        apply(&mut doc, EditOp::AddZoom { at_ms: 200, dur_ms: 100 });
-        assert_ne!(doc.zooms[0].id, doc.zooms[1].id);
-        assert!(doc.zooms[0].id.starts_with('z'));
-    }
-
-    #[test]
-    fn update_zoom_changes_only_supplied_fields() {
-        let mut doc = empty();
-        apply(&mut doc, EditOp::AddZoom { at_ms: 0, dur_ms: 500 });
-        let id = doc.zooms[0].id.clone();
-        apply(&mut doc, EditOp::UpdateZoom {
-            id, start_ms: Some(100), end_ms: None,
-            scale: None, target: None, easing: None,
-        });
-        assert_eq!((doc.zooms[0].start_ms, doc.zooms[0].end_ms, doc.zooms[0].scale), (100, 500, 2.0));
-    }
-
-    #[test]
-    fn update_zoom_unknown_id_is_noop() {
-        let mut doc = empty();
-        apply(&mut doc, EditOp::AddZoom { at_ms: 0, dur_ms: 100 });
-        apply(&mut doc, EditOp::UpdateZoom {
-            id: "z999".into(), start_ms: Some(9999), end_ms: None,
-            scale: None, target: None, easing: None,
-        });
-        assert_eq!(doc.zooms[0].start_ms, 0);
-    }
-
-    #[test]
-    fn remove_zoom_drops_by_id() {
-        let mut doc = empty();
-        apply(&mut doc, EditOp::AddZoom { at_ms: 0, dur_ms: 100 });
-        apply(&mut doc, EditOp::AddZoom { at_ms: 200, dur_ms: 100 });
-        let id = doc.zooms[0].id.clone(); apply(&mut doc, EditOp::RemoveZoom { id });
-        assert_eq!(doc.zooms.len(), 1);
-    }
-
-    #[test]
-    fn set_trim_replaces_trim() {
-        let mut doc = empty();
-        apply(&mut doc, EditOp::SetTrim { in_ms: 200, out_ms: 8000 });
-        assert_eq!(doc.trim, Trim { in_ms: 200, out_ms: 8000 });
-    }
-
-    #[test]
-    fn metrics_kept_ms_subtracts_cuts() {
-        let mut doc = empty();
-        apply(&mut doc, EditOp::SetTrim { in_ms: 0, out_ms: 10000 });
-        apply(&mut doc, EditOp::AddCut { start_ms: 1000, end_ms: 3000 });
-        let m = metrics(&doc);
-        assert_eq!((m.duration_ms, m.kept_ms, m.cut_count), (10000, 8000, 1));
-    }
-
-    #[test]
-    fn set_layout_seg_noop_unknown() {
-        let mut doc = empty();
-        doc.layout.push(LayoutSeg { id: "l1".into(), start_ms: 0, end_ms: 1000, layout: "screen".into() });
-        apply(&mut doc, EditOp::SetLayoutSeg { id: "l99".into(), layout: "pip".into() });
-        assert_eq!(doc.layout[0].layout, "screen");
-    }
-
-    #[test]
-    fn add_zoom_full_uses_given_scale() {
-        let mut doc = empty();
-        apply(&mut doc, EditOp::AddZoomFull { at_ms: 100, dur_ms: 500, scale: 3.0 });
-        let z = &doc.zooms[0];
-        assert_eq!((z.start_ms, z.end_ms, z.scale), (100, 600, 3.0));
-        assert!(z.id.starts_with('z'));
-    }
-}
+#[path = "api_tests.rs"]
+mod tests;

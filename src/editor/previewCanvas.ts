@@ -1,38 +1,33 @@
-import type { PreviewLayout, ClickSample, CursorKindSample } from "../lib/ipc";
-import { spotlightAlpha, drawSpotlight, type SpotlightInput } from "./spotlightPreview";
+import type { PreviewLayout, ClickSample } from "../lib/ipc";
+import { drawCursorSprite, type DrawCursor } from "./cursorPreview";
 
 export interface DrawCam { scale: number; cx: number; cy: number; curx: number; cury: number }
 
-/** Everything the preview needs to draw the export cursor: the recording's cursor style/size +
- *  bounce, the type track, and the decoded sprite images (+ hotspots + canvas heights) by kind. */
-export interface DrawCursor {
-  style: string; size: number; clickBounce: boolean; bounceIntensity: number; motionBlur: number;
-  kinds: CursorKindSample[];
-  sprites: Map<string, HTMLImageElement>;
-  hots: Map<string, [number, number]>;
-  canvasH: Map<string, number>;
-  recent: [number, number][]; // ring of recent on-canvas positions, for the motion trail
-}
-
-const RIPPLE_MS = 500;
-
-/** Composite one preview frame onto a 2D canvas: the export background, the zoomed screen video
- *  with cursor + click ripples + spotlight, and the webcam PiP. Framing + background come from the
- *  backend so the preview approximates the export (the zoom magnifies the screen within its fixed
- *  panel, so framing differs at high zoom). Canvas2D drawImage holds 60fps. */
+/** Composite one preview frame: draw the export background + the screen video into its panel
+ *  (unzoomed) onto an offscreen buffer, then crop+resize that WHOLE buffer per the camera zoom -
+ *  exactly like the export compositor (compositor.rs), which zooms the entire composited scene,
+ *  not just the screen's own source, so the background pans/zooms in lockstep with it. The webcam
+ *  PiP and cursor are then drawn on top of the zoomed result at their normal (unzoomed) size,
+ *  matching the export where they're composited/projected after the crop too. Canvas2D drawImage
+ *  holds 60fps. */
 export function drawPreview(
   ctx: CanvasRenderingContext2D, w: number, h: number,
   screen: HTMLVideoElement, webcam: HTMLVideoElement | null, cam: DrawCam,
   layout: PreviewLayout | null, bg: HTMLImageElement | null, clicks: ClickSample[], now: number,
-  cursor: DrawCursor | null, spotlight: SpotlightInput | null,
+  cursor: DrawCursor | null, offscreen: HTMLCanvasElement
 ) {
+  if (offscreen.width !== w) offscreen.width = w;
+  if (offscreen.height !== h) offscreen.height = h;
+  const octx = offscreen.getContext("2d");
+  if (!octx) return;
+
   // Background: the exact export bg image once loaded, else a gradient placeholder.
   if (bg && bg.complete && bg.naturalWidth > 0) {
-    ctx.drawImage(bg, 0, 0, w, h);
+    octx.drawImage(bg, 0, 0, w, h);
   } else {
-    const g = ctx.createLinearGradient(0, 0, w * 0.4, h);
+    const g = octx.createLinearGradient(0, 0, w * 0.4, h);
     g.addColorStop(0, "#2c2c42"); g.addColorStop(1, "#131318");
-    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+    octx.fillStyle = g; octx.fillRect(0, 0, w, h);
   }
 
   // Screen rect: from the backend layout (exact export framing), else an inset fallback.
@@ -45,39 +40,49 @@ export function drawPreview(
     dx = pad; dy = pad; dw = w - 2 * pad; dh = h - 2 * pad; r = Math.min(dw, dh) * 0.018 + 6;
   }
 
-  let curC: [number, number] | null = null, cpos: [number, number] | null = null; // spotlight centre; cursor pos
+  // The screen's full current frame into its panel, unzoomed - the zoom crop below applies to
+  // this whole composited base, not to a source-video crop. Gated on the layout's interpolated
+  // screenAlpha so a camera_only layout (or a mid-transition frame) hides/fades this panel.
   const vw = screen.videoWidth, vh = screen.videoHeight;
-  if (vw > 0 && vh > 0) {
-    // Zoom is a source-rect crop centred on cam.cx/cy.
-    const s = Math.max(1, cam.scale);
-    const sw = vw / s, sh = vh / s;
-    const sx = Math.max(0, Math.min(vw - sw, cam.cx * vw - sw / 2));
-    const sy = Math.max(0, Math.min(vh - sh, cam.cy * vh - sh / 2));
-    ctx.save();
-    ctx.shadowColor = "rgba(0,0,0,.5)"; ctx.shadowBlur = 34; ctx.shadowOffsetY = 14;
-    roundRect(ctx, dx, dy, dw, dh, r); ctx.fillStyle = "#000"; ctx.fill();
-    ctx.restore();
-    ctx.save();
-    roundRect(ctx, dx, dy, dw, dh, r); ctx.clip();
-    ctx.drawImage(screen, sx, sy, sw, sh, dx, dy, dw, dh);
-    // Map a 0..1 screen-content point to its on-canvas pixel through the zoom crop, or null
-    // when it lies outside the visible crop. Cursor + click ripples share this so they track.
-    const map = (fx: number, fy: number): [number, number] | null => {
-      const vx = fx * vw, vy = fy * vh;
-      if (vx < sx || vx > sx + sw || vy < sy || vy > sy + sh) return null;
-      return [dx + ((vx - sx) / sw) * dw, dy + ((vy - sy) / sh) * dh];
-    };
-    drawClicks(ctx, clicks, now, map, Math.min(w, h)); // ripples behind the cursor, clipped to screen
-    cpos = map(cam.curx, cam.cury);
-    curC = [dx + ((cam.curx * vw - sx) / sw) * dw, dy + ((cam.cury * vh - sy) / sh) * dh];
-    ctx.restore();
-    // Cursor on top, UNCLIPPED, so it is never cut at the panel edge/rounded corner when zoomed
-    // (the export's panel-rect cursor clip expands to ~the whole frame at zoom, so it isn't cut).
-    if (cpos && cursor) drawCursorSprite(ctx, cpos, now, cursor, clicks, h);
+  const screenAlpha = layout?.screenAlpha ?? 1;
+  if (vw > 0 && vh > 0 && screenAlpha >= 0.004) {
+    octx.globalAlpha = screenAlpha;
+    octx.save();
+    octx.shadowColor = "rgba(0,0,0,.5)"; octx.shadowBlur = 34; octx.shadowOffsetY = 14;
+    roundRect(octx, dx, dy, dw, dh, r); octx.fillStyle = "#000"; octx.fill();
+    octx.restore();
+    octx.save();
+    roundRect(octx, dx, dy, dw, dh, r); octx.clip();
+    octx.drawImage(screen, 0, 0, vw, vh, dx, dy, dw, dh);
+    octx.restore();
+    octx.globalAlpha = 1;
+  }
+
+  // Zoom: crop+resize the WHOLE base (background + screen panel together) per the camera, same
+  // math as the export's coordmap::crop - so the background pans/zooms with the screen instead of
+  // sitting static behind a merely-cropped raw recording.
+  const scale = Math.max(cam.scale, 0.01);
+  const cw = Math.max(1, w / scale), ch = Math.max(1, h / scale);
+  const camPxX = dx + cam.cx * dw, camPxY = dy + cam.cy * dh;
+  const cx0 = Math.min(Math.max(camPxX - cw / 2, 0), Math.max(0, w - cw));
+  const cy0 = Math.min(Math.max(camPxY - ch / 2, 0), Math.max(0, h - ch));
+  ctx.drawImage(offscreen, cx0, cy0, cw, ch, 0, 0, w, h);
+
+  // Cursor: project its pre-zoom position through the same crop, drawn on the zoomed result at a
+  // fixed size (the export doesn't scale cursor size with zoom either - only its position moves).
+  if (cursor && vw > 0 && vh > 0) {
+    const curPxX = dx + cam.curx * dw, curPxY = dy + cam.cury * dh;
+    const cpos: [number, number] = [(curPxX - cx0) * w / cw, (curPxY - cy0) * h / ch];
+    drawCursorSprite(ctx, cpos, now, cursor, clicks, h);
   }
 
   // Webcam PiP: exact rect from the layout (rounded-rect, cover-fit), else a bottom-right circle.
-  if (webcam && webcam.videoWidth > 0 && webcam.videoHeight > 0) {
+  // Drawn on top of the zoomed result, unzoomed itself - a fixed floating bubble, like the export.
+  // Gated on the layout's interpolated camAlpha so a screen_only layout (or a mid-transition
+  // frame) hides/fades this PiP.
+  const camAlpha = layout?.camAlpha ?? 1;
+  if (webcam && webcam.videoWidth > 0 && webcam.videoHeight > 0 && camAlpha >= 0.004) {
+    ctx.globalAlpha = camAlpha;
     const wv = webcam.videoWidth, wvh = webcam.videoHeight;
     if (layout?.cam) {
       const [fx, fy, fw, fh, fr] = layout.cam;
@@ -108,10 +113,8 @@ export function drawPreview(
       ctx.beginPath(); ctx.arc(cxp, cyp, cr, 0, Math.PI * 2);
       ctx.strokeStyle = "rgba(255,255,255,.18)"; ctx.lineWidth = 2; ctx.stroke();
     }
+    ctx.globalAlpha = 1;
   }
-
-  // Spotlight: darken the whole canvas with a soft hole at the cursor (approximates the export's Classic mode).
-  if (spotlight && curC) drawSpotlight(ctx, w, h, curC, spotlightAlpha(spotlight.effects, spotlight.holds, spotlight.on, now), spotlight.params);
 }
 
 /** Draw `img` to cover the dest rect (centre-crop the source to the dest aspect). */
@@ -120,72 +123,6 @@ function coverDraw(ctx: CanvasRenderingContext2D, img: CanvasImageSource, sw: nu
   const scale = Math.max(dw / sw, dh / sh);
   const cw = dw / scale, ch = dh / scale;
   ctx.drawImage(img, (sw - cw) / 2, (sh - ch) / 2, cw, ch, dx, dy, dw, dh);
-}
-
-/** Expanding click ripples: for each click within RIPPLE_MS of `now`, a fading ring at the
- *  zoom-mapped click position (matching the export's click FX). `map` projects 0..1 screen
- *  points through the current zoom crop (null = off-screen). */
-function drawClicks(ctx: CanvasRenderingContext2D, clicks: ClickSample[], now: number,
-  map: (fx: number, fy: number) => [number, number] | null, minSide: number) {
-  for (const c of clicks) {
-    const dt = now - c.t;
-    if (dt < 0 || dt > RIPPLE_MS) continue;
-    const p = map(c.x, c.y);
-    if (!p) continue;
-    const t = dt / RIPPLE_MS;
-    const radius = minSide * (0.012 + 0.05 * t);
-    const a = (1 - t) * 0.5;
-    ctx.beginPath(); ctx.arc(p[0], p[1], radius, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(255,255,255,${a * 0.35})`; ctx.fill();
-    ctx.lineWidth = 2; ctx.strokeStyle = `rgba(255,255,255,${a})`; ctx.stroke();
-  }
-}
-
-/** The cursor type active at output time `ms` (last sample with t <= ms), default "arrow". */
-function cursorAt(kinds: CursorKindSample[], ms: number): string {
-  let lo = 0, hi = kinds.length;
-  while (lo < hi) { const mid = (lo + hi) >> 1; if (kinds[mid].t <= ms) lo = mid + 1; else hi = mid; }
-  return lo > 0 ? kinds[lo - 1].kind : "arrow";
-}
-
-/** Draw the real export cursor sprite at the mapped position `p`, gated by style: only when
- *  "enhanced" (System = the OS cursor is already in the video; Hidden = none). Sized like the
- *  export (size * outH * 0.033, uniform on the sprite's canvas height), anchored at the hotspot,
- *  with the same post-click bounce dip and a fading motion trail (driven by `motionBlur`). */
-function drawCursorSprite(ctx: CanvasRenderingContext2D, p: [number, number], now: number,
-  c: DrawCursor, clicks: ClickSample[], outH: number) {
-  if (c.style !== "enhanced") return;
-  const kind = cursorAt(c.kinds, now);
-  const img = c.sprites.get(kind) ?? c.sprites.get("arrow");
-  const ch = c.canvasH.get(kind) ?? c.canvasH.get("arrow");
-  const hot = c.hots.get(kind) ?? c.hots.get("arrow");
-  if (!img || !img.complete || !img.naturalWidth || !ch || !hot) return;
-  let sizePx = c.size * outH * 0.033;
-  if (c.clickBounce) {
-    for (let i = clicks.length - 1; i >= 0; i--) {
-      const dt = now - clicks[i].t;
-      if (dt < 0) continue;
-      if (dt < 180) sizePx *= 1 - 0.36 * c.bounceIntensity * (1 - dt / 180);
-      break;
-    }
-  }
-  const scale = sizePx / ch;
-  const tw = img.naturalWidth * scale, th = img.naturalHeight * scale;
-  const blit = (q: [number, number]) => ctx.drawImage(img, q[0] - hot[0] * tw, q[1] - hot[1] * th, tw, th);
-  // Motion trail (matches the export's apply_enhanced): the last few positions, fading. A large
-  // jump (a scrub) clears it so the trail never smears across a seek.
-  const last = c.recent[c.recent.length - 1];
-  if (last && Math.hypot(p[0] - last[0], p[1] - last[1]) > outH * 0.2) c.recent.length = 0;
-  c.recent.push(p); if (c.recent.length > 6) c.recent.shift();
-  if (c.motionBlur > 0) {
-    const trail = c.recent.slice(0, -1).reverse();
-    for (let i = 0; i < trail.length; i++) {
-      ctx.globalAlpha = Math.min(1, c.motionBlur * (1 - i / trail.length) * 0.5);
-      blit(trail[i]);
-    }
-    ctx.globalAlpha = 1;
-  }
-  blit(p);
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {

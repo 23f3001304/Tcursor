@@ -64,6 +64,7 @@ Where the camera centers during a zoom event.
 pub struct Zoom {
     pub id: String, pub start_ms: u32, pub end_ms: u32,
     pub target: ZoomTarget, pub scale: f32, pub easing: String,
+    pub zoom_in_ms: u32, pub zoom_out_ms: u32,
 }
 ```
 
@@ -201,7 +202,14 @@ The kind of an editable effect region. Serializes lowercase (`"spotlight"`) to m
 
 ```rust
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct EffectRegion { pub id: String, pub kind: EffectKind, pub start_ms: u32, pub end_ms: u32 }
+pub struct EffectRegion {
+    pub id: String, pub kind: EffectKind, pub start_ms: u32, pub end_ms: u32,
+    pub fade_in_ms: u32, pub fade_out_ms: u32,
+    pub mode: Option<crate::settings::model::SpotlightMode>,
+    pub dim: Option<f32>,
+    pub radius: Option<f32>,
+    pub feather: Option<f32>,
+}
 ```
 
 An editable effect region on the timeline (v1: Spotlight). `EditDoc.effects` is a `Vec<EffectRegion>` with `#[serde(default)]` for back-compat (a pre-existing `edit.json` without `effects` loads). Params default from settings for now; at export, `fx_state::spotlight_region_alpha` fades a Spotlight region in/out over its span and unions it with the settings + hotkey-hold spotlight.

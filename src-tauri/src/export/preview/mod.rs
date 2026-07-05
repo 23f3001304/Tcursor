@@ -1,0 +1,173 @@
+// Render one composited frame at an arbitrary time T from edit.json.
+// A WARM FrameRenderer (GPU pipeline, probed dims, decoded background, loaded
+// events/edit/actions) is cached per recording in PreviewSession and reused across
+// scrubs - only the per-frame seek-decode + composite + PNG-encode rerun. The cache is
+// keyed by (folder, edit.json mtime, size), so an edit (which rewrites edit.json)
+// transparently rebuilds it and the next preview reflects the change.
+use anyhow::{Context, Result};
+use std::path::PathBuf;
+use std::sync::Mutex;
+use std::time::SystemTime;
+use crate::export::pipeline::ffio::RawDecoder;
+use crate::export::render::{FrameRenderer, RenderMeta, OUT_FPS};
+use crate::export::types::Layout;
+use crate::session::paths::ProjectPaths;
+
+/// Build a fresh preview renderer for `out_w x out_h`. Scales export's absolute pad/radius
+/// to the (smaller) preview canvas so framing matches export proportionally.
+fn build_renderer(paths: &ProjectPaths, out_w: u32, out_h: u32) -> Result<(FrameRenderer, RenderMeta)> {
+    let fps = crate::win::display::primary_refresh_hz().min(60);
+    let def = Layout::default();
+    let s = out_w as f32 / def.out_w as f32;
+    let layout = Layout {
+        out_w, out_h,
+        pad_px: (def.pad_px as f32 * s).round() as u32,
+        screen_radius_px: def.screen_radius_px * s,
+        ..def
+    };
+    FrameRenderer::new(paths, layout, fps)
+}
+
+/// Per-frame work given a warm renderer: rewind the camera, fast-forward to T (math only),
+/// seek-decode the screen + webcam frame at T, composite, PNG-encode.
+fn render_frame(renderer: &mut FrameRenderer, meta: &RenderMeta, paths: &ProjectPaths,
+                time_ms: u32, out_w: u32, out_h: u32) -> Result<Vec<u8>> {
+    // step_camera requires ascending t; rewind so the cached renderer can re-scan to T.
+    renderer.reset_camera();
+    let k_target = time_ms as u64 * OUT_FPS / 1000;
+    let mut pose = renderer.step_camera(meta.video_start);
+    for j in 1..=k_target {
+        pose = renderer.step_camera(meta.video_start + j * 1000 / OUT_FPS);
+    }
+
+    // Seek-decode one screen frame at time_ms (the screen file's frame 0 is video_start).
+    let mut screen_buf = vec![0u8; meta.screen_bytes];
+    let mut screen_dec = RawDecoder::spawn(
+        &paths.video(), 0.0, false, Some(time_ms as u64), None, meta.screen_bytes)?;
+    if !screen_dec.read_frame(&mut screen_buf)? {
+        anyhow::bail!("no screen frame at {time_ms}ms (past end of video)");
+    }
+    drop(screen_dec);
+
+    // Seek-decode one webcam frame if present (export pre-seeks webcam by video_start).
+    let wc_size = meta.webcam_size;
+    let wc_bytes = (wc_size * wc_size * 4) as usize;
+    let webcam: Option<(Vec<u8>, u32, u32)> = if paths.webcam().exists() {
+        let mut buf = vec![0u8; wc_bytes];
+        let mut wc_dec = RawDecoder::spawn(
+            &paths.webcam(), OUT_FPS as f64, false,
+            Some(meta.video_start + time_ms as u64), Some(wc_size), wc_bytes)?;
+        wc_dec.read_frame(&mut buf)?;
+        drop(wc_dec);
+        Some((buf, wc_size, wc_size))
+    } else {
+        None
+    };
+
+    let wc_ref = webcam.as_ref().map(|(b, w, h)| (b.as_slice(), *w, *h));
+    let mut bgra = Vec::new();
+    renderer.composite_at(&pose, &screen_buf, wc_ref, &mut bgra);
+    png_encode(&bgra, out_w, out_h)
+}
+
+/// Render one composited frame at `time_ms` into the recording at `paths` (uncached:
+/// builds a fresh renderer). Returns PNG bytes (`out_w` x `out_h`).
+pub fn render_preview(paths: &ProjectPaths, time_ms: u32, out_w: u32, out_h: u32) -> Result<Vec<u8>> {
+    let (mut renderer, meta) = build_renderer(paths, out_w, out_h)?;
+    render_frame(&mut renderer, &meta, paths, time_ms, out_w, out_h)
+}
+
+/// A warm preview renderer cached for one recording + edit revision.
+pub(crate) struct Cached { pub folder: String, pub mtime: Option<SystemTime>, pub out_w: u32, pub out_h: u32, pub renderer: FrameRenderer, pub meta: RenderMeta }
+
+/// Managed Tauri state: the most-recently-used warm preview renderer (one at a time).
+#[derive(Default)]
+pub struct PreviewSession(Mutex<Option<Cached>>);
+
+/// Run `f` with the warm renderer for `folder`, (re)building it when the folder, edit.json
+/// mtime, or preview size changes. The single place the preview cache is keyed - shared by
+/// every preview command (frame, camera track, layout, clicks, background) so the warm-up
+/// logic lives once.
+pub(crate) fn with_warm<T>(session: &PreviewSession, folder: &str,
+    f: impl FnOnce(&mut Cached, &ProjectPaths) -> Result<T, String>) -> Result<T, String> {
+    let paths = ProjectPaths { folder: PathBuf::from(folder) };
+    let (out_w, out_h) = (1280u32, 720u32);
+    let mtime = std::fs::metadata(paths.edit()).and_then(|m| m.modified()).ok();
+    let mut guard = session.0.lock().unwrap();
+    // Same recording + preview size already warm: an edit.json change only needs the cheap
+    // edit-derived state refreshed in place (zoom/layout/regions) - NOT a full renderer rebuild,
+    // which recreates the GPU device + decodes the background. This is what keeps editing zoom/
+    // spotlight snappy (the editor re-fetches camera_track/preview_layout on every edit).
+    let same = matches!(guard.as_ref(),
+        Some(c) if c.folder == folder && c.out_w == out_w && c.out_h == out_h);
+    if same {
+        let c = guard.as_mut().unwrap();
+        if c.mtime != mtime { c.renderer.reload_edit(&paths); c.mtime = mtime; }
+    } else {
+        let (renderer, meta) = build_renderer(&paths, out_w, out_h).map_err(|e| e.to_string())?;
+        *guard = Some(Cached { folder: folder.to_string(), mtime, out_w, out_h, renderer, meta });
+    }
+    f(guard.as_mut().unwrap(), &paths)
+}
+
+/// PNG-encode a BGRA buffer in-memory.
+pub(crate) fn png_encode(bgra: &[u8], w: u32, h: u32) -> Result<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut rgba = vec![0u8; bgra.len()];
+    for i in (0..bgra.len()).step_by(4) {
+        rgba[i] = bgra[i + 2];
+        rgba[i + 1] = bgra[i + 1];
+        rgba[i + 2] = bgra[i];
+        rgba[i + 3] = bgra[i + 3];
+    }
+    let mut encoder = png::Encoder::new(&mut out, w, h);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header().context("png write header")?;
+    writer.write_image_data(&rgba).context("png write image data")?;
+    drop(writer);
+    Ok(out)
+}
+
+/// Tauri command: render one preview frame and return a PNG data URL. Reuses the warm
+/// renderer cache (`with_warm`), so scrubbing is fast and edits still take effect.
+#[tauri::command]
+pub fn preview_frame(folder: String, time_ms: u32, session: tauri::State<'_, PreviewSession>) -> Result<String, String> {
+    let png = with_warm(&session, &folder, |c, paths| {
+        render_frame(&mut c.renderer, &c.meta, paths, time_ms, c.out_w, c.out_h).map_err(|e| e.to_string())
+    })?;
+    Ok(format!("data:image/png;base64,{}", base64_encode(&png)))
+}
+
+/// Tauri command: the export background (BGRA mesh/gradient) as a PNG data URL, so the
+/// editor's canvas preview paints the exact same background the export uses instead of an
+/// approximate gradient. Reuses the warm renderer cache.
+#[tauri::command]
+pub fn preview_bg(folder: String, session: tauri::State<'_, PreviewSession>) -> Result<String, String> {
+    let png = with_warm(&session, &folder, |c, _paths| {
+        png_encode(c.renderer.bg(), c.out_w, c.out_h).map_err(|e| e.to_string())
+    })?;
+    Ok(format!("data:image/png;base64,{}", base64_encode(&png)))
+}
+
+/// Base64-encode bytes (RFC 4648, no padding line-breaks).
+pub(crate) fn base64_encode(input: &[u8]) -> String {
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity((input.len() + 2) / 3 * 4);
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0] as usize;
+        let b1 = if chunk.len() > 1 { chunk[1] as usize } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as usize } else { 0 };
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(CHARS[(n >> 18) & 63] as char);
+        out.push(CHARS[(n >> 12) & 63] as char);
+        out.push(if chunk.len() > 1 { CHARS[(n >> 6) & 63] as char } else { '=' });
+        out.push(if chunk.len() > 2 { CHARS[n & 63] as char } else { '=' });
+    }
+    out
+}
+
+pub mod preview_fx;
+pub mod preview_layouts;
+pub mod preview_track;
+pub mod thumbs;

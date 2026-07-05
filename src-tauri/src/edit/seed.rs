@@ -23,18 +23,12 @@ fn easing_str(e: Easing) -> String {
 /// it is preserved as `ZoomTarget::Fixed{x,y}` (NOT dropped to `Cursor`) to keep a
 /// re-render byte-identical. Output length always equals input length.
 pub fn zooms_from_regions(regions: &[ZoomRegion]) -> Vec<Zoom> {
-    regions
-        .iter()
-        .enumerate()
-        .map(|(i, r)| Zoom {
-            id: format!("z{}", i),
-            start_ms: r.start_ms,
-            end_ms: r.end_ms,
-            target: ZoomTarget::Fixed { x: r.anchor.x as f32, y: r.anchor.y as f32 },
-            scale: r.target_scale,
-            easing: easing_str(r.easing),
-        })
-        .collect()
+    regions.iter().enumerate().map(|(i, r)| Zoom {
+        id: format!("z{}", i), start_ms: r.start_ms, end_ms: r.end_ms,
+        target: ZoomTarget::Fixed { x: r.anchor.x as f32, y: r.anchor.y as f32 },
+        scale: r.target_scale, easing: easing_str(r.easing),
+        zoom_in_ms: r.zoom_in_ms, zoom_out_ms: r.zoom_out_ms, layer: r.layer,
+    }).collect()
 }
 
 /// Serde wire name for a `LayoutId` (e.g. `screen`, `screen_only`).
@@ -58,7 +52,8 @@ pub fn layout_from_actions(actions: &[ActionEvent], dur_ms: u32) -> Vec<LayoutSe
     let mut segs = Vec::with_capacity(switches.len());
     for (i, &(start, id)) in switches.iter().enumerate() {
         let end = switches.get(i + 1).map(|&(s, _)| s).unwrap_or(dur_ms).max(start);
-        segs.push(LayoutSeg { id: format!("l{}", i), start_ms: start, end_ms: end, layout: layout_name(id) });
+        segs.push(LayoutSeg { id: format!("l{}", i), start_ms: start, end_ms: end, layout: layout_name(id),
+            transition_ms: 350, easing: "smooth".into() });
     }
     segs
 }
@@ -93,17 +88,17 @@ fn build_default(paths: &ProjectPaths) -> EditDoc {
     // Raw regions: auto click-zoom then manual hold-zoom (same order as the exporter;
     // re-anchoring into the screen panel is deferred to render-time, as today).
     let mut raw = if settings.zoom.enabled {
-        crate::export::autozoom::generate(&log.events, &log.screen, &cfg, &typing, settings.zoom.smart_hold)
+        crate::export::camera::autozoom::generate(&log.events, &log.screen, &cfg, &typing, settings.zoom.smart_hold)
     } else {
         Vec::new()
     };
-    raw.extend(crate::export::manual::from_actions(&actions, &log.events, &log.screen, &cfg));
+    raw.extend(crate::export::camera::manual::from_actions(&actions, &log.events, &log.screen, &cfg));
 
     // Auto/manual zoom regions come out in EVENT time (click/press timestamps); the editor
     // timeline is OUTPUT time (0 = first video frame). Shift zooms onto the output clock so a
     // seeded zoom lands where its pill sits - the same `out = et + events_ms - video_start`
     // conversion clicks use - and so edited/added zooms (already output-time) stay consistent.
-    let tl = crate::export::timeline::build_timeline(paths, &log, 60);
+    let tl = crate::export::pipeline::timeline::build_timeline(paths, &log, 60);
     let video_start = tl.frames.first().copied().unwrap_or(0);
     let dur_ms = (tl.frames.last().copied().unwrap_or(video_start).max(video_start + 1) - video_start) as u32;
     let shift = tl.events_ms as i64 - video_start as i64;
@@ -126,10 +121,10 @@ fn build_default(paths: &ProjectPaths) -> EditDoc {
 /// Recorded spotlight holds as editable Spotlight regions (event-time spans clamped to `[0, dur]`,
 /// the base seeded zooms use), so a hotkey-held spotlight is an editable/removable timeline pill.
 fn spotlight_effects(actions: &[ActionEvent], dur: u32) -> Vec<EffectRegion> {
-    crate::export::hold::hold_spans(actions, dur,
+    crate::export::fx::hold::hold_spans(actions, dur,
         |k| matches!(k, ActionKind::SpotlightHoldStart), |k| matches!(k, ActionKind::SpotlightHoldEnd))
         .into_iter().enumerate().filter(|(_, (s, e))| *e > 0 && *s < dur)
-        .map(|(i, (s, e))| EffectRegion { id: format!("e{i}"), kind: EffectKind::Spotlight, start_ms: s.min(dur), end_ms: e.min(dur) })
+        .map(|(i, (s, e))| EffectRegion { id: format!("e{i}"), kind: EffectKind::Spotlight, start_ms: s.min(dur), end_ms: e.min(dur), fade_in_ms: 250, fade_out_ms: 250, mode: None, dim: None, radius: None, feather: None, layer: 0 })
         .collect()
 }
 
@@ -141,7 +136,7 @@ mod tests {
 
     fn region(start: u32, end: u32, x: i32, y: i32) -> ZoomRegion {
         ZoomRegion { start_ms: start, end_ms: end, zoom_in_ms: 350, zoom_out_ms: 450,
-            target_scale: 2.2, anchor: FramePoint { x, y }, easing: Easing::Smooth }
+            target_scale: 2.2, anchor: FramePoint { x, y }, easing: Easing::Smooth, layer: 0 }
     }
 
     #[test]

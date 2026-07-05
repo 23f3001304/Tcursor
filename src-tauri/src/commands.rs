@@ -31,7 +31,7 @@ pub fn save_webcam(folder: String, bytes: Vec<u8>) -> Result<(), String> {
 
 #[tauri::command]
 pub fn export_project(folder: String, app: tauri::AppHandle) -> Result<(), String> {
-    crate::export::run::run_export(app, folder);
+    crate::export::pipeline::run::run_export(app, folder);
     Ok(())
 }
 

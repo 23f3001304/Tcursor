@@ -34,7 +34,7 @@ Renders the ruler, filmstrip, track stack, and spring-animated playhead.
 
 **Filmstrip.** `<Filmstrip thumbs={thumbs} />` fills the clip with the frame thumbnails.
 
-**Zoom track.** Each `doc.zooms` entry is a `motion.div.e-zblk` in `.e-zoomrow`, positioned `left: (s/dur)*100%`, `width: max(2.5%, ((e-s)/dur)*100%)` where `s/e` come from the live `useRegionDrag` draft while dragging. Body = move; the two `.e-zh` handles = retime. Selected pills get `.sel`. Spring: `stiffness 480, damping 30`.
+**Zoom track.** `layoutRegions(doc.zooms)` assigns each zoom a `layer` (same greedy interval-partitioning as the effect layers below), and the timeline renders one `.e-zoomrow` per layer - so overlapping zooms stack on separate rows instead of colliding in the same lane. Each entry is a `motion.div.e-zblk`, positioned `left: (s/dur)*100%`, `width: max(2.5%, ((e-s)/dur)*100%)` where `s/e` come from the live `useRegionDrag` draft while dragging (layer-aware: `useRegionDrag` only clamps a drag against same-layer neighbours, so cross-layer overlap during a drag is allowed). Body = move; the two `.e-zh` handles = retime. Selected pills get `.sel`. Spring: `stiffness 480, damping 30`.
 
 **Effect layers.** `layoutRegions(doc.effects)` assigns each effect a `layer`; the timeline renders one `.e-fxrow` per layer (so overlapping spotlights stack on separate rows), each pill an amber `.e-fxblk` driven by a second `useRegionDrag` (layer-aware clamp). Selecting opens the `EffectInspector`.
 

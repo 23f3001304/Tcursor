@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use cursor_zoom_lib::export::exporter::export;
+use cursor_zoom_lib::export::pipeline::exporter::export;
 use cursor_zoom_lib::session::paths::ProjectPaths;
 
 #[test]

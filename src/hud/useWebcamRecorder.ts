@@ -13,14 +13,14 @@ export function useWebcamRecorder() {
     rec.current = mr;
   }
 
-  async function stop(): Promise<number[] | null> {
+  async function stop(): Promise<Uint8Array | null> {
     const mr = rec.current;
     if (!mr) return null;
     const done = new Promise<Blob>((res) => { mr.onstop = () => res(new Blob(chunks.current, { type: "video/webm" })); });
     mr.stop();
     rec.current = null;
     const buf = await (await done).arrayBuffer();
-    return Array.from(new Uint8Array(buf));
+    return new Uint8Array(buf);
   }
 
   return { start, stop };

@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::io;
 use std::path::Path;
+use flate2::write::GzEncoder;
+use flate2::read::GzDecoder;
+use flate2::Compression;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -33,13 +36,31 @@ pub struct EventLog {
 
 impl EventLog {
     pub fn save(&self, path: &Path) -> io::Result<()> {
-        let json = serde_json::to_vec(self)
+        let file = std::fs::File::create(path)?;
+        let writer = std::io::BufWriter::new(file);
+        let mut encoder = GzEncoder::new(writer, Compression::default());
+        serde_json::to_writer(&mut encoder, self)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-        std::fs::write(path, json)
+        encoder.finish()?;
+        Ok(())
     }
     pub fn load(path: &Path) -> io::Result<EventLog> {
-        let bytes = std::fs::read(path)?;
-        serde_json::from_slice(&bytes).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+        use std::io::{Read, Seek, SeekFrom};
+        let mut file = std::fs::File::open(path)?;
+        let mut header = [0u8; 2];
+        let is_gzip = if file.read_exact(&mut header).is_ok() {
+            header == [0x1f, 0x8b]
+        } else {
+            false
+        };
+        file.seek(SeekFrom::Start(0))?;
+        let reader = std::io::BufReader::new(file);
+        if is_gzip {
+            let decoder = GzDecoder::new(reader);
+            serde_json::from_reader(decoder).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+        } else {
+            serde_json::from_reader(reader).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+        }
     }
 }
 
@@ -69,5 +90,33 @@ mod tests {
             t: 0, kind: EventKind::Move, x: 1, y: 2, button: None,
         }).unwrap();
         assert!(!json.contains("button"));
+    }
+    #[test]
+    fn loads_both_compressed_and_uncompressed_event_logs() {
+        let log = EventLog {
+            started_unix_ms: 1000,
+            screen: ScreenInfo { w: 1920, h: 1080, origin_x: 0, origin_y: 0 },
+            events: vec![MouseEvent { t: 0, kind: EventKind::Move, x: 5, y: 6, button: None }],
+        };
+        let tmp_dir = std::env::temp_dir();
+        let gz_path = tmp_dir.join("test_events_gz.json");
+        let plain_path = tmp_dir.join("test_events_plain.json");
+        let _ = std::fs::remove_file(&gz_path);
+        let _ = std::fs::remove_file(&plain_path);
+
+        log.save(&gz_path).unwrap();
+        let json = serde_json::to_vec(&log).unwrap();
+        std::fs::write(&plain_path, json).unwrap();
+
+        let log_gz = EventLog::load(&gz_path).unwrap();
+        let log_plain = EventLog::load(&plain_path).unwrap();
+
+        assert_eq!(log_gz.started_unix_ms, 1000);
+        assert_eq!(log_plain.started_unix_ms, 1000);
+        assert_eq!(log_gz.events.len(), 1);
+        assert_eq!(log_plain.events.len(), 1);
+
+        let _ = std::fs::remove_file(&gz_path);
+        let _ = std::fs::remove_file(&plain_path);
     }
 }

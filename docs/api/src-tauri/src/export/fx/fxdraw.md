@@ -1,4 +1,4 @@
-# src-tauri/src/export/fxdraw.rs
+# src-tauri/src/export/fx/fxdraw.rs
 
 CPU fallback `FxRenderer` implementation that applies the full effect stack (video FX, spotlight, click effects) sequentially onto the composited BGRA frame. This renderer is always available; the GPU path in `fx_gpu` replaces it when a compatible GPU is detected. `fx_state::select_fx` returns a `Box<dyn FxRenderer>` pointing to either implementation so the rest of the export pipeline never needs to branch.
 
@@ -12,7 +12,7 @@ Unit struct implementing the `FxRenderer` trait. Carries no state; all rendering
 
 ### Used by
 
-- `src-tauri/src/export/fx_state.rs` - `select_fx` returns `Box::new(CpuFx)` when no GPU is available.
+- `src-tauri/src/export/fx/fx_state.rs` - `select_fx` returns `Box::new(CpuFx)` when no GPU is available.
 
 ## CpuFx::apply
 

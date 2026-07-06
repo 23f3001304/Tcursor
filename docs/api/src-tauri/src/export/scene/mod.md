@@ -1,4 +1,4 @@
-# src-tauri/src/export/scene.rs
+# src-tauri/src/export/scene/mod.rs
 
 Defines the two-panel scene geometry (screen + camera), resolves each `LayoutId` preset into concrete output-pixel rectangles and radii, and provides cross-dissolve interpolation and zoom-driven camera shrink. Pure CPU geometry - no I/O, no GPU state, identical inputs produce identical outputs.
 
@@ -17,10 +17,10 @@ One composited layer expressed as a rounded rectangle in output pixels.
 
 ### Used by
 
-- `src-tauri/src/export/compositor.rs` - `draw_panel` reads `rect`, `radius`, `alpha` to blit and blend.
-- `src-tauri/src/export/gpu_uniforms.rs` - `build_uniforms` packs both panels' fields into the WGSL uniform buffer.
-- `src-tauri/src/export/exporter.rs` - checks `scene.screen.alpha < 0.5` to disable zoom on CameraOnly layouts.
-- `src-tauri/src/export/layout.rs` - `LayoutTrack` stores and interpolates panels during transitions.
+- `src-tauri/src/export/gpu/compositor.rs` - `draw_panel` reads `rect`, `radius`, `alpha` to blit and blend.
+- `src-tauri/src/export/gpu/gpu_uniforms.rs` - `build_uniforms` packs both panels' fields into the WGSL uniform buffer.
+- `src-tauri/src/export/pipeline/exporter.rs` - checks `scene.screen.alpha < 0.5` to disable zoom on CameraOnly layouts.
+- `src-tauri/src/export/scene/layout.rs` - `LayoutTrack` stores and interpolates panels during transitions.
 
 ## Scene
 
@@ -36,10 +36,10 @@ The complete frame geometry at one instant: screen is the zoomed base layer, cam
 
 ### Used by
 
-- `src-tauri/src/export/compositor.rs` - `CpuCompositor::composite_into` draws screen then camera.
-- `src-tauri/src/export/gpu_compositor.rs` - passes both panels to the shader via uniforms.
-- `src-tauri/src/export/exporter.rs` - receives scene from `LayoutTrack::scene_at`; applies `shrink_camera` on `scene.camera`.
-- `src-tauri/src/export/layout.rs` - produces `Scene` values via `resolve`; interpolates them on transitions.
+- `src-tauri/src/export/gpu/compositor.rs` - `CpuCompositor::composite_into` draws screen then camera.
+- `src-tauri/src/export/gpu/gpu_compositor.rs` - passes both panels to the shader via uniforms.
+- `src-tauri/src/export/pipeline/exporter.rs` - receives scene from `LayoutTrack::scene_at`; applies `shrink_camera` on `scene.camera`.
+- `src-tauri/src/export/scene/layout.rs` - produces `Scene` values via `resolve`; interpolates them on transitions.
 
 ## Scene::lerp
 
@@ -92,6 +92,27 @@ A new `Panel` with rect and radius scaled about the panel center by a smoothstep
 ### Behaviors worth knowing
 
 - `shrink_is_identity_at_no_zoom_and_min_at_full` (unit test): at `scale=1.0` the panel is unchanged; at `scale=target_scale=2.2` with `min=0.6` the width shrinks to 120 (60% of 200) and the center stays fixed.
+
+## rect_from_center
+
+```rust
+pub fn rect_from_center(p: CamPose, ow: f32, oh: f32) -> RectF
+```
+
+Converts a sampled `CamPose` (Task 4's camera_moves interpolator output - center `x`/`y` + `size`, all fractions of the output frame) into the camera panel's `RectF`. Used by `FrameRenderer::step_camera` (`src-tauri/src/export/render/mod.rs`) to override the scene's static camera-panel rect only when `CameraMoveTrack::sample` returns `Some`.
+
+### Inputs
+
+- `p: CamPose` - `x`/`y` are the PiP's center as a fraction of the frame; `size` is its height as a fraction of the frame. *Why fractions, not pixels:* matches `CameraMove`'s wire units and stays resolution-independent.
+- `ow: f32`, `oh: f32` - output canvas dimensions in pixels. *Why:* converts the fractional pose to the pixel `RectF` the panel/compositor need.
+
+### Returns
+
+`RectF { x, y, w, h }` (top-left form): `h = p.size * oh`; `w = h` (square - the mode's aspect ratio is not applied here, it lands in Task 9); `x = p.x * ow - w/2`, `y = p.y * oh - h/2` so the rect is centered at `(p.x * ow, p.y * oh)`.
+
+### Behaviors worth knowing
+
+- `rect_from_center_is_squared_and_centered` (unit test): `CamPose { x: 0.5, y: 0.5, size: 0.3 }` at `1920x1080` yields a rect whose height and width both equal `0.3 * 1080` and whose center lands exactly at `(960, 540)`.
 
 ## resolve
 

@@ -1,5 +1,5 @@
 // Run: cargo test --test manual_mouse -- --ignored --nocapture
-use cursor_zoom_lib::events::tracker::MouseTracker;
+use cursor_zoom_lib::events::track::tracker::MouseTracker;
 
 #[test]
 #[ignore]

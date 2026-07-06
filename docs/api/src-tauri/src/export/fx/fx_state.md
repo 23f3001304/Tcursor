@@ -1,4 +1,4 @@
-# src-tauri/src/export/fx_state.rs
+# src-tauri/src/export/fx/fx_state.rs
 
 Renderer-agnostic data model and builder for per-frame click FX, spotlight, and video FX state. Provides `fx_state_at` to compute what is visually active at a given event-time, the `FxRenderer` trait shared by both GPU and CPU backends, the `select_fx` factory, and the `render` entry point the exporter calls once per output frame.
 
@@ -34,9 +34,9 @@ One active click effect in output pixels (post-zoom). Produced by `fx_state_at` 
 
 ### Used by
 
-- `src-tauri/src/export/fx_uniforms.rs` - `build_fx_u` packs each `FxHit` into `FxU.hits`.
-- `src-tauri/src/export/fxdraw.rs` - `CpuFx::apply` iterates hits for software rendering.
-- `src-tauri/src/export/clickdraw.rs` - reads hits for software click-ring drawing.
+- `src-tauri/src/export/fx/fx_uniforms.rs` - `build_fx_u` packs each `FxHit` into `FxU.hits`.
+- `src-tauri/src/export/fx/fxdraw.rs` - `CpuFx::apply` iterates hits for software rendering.
+- `src-tauri/src/export/fx/clickdraw.rs` - reads hits for software click-ring drawing.
 
 ## Spot
 
@@ -64,9 +64,9 @@ Active spotlight state in output pixels. Size fields are fractions of output hei
 
 ### Used by
 
-- `src-tauri/src/export/fx_uniforms.rs` - `build_fx_u` packs `Spot` fields into `FxU.b/c/d/tint`.
-- `src-tauri/src/export/fxdraw.rs` - `CpuFx::apply` applies the spotlight on the software path.
-- `src-tauri/src/export/fx_gpu.rs` - read indirectly via `FxState.spot` in `GpuFx::apply`.
+- `src-tauri/src/export/fx/fx_uniforms.rs` - `build_fx_u` packs `Spot` fields into `FxU.b/c/d/tint`.
+- `src-tauri/src/export/fx/fxdraw.rs` - `CpuFx::apply` applies the spotlight on the software path.
+- `src-tauri/src/export/fx/fx_gpu.rs` - read indirectly via `FxState.spot` in `GpuFx::apply`.
 
 ## VideoFx
 
@@ -85,8 +85,8 @@ Active video FX triggered by a `VideoFxHoldStart` / `VideoFxHoldEnd` action pair
 
 ### Used by
 
-- `src-tauri/src/export/fx_uniforms.rs` - `build_fx_u` packs `VideoFx` into `FxU.e`.
-- `src-tauri/src/export/videodraw.rs` - reads `VideoFx` fields for the CPU video FX path.
+- `src-tauri/src/export/fx/fx_uniforms.rs` - `build_fx_u` packs `VideoFx` into `FxU.e`.
+- `src-tauri/src/export/fx/videodraw.rs` - reads `VideoFx` fields for the CPU video FX path.
 
 ## FxState
 
@@ -115,10 +115,10 @@ Complete renderer-agnostic description of all active FX at one output frame. Bui
 
 ### Used by
 
-- `src-tauri/src/export/fx_uniforms.rs` - `build_fx_u` converts `FxState` to the shader uniform.
-- `src-tauri/src/export/fx_gpu.rs` - `GpuFx::apply` dispatches the GPU shader.
-- `src-tauri/src/export/fxdraw.rs` - `CpuFx::apply` handles the software path.
-- `src-tauri/src/export/videodraw.rs` - reads `FxState.video`.
+- `src-tauri/src/export/fx/fx_uniforms.rs` - `build_fx_u` converts `FxState` to the shader uniform.
+- `src-tauri/src/export/fx/fx_gpu.rs` - `GpuFx::apply` dispatches the GPU shader.
+- `src-tauri/src/export/fx/fxdraw.rs` - `CpuFx::apply` handles the software path.
+- `src-tauri/src/export/fx/videodraw.rs` - reads `FxState.video`.
 
 ## fx_state_at
 

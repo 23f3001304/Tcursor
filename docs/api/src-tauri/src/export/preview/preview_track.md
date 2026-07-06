@@ -1,4 +1,4 @@
-# src-tauri/src/export/preview_track.rs
+# src-tauri/src/export/preview/preview_track.rs
 
 Editor-preview support commands: the lightweight metadata the M3 editor needs to play the recording natively and composite a smooth, export-faithful preview on a canvas - the per-frame camera curve, the static layout, the click track, and the low-res proxy. Split out of `preview.rs` (frame compositing) so each file stays focused. All reuse the warm renderer cache via `with_warm`.
 
@@ -66,39 +66,6 @@ Returns the `PreviewLayout` for the recording.
 
 1. Inside `with_warm`, `reset_camera`, then `step_camera(video_start)` to get the scene at t=0 (the unzoomed base layout).
 2. Divide `pose.scene.screen.rect` and `pose.scene.camera.rect` (+ radii) by the output dimensions to get fractions; set `cam` to `None` when `pose.scene.camera.alpha <= 0.5`.
-
-## HoldSpan
-
-```rust
-#[derive(serde::Serialize)]
-pub struct HoldSpan { pub start_ms: u32, pub end_ms: u32 }
-```
-
-One recorded effect-hold interval in OUTPUT time (ms) - same time basis as `ClickSample` and `CamSample`. The editor preview applies the same 250ms fade ramp over `[start_ms, end_ms)` that the export's `hold_alpha` uses, so a recorded hold lights up identically.
-
-## spotlight_holds
-
-```rust
-#[tauri::command]
-pub fn spotlight_holds(folder: String, session: tauri::State<'_, PreviewSession>) -> Result<Vec<HoldSpan>, String>
-```
-
-Returns the recorded spotlight-hold intervals (the hotkey spotlight held during capture) in output time, so the editor preview lights held spotlights exactly like the export - not just editor-added effect regions. Mirrors the hold half of the export's `s_alpha = max(settings, hold_alpha(actions), region_alpha)`.
-
-### Inputs (what, and why it is needed)
-
-- `folder: String` - absolute project path. *Why:* identifies the recording (its `actions.json` carries the holds).
-- `session: State<PreviewSession>` - the warm renderer cache. *Why:* the holds come from the renderer's owned action log; reusing the cache avoids reloading it.
-
-### Returns
-
-`Result<Vec<HoldSpan>, String>` - the held intervals clipped to `[0, dur]`, output-time. Errors (as a string) if the renderer cannot be built.
-
-### Implementation
-
-1. Inside `with_warm`, read the trim duration from `load_or_seed(...).trim.out_ms`.
-2. Compute the event→output offset `off = events_ms - video_start` (the inverse of `step_camera`'s `ev_t = t - events_ms`, identical to `click_track`).
-3. Call `hold::hold_spans` on `renderer.actions()` with the `SpotlightHoldStart`/`SpotlightHoldEnd` predicates (an unpaired open hold runs to the output end), then shift each span by `off` and clip to `[0, dur]`, dropping spans that fall entirely outside.
 
 ## ClickSample
 

@@ -1,4 +1,4 @@
-# src-tauri/src/export/thumbs.rs
+# src-tauri/src/export/preview/thumbs.rs
 
 Editor-timeline media: cached ffmpeg helpers for the filmstrip thumbnails, the per-source audio waveform images, and a mixed preview-audio track. All mirror `ensure_proxy` (run once, cache by output existence) and wrap their ffmpeg pass in `win::proc::generate_once` (so the post-record pre-warm and the editor's lazy `ensure_*` never transcode the same file twice or storm the CPU with concurrent passes right as the editor opens) run via `ffcmd_bg` (below-normal priority, so the one serialized multi-threaded pass yields to the UI instead of freezing it). The recorder's proxy is silent; these give the editor frames to scrub, waveforms to show, and sound to play.
 

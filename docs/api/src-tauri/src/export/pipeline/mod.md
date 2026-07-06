@@ -1,4 +1,4 @@
-# src-tauri/src/export/pipeline.rs
+# src-tauri/src/export/pipeline/mod.rs
 
 The 3-stage export pipeline that overlaps decode, composite, and encode. The screen and webcam decoders each run on their own thread (bodies in `pipeline_decode.rs`), reading frames into pooled buffers and streaming them over bounded channels; the exporter's composite loop pulls from those channels via `ScreenPipe`/`WebcamPipe` while the encoder thread drains the composited frames. The result is that decoding frame N+1 overlaps compositing frame N overlaps encoding frame N-1, so wall time trends from `sum(decode, composite)` toward `max(decode, composite)`.
 

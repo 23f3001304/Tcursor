@@ -1,4 +1,4 @@
-import type { Settings } from "../hud/settings";
+import type { Settings } from "../hud/settings/settings";
 
 export type ZoomTarget = "cursor" | { fixed: { x: number; y: number } };
 
@@ -20,6 +20,7 @@ export interface LayoutSeg { id: string; start_ms: number; end_ms: number; layou
 export interface Trim { in_ms: number; out_ms: number }
 export type EffectKind = "spotlight";
 export interface EffectRegion { id: string; kind: EffectKind; start_ms: number; end_ms: number; fade_in_ms: number; fade_out_ms: number; mode?: string; dim?: number; radius?: number; feather?: number; layer: number }
+export interface CameraMove { id: string; t_ms: number; x: number; y: number; size: number; easing: string }
 
 export interface EditDoc {
   version: number;
@@ -29,6 +30,7 @@ export interface EditDoc {
   speed: Speed[];
   layout: LayoutSeg[];
   effects: EffectRegion[];
+  camera_moves: CameraMove[];
   settings: Settings;
 }
 
@@ -45,4 +47,7 @@ export type EditOp =
   | { op: "remove_layout_seg"; id: string }
   | { op: "add_effect"; kind: EffectKind; start_ms: number; end_ms: number }
   | { op: "update_effect"; id: string; start_ms?: number; end_ms?: number; fade_in_ms?: number; fade_out_ms?: number; mode?: string; dim?: number; radius?: number; feather?: number; layer?: number }
-  | { op: "remove_effect"; id: string };
+  | { op: "remove_effect"; id: string }
+  | { op: "add_camera_move"; t_ms: number; x: number; y: number; size: number }
+  | { op: "update_camera_move"; id: string; t_ms?: number; x?: number; y?: number; size?: number; easing?: string }
+  | { op: "remove_camera_move"; id: string };

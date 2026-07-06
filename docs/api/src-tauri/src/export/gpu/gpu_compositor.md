@@ -1,4 +1,4 @@
-# src-tauri/src/export/gpu_compositor.rs
+# src-tauri/src/export/gpu/gpu_compositor.rs
 
 GPU-accelerated compositor backed by wgpu. Implements the `Compositor` trait by uploading per-frame textures, running the WGSL compositing shader, and reading back BGRA pixels to a `Vec<u8>` that matches the `CpuCompositor` output format exactly (verified by the `cpu_gpu_parity` test).
 
@@ -21,7 +21,7 @@ GPU compositor holding device-lifetime state and a lazily-initialized background
 
 ### Used by
 
-- `src-tauri/src/export/exporter.rs` - `select_compositor` returns a `Box<dyn Compositor>` holding a `GpuCompositor` when the GPU is available.
+- `src-tauri/src/export/pipeline/exporter.rs` - `select_compositor` returns a `Box<dyn Compositor>` holding a `GpuCompositor` when the GPU is available.
 
 ## GpuCompositor::new
 

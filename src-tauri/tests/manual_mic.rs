@@ -1,4 +1,4 @@
-use cursor_zoom_lib::audio::cpal_mic::CpalMic;
+use cursor_zoom_lib::audio::capture::cpal_mic::CpalMic;
 
 #[test]
 #[ignore]

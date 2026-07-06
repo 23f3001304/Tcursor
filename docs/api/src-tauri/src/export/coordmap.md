@@ -25,7 +25,7 @@ Converts a global screen coordinate `(x, y)` to a frame-local pixel by subtracti
 
 ### Used by
 
-- `src-tauri/src/export/autozoom.rs` - converts click coordinates before anchor placement.
+- `src-tauri/src/export/camera/autozoom.rs` - converts click coordinates before anchor placement.
 
 ## inset_rect
 
@@ -51,9 +51,9 @@ Returns the screen panel rectangle `(x, y, w, h)` in output pixels: the screen a
 
 ### Used by
 
-- `src-tauri/src/export/compositor.rs` - `CpuCompositor::composite_into` uses the crop rect derived from this.
-- `src-tauri/src/export/scene.rs` - `resolve` computes the screen panel rect via this function.
-- `src-tauri/src/export/gpu_uniforms.rs` - called indirectly through `scene`.
+- `src-tauri/src/export/gpu/compositor.rs` - `CpuCompositor::composite_into` uses the crop rect derived from this.
+- `src-tauri/src/export/scene/mod.rs` - `resolve` computes the screen panel rect via this function.
+- `src-tauri/src/export/gpu/gpu_uniforms.rs` - called indirectly through `scene`.
 
 ## corner_radius
 
@@ -78,7 +78,7 @@ Returns the corner radius for the screen panel: `layout.screen_radius_px` clampe
 
 ### Used by
 
-- `src-tauri/src/export/scene.rs` - `resolve` and `panel_radius` call this for the screen panel.
+- `src-tauri/src/export/scene/mod.rs` - `resolve` and `panel_radius` call this for the screen panel.
 
 ## to_base
 
@@ -100,8 +100,8 @@ Maps a screen-local frame pixel into the composited base frame (output pixels be
 
 ### Used by
 
-- `src-tauri/src/export/autozoom.rs` - converts click anchors to base-frame coords.
-- `src-tauri/src/export/layout.rs` - re-anchors zoom regions into the active panel.
+- `src-tauri/src/export/camera/autozoom.rs` - converts click anchors to base-frame coords.
+- `src-tauri/src/export/scene/layout.rs` - re-anchors zoom regions into the active panel.
 
 ## to_panel
 
@@ -128,8 +128,8 @@ Maps a screen-local frame pixel into any panel rect (output pixels). Generalizes
 
 ### Used by
 
-- `src-tauri/src/export/exporter.rs` - converts the cursor position each frame.
-- `src-tauri/src/export/fx_state.rs` - converts click positions for FX overlay placement.
+- `src-tauri/src/export/pipeline/exporter.rs` - converts the cursor position each frame.
+- `src-tauri/src/export/fx/fx_state.rs` - converts click positions for FX overlay placement.
 
 ## crop
 
@@ -154,7 +154,7 @@ Returns `(cx0, cy0, cw, ch)` - the crop rectangle in output pixels that the comp
 
 ### Used by
 
-- `src-tauri/src/export/compositor.rs` - `CpuCompositor::composite_into` passes to `resize_crop`.
+- `src-tauri/src/export/gpu/compositor.rs` - `CpuCompositor::composite_into` passes to `resize_crop`.
 - `src-tauri/src/export/coordmap.rs` - `project` calls this to compute the zoom transform.
 
 ## project

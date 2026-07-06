@@ -151,3 +151,4 @@ mod tests;
 
 pub mod autozoom;
 pub mod manual;
+pub mod moves;

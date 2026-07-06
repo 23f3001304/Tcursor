@@ -34,5 +34,5 @@ Maps `t` in [0, 1] to an eased value in [0, 1]. Input is clamped to [0, 1] befor
 
 ### Used by
 
-- `src-tauri/src/export/camera.rs` - `CameraSim::step` may call `ease` for region-specific curves.
-- `src-tauri/src/export/layout.rs` - `LayoutTrack` uses it for cross-dissolve transition easing.
+- `src-tauri/src/export/camera/mod.rs` - `CameraSim::step` may call `ease` for region-specific curves.
+- `src-tauri/src/export/scene/layout.rs` - `LayoutTrack` uses it for cross-dissolve transition easing.

@@ -12,11 +12,11 @@ pub struct ProjectPaths { pub folder: PathBuf }
 
 ### Used by
 
-- `src-tauri/src/session/recorder.rs` - constructs `ProjectPaths` from `base + project_name`, calls `ensure`, then calls every path accessor to wire up the recording.
-- `src-tauri/src/export/exporter.rs` - loads paths to locate `video.mp4`, `events.json`, `sync.json`, etc. during export.
-- `src-tauri/src/export/audio_mux.rs` - reads `mic.wav` and `system.wav` paths to mux audio tracks.
-- `src-tauri/src/export/timeline.rs` - reads `sync.json` path to load `SyncLog`.
-- `src-tauri/src/export/run.rs` - obtains `ProjectPaths` to hand off to `exporter.rs`.
+- `src-tauri/src/session/record/recorder.rs` - constructs `ProjectPaths` from `base + project_name`, calls `ensure`, then calls every path accessor to wire up the recording.
+- `src-tauri/src/export/pipeline/exporter.rs` - loads paths to locate `video.mp4`, `events.json`, `sync.json`, etc. during export.
+- `src-tauri/src/export/pipeline/audio_mux.rs` - reads `mic.wav` and `system.wav` paths to mux audio tracks.
+- `src-tauri/src/export/pipeline/timeline.rs` - reads `sync.json` path to load `SyncLog`.
+- `src-tauri/src/export/pipeline/run.rs` - obtains `ProjectPaths` to hand off to `exporter.rs`.
 - `src-tauri/src/edit/commands.rs` - reads `edit.json` and `settings.json` paths for the editor.
 - `src-tauri/src/edit/seed.rs` - reads `events.json`, `typing.json`, `actions.json`, and `sync.json` to seed the edit plan.
 - `src-tauri/src/ai/commands.rs` - reads `edit.json` path for AI-director commands.

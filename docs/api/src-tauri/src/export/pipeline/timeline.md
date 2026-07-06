@@ -1,4 +1,4 @@
-# src-tauri/src/export/timeline.rs
+# src-tauri/src/export/pipeline/timeline.rs
 
 Builds the per-frame timestamp vector that places every encoded video frame at its true wall-clock time, and records the start offsets of mic and system audio tracks relative to the video. Abstracts over two paths: a precise sync log (recorded at capture time) and a synthesized uniform fallback for older recordings.
 
@@ -22,7 +22,7 @@ The real capture timeline for one project.
 
 ### Used by
 
-- `src-tauri/src/export/exporter.rs` - `build_timeline` is called once; `tl.frames` drives the frame loop; `tl.mic_ms` / `tl.system_ms` / `tl.events_ms` compute the audio shift and event offset.
+- `src-tauri/src/export/pipeline/exporter.rs` - `build_timeline` is called once; `tl.frames` drives the frame loop; `tl.mic_ms` / `tl.system_ms` / `tl.events_ms` compute the audio shift and event offset.
 
 ## build_timeline
 

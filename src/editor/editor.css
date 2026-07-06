@@ -1,14 +1,18 @@
 /* TCursor editor - full-screen post-record editor. Dark, one red accent. */
 .editor {
-  --e-bg: #09090b; --e-surface: #0e0e11; --e-card: #161619; --e-soft: #1c1c20;
-  --e-border: #262629; --e-border2: #1e1e21;
+  /* Elevation ramp - each plane a few % brighter than the one beneath it, so depth comes
+     from layered surfaces + a top-left light, not heavy shadows. bg = deepest (canvas). */
+  --e-bg: #0a0a0b; --e-surface: #111214; --e-card: #17181c; --e-soft: #202128;
+  --e-border: #2a2a31; --e-border2: #202025;
   --e-fg: #fafafa; --e-mut: #a1a1aa; --e-dim: #71717a;
   --e-primary: #ef4444; --e-primaryh: #dc2626;
-  --e-zoom: #7c7ce6; --e-fx: #d99a2b; --e-layout: #2f9e8f; --e-ai: #7c6cf0; --e-ok: #22c55e;
+  --e-zoom: #7c7ce6; --e-fx: #d99a2b; --e-layout: #2f9e8f; --e-cam: #e05d9e; --e-ai: #7c6cf0; --e-ok: #22c55e;
   --e-ring: rgba(250,250,250,.7); --e-focus: var(--e-dim);
-  --e-shadow-raise: 0 1px 2px rgba(0,0,0,.3);
-  --e-shadow-pop: 0 8px 24px rgba(0,0,0,.5), 0 2px 8px rgba(0,0,0,.35);
-  --e-r-sm: 6px; --e-r: 9px; --e-r-lg: 12px;
+  --e-shadow-raise: 0 1px 2px rgba(0,0,0,.35);
+  --e-shadow-pop: 0 10px 30px rgba(0,0,0,.55), 0 2px 8px rgba(0,0,0,.4);
+  --e-lift: inset 0 1px 0 rgba(255,255,255,.045);      /* top-light: single source, top-left */
+  --e-glow-primary: 0 0 24px rgba(239,68,68,.20);      /* soft accent glow */
+  --e-r-sm: 8px; --e-r: 10px; --e-r-lg: 14px; --e-r-xl: 18px;
   position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column;
   background: var(--e-bg); color: var(--e-fg);
   font-family: "Inter Variable", -apple-system, "Segoe UI", system-ui, sans-serif;
@@ -29,48 +33,77 @@
   transition: background .14s ease, color .14s ease; }
 .e-gst:hover { background: var(--e-soft); color: var(--e-fg); }
 .e-gst:disabled { opacity: .35; cursor: default; }
-.e-export { height: 33px; padding: 0 15px; border: none; border-radius: 9px;
+.e-export { position: relative; overflow: hidden; height: 33px; padding: 0 15px; border: none; border-radius: 9px;
   background: var(--e-primary); color: #fff; font-weight: 560; font-size: 12.5px; letter-spacing: -0.01em;
   display: flex; align-items: center; gap: 6px;
   box-shadow: 0 1px 2px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.13);
   transition: background .14s ease, transform .1s ease, box-shadow .14s ease; }
-.e-export:hover { background: var(--e-primaryh); box-shadow: 0 2px 8px rgba(239,68,68,.32), inset 0 1px 0 rgba(255,255,255,.13); }
+.e-export:hover { background: var(--e-primaryh); transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(239,68,68,.32), var(--e-glow-primary), inset 0 1px 0 rgba(255,255,255,.13); }
 .e-export:active { transform: translateY(0.5px); }
 .e-export svg { opacity: .92; }
 .e-export:disabled { opacity: .55; cursor: default; box-shadow: none; }
+.e-export-bar { position: absolute; left: 0; bottom: 0; height: 2px; background: rgba(255,255,255,.4); }
 .e-bar > *:not(button) { pointer-events: none; } /* empty bar area drags the window; buttons stay clickable */
 .e-bardiv { width: 1px; height: 20px; background: var(--e-border); margin: 0 3px; flex: none; }
 .e-gst.close:hover { background: var(--e-primary); color: #fff; }
 
-.e-body { flex: 1; display: flex; min-height: 0; }
-.e-rail { width: 58px; flex: none; display: flex; flex-direction: column; align-items: center;
-  padding: 12px 0; gap: 4px; border-right: 1px solid var(--e-border2); }
-.e-ric { width: 42px; height: 42px; border-radius: var(--e-r); border: none; background: transparent;
-  color: var(--e-dim); display: flex; align-items: center; justify-content: center;
-  transition: background .14s ease, color .14s ease; }
-.e-ric:hover { background: var(--e-soft); color: var(--e-fg); }
-.e-ric.on { background: var(--e-soft); color: var(--e-fg); }
+.e-body { flex: 1; display: flex; min-height: 0; padding: 10px; gap: 10px; }
+/* Floating sidebar: sits above the canvas with space around it (not edge-to-edge). */
+.e-rail { width: 56px; flex: none; display: flex; flex-direction: column; align-items: center;
+  padding: 10px 0; gap: 4px; border-radius: var(--e-r-lg); background: var(--e-surface);
+  border: 1px solid var(--e-border); box-shadow: var(--e-lift), 0 8px 24px rgba(0,0,0,.55); }
+.e-ric { position: relative; width: 42px; height: 42px; border-radius: var(--e-r); border: none;
+  background: transparent; color: var(--e-dim); display: flex; align-items: center; justify-content: center;
+  transition: color .14s ease; }
+.e-ric > svg { position: relative; z-index: 1; }
+.e-ric:not(.on):hover { background: var(--e-soft); color: var(--e-fg); }
+.e-ric:hover { color: var(--e-fg); }
+.e-ric.on { color: var(--e-fg); }
 .e-ric.ai.on { color: var(--e-ai); }
+/* Shared active pill: the only element that layout-animates between tools. A subtle border +
+   top-light + faint elevation give the active tool an Arc-style raised presence, not a flat fill. */
+.e-ric-hl { position: absolute; inset: 0; border-radius: var(--e-r); background: var(--e-soft);
+  border: 1px solid var(--e-border); box-shadow: var(--e-lift), var(--e-shadow-raise); z-index: 0; }
+/* AI tab keeps its violet identity - a faint tint layered over the raised pill. */
+.e-ric.ai.on .e-ric-hl { background: rgba(124, 108, 240, .14); }
 
-.e-panel { width: 320px; flex: none; border-right: 1px solid var(--e-border2); overflow-y: auto; padding: 22px; }
+/* Animated panel slot: owns the fixed width + right border so the inner panel just fills it.
+   popLayout pulls the exiting panel out of flow, so the slot must not shrink underneath it. */
+.e-panel-slot { width: 320px; flex: none; display: flex; min-height: 0; border-radius: var(--e-r-lg);
+  overflow: hidden; border: 1px solid var(--e-border);
+  box-shadow: var(--e-lift), 0 16px 44px rgba(0,0,0,.6), 0 4px 12px rgba(0,0,0,.45); }
+.e-panel-slot > .e-panel, .e-panel-slot > .e-insp { width: 100%; flex: 1; min-height: 0; border-right: none; }
+.e-panel { width: 320px; flex: none; border-right: 1px solid var(--e-border2); overflow-y: auto;
+  padding: 22px; background: var(--e-surface); }
 .e-panel h2 { font-size: 16px; font-weight: 600; margin: 0 0 6px; }
-.e-lede { font-size: 12.5px; color: var(--e-mut); line-height: 1.55; margin: 0 0 20px; }
+.e-lede { font-size: 12.5px; font-weight: 450; color: var(--e-mut); line-height: 1.55; margin: 0 0 20px; }
 /* Reusable panel primitives (consumed by the property-panel wave). */
 .e-switchrow { display: flex; align-items: center; justify-content: space-between; gap: 12px;
   min-height: 32px; font-size: 13px; font-weight: 500; color: var(--e-fg); }
 .e-sec { border-top: 1px solid var(--e-border2); margin-top: 16px; padding-top: 16px; }
+/* Insert-element library pills: native-drag, CSS hover-scale (no Motion, so drag works). */
+.e-libpill:hover { transform: scale(1.02); }
+/* Camera-move pill fill (its own flat color, matching e-zblk/e-fxblk/e-layblk's pattern). */
+.e-camkfpill { border-radius: var(--e-r); border: 1px solid rgba(255,255,255,.14);
+  background: linear-gradient(180deg, rgba(255,255,255,.16), rgba(255,255,255,0) 60%), var(--e-cam);
+  box-shadow: var(--e-lift), var(--e-shadow-raise); }
 .e-sel { display: flex; align-items: center; justify-content: space-between; height: 40px; width: 100%;
   padding: 0 13px; border: 1px solid var(--e-border); background: transparent; color: var(--e-fg);
   border-radius: var(--e-r); margin-bottom: 9px; transition: background .14s ease; }
 .e-sel:hover { background: var(--e-soft); }
 .e-sel .l { font-size: 13px; color: var(--e-mut); }
 .e-sel .v { font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 7px; }
-.e-sel .lc { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; }
-.e-run { width: 100%; height: 42px; border: none; border-radius: var(--e-r); background: var(--e-ai);
+.e-sel .lc { width: 6px; height: 6px; border-radius: 50%; background: var(--e-ok); }
+.e-run { width: 100%; height: 42px; border: none; border-radius: var(--e-r);
+  background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,0)), var(--e-ai);
   color: #fff; font-size: 13px; font-weight: 550; display: flex; align-items: center;
-  justify-content: center; gap: 8px; margin: 6px 0 18px; transition: filter .14s ease; }
-.e-run:hover { filter: brightness(1.08); }
-.e-run:disabled { opacity: .6; cursor: default; }
+  justify-content: center; gap: 8px; margin: 6px 0 18px; box-shadow: var(--e-lift), var(--e-shadow-raise);
+  transition: filter .14s ease, transform .14s ease, box-shadow .14s ease; }
+.e-run:hover { filter: brightness(1.08); transform: translateY(-1px);
+  box-shadow: var(--e-lift), var(--e-shadow-raise), 0 6px 18px rgba(124,108,240,.28); }
+.e-run:active { transform: translateY(0); }
+.e-run:disabled { opacity: .6; cursor: default; transform: none; box-shadow: none; }
 .e-sum { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .e-sum li { display: flex; align-items: center; gap: 11px; font-size: 13px; }
 .e-sum .ic { width: 28px; height: 28px; border-radius: 8px; background: var(--e-soft);
@@ -78,49 +111,86 @@
   color: var(--e-mut); flex: none; }
 
 .e-stagewrap { flex: 1; position: relative; display: flex; align-items: center; justify-content: center;
-  min-width: 0; min-height: 0; padding: 30px; background: var(--e-surface); }
+  min-width: 0; min-height: 0; padding: 26px; border-radius: var(--e-r-lg);
+  background: radial-gradient(120% 100% at 50% 26%, #0b0b0e, #050506); }
+/* Floating stage toolbar: subtle glass over the video (blur + translucent fill), not Vista. */
 .e-ftool { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); display: flex; gap: 2px;
-  background: var(--e-card); border: 1px solid var(--e-border); border-radius: 10px; padding: 4px; z-index: 6; }
+  background: rgba(20,20,24,.62); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  border: 1px solid var(--e-border); border-radius: var(--e-r-lg); padding: 4px;
+  z-index: 6; box-shadow: var(--e-shadow-pop); }
 .e-ftool button { width: 34px; height: 32px; border: none; background: transparent; color: var(--e-mut);
   border-radius: var(--e-r-sm); display: flex; align-items: center; justify-content: center;
   transition: background .14s ease, color .14s ease; }
 .e-ftool button:hover { background: var(--e-soft); color: var(--e-fg); }
+.e-ftool button.on { background: var(--e-soft); color: var(--e-fg); }
 /* Full-composite preview: the canvas (drawPreview) is the in-flow 16:9 sizer; the source
    videos are hidden. The stage shrink-wraps the canvas. */
 .e-stage { position: relative; display: flex; align-items: center; justify-content: center;
   max-width: 100%; max-height: 100%; border-radius: var(--e-r-lg);
-  overflow: hidden; border: 1px solid var(--e-border); background: #0b0b0d; box-shadow: 0 30px 70px rgba(0,0,0,.45); }
+  overflow: hidden; border: 1px solid var(--e-border); background: #0b0b0d;
+  box-shadow: 0 30px 70px rgba(0,0,0,.5), 0 2px 6px rgba(0,0,0,.4), var(--e-lift); }
 .e-canvas { display: block; max-width: 100%; max-height: 100%; }
 .e-stage-empty { margin: auto; color: var(--e-dim); font-size: 13px; display: flex; flex-direction: column;
   align-items: center; gap: 10px; }
 .e-stage-load { position: absolute; top: 12px; right: 12px; color: var(--e-mut); display: flex; }
 
 .e-transport { height: 52px; flex: none; border-top: 1px solid var(--e-border2); display: flex;
-  align-items: center; gap: 10px; padding: 0 16px; font-size: 13px; color: var(--e-mut); }
+  align-items: center; justify-content: space-between; gap: 12px; padding: 0 16px;
+  font-size: 13px; color: var(--e-mut); }
+.e-tgroup { display: flex; align-items: center; gap: 8px; }
+.e-tdiv { width: 1px; height: 20px; background: var(--e-border2); flex: none; margin: 0 2px; }
 .e-tg { width: 32px; height: 32px; border: none; background: transparent; color: var(--e-mut);
   border-radius: var(--e-r-sm); display: flex; align-items: center; justify-content: center;
   transition: background .14s ease, color .14s ease; }
 .e-tg:hover { background: var(--e-soft); color: var(--e-fg); }
-.e-time { font-variant-numeric: tabular-nums; color: var(--e-fg); font-weight: 500; min-width: 96px; text-align: center; }
-.e-qual { height: 28px; padding: 0 10px; border: 1px solid var(--e-border); background: var(--e-soft); color: var(--e-mut);
-  border-radius: var(--e-r-sm); font-size: 12px; font-weight: 550; font-variant-numeric: tabular-nums;
-  transition: background .14s ease, color .14s ease; }
-.e-qual:hover { background: var(--e-card); color: var(--e-fg); }
+.e-tg.on { background: var(--e-soft); color: var(--e-fg); }
+/* Trim: a labelled ghost pill (bordered), distinct from the bare icon tools beside it. */
+.e-tbtn { height: 32px; padding: 0 12px; border: 1px solid var(--e-border);
+  background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,0));
+  color: var(--e-mut); border-radius: var(--e-r); font-size: 12.5px; font-weight: 500;
+  display: flex; align-items: center; gap: 6px; box-shadow: var(--e-lift);
+  transition: background .14s ease, color .14s ease, border-color .14s ease, transform .14s ease, box-shadow .14s ease; }
+.e-tbtn:hover { background: var(--e-soft); color: var(--e-fg); border-color: var(--e-mut);
+  transform: translateY(-1px); box-shadow: var(--e-lift), var(--e-shadow-raise); }
+.e-tbtn:active { transform: translateY(0); }
+/* Single readout: current time in --e-fg, "/ total" dimmed. */
+.e-time { font-variant-numeric: tabular-nums; color: var(--e-fg); font-weight: 500; font-size: 12.5px;
+  min-width: 88px; text-align: center; }
+.e-time .sep { color: var(--e-dim); font-weight: 400; margin: 0 1px; }
+.e-time .tot { color: var(--e-dim); }
+/* Right-rail chip (aspect / quality): transparent, bordered, 28px, 11px tabular. */
+.e-chip { height: 28px; padding: 0 9px; border: 1px solid var(--e-border);
+  background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,0));
+  color: var(--e-mut); border-radius: var(--e-r-sm); font-size: 11px; font-weight: 500;
+  font-variant-numeric: tabular-nums; display: flex; align-items: center; box-shadow: var(--e-lift);
+  transition: background .14s ease, color .14s ease, border-color .14s ease, transform .14s ease, box-shadow .14s ease; }
+.e-chip:hover { background: var(--e-soft); color: var(--e-fg); border-color: var(--e-mut);
+  transform: translateY(-1px); box-shadow: var(--e-lift), var(--e-shadow-raise); }
+.e-chip:active { transform: translateY(0); }
 .e-play { width: 36px; height: 36px; border-radius: 50%; background: var(--e-fg); color: #0a0a0a; border: none;
-  display: flex; align-items: center; justify-content: center; }
+  display: flex; align-items: center; justify-content: center; box-shadow: var(--e-shadow-raise); }
+/* Volume flyout: fixed-width track that fades in with a small x-shift (never animates width). */
+.e-volwrap { display: flex; align-items: center; gap: 6px; position: relative; }
+.e-volflyout { width: 76px; display: flex; align-items: center; overflow: hidden; }
 
 .e-timeline { flex: none; border-top: 1px solid var(--e-border2); background: var(--e-surface);
   padding: 8px 16px 14px; position: relative; }
-.e-ruler { position: relative; height: 14px; font-size: 11px; color: var(--e-dim);
+.e-ruler { position: relative; height: 18px; font-size: 11px; color: var(--e-dim);
   font-variant-numeric: tabular-nums; margin-bottom: 7px; }
-.e-ruler span { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
+/* Each tick = an 11px label with a 1x4px hairline bar beneath it, pinned to the tick's time. */
+.e-ruler span { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap;
+  padding-bottom: 5px; }
+.e-ruler span::after { content: ""; position: absolute; left: 50%; bottom: 0; transform: translateX(-50%);
+  width: 1px; height: 4px; background: var(--e-border); }
 .e-ruler span:first-child { transform: none; }
+.e-ruler span:first-child::after { left: 0; transform: none; }
 .e-tlbody { position: relative; cursor: pointer; }
 /* Filmstrip clip: frame thumbnails filling the width, in an inset (3D) well. */
 .e-filmstrip { display: flex; height: 54px; border-radius: var(--e-r); margin-bottom: 8px; overflow: hidden;
   background: var(--e-card); border: 1px solid var(--e-border);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.04), inset 0 -6px 12px rgba(0,0,0,.22); }
 .e-filmstrip img { height: 100%; object-fit: cover; display: block; pointer-events: none; }
+.e-filmstrip-empty { align-items: center; justify-content: center; color: var(--e-dim); font-size: 12px; }
 /* Track stack: scrolls when many effect layers appear; ruler + filmstrip stay above. */
 .e-tracks { display: flex; flex-direction: column; gap: 6px; max-height: 130px; overflow-y: auto; overflow-x: hidden; }
 .e-tracks::-webkit-scrollbar { width: 11px; }
@@ -128,14 +198,18 @@
 .e-tracks::-webkit-scrollbar-thumb { background: var(--e-dim); border-radius: 999px;
   border: 3px solid var(--e-bg); background-clip: padding-box; min-height: 40px; }
 .e-tracks:hover::-webkit-scrollbar-thumb { background: var(--e-mut); background-clip: padding-box; }
-.e-zoomrow { position: relative; height: 34px; border-radius: var(--e-r);
+.e-zoomrow { position: relative; height: 32px; border-radius: var(--e-r);
   background: var(--e-surface); box-shadow: inset 0 0 0 1px var(--e-border2); }
-/* Zoom pill: flat fill, hairline border, faint raise; white side grips (on hover) to retime. */
-.e-zblk { position: absolute; top: 0; height: 34px; border-radius: var(--e-r); cursor: grab; overflow: hidden;
+/* Zoom pill: lane-colored fill with a lit top edge; hairline border, raise; white side grips (on hover) to retime. */
+.e-zblk { position: absolute; top: 0; height: 32px; border-radius: var(--e-r); cursor: grab; overflow: hidden;
   display: flex; align-items: stretch; user-select: none; touch-action: none; opacity: .9;
-  background: var(--e-zoom); border: 1px solid rgba(255,255,255,.14); box-shadow: var(--e-shadow-raise); }
+  background: linear-gradient(180deg, rgba(255,255,255,.16), rgba(255,255,255,0) 60%), var(--e-zoom);
+  border: 1px solid rgba(255,255,255,.14); box-shadow: var(--e-lift), var(--e-shadow-raise);
+  transition: transform .14s ease, box-shadow .14s ease; }
 .e-zblk.drag { cursor: grabbing; z-index: 4; box-shadow: var(--e-shadow-pop); }
-.e-zblk.sel { opacity: 1; outline: 1.5px solid var(--e-ring); outline-offset: -1.5px; }
+.e-zblk.sel { opacity: 1; transform: translateY(-1px);
+  outline: 1.5px solid var(--e-ring); outline-offset: -1.5px;
+  box-shadow: var(--e-lift), 0 3px 8px rgba(0,0,0,.4), 0 0 16px rgba(124,124,230,.30); }
 .e-zlabel { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; color: #fff;
   font-size: 11px; font-weight: 600; pointer-events: none; white-space: nowrap; overflow: hidden; }
 .e-zh { width: 11px; flex: none; cursor: ew-resize; position: relative; touch-action: none; }
@@ -145,27 +219,48 @@
 .e-zblk:hover .e-zh::after { opacity: 1; }
 .e-zh:hover::after { height: 16px; background: rgba(255,255,255,.9); opacity: 1; }
 /* Audio track: quiet, low-contrast waveform with a small source icon (system vs mic). */
-.e-audiorow { position: relative; height: 26px; border-radius: var(--e-r); overflow: hidden;
+.e-audiorow { position: relative; height: 22px; border-radius: var(--e-r); overflow: hidden;
   background: var(--e-surface); box-shadow: inset 0 0 0 1px var(--e-border2); }
 .e-audiorow img { width: 100%; height: 100%; object-fit: fill; opacity: .5; display: block; pointer-events: none; }
 .e-trackicon { position: absolute; left: 5px; top: 50%; transform: translateY(-50%); z-index: 2;
   color: var(--e-dim); display: flex; opacity: .85; pointer-events: none; }
 /* Effect layer row + spotlight pill (flat amber; white grip handles on hover, like zoom). */
-.e-fxrow { position: relative; height: 30px; border-radius: var(--e-r);
+.e-fxrow { position: relative; height: 32px; border-radius: var(--e-r);
   background: var(--e-surface); box-shadow: inset 0 0 0 1px var(--e-border2); }
-.e-fxblk { position: absolute; top: 0; height: 30px; border-radius: var(--e-r); cursor: grab; overflow: hidden;
+.e-fxblk { position: absolute; top: 0; height: 32px; border-radius: var(--e-r); cursor: grab; overflow: hidden;
   display: flex; align-items: stretch; user-select: none; touch-action: none; opacity: .9;
-  background: var(--e-fx); border: 1px solid rgba(255,255,255,.14); box-shadow: var(--e-shadow-raise); }
+  background: linear-gradient(180deg, rgba(255,255,255,.16), rgba(255,255,255,0) 60%), var(--e-fx);
+  border: 1px solid rgba(255,255,255,.14); box-shadow: var(--e-lift), var(--e-shadow-raise);
+  transition: transform .14s ease, box-shadow .14s ease; }
 .e-fxblk.drag { cursor: grabbing; z-index: 4; box-shadow: var(--e-shadow-pop); }
-.e-fxblk.sel { opacity: 1; outline: 1.5px solid var(--e-ring); outline-offset: -1.5px; }
+.e-fxblk.sel { opacity: 1; transform: translateY(-1px);
+  outline: 1.5px solid var(--e-ring); outline-offset: -1.5px;
+  box-shadow: var(--e-lift), 0 3px 8px rgba(0,0,0,.4), 0 0 16px rgba(217,154,43,.30); }
 /* Layout segment row + pill (flat teal; white grip handles on hover, like zoom/fx). */
-.e-layrow { position: relative; height: 30px; border-radius: var(--e-r);
+.e-layrow { position: relative; height: 32px; border-radius: var(--e-r);
   background: var(--e-surface); box-shadow: inset 0 0 0 1px var(--e-border2); }
-.e-layblk { position: absolute; top: 0; height: 30px; border-radius: var(--e-r); cursor: grab; overflow: hidden;
+.e-layblk { position: absolute; top: 0; height: 32px; border-radius: var(--e-r); cursor: grab; overflow: hidden;
   display: flex; align-items: stretch; user-select: none; touch-action: none; opacity: .9;
-  background: var(--e-layout); border: 1px solid rgba(255,255,255,.14); box-shadow: var(--e-shadow-raise); }
+  background: linear-gradient(180deg, rgba(255,255,255,.16), rgba(255,255,255,0) 60%), var(--e-layout);
+  border: 1px solid rgba(255,255,255,.14); box-shadow: var(--e-lift), var(--e-shadow-raise);
+  transition: transform .14s ease, box-shadow .14s ease; }
 .e-layblk.drag { cursor: grabbing; z-index: 4; box-shadow: var(--e-shadow-pop); }
-.e-layblk.sel { opacity: 1; outline: 1.5px solid var(--e-ring); outline-offset: -1.5px; }
+.e-layblk.sel { opacity: 1; transform: translateY(-1px);
+  outline: 1.5px solid var(--e-ring); outline-offset: -1.5px;
+  box-shadow: var(--e-lift), 0 3px 8px rgba(0,0,0,.4), 0 0 16px rgba(47,158,143,.32); }
+/* Camera-move lane: keyframes are single-point diamonds, not start/end regions, so one row
+   holds every keyframe (no layer-stacking like the zoom/fx/layout tracks above). */
+.e-camrow { position: relative; height: 32px; border-radius: var(--e-r);
+  background: var(--e-surface); box-shadow: inset 0 0 0 1px var(--e-border2); }
+.e-camkf { position: absolute; top: 50%; left: 0; width: 14px; height: 14px; margin-left: -7px;
+  border-radius: 3px; cursor: grab; touch-action: none; opacity: .9;
+  background: linear-gradient(135deg, rgba(255,255,255,.18), rgba(255,255,255,0) 60%), var(--e-cam);
+  border: 1px solid rgba(255,255,255,.16); box-shadow: var(--e-lift), var(--e-shadow-raise);
+  transform: translateY(-50%) rotate(45deg); transition: box-shadow .14s ease; }
+.e-camkf:hover { opacity: 1; }
+.e-camkf:active { cursor: grabbing; z-index: 4; box-shadow: var(--e-shadow-pop); }
+.e-camkf.sel { opacity: 1; outline: 1.5px solid var(--e-ring); outline-offset: 1.5px;
+  box-shadow: var(--e-lift), 0 3px 8px rgba(0,0,0,.4), 0 0 16px rgba(224,93,158,.35); }
 .e-ph { position: absolute; top: 0; bottom: 0; width: 1.5px; background: var(--e-primary); z-index: 5; pointer-events: none; }
 .e-ph i { position: absolute; top: -2px; left: -4.5px; width: 10px; height: 8px; background: var(--e-primary); border-radius: 2.5px; }
 
@@ -188,15 +283,44 @@
 .e-insp { display: flex; flex-direction: column; }
 .e-insphdr { display: flex; align-items: center; justify-content: space-between; }
 .e-insphdr h2 { margin: 0; }
+/* Panel header: title + matched ghost icon buttons (reset/close) over a hairline. */
+.e-phead { padding-bottom: 14px; margin-bottom: 18px; border-bottom: 1px solid var(--e-border2); }
+.e-phead-top { display: flex; align-items: center; justify-content: space-between; }
+.e-phead h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.e-phead .e-lede { margin: 9px 0 0; }
+.e-hicons { display: flex; align-items: center; gap: 2px; }
+.e-hicon { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+  border: none; background: transparent; color: var(--e-dim); border-radius: var(--e-r-sm); cursor: pointer;
+  transition: background .14s ease, color .14s ease; }
+.e-hicon:hover { background: var(--e-soft); color: var(--e-fg); }
+/* Section header: uppercase micro-label, distinct from control labels (.e-fl) so the panel has hierarchy. */
+.e-sechead { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--e-dim); margin: 0; }
+/* Header actions: an optional non-red text button (Reset/Clear) sitting left of the X close. */
+.e-hdracts { display: flex; align-items: center; gap: 6px; }
+.e-reset { height: 28px; padding: 0 8px; border: none; background: transparent; color: var(--e-mut);
+  font-size: 12.5px; font-weight: 500; border-radius: var(--e-r-sm); cursor: pointer;
+  transition: background .14s ease, color .14s ease; }
+.e-reset:hover { background: var(--e-soft); color: var(--e-fg); }
+/* Full-width neutral secondary action (e.g. "Reset Defaults") - never red. */
+.e-ghostbtn { width: 100%; height: 40px; border: 1px solid var(--e-border); border-radius: var(--e-r);
+  background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,0));
+  color: var(--e-mut); font-size: 13px; font-weight: 500;
+  display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; box-shadow: var(--e-lift);
+  transition: background .14s ease, color .14s ease, border-color .14s ease, transform .14s ease, box-shadow .14s ease; }
+.e-ghostbtn:hover { background: var(--e-soft); color: var(--e-fg); border-color: var(--e-mut);
+  transform: translateY(-1px); box-shadow: var(--e-lift), var(--e-shadow-raise); }
+.e-ghostbtn:active { transform: translateY(0); }
 .e-field { display: flex; flex-direction: column; gap: 7px; margin-bottom: 16px; }
-.e-fl { font-size: 12px; color: var(--e-mut); display: flex; justify-content: space-between; align-items: center; }
-.e-fl b { color: var(--e-fg); font-weight: 600; font-variant-numeric: tabular-nums; }
+.e-fl { font-size: 12px; font-weight: 400; color: var(--e-mut); display: flex; justify-content: space-between; align-items: center; }
+.e-fl b { color: var(--e-fg); font-weight: 500; font-variant-numeric: tabular-nums; }
 .e-field2 { display: flex; gap: 10px; }
 .e-field2 .e-field { flex: 1; }
 .e-seg { display: flex; gap: 4px; background: var(--e-soft); border-radius: var(--e-r-sm); padding: 3px; }
 .e-seg button { flex: 1; height: 30px; border: none; background: transparent; color: var(--e-mut);
   border-radius: var(--e-r-sm); font-size: 12.5px; font-weight: 500; transition: background .14s ease, color .14s ease; }
-.e-seg button.on { background: var(--e-card); color: var(--e-fg); box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+.e-seg button.on { background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,0)), var(--e-card);
+  color: var(--e-fg); box-shadow: var(--e-lift), 0 1px 2px rgba(0,0,0,.25); }
 .e-del { margin-top: 12px; height: 42px; border: 1px solid rgba(239, 68, 68, 0.2); border-radius: var(--e-r);
   background: rgba(239, 68, 68, 0.05); color: #f87171; font-size: 13.5px; font-weight: 600; display: flex; align-items: center;
   justify-content: center; gap: 8px; cursor: pointer; transition: background .15s ease, border-color .15s ease, transform 0.1s ease; }
@@ -271,13 +395,16 @@
   padding: 0;
   border: none;
   outline: none;
-  transition: transform 0.12s ease, box-shadow 0.15s ease;
+  box-shadow: var(--e-lift), var(--e-shadow-raise);
+  transition: transform 0.14s ease, box-shadow 0.15s ease;
 }
 .e-preset-circle:hover {
-  transform: scale(1.12);
+  transform: translateY(-1px);
+  box-shadow: var(--e-lift), var(--e-shadow-raise), 0 4px 10px rgba(0,0,0,.35);
 }
+.e-preset-circle:active { transform: translateY(0); }
 .e-preset-circle.on {
-  box-shadow: 0 0 0 2px var(--e-bg), 0 0 0 4px var(--accent, #ef4444);
+  box-shadow: 0 0 0 2px var(--e-bg), 0 0 0 4px var(--e-fg), 0 0 16px rgba(250,250,250,.18);
 }
 
 .e-accent-list {
@@ -293,11 +420,14 @@
   padding: 0;
   border: none;
   outline: none;
-  transition: transform 0.12s ease, box-shadow 0.15s ease;
+  box-shadow: var(--e-lift), var(--e-shadow-raise);
+  transition: transform 0.14s ease, box-shadow 0.15s ease;
 }
 .e-accent-circle:hover {
-  transform: scale(1.12);
+  transform: translateY(-1px);
+  box-shadow: var(--e-lift), var(--e-shadow-raise), 0 4px 10px rgba(0,0,0,.35);
 }
+.e-accent-circle:active { transform: translateY(0); }
 .e-accent-circle.on {
   box-shadow: 0 0 0 2px var(--e-bg), 0 0 0 4px var(--e-fg, #fff);
 }
@@ -314,34 +444,37 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
-  border-radius: 8px;
-  background: var(--e-soft);
+  gap: 4px;
+  border-radius: var(--e-r-sm);
+  background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.01)), var(--e-soft);
   border: 1px solid var(--e-border);
   cursor: pointer;
   padding: 6px 0 4px;
   outline: none;
-  transition: transform 0.1s ease, border-color 0.15s ease, background-color 0.15s ease;
+  box-shadow: var(--e-lift);
+  transition: transform 0.14s ease, border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.14s ease;
 }
 .e-pack-card:hover {
-  transform: scale(1.05);
+  transform: translateY(-1px);
   border-color: var(--e-mut);
+  box-shadow: var(--e-lift), var(--e-shadow-raise);
 }
+.e-pack-card:active { transform: translateY(0); }
 .e-pack-card.on {
-  background: color-mix(in srgb, var(--accent, #ef4444) 8%, var(--e-soft));
-  border-color: var(--accent, #ef4444);
-  border-width: 1.5px;
+  background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.01)), var(--e-card);
+  border-color: var(--e-fg);
+  box-shadow: var(--e-lift), 0 0 16px rgba(250,250,250,.14);
 }
 .e-pack-card span {
-  font-size: 8.5px;
-  font-weight: 700;
+  font-size: 10.5px;
+  font-weight: 500;
   color: var(--e-mut);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  text-transform: none;
+  letter-spacing: -0.01em;
   pointer-events: none;
 }
 .e-pack-card.on span {
-  color: var(--accent, #ef4444);
+  color: var(--e-fg);
 }
 
 .e-pack-add {
@@ -350,32 +483,34 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
-  border-radius: 8px;
+  gap: 4px;
+  border-radius: var(--e-r-sm);
   background: transparent;
   border: 1px dashed var(--e-dim);
   color: var(--e-dim);
   cursor: pointer;
   padding: 6px 0 4px;
   outline: none;
-  transition: transform 0.1s ease, border-color 0.15s ease, color 0.15s ease;
+  transition: transform 0.14s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.14s ease;
 }
 .e-pack-add:hover {
-  transform: scale(1.05);
+  transform: translateY(-1px);
   border-color: var(--e-fg);
   color: var(--e-fg);
+  box-shadow: var(--e-shadow-raise);
 }
+.e-pack-add:active { transform: translateY(0); }
 .e-pack-add span {
-  font-size: 8.5px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: 10.5px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: -0.01em;
 }
 
 .e-upload-dashed {
   width: 100%;
   height: 36px;
-  background: var(--e-soft);
+  background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.01)), var(--e-soft);
   border: 1px dashed var(--e-border);
   border-radius: 6px;
   color: var(--e-mut);
@@ -387,12 +522,16 @@
   gap: 6px;
   cursor: pointer;
   border-style: dashed;
-  transition: border-color 0.15s, color 0.15s;
+  box-shadow: var(--e-lift);
+  transition: border-color 0.15s, color 0.15s, transform 0.14s ease, box-shadow 0.14s ease;
 }
 .e-upload-dashed:hover {
   border-color: var(--e-fg);
   color: var(--e-fg);
+  transform: translateY(-1px);
+  box-shadow: var(--e-lift), var(--e-shadow-raise);
 }
+.e-upload-dashed:active { transform: translateY(0); }
 
 .e-sublist {
   display: flex;
@@ -413,7 +552,7 @@
   transition: border-color 0.15s ease;
 }
 .e-subrow:focus-within {
-  border-color: var(--accent, #ef4444);
+  border-color: var(--e-focus);
 }
 .e-subtime {
   font-size: 11px;

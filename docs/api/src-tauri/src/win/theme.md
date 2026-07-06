@@ -62,4 +62,4 @@ Maps a `ThemeMode` variant to a concrete dark/light boolean, delegating to `os_p
 
 ### Used by
 
-- `src-tauri/src/export/exporter.rs` - called once per export with `settings.ui.theme`; the boolean drives cursor sprite inversion (dark theme = invert light sprites) and any dark-mode color adjustments in the export pipeline
+- `src-tauri/src/export/pipeline/exporter.rs` - called once per export with `settings.ui.theme`; the boolean drives cursor sprite inversion (dark theme = invert light sprites) and any dark-mode color adjustments in the export pipeline

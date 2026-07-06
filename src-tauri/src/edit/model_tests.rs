@@ -1,0 +1,104 @@
+// Tests for edit::model, split into their own file so model.rs stays under the size limit.
+use super::*;
+use std::path::PathBuf;
+
+fn tmp_path(name: &str) -> PathBuf {
+    std::env::temp_dir().join(name)
+}
+
+fn sample_doc() -> EditDoc {
+    EditDoc {
+        version: 1,
+        trim: Trim { in_ms: 100, out_ms: 5000 },
+        cuts: vec![Cut { start_ms: 500, end_ms: 1000 }],
+        zooms: vec![Zoom { id: "z1".into(), start_ms: 200, end_ms: 800, target: ZoomTarget::Cursor, scale: 2.2, easing: "ease".into(), zoom_in_ms: 350, zoom_out_ms: 450, layer: 0 }],
+        speed: vec![Speed { id: "s1".into(), start_ms: 1000, end_ms: 2000, factor: 2.0 }],
+        layout: vec![LayoutSeg { id: "l1".into(), start_ms: 0, end_ms: 5000, layout: "screen".into(), transition_ms: 350, easing: "smooth".into() }],
+        effects: vec![],
+        camera_moves: vec![],
+        settings: crate::settings::model::Settings::default(),
+    }
+}
+
+#[test]
+fn zoom_and_effect_region_layer_defaults_to_zero_on_missing_field() {
+    // Simulates loading a pre-existing edit.json saved before `layer` existed.
+    let zoom_json = r#"{"id":"z0","start_ms":0,"end_ms":1000,"target":"cursor","scale":2.0,"easing":"smooth","zoom_in_ms":350,"zoom_out_ms":450}"#;
+    let zoom: Zoom = serde_json::from_str(zoom_json).unwrap();
+    assert_eq!(zoom.layer, 0);
+
+    let effect_json = r#"{"id":"e0","kind":"spotlight","start_ms":0,"end_ms":1000,"fade_in_ms":250,"fade_out_ms":250}"#;
+    let effect: EffectRegion = serde_json::from_str(effect_json).unwrap();
+    assert_eq!(effect.layer, 0);
+}
+
+#[test]
+fn round_trip_save_load() {
+    let doc = sample_doc();
+    let p = tmp_path("edit_model_round_trip.json");
+    doc.save(&p).unwrap();
+    let loaded = EditDoc::load(&p).unwrap();
+    assert_eq!(loaded.version, 1);
+    assert_eq!(loaded.trim.in_ms, 100);
+    assert_eq!(loaded.cuts.len(), 1);
+    assert_eq!(loaded.zooms.len(), 1);
+    assert_eq!(loaded.zooms[0].id, "z1");
+    assert_eq!(loaded.speed.len(), 1);
+    assert_eq!(loaded.layout.len(), 1);
+    assert_eq!(loaded, doc);
+}
+
+#[test]
+fn load_missing_path_is_none() {
+    let p = tmp_path("edit_model_no_such_file_xyz.json");
+    let _ = std::fs::remove_file(&p);
+    assert!(EditDoc::load(&p).is_none());
+}
+
+#[test]
+fn partial_json_fills_defaults() {
+    let json = r#"{"zooms":[{"id":"z1","start_ms":0,"end_ms":100,"target":"cursor","scale":2.0,"easing":"linear"}]}"#;
+    let doc: EditDoc = serde_json::from_str(json).unwrap();
+    assert_eq!(doc.version, 1);
+    assert_eq!(doc.cuts.len(), 0);
+    assert_eq!(doc.speed.len(), 0);
+    assert_eq!(doc.layout.len(), 0);
+    assert_eq!(doc.trim, Trim::default());
+    assert_eq!(doc.zooms.len(), 1);
+}
+
+#[test]
+fn old_json_without_durations_gets_tuned_defaults() {
+    let json = r#"{"zooms":[{"id":"z0","start_ms":0,"end_ms":100,"target":"cursor","scale":2.0,"easing":"smooth"}],"effects":[{"id":"e0","kind":"spotlight","start_ms":0,"end_ms":100}]}"#;
+    let doc: EditDoc = serde_json::from_str(json).unwrap();
+    assert_eq!((doc.zooms[0].zoom_in_ms, doc.zooms[0].zoom_out_ms), (350, 450));
+    assert_eq!((doc.effects[0].fade_in_ms, doc.effects[0].fade_out_ms), (250, 250));
+}
+
+#[test]
+fn zoom_target_fixed_serializes_with_xy() {
+    let t = ZoomTarget::Fixed { x: 0.5, y: 0.75 };
+    let json = serde_json::to_string(&t).unwrap();
+    assert!(json.contains("\"x\""), "x missing: {}", json);
+    assert!(json.contains("\"y\""), "y missing: {}", json);
+    assert!(json.contains("fixed"), "variant missing: {}", json);
+    let back: ZoomTarget = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, t);
+}
+
+#[test]
+fn camera_move_round_trip_save_load() {
+    let mut doc = sample_doc();
+    doc.camera_moves = vec![CameraMove { id: "k1".into(), t_ms: 300, x: 0.5, y: 0.4, size: 0.3, easing: "smooth".into() }];
+    let p = tmp_path("edit_model_camera_move_round_trip.json");
+    doc.save(&p).unwrap();
+    let loaded = EditDoc::load(&p).unwrap();
+    assert_eq!(loaded.camera_moves.len(), 1);
+    assert_eq!(loaded, doc);
+}
+
+#[test]
+fn camera_move_missing_field_defaults_to_empty_vec() {
+    let doc: EditDoc = serde_json::from_str(r#"{"zooms":[]}"#).unwrap();
+    assert_eq!(doc.camera_moves.len(), 0);
+}

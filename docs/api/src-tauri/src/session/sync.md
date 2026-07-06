@@ -27,8 +27,8 @@ Both `mic_ms` and `system_ms` carry `#[serde(default)]` so older `sync.json` fil
 
 ### Used by
 
-- `src-tauri/src/session/recorder.rs` - constructed in `stop_recording` from `frame_ts`, `events_ms`, and the audio start atomics; saved via `SyncLog::save`.
-- `src-tauri/src/export/timeline.rs` - loaded via `SyncLog::load` to rebuild the frame timeline and compute audio offsets during export.
+- `src-tauri/src/session/record/recorder.rs` - constructed in `stop_recording` from `frame_ts`, `events_ms`, and the audio start atomics; saved via `SyncLog::save`.
+- `src-tauri/src/export/pipeline/timeline.rs` - loaded via `SyncLog::load` to rebuild the frame timeline and compute audio offsets during export.
 
 ## SyncLog::save
 

@@ -1,4 +1,4 @@
-# src-tauri/src/export/manual.rs
+# src-tauri/src/export/camera/manual.rs
 
 Converts `ZoomHoldStart` / `ZoomHoldEnd` action pairs into `ZoomRegion` values for the manual-zoom effect. Each matched pair produces one region anchored at the cursor position at the moment the key was pressed; unmatched `ZoomHoldStart` events (hold still active at recording end) produce no region.
 

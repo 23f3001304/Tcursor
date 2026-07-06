@@ -1,4 +1,4 @@
-# src-tauri/src/export/hold.rs
+# src-tauri/src/export/fx/hold.rs
 
 Generic fade-in / hold / fade-out alpha ramp shared by every hold-to-activate manual effect (spotlight, video FX). Accepts predicate closures identifying the start and end `ActionKind` so the same ramp algorithm drives all effect types without duplication. Pure and deterministic - identical inputs always produce identical output.
 
@@ -40,8 +40,8 @@ Computes the effect strength 0..1 at elapsed time `et` by walking the action eve
 
 ### Used by
 
-- `src-tauri/src/export/spotlight.rs` - `spotlight::hold_alpha` delegates here with `SpotlightHoldStart` / `SpotlightHoldEnd` predicates.
-- `src-tauri/src/export/fx_state.rs` - directly calls `hold::hold_alpha` with `VideoFxHoldStart` / `VideoFxHoldEnd` predicates for the video FX overlay.
+- `src-tauri/src/export/fx/spotlight.rs` - `spotlight::hold_alpha` delegates here with `SpotlightHoldStart` / `SpotlightHoldEnd` predicates.
+- `src-tauri/src/export/fx/fx_state.rs` - directly calls `hold::hold_alpha` with `VideoFxHoldStart` / `VideoFxHoldEnd` predicates for the video FX overlay.
 
 ### Behaviors
 

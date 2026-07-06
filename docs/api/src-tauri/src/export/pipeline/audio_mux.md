@@ -1,4 +1,4 @@
-# src-tauri/src/export/audio_mux.rs
+# src-tauri/src/export/pipeline/audio_mux.rs
 
 Muxes the encoded silent video with recorded microphone and/or system audio into `final.mp4`. Handles all four audio combinations (both tracks, one track, no tracks) and applies per-track A/V sync offsets before muxing.
 

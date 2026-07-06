@@ -1,4 +1,4 @@
-# src-tauri/src/export/fx_uniforms.rs
+# src-tauri/src/export/fx/fx_uniforms.rs
 
 Packs `FxState` into the `FxU` GPU uniform struct consumed by `fx.wgsl`. Defines the canonical numeric-id mappings for click styles, spotlight modes, and video FX modes - the single source of truth that the `FX_*` constants in `fx.wgsl` must mirror exactly.
 
@@ -12,8 +12,8 @@ Maximum simultaneous click effects packed into the shader uniform. Clicks beyond
 
 ### Used by
 
-- `src-tauri/src/export/fx_uniforms.rs` - `build_fx_u` uses `.take(MAX_HITS)` when iterating hits.
-- `src-tauri/src/export/fx_gpu.rs` - `FxU` embeds `[[f32; 4]; MAX_HITS]`, so its size in bytes determines the uniform buffer allocation.
+- `src-tauri/src/export/fx/fx_uniforms.rs` - `build_fx_u` uses `.take(MAX_HITS)` when iterating hits.
+- `src-tauri/src/export/fx/fx_gpu.rs` - `FxU` embeds `[[f32; 4]; MAX_HITS]`, so its size in bytes determines the uniform buffer allocation.
 
 ## FxU
 
@@ -47,7 +47,7 @@ The shader uniform block. All fields are `[f32; 4]` (vec4) for std140 alignment.
 
 ### Used by
 
-- `src-tauri/src/export/fx_gpu.rs` - `GpuFx::apply` uploads `FxU` as a wgpu `UNIFORM` buffer at binding 2.
+- `src-tauri/src/export/fx/fx_gpu.rs` - `GpuFx::apply` uploads `FxU` as a wgpu `UNIFORM` buffer at binding 2.
 
 ## style_id
 

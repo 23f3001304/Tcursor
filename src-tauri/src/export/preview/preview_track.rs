@@ -4,11 +4,10 @@
 // kept out of preview.rs (frame compositing) so each file stays focused. All reuse the warm
 // renderer cache via `with_warm`.
 use std::path::PathBuf;
-use crate::actions::model::ActionKind;
 use crate::export::preview::{with_warm, PreviewSession};
 use crate::export::render::OUT_FPS;
 use crate::session::paths::ProjectPaths;
-use crate::win::proc::ffcmd_bg;
+use crate::win::sys::proc::ffcmd_bg;
 
 /// One sample of the camera curve: output time `t` (ms), the zoom as scale + center, and the
 /// cursor position - `cx`/`cy`/`curx`/`cury` are 0..1 fractions of the SCREEN content, so the
@@ -67,29 +66,6 @@ pub fn preview_layout(folder: String, session: tauri::State<'_, PreviewSession>)
     })
 }
 
-/// One recorded effect-hold interval in OUTPUT time (ms) - same basis as `ClickSample`.
-#[derive(serde::Serialize)]
-pub struct HoldSpan { pub start_ms: u32, pub end_ms: u32 }
-
-/// Recorded spotlight-hold intervals (the hotkey spotlight held during capture) mapped to output
-/// time, so the editor preview lights the spotlight exactly like the export's `hold_alpha` - not
-/// just for editor-added regions. Output basis matches `click_track`: `out = et + events_ms -
-/// video_start`. Spans are clipped to `[0, dur]`; the preview applies the fade ramp.
-#[tauri::command]
-pub fn spotlight_holds(folder: String, session: tauri::State<'_, PreviewSession>) -> Result<Vec<HoldSpan>, String> {
-    with_warm(&session, &folder, |c, paths| {
-        let dur = crate::edit::seed::load_or_seed(paths).trim.out_ms as i64;
-        let off = c.renderer.events_ms() as i64 - c.meta.video_start as i64; // event_t + off = output_t
-        let end_ev = (dur - off).max(0) as u32; // event time mapping to the output end
-        Ok(crate::export::fx::hold::hold_spans(c.renderer.actions(), end_ev,
-            |k| matches!(k, ActionKind::SpotlightHoldStart), |k| matches!(k, ActionKind::SpotlightHoldEnd))
-            .into_iter().filter_map(|(s, e)| {
-                let (os, oe) = (s as i64 + off, e as i64 + off);
-                (oe > 0 && os < dur).then(|| HoldSpan { start_ms: os.max(0) as u32, end_ms: oe.min(dur) as u32 })
-            }).collect())
-    })
-}
-
 /// One click ripple: output time `t` (ms) and 0..1 screen-content position. Same basis as
 /// `CamSample`'s cursor, so the editor draws the ripple where the cursor clicked.
 #[derive(serde::Serialize)]
@@ -114,7 +90,7 @@ pub fn ensure_proxy(folder: String, height: u32) -> Result<String, String> {
     let paths = ProjectPaths { folder: PathBuf::from(&folder) };
     let h = height.clamp(240, 2160) & !1; // even
     let proxy = paths.folder.join(format!("preview_{h}_rt.mp4"));
-    crate::win::proc::generate_once(&proxy, || {
+    crate::win::sys::proc::generate_once(&proxy, || {
         // The capture encoder writes CFR at a nominal fps usually faster than the real capture
         // rate, so video.mp4 plays sped up. Stretch the proxy to the real recording duration
         // (trim.out_ms - the exact span the export spans) via setpts, so the preview plays at
@@ -127,7 +103,7 @@ pub fn ensure_proxy(folder: String, height: u32) -> Result<String, String> {
         let enc = if probed > 0.05 { probed } else { real };
         let k = real / enc;
         let vf = if (k - 1.0).abs() > 0.02 { format!("scale=-2:{h},setpts={k:.6}*PTS") } else { format!("scale=-2:{h}") };
-        let tmp = crate::win::proc::tmp_sibling(&proxy); // write then atomic-rename (no partial reads)
+        let tmp = crate::win::sys::proc::tmp_sibling(&proxy); // write then atomic-rename (no partial reads)
         let status = ffcmd_bg("ffmpeg")
             .args(["-v", "error", "-y", "-i"]).arg(paths.video())
             .args(["-vf", &vf, "-c:v", "libx264", "-preset", "veryfast",

@@ -1,4 +1,4 @@
-# src-tauri/src/export/gpu_uniforms.rs
+# src-tauri/src/export/gpu/gpu_uniforms.rs
 
 Defines the GPU uniform buffer layout (`Uniforms`) and the builder function that populates it from per-frame scene, camera, and layout state. The struct is designed for direct `bytemuck` byte-casting with no padding surprises.
 
@@ -33,7 +33,7 @@ Packed uniform struct sent to the WGSL compositing shader. All coordinates are U
 
 ### Used by
 
-- `src-tauri/src/export/gpu_compositor.rs` - `GpuCompositor::composite_into` calls `build_uniforms` and uploads the result as binding 4.
+- `src-tauri/src/export/gpu/gpu_compositor.rs` - `GpuCompositor::composite_into` calls `build_uniforms` and uploads the result as binding 4.
 
 ## build_uniforms
 

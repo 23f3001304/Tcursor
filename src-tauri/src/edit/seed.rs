@@ -66,7 +66,7 @@ pub fn load_or_seed(paths: &ProjectPaths) -> EditDoc {
         Some(d) => (d, false),
         None => (build_default(paths), true),
     };
-    if crate::edit::effects::lift_always_on_spotlight(&mut doc) || fresh { let _ = doc.save(&paths.edit()); }
+    if crate::edit::ops::effects::lift_always_on_spotlight(&mut doc) || fresh { let _ = doc.save(&paths.edit()); }
     doc
 }
 
@@ -83,7 +83,7 @@ fn build_default(paths: &ProjectPaths) -> EditDoc {
     };
     let actions = crate::actions::model::ActionLog::load(&paths.actions())
         .map(|a| a.actions).unwrap_or_default();
-    let typing = crate::events::typing::TypingLog::load(&paths.typing()).ms;
+    let typing = crate::events::track::typing::TypingLog::load(&paths.typing()).ms;
 
     // Raw regions: auto click-zoom then manual hold-zoom (same order as the exporter;
     // re-anchoring into the screen panel is deferred to render-time, as today).
@@ -114,6 +114,7 @@ fn build_default(paths: &ProjectPaths) -> EditDoc {
         speed: vec![],
         layout: layout_from_actions(&actions, dur_ms),
         effects: spotlight_effects(&actions, dur_ms),
+        camera_moves: vec![],
         settings,
     }
 }

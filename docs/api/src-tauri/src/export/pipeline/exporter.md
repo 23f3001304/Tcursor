@@ -1,4 +1,4 @@
-# src-tauri/src/export/exporter.rs
+# src-tauri/src/export/pipeline/exporter.rs
 
 Top-level export orchestrator and the **composite stage** of the 3-stage decode -> composite -> encode pipeline. It loads a `FrameRenderer` from `render.rs` (which owns all per-frame compositing state), starts the screen/webcam decode threads via `ScreenPipe`/`WebcamPipe` (`pipeline.rs`), spawns the encoder thread, drives the per-frame composite loop, and muxes audio into `final.mp4`. All per-frame render logic (camera sim, compositor, FX overlays, cursor) lives in `render::FrameRenderer`; the decode threads and the encoder each run concurrently, connected by bounded channels with recycled buffer pools (`pool.rs`), so decoding frame N+1 overlaps compositing frame N overlaps encoding frame N-1. Output is byte-identical to the old sequential loop - only the overlap and buffer recycling changed.
 

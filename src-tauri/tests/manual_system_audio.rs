@@ -1,7 +1,7 @@
 // Run: cargo test --test manual_system_audio -- --ignored --nocapture
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use cursor_zoom_lib::audio::system_audio::SystemAudio;
+use cursor_zoom_lib::audio::capture::system_audio::SystemAudio;
 
 #[test]
 #[ignore]

@@ -190,4 +190,4 @@ Converts a `HotkeySettings` struct into the armed-chord table consumed by `Keybo
 
 ### Used by
 
-- `src-tauri/src/session/recorder.rs` - called once at recording start: `KeyboardTracker::start(arming_from_settings(&snap.hotkeys))`.
+- `src-tauri/src/session/record/recorder.rs` - called once at recording start: `KeyboardTracker::start(arming_from_settings(&snap.hotkeys))`.

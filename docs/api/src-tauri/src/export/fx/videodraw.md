@@ -1,4 +1,4 @@
-# src-tauri/src/export/videodraw.rs
+# src-tauri/src/export/fx/videodraw.rs
 
 Applies full-frame video effects (cinematic dim, screen focus, colour pop, nebula wash) directly onto the composited BGRA frame in software. This is the CPU path - the same visual results are achievable via the GPU shader when available; this file is the guaranteed fallback for every export. Invoked by `fxdraw::CpuFx` before spotlight and click effects so video FX form the base enhancement layer.
 
@@ -39,4 +39,4 @@ Modifies every relevant pixel of `out` in-place according to `v.mode`, scaled by
 
 ### Used by
 
-- `src-tauri/src/export/fxdraw.rs` - `CpuFx::apply` calls `draw_video` as the first of three sequential effect layers when `state.video` is `Some`.
+- `src-tauri/src/export/fx/fxdraw.rs` - `CpuFx::apply` calls `draw_video` as the first of three sequential effect layers when `state.video` is `Some`.

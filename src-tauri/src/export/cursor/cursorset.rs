@@ -1,7 +1,7 @@
 // Per-type cursor sprite set for Enhanced export: decode each shape once, look up
 // the active type per frame, and invert RGB for dark themes (one asset set serves both).
 use std::collections::{HashMap, VecDeque};
-use crate::events::cursortype::{CursorType, CursorTrack};
+use crate::events::track::cursortype::{CursorType, CursorTrack};
 use crate::events::model::{EventKind, MouseEvent};
 use crate::settings::model::{CursorSettings, CursorStyle};
 use crate::export::cursor::cursordraw::{decode_sprite, CursorSprite};

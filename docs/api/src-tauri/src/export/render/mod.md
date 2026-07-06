@@ -1,4 +1,4 @@
-# src-tauri/src/export/render.rs
+# src-tauri/src/export/render/mod.rs
 
 Reusable per-frame renderer that owns all per-export setup except the raw decoders and the encoder sink. Extracted from `exporter.rs` so the same compositing code can serve both the export loop and the preview engine (Task 2). The exporter calls `FrameRenderer::new` once, then `step_camera` + `composite_at` once per output frame. The preview engine fast-forwards `step_camera` from 0 to a target time (cheap math, no decode) and composites once.
 
@@ -81,6 +81,7 @@ Private fields include:
 - `cfg: ZoomConfig` - derived from `settings.zoom`; used by `CameraSim::step`.
 - `layout: Layout` - output canvas dimensions and screen-panel geometry.
 - `track: LayoutTrack` - resolves the active `Scene` at any event time.
+- `cam_moves: CameraMoveTrack` - built once from `doc.camera_moves` (Task 4); `step_camera` samples it per frame to override the scene's camera-panel rect. Empty (the default) means "no override" - see `## camera` below.
 - `regions: Vec<ZoomRegion>` - re-anchored zoom regions for `CameraSim::step`.
 - `bg: Vec<u8>` - decoded background BGRA pixels; passed to compositor each frame.
 - `compositor: Box<dyn Compositor>` - GPU or CPU compositor, selected once at init.
@@ -148,6 +149,19 @@ Advances the camera simulation to output time `t` and returns the resolved pose.
 ### Implementation
 
 Replicates `Cursor::at` inline (index advance + exponential low-pass at `A=0.35`) using owned event data, because `FrameRenderer` owns the event log and cannot hold a `Cursor<'a>` that borrows from itself. Cursor and `LayoutTrack::scene_at` sample at the event-relative `ev_t = t - events_ms`; `CameraSim::step` is then called at the output-time `out_t = t - video_start` (zoom regions are stored in output time), followed by the CameraOnly identity override (`scene.screen.alpha < 0.5`) and `shrink_camera` when enabled and the screen panel is dominant.
+
+**`camera_moves` override (Task 4):** right after `scene` is resolved and `out_t` is computed, `step_camera` samples `self.cam_moves` (a `CameraMoveTrack` built once from `doc.camera_moves` in `EditState::load`, refreshed by both `FrameRenderer::new` and `reload_edit`):
+
+```rust
+if let Some(p) = self.cam_moves.sample(out_t) {
+    scene.camera.rect = crate::export::scene::rect_from_center(p, self.layout.out_w as f32, self.layout.out_h as f32);
+}
+```
+
+- `CameraMoveTrack::sample(out_t) -> Option<CamPose>` (`export/camera/moves.rs`) - `None` for an empty track, which is the seeded-doc default, so this block never runs and the scene's camera rect is exactly whatever `overlay_for`/`resolve` produced (byte-identical to pre-Task-4 behavior).
+- `rect_from_center(p: CamPose, ow: f32, oh: f32) -> RectF` (`export/scene/mod.rs`) - converts the sampled center-based pose into the panel's top-left `RectF`: height `h = p.size * oh`, width `w = h` (square; the mode's aspect ratio arrives in Task 9), top-left `x = p.x * ow - w/2`, `y = p.y * oh - h/2`.
+- Only `scene.camera.rect` is overridden - `radius`/`alpha` stay whatever the static resolve already set. The override runs before the `camera_shrink` block below it, so an in-flight zoom-shrink composes on top of the overridden rect's center, same as it would on top of the static one.
+- Uses the same `ow`/`oh` (`self.layout.out_w`/`out_h`, `f32`) already in scope for the surrounding per-frame math - no separate output-dimension lookup.
 
 ## FrameRenderer::composite_at
 

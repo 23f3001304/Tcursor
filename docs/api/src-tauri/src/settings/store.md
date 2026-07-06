@@ -58,7 +58,7 @@ None. Reads from the path returned by `config_path()`.
 ### Used by
 
 - `src-tauri/src/commands.rs` (`get_settings`) - serves the current settings over IPC to the frontend
-- `src-tauri/src/session/recorder.rs` - called at recording start to snapshot all settings for the session duration
+- `src-tauri/src/session/record/recorder.rs` - called at recording start to snapshot all settings for the session duration
 
 ## save
 

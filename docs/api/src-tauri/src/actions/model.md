@@ -23,8 +23,8 @@ Serializes to snake_case JSON strings via `#[serde(rename_all = "snake_case")]` 
 ### Used by
 
 - `src-tauri/src/actions/matcher.rs` - `arming_from_settings` maps each `HotkeySettings` layout field to a `SetLayout(LayoutId)` arm.
-- `src-tauri/src/export/caption.rs` - `caption_at` matches `SetLayout(id)` to look up the hotkey string to display as an on-screen caption.
-- `src-tauri/src/export/fromedit.rs` - `layout_segs_from_doc` constructs `ActionEvent` values carrying `LayoutId` to feed the export pipeline.
+- `src-tauri/src/export/fx/caption.rs` - `caption_at` matches `SetLayout(id)` to look up the hotkey string to display as an on-screen caption.
+- `src-tauri/src/export/render/fromedit.rs` - `layout_segs_from_doc` constructs `ActionEvent` values carrying `LayoutId` to feed the export pipeline.
 
 ## ActionKind
 
@@ -52,9 +52,9 @@ Serializes to snake_case (e.g. `"zoom_hold_start"`). `Copy` because events are s
 
 - `src-tauri/src/actions/matcher.rs` - `Arm.on_down` and `Arm.on_up` carry `ActionKind` values; `ActionMatcher::on_key` emits them.
 - `src-tauri/src/actions/keyboard.rs` - `KeyboardTracker` accumulates `ActionEvent` values containing `ActionKind`.
-- `src-tauri/src/export/caption.rs` - matched in `caption_at` to determine which hotkey label to render.
-- `src-tauri/src/export/hold.rs`, `src-tauri/src/export/spotlight.rs`, `src-tauri/src/export/manual.rs` - consume `ActionKind` variants to drive hold, spotlight, and manual zoom rendering.
-- `src-tauri/src/ai/timeline.rs` - filters `SetLayout` variants into the AI transcript.
+- `src-tauri/src/export/fx/caption.rs` - matched in `caption_at` to determine which hotkey label to render.
+- `src-tauri/src/export/fx/hold.rs`, `src-tauri/src/export/fx/spotlight.rs`, `src-tauri/src/export/camera/manual.rs` - consume `ActionKind` variants to drive hold, spotlight, and manual zoom rendering.
+- `src-tauri/src/ai/backend/timeline.rs` - filters `SetLayout` variants into the AI transcript.
 
 ## ActionEvent
 
@@ -72,9 +72,9 @@ A single timestamped hotkey action.
 
 - `src-tauri/src/actions/keyboard.rs` - produced by `KeyboardTracker` and returned from `stop()`.
 - `src-tauri/src/actions/model.rs` - stored in `ActionLog.actions`.
-- `src-tauri/src/ai/timeline.rs` - consumed by `serialize` to emit layout-change lines in the AI transcript.
-- `src-tauri/src/export/caption.rs` - sliced and searched in `caption_at`.
-- `src-tauri/src/export/fromedit.rs` - constructed by `layout_segs_from_doc` to feed the export pipeline.
+- `src-tauri/src/ai/backend/timeline.rs` - consumed by `serialize` to emit layout-change lines in the AI transcript.
+- `src-tauri/src/export/fx/caption.rs` - sliced and searched in `caption_at`.
+- `src-tauri/src/export/render/fromedit.rs` - constructed by `layout_segs_from_doc` to feed the export pipeline.
 
 ## ActionLog
 
@@ -92,9 +92,9 @@ Container for all `ActionEvent` values from one recording session, with JSON per
 
 ### Used by
 
-- `src-tauri/src/session/recorder_threads.rs` - constructs `ActionLog { actions }` and calls `save(actions_path)` when a recording ends.
+- `src-tauri/src/session/record/recorder_threads.rs` - constructs `ActionLog { actions }` and calls `save(actions_path)` when a recording ends.
 - `src-tauri/src/ai/commands.rs` - `ai_autoedit` calls `ActionLog::load` to read the session's hotkey log for the AI timeline.
-- `src-tauri/src/export/exporter.rs` - loads `ActionLog` to feed the export pipeline.
+- `src-tauri/src/export/pipeline/exporter.rs` - loads `ActionLog` to feed the export pipeline.
 
 ## ActionLog::save
 

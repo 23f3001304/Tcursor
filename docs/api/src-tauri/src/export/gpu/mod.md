@@ -1,4 +1,4 @@
-# src-tauri/src/export/gpu.rs
+# src-tauri/src/export/gpu/mod.rs
 
 wgpu device/pipeline initialization, GPU availability probe, texture upload helper, and the shared `FORMAT` constant for the export GPU compositor. All allocation happens at construction time in `Gpu::new`; per-frame paths touch only `upload_tex` and the already-allocated device/queue.
 
@@ -21,7 +21,7 @@ The smallest multiple of `align` >= `v`. Panics if `align == 0` (unsigned wrapar
 
 ### Used by
 
-- `src-tauri/src/export/gpu.rs` - `Gpu::new` uses it to compute `padded_bpr`.
+- `src-tauri/src/export/gpu/mod.rs` - `Gpu::new` uses it to compute `padded_bpr`.
 
 ## gpu_available
 
@@ -37,7 +37,7 @@ Returns `true` if wgpu can find at least one adapter on this machine. Blocks the
 
 ### Used by
 
-- `src-tauri/src/export/exporter.rs` - `select_compositor` calls this before attempting `GpuCompositor::new`.
+- `src-tauri/src/export/pipeline/exporter.rs` - `select_compositor` calls this before attempting `GpuCompositor::new`.
 
 ## FORMAT
 
@@ -49,8 +49,8 @@ The texture format used for all export textures (background, screen, webcam, out
 
 ### Used by
 
-- `src-tauri/src/export/gpu.rs` - `Gpu::new` and `Gpu::upload_tex` set this format on every texture.
-- `src-tauri/src/export/gpu_compositor.rs` - implicitly via the bind group and render pass.
+- `src-tauri/src/export/gpu/mod.rs` - `Gpu::new` and `Gpu::upload_tex` set this format on every texture.
+- `src-tauri/src/export/gpu/gpu_compositor.rs` - implicitly via the bind group and render pass.
 
 ## Gpu
 
@@ -81,7 +81,7 @@ All device-lifetime GPU state shared across every frame in one export run.
 
 ### Used by
 
-- `src-tauri/src/export/gpu_compositor.rs` - `GpuCompositor` holds a `Gpu` and calls `upload_tex` each frame.
+- `src-tauri/src/export/gpu/gpu_compositor.rs` - `GpuCompositor` holds a `Gpu` and calls `upload_tex` each frame.
 
 ## Gpu::new
 

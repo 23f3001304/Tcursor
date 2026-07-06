@@ -13,26 +13,26 @@ pub fn ai_autoedit(folder: String, model: Option<String>) -> Result<EditDoc, Str
         .map_err(|e| e.to_string())?;
     let actions = crate::actions::model::ActionLog::load(&paths.actions())
         .map(|a| a.actions).unwrap_or_default();
-    let cursor = crate::events::cursortype::CursorTrack::load(&paths.cursor());
-    let typing = crate::events::typing::TypingLog::load(&paths.typing()).ms;
+    let cursor = crate::events::track::cursortype::CursorTrack::load(&paths.cursor());
+    let typing = crate::events::track::typing::TypingLog::load(&paths.typing()).ms;
 
-    let transcript = crate::ai::timeline::serialize(&log, &actions, &cursor, &typing, dur_ms);
+    let transcript = crate::ai::backend::timeline::serialize(&log, &actions, &cursor, &typing, dur_ms);
 
     let model_name = model.unwrap_or_else(|| "llama3.2".into());
-    let raw = crate::ai::ollama::chat(
+    let raw = crate::ai::backend::ollama::chat(
         &model_name,
-        &crate::ai::prompt::system_prompt(),
+        &crate::ai::backend::prompt::system_prompt(),
         &transcript,
     )?;
 
-    let ops = crate::ai::plan::ops_from_json(&raw, dur_ms)?;
+    let ops = crate::ai::backend::plan::ops_from_json(&raw, dur_ms)?;
 
     // Replace mechanical auto-zooms with AI plan - only after both chat() and
     // ops_from_json() succeed (their ? exits early on failure).
     doc.zooms.clear();
     doc.trim = Trim { in_ms: 0, out_ms: dur_ms };
     for op in ops {
-        crate::edit::api::apply(&mut doc, op);
+        crate::edit::ops::api::apply(&mut doc, op);
     }
 
     doc.save(&paths.edit()).map_err(|e| e.to_string())?;

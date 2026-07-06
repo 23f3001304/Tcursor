@@ -1,4 +1,4 @@
-# src-tauri/src/export/cursordraw.rs
+# src-tauri/src/export/cursor/cursordraw.rs
 
 CPU rasterizer for the Enhanced synthetic cursor: PNG sprite decoding, click-bounce scale animation, motion trail compositing, and alpha-blitted placement onto a BGRA frame. All drawing is confined to a caller-supplied clip rect so the cursor and trail never spill outside the screen panel. The per-type sprite set and theme inversion live in `cursorset`; this file is the low-level draw layer.
 
@@ -23,7 +23,7 @@ Decoded, content-tight cursor sprite ready for blitting.
 
 ### Used by
 
-- `src-tauri/src/export/cursorset.rs` - stores one `CursorSprite` per `CursorType` in `CursorPrep.set`; calls `decode_sprite` at prep time and `apply_enhanced` per frame.
+- `src-tauri/src/export/cursor/cursorset.rs` - stores one `CursorSprite` per `CursorType` in `CursorPrep.set`; calls `decode_sprite` at prep time and `apply_enhanced` per frame.
 
 ## decode_sprite
 

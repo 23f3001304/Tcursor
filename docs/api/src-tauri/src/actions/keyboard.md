@@ -30,8 +30,8 @@ Owns a background `"keyboard-poll"` thread that reads physical key state directl
 
 ### Used by
 
-- `src-tauri/src/session/recorder.rs` - stores a `KeyboardTracker` in the `Recorder` struct and creates it via `KeyboardTracker::start(arming_from_settings(&snap.hotkeys))`.
-- `src-tauri/src/session/recorder_threads.rs` - accepts `Option<KeyboardTracker>`, calls `stop()` when the session ends, and writes the returned events to `actions.json`.
+- `src-tauri/src/session/record/recorder.rs` - stores a `KeyboardTracker` in the `Recorder` struct and creates it via `KeyboardTracker::start(arming_from_settings(&snap.hotkeys))`.
+- `src-tauri/src/session/record/recorder_threads.rs` - accepts `Option<KeyboardTracker>`, calls `stop()` when the session ends, and writes the returned events to `actions.json`.
 
 ## KeyboardTracker::start
 

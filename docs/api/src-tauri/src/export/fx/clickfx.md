@@ -1,4 +1,4 @@
-# src-tauri/src/export/clickfx.rs
+# src-tauri/src/export/fx/clickfx.rs
 
 Computes the set of live click effect hits at a given playback time, plus pure math helpers for ripple radius and fade opacity. This is the data layer for click effects: it produces `Hit` values from the event log; `clickdraw` consumes them to produce pixels. All functions are pure and stateless.
 
@@ -16,8 +16,8 @@ A single active click effect at query time.
 
 ### Used by
 
-- `src-tauri/src/export/fx_state.rs` - `FxState::build` calls `hits_at` to populate `FxState.hits` from the event log; `FxHit` in `fx_state` is the projected counterpart (output-space x/y, same progress).
-- `src-tauri/src/export/clickdraw.rs` - consumes `FxState.hits` (which are based on `Hit`) and calls `ripple_radius` and `fade_alpha` to compute per-pixel draw parameters.
+- `src-tauri/src/export/fx/fx_state.rs` - `FxState::build` calls `hits_at` to populate `FxState.hits` from the event log; `FxHit` in `fx_state` is the projected counterpart (output-space x/y, same progress).
+- `src-tauri/src/export/fx/clickdraw.rs` - consumes `FxState.hits` (which are based on `Hit`) and calls `ripple_radius` and `fade_alpha` to compute per-pixel draw parameters.
 
 ## hits_at
 

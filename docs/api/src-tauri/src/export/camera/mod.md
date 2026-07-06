@@ -1,4 +1,4 @@
-# src-tauri/src/export/camera.rs
+# src-tauri/src/export/camera/mod.rs
 
 Stateful virtual camera that follows a deterministic eased scale curve fully contained within each zoom region: scale ramps 1 -> target over `zoom_in_ms`, holds, then ramps target -> 1 over `zoom_out_ms`, reaching exactly 1.0 at `end_ms`. Produces a `Camera` value each frame consumed by the compositors and FX overlay. The most-recently-started active region always wins, so a new click preempts an older region's zoom-out immediately.
 
@@ -50,7 +50,7 @@ The virtual camera's mutable state.
 
 ### Used by
 
-- `src-tauri/src/export/exporter.rs` - one `CameraSim` per export; `step` is called in the frame loop.
+- `src-tauri/src/export/pipeline/exporter.rs` - one `CameraSim` per export; `step` is called in the frame loop.
 
 ## CameraSim::new
 
@@ -115,3 +115,7 @@ Generates automatic zoom regions from recorded mouse clicks and optional typing 
 ## manual
 
 Converts `ZoomHoldStart`/`ZoomHoldEnd` action pairs into `ZoomRegion` values anchored at the cursor position when the key was pressed. Key items: `from_actions(actions, events, screen, cfg) -> Vec<ZoomRegion>`.
+
+## moves
+
+Keyframed webcam PiP position+size interpolator, the export source of truth for `EditDoc.camera_moves`. Key items: `CameraMoveTrack::from_doc(&[CameraMove]) -> Self`, `CameraMoveTrack::sample(t_ms) -> Option<CamPose>`.

@@ -1,4 +1,4 @@
-# src-tauri/src/export/cursor.rs
+# src-tauri/src/export/cursor/mod.rs
 
 Stateful cursor position tracker that interpolates between throttled mouse samples and then applies an exponential low-pass filter so small jitter does not cause the on-screen cursor to jump in the rendered video. Owns its event log so it can live inside the `FrameRenderer` as the single owner of the events (also the source the FX layer reads). The tracker advances forward-only through the log for amortized O(1) lookups.
 
@@ -25,7 +25,7 @@ Stateful cursor tracker that owns the mouse log and screen geometry.
 
 ### Used by
 
-- `src-tauri/src/export/render.rs` - `FrameRenderer` owns one `Cursor`, calls `at` once per rendered frame to place the synthetic cursor / anchor effects, and exposes `events()` to the FX layer.
+- `src-tauri/src/export/render/mod.rs` - `FrameRenderer` owns one `Cursor`, calls `at` once per rendered frame to place the synthetic cursor / anchor effects, and exposes `events()` to the FX layer.
 
 ## Cursor::new
 

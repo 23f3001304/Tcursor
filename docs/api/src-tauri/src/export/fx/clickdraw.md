@@ -1,4 +1,4 @@
-# src-tauri/src/export/clickdraw.rs
+# src-tauri/src/export/fx/clickdraw.rs
 
 Renders all click effect styles (ripple, pulse, glow, neon, shockwave, particles) onto a BGRA frame buffer by dispatching per-hit draws from `FxState`. Each style uses a private geometric primitive (ring, disc, gaussian glow, additive ring, or scattered sparks). All sizes are expressed as fractions of frame height `oh` so effects scale consistently with resolution. Invoked by `fxdraw::CpuFx::apply` as the topmost compositing layer.
 

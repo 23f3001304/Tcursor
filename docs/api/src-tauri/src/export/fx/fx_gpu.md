@@ -1,4 +1,4 @@
-# src-tauri/src/export/fx_gpu.rs
+# src-tauri/src/export/fx/fx_gpu.rs
 
 GPU-backed FX renderer that uploads a composited BGRA frame to wgpu, runs `fx.wgsl` (spotlight, click effects, video FX) in a full-screen triangle pass, and reads the result back into the caller's buffer. Selected automatically by `select_fx` when a wgpu adapter is available; falls through to `CpuFx` otherwise.
 
@@ -26,7 +26,7 @@ Holds all persistent wgpu objects for one export session. Constructed once in `G
 
 ### Used by
 
-- `src-tauri/src/export/fx_state.rs` - `select_fx` constructs a `GpuFx` and boxes it as a `dyn FxRenderer`.
+- `src-tauri/src/export/fx/fx_state.rs` - `select_fx` constructs a `GpuFx` and boxes it as a `dyn FxRenderer`.
 
 ## GpuFx::new
 

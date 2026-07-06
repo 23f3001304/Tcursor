@@ -1,4 +1,4 @@
-# src-tauri/src/export/pool.rs
+# src-tauri/src/export/gpu/pool.rs
 
 A tiny recycled-buffer pool over an mpsc channel, so the export pipeline reuses frame buffers between decode → composite → encode instead of allocating ~tens of MB per frame.
 

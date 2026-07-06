@@ -1,4 +1,4 @@
-# src-tauri/src/export/spotlight.rs
+# src-tauri/src/export/fx/spotlight.rs
 
 Thin spotlight-specific adapter over the generic `hold::hold_alpha` ramp. Provides a typed public function for the spotlight effect so callers in `fx_state` do not need to supply predicate closures inline. All logic lives in `export::hold`; this file only binds the correct `ActionKind` predicates.
 
@@ -29,7 +29,7 @@ Returns the spotlight strength 0..1 at event-time `et`, ramping in and out aroun
 
 ### Used by
 
-- `src-tauri/src/export/fx_state.rs` - `FxState::build` calls `spotlight::hold_alpha` to compute `s_alpha`; the result drives whether a `Spot` is included in the `FxState` snapshot for the current frame.
+- `src-tauri/src/export/fx/fx_state.rs` - `FxState::build` calls `spotlight::hold_alpha` to compute `s_alpha`; the result drives whether a `Spot` is included in the `FxState` snapshot for the current frame.
 
 ### Behaviors
 

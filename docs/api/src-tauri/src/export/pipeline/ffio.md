@@ -1,4 +1,4 @@
-# src-tauri/src/export/ffio.rs
+# src-tauri/src/export/pipeline/ffio.rs
 
 FFmpeg and ffprobe spawn helpers, raw BGRA frame reader, and bundled-image decode/crop utilities. All public functions here are pure I/O adapters over the bundled ffmpeg/ffprobe binary located by `win::proc::ffcmd`; they contain no export logic or state.
 
@@ -178,9 +178,9 @@ A spawned ffmpeg process emitting a continuous stream of raw BGRA frames at a fi
 
 ### Used by
 
-- `src-tauri/src/export/exporter.rs` - decodes source video frames during the main render loop.
-- `src-tauri/src/export/timeline.rs` - decodes webcam/camera frames for picture-in-picture overlay.
-- `src-tauri/src/export/cursordraw.rs` - decodes cursor animation frames.
+- `src-tauri/src/export/pipeline/exporter.rs` - decodes source video frames during the main render loop.
+- `src-tauri/src/export/pipeline/timeline.rs` - decodes webcam/camera frames for picture-in-picture overlay.
+- `src-tauri/src/export/cursor/cursordraw.rs` - decodes cursor animation frames.
 
 ## RawDecoder::spawn
 

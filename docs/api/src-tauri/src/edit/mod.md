@@ -10,14 +10,6 @@ Serializable type hierarchy for `edit.json`: atomic edit types up to the root `E
 
 Builds the first `EditDoc` from raw recording data (zoom regions and action log) so the editor opens in a state that matches today's exporter, then writes it as `edit.json`; on subsequent opens returns the existing file untouched. Key items: `load_or_seed` (load-or-create entry point used by `commands` and `ai::commands`), `zooms_from_regions` (converts `ZoomRegion` slice to `Vec<Zoom>` with stable ids and `Fixed` anchors), `layout_from_actions` (converts `SetLayout` action track to consecutive `LayoutSeg` entries covering the full clip duration).
 
-## api
-
-Pure business logic for mutating and measuring an `EditDoc`; the single write point for all document mutations. Key items: `apply` (dispatches an `EditOp` variant to mutate `doc` in place), `metrics` (derives a read-only `Metrics` summary from the current doc state), `EditOp` enum (all editor operations: `AddZoom`, `AddZoomFull`, `UpdateZoom`, `RemoveZoom`, `SetTrim`, `AddCut`, `SetSpeed`, `SetLayoutSeg`, `AddEffect`, `UpdateEffect`, `RemoveEffect`), `Metrics` struct (`duration_ms`, `kept_ms`, `zoom_count`, `cut_count`). The effect ops are delegated to `effects::apply_effect`.
-
-## effects
-
-Effect-region edit ops (`add/update/remove_effect`), split out of `api.rs` so each file stays under the size limit. Key item: `apply_effect` - `api::apply` delegates the three effect-op variants here; `AddEffect` generates an `e`-prefixed id, `UpdateEffect` patches start/end, `RemoveEffect` drops by id.
-
 ## commands
 
 Three Tauri IPC command handlers covering the full read-mutate-save lifecycle; the only code in the `edit` module that touches the Tauri command bus or the filesystem directly. Key items: `get_edit` (loads or seeds the `EditDoc` for a project folder), `apply_edit_op` (applies one `EditOp`, saves, and returns the updated doc), `save_edit` (overwrites `edit.json` with a caller-supplied doc for bulk frontend mutations).

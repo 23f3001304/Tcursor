@@ -38,8 +38,8 @@ Fields:
 
 - `src-tauri/src/settings/model.rs` (`Settings.zoom`) - persisted in `config.json`
 - `src-tauri/src/edit/seed.rs` - calls `to_zoom_config()` to seed an `EditDoc` from a raw recording
-- `src-tauri/src/export/exporter.rs` - calls `to_zoom_config()` when building the export pipeline
-- `src-tauri/src/export/fromedit.rs` - calls `to_zoom_config()` when exporting from an `EditDoc`
+- `src-tauri/src/export/pipeline/exporter.rs` - calls `to_zoom_config()` when building the export pipeline
+- `src-tauri/src/export/render/fromedit.rs` - calls `to_zoom_config()` when exporting from an `EditDoc`
 
 ## ZoomSettings::to_zoom_config
 
@@ -88,8 +88,8 @@ Serialises as lowercase. Each variant maps to a float shader ID in `export::fx_u
 
 ### Used by
 
-- `src-tauri/src/export/clickdraw.rs` - selects which draw path to run per frame
-- `src-tauri/src/export/fx_uniforms.rs` (`style_id`) - converts to a float uniform for the GPU shader
+- `src-tauri/src/export/fx/clickdraw.rs` - selects which draw path to run per frame
+- `src-tauri/src/export/fx/fx_uniforms.rs` (`style_id`) - converts to a float uniform for the GPU shader
 - `src-tauri/src/settings/model.rs` (`ClickFxSettings.style`) - stored in the per-recording settings block
 
 ## SpotlightMode
@@ -113,8 +113,8 @@ Serialises as lowercase. Maps to a float shader ID in `export::fx_uniforms::spot
 
 ### Used by
 
-- `src-tauri/src/export/fx_uniforms.rs` (`spot_mode_id`) - converts to a float uniform for the spotlight shader
-- `src-tauri/src/export/fxdraw.rs` - used in test fixtures to exercise spotlight rendering paths
+- `src-tauri/src/export/fx/fx_uniforms.rs` (`spot_mode_id`) - converts to a float uniform for the spotlight shader
+- `src-tauri/src/export/fx/fxdraw.rs` - used in test fixtures to exercise spotlight rendering paths
 
 ## VideoFxMode
 
@@ -135,7 +135,7 @@ Serialises as lowercase. Maps to a float shader ID in `export::fx_uniforms::vide
 
 ### Used by
 
-- `src-tauri/src/export/fx_uniforms.rs` (`video_mode_id`) - converts to a float uniform for the video FX shader
+- `src-tauri/src/export/fx/fx_uniforms.rs` (`video_mode_id`) - converts to a float uniform for the video FX shader
 
 ## ClickFxSettings
 
@@ -178,10 +178,10 @@ Fields:
 ### Used by
 
 - `src-tauri/src/settings/model.rs` (`Settings.clickfx`) - persisted in `config.json`
-- `src-tauri/src/export/clickdraw.rs` - reads `style` and `color` to select and paint click effects per frame
-- `src-tauri/src/export/fx_uniforms.rs` - converts all fx settings to GPU shader uniforms
-- `src-tauri/src/export/fxdraw.rs` - constructs `FxState` from `ClickFxSettings` fields for rendering tests
-- `src-tauri/src/export/caption.rs` - reads `captions` to decide whether to render action text overlays
+- `src-tauri/src/export/fx/clickdraw.rs` - reads `style` and `color` to select and paint click effects per frame
+- `src-tauri/src/export/fx/fx_uniforms.rs` - converts all fx settings to GPU shader uniforms
+- `src-tauri/src/export/fx/fxdraw.rs` - constructs `FxState` from `ClickFxSettings` fields for rendering tests
+- `src-tauri/src/export/fx/caption.rs` - reads `captions` to decide whether to render action text overlays
 
 ## HotkeySettings
 
@@ -213,7 +213,7 @@ Fields:
 
 - `src-tauri/src/settings/model.rs` (`Settings.hotkeys`) - persisted in `config.json`
 - `src-tauri/src/actions/matcher.rs` (`arming_from_settings`) - converts hotkey strings to `Arm` structs for the `ActionMatcher`
-- `src-tauri/src/export/caption.rs` (`caption_at`) - reads hotkey strings to build action label text for caption overlays
+- `src-tauri/src/export/fx/caption.rs` (`caption_at`) - reads hotkey strings to build action label text for caption overlays
 
 ## ThemeMode
 
@@ -234,7 +234,7 @@ Serialises as lowercase.
 ### Used by
 
 - `src-tauri/src/win/theme.rs` (`resolve_dark`) - maps `System` to an OS registry query; used to decide whether to invert cursor sprites and apply dark-theme coloring
-- `src-tauri/src/export/exporter.rs` - calls `resolve_dark(settings.ui.theme)` to determine sprite inversion during export
+- `src-tauri/src/export/pipeline/exporter.rs` - calls `resolve_dark(settings.ui.theme)` to determine sprite inversion during export
 
 ## InterfaceSettings
 
@@ -257,7 +257,7 @@ Fields:
 ### Used by
 
 - `src-tauri/src/settings/model.rs` (`Settings.ui`) - persisted in `config.json`
-- `src-tauri/src/export/exporter.rs` - reads `ui.theme` to resolve dark mode for cursor sprite inversion
+- `src-tauri/src/export/pipeline/exporter.rs` - reads `ui.theme` to resolve dark mode for cursor sprite inversion
 
 ## CursorStyle
 
@@ -278,8 +278,8 @@ Serialises as lowercase.
 ### Used by
 
 - `src-tauri/src/settings/model.rs` (`CursorStyle::captures_os_cursor`) - queried to configure WGC
-- `src-tauri/src/session/recorder.rs` - calls `captures_os_cursor()` to set the WGC cursor inclusion flag; checks `== Enhanced` to start the `CursorTypeTracker`
-- `src-tauri/src/export/cursorset.rs` (`prep`) - returns `None` early for any style except `Enhanced`, skipping sprite preparation
+- `src-tauri/src/session/record/recorder.rs` - calls `captures_os_cursor()` to set the WGC cursor inclusion flag; checks `== Enhanced` to start the `CursorTypeTracker`
+- `src-tauri/src/export/cursor/cursorset.rs` (`prep`) - returns `None` early for any style except `Enhanced`, skipping sprite preparation
 
 ## CursorStyle::captures_os_cursor
 
@@ -328,8 +328,8 @@ Fields:
 ### Used by
 
 - `src-tauri/src/settings/model.rs` (`Settings.cursor`) - persisted in `config.json`
-- `src-tauri/src/export/cursorset.rs` (`prep`) - reads `style`, `motion_blur`, `click_bounce`, `bounce_intensity` to configure cursor sprite animation
-- `src-tauri/src/session/recorder.rs` - reads `style.captures_os_cursor()` and checks `style == Enhanced` to initialize the cursor type tracker
+- `src-tauri/src/export/cursor/cursorset.rs` (`prep`) - reads `style`, `motion_blur`, `click_bounce`, `bounce_intensity` to configure cursor sprite animation
+- `src-tauri/src/session/record/recorder.rs` - reads `style.captures_os_cursor()` and checks `style == Enhanced` to initialize the cursor type tracker
 
 ## Settings
 
@@ -363,5 +363,5 @@ Fields:
 
 - `src-tauri/src/settings/store.rs` (`load`, `save`) - the struct that is serialised to and deserialised from disk
 - `src-tauri/src/commands.rs` (`get_settings`, `set_settings`) - surfaced over IPC so the frontend can read and write settings
-- `src-tauri/src/session/recorder.rs` - loaded at recording start via `store::load()` to snapshot all settings for the session
-- `src-tauri/src/export/exporter.rs` - received from the IPC call and drives every export subsystem
+- `src-tauri/src/session/record/recorder.rs` - loaded at recording start via `store::load()` to snapshot all settings for the session
+- `src-tauri/src/export/pipeline/exporter.rs` - received from the IPC call and drives every export subsystem

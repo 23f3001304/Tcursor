@@ -1,4 +1,4 @@
-# src-tauri/src/export/fromedit.rs
+# src-tauri/src/export/render/fromedit.rs
 
 Inverse of `edit::seed`: reconstructs the exporter's raw `ZoomRegion` list and `SetLayout` action track from a persisted `EditDoc`, so the exporter renders the user's saved plan instead of regenerating it from click events. Trim, cuts, and speed changes are intentionally not applied here. The round-trip proof test `regions_round_trip_through_edit_doc` demonstrates lossless `seed <-> export` conversion.
 

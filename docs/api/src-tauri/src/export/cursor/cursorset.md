@@ -1,4 +1,4 @@
-# src-tauri/src/export/cursorset.rs
+# src-tauri/src/export/cursor/cursorset.rs
 
 Manages the per-type cursor sprite set for Enhanced export: decodes each cursor shape once at prep time from compile-time embedded PNGs, looks up the active type per frame via the cursor type track, inverts RGB channels for dark themes so a single asset set serves both light and dark backgrounds, and drives the per-frame draw call. The drawing primitives live in `cursordraw`; this file is the sprite-management and call-site seam.
 
@@ -33,7 +33,7 @@ All per-export Enhanced cursor state, created once by `prep` and mutated each fr
 
 ### Used by
 
-- `src-tauri/src/export/exporter.rs` - creates one `CursorPrep` per export via `prep`, then calls `draw` once per rendered frame.
+- `src-tauri/src/export/pipeline/exporter.rs` - creates one `CursorPrep` per export via `prep`, then calls `draw` once per rendered frame.
 
 ## prep
 

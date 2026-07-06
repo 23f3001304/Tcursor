@@ -1,4 +1,4 @@
-# src-tauri/src/export/background.rs
+# src-tauri/src/export/scene/background.rs
 
 Rasterizes the export background layer (solid colour, linear gradient at any angle, or image stub) into a raw BGRA pixel buffer. This is the only file that touches `Background` at draw time; callers receive a flat buffer and never inspect which variant was used. Pure and deterministic - identical inputs always produce identical output.
 

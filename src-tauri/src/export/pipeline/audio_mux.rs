@@ -2,7 +2,7 @@
 use anyhow::{anyhow, Context, Result};
 use std::path::Path;
 use std::process::{Command, Stdio};
-use crate::win::proc::ffcmd;
+use crate::win::sys::proc::ffcmd;
 
 use crate::session::paths::ProjectPaths;
 

@@ -13,10 +13,13 @@ pub(crate) struct EditState {
     pub track: LayoutTrack,
     pub regions: Vec<ZoomRegion>,
     pub effects: Vec<EffectRegion>,
+    pub cam_moves: CameraMoveTrack,
 }
 ```
 
-Everything the renderer derives from `edit.json` that a zoom/spotlight edit can change: the settings, the zoom config, the layout track, the anchored zoom regions, and the effect regions. Pure CPU - no GPU, no video probe, no background decode, no cursor prep - so it rebuilds in ~microseconds.
+Everything the renderer derives from `edit.json` that a zoom/spotlight/camera-move edit can change: the settings, the zoom config, the layout track, the anchored zoom regions, the effect regions, and the camera-moves track (Task 4). Pure CPU - no GPU, no video probe, no background decode, no cursor prep - so it rebuilds in ~microseconds.
+
+- `cam_moves: CameraMoveTrack` - `CameraMoveTrack::from_doc(&doc.camera_moves)`; empty when the doc has no `camera_moves` (the default), which is the signal `FrameRenderer::step_camera` uses to leave the scene's camera panel untouched.
 
 ## EditState::load
 

@@ -4,7 +4,7 @@
 // scrub, waveforms to show, and sound to play.
 use std::path::PathBuf;
 use crate::session::paths::ProjectPaths;
-use crate::win::proc::ffcmd_bg;
+use crate::win::sys::proc::ffcmd_bg;
 
 /// N evenly-spaced JPEG thumbnails (height 64) from the proxy (or raw video), cached in
 /// `folder/thumbs_<count>_64/`. Returns the per-file paths (the frontend wraps each with
@@ -14,7 +14,7 @@ pub fn ensure_thumbs(folder: String, count: u32) -> Result<Vec<String>, String> 
     let paths = ProjectPaths { folder: PathBuf::from(&folder) };
     let n = count.clamp(8, 120);
     let dir = paths.folder.join(format!("thumbs_{n}_64"));
-    crate::win::proc::generate_once(&dir.join("thumb_0001.jpg"), || {
+    crate::win::sys::proc::generate_once(&dir.join("thumb_0001.jpg"), || {
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let dur = (crate::edit::seed::load_or_seed(&paths).trim.out_ms as f64 / 1000.0).max(0.1);
         let proxy = paths.folder.join("preview_720_rt.mp4");
@@ -47,8 +47,8 @@ pub fn ensure_waveform(folder: String, which: String) -> Result<String, String> 
     };
     if !wav.exists() { return Ok(String::new()); }
     let out = paths.folder.join(format!("wf_{which}.png"));
-    crate::win::proc::generate_once(&out, || {
-        let tmp = crate::win::proc::tmp_sibling(&out); // write then atomic-rename
+    crate::win::sys::proc::generate_once(&out, || {
+        let tmp = crate::win::sys::proc::tmp_sibling(&out); // write then atomic-rename
         // dynaudnorm normalizes loudness and scale=sqrt emphasizes low amplitudes, so a quiet mic
         // shows a visible waveform (a flat, invisible line otherwise) even though the export mic is
         // audible. The `wf_` prefix invalidates older flat `wave_*.png` caches.
@@ -75,8 +75,8 @@ pub fn ensure_preview_audio(folder: String) -> Result<String, String> {
     let (hm, hs) = (mic.exists(), sys.exists());
     if !hm && !hs { return Ok(String::new()); }
     let out = paths.folder.join("preview_audio.m4a");
-    crate::win::proc::generate_once(&out, || {
-        let tmp = crate::win::proc::tmp_sibling(&out); // write then atomic-rename
+    crate::win::sys::proc::generate_once(&out, || {
+        let tmp = crate::win::sys::proc::tmp_sibling(&out); // write then atomic-rename
         let mut cmd = ffcmd_bg("ffmpeg");
         cmd.args(["-v", "error", "-y"]);
         if hm { cmd.arg("-i").arg(&mic); }

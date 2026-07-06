@@ -15,7 +15,7 @@ A 24-bit sRGB color.
 
 ### Used by
 
-- `src-tauri/src/export/background.rs` - reads `Rgb` fields to fill gradient or solid background buffers.
+- `src-tauri/src/export/scene/background.rs` - reads `Rgb` fields to fill gradient or solid background buffers.
 
 ## FramePoint
 
@@ -31,7 +31,7 @@ An integer pixel coordinate in frame-local space (after subtracting monitor orig
 ### Used by
 
 - `src-tauri/src/export/coordmap.rs` - input and output of all coordinate mapping functions.
-- `src-tauri/src/export/camera.rs` - cursor position passed to `CameraSim::step`.
+- `src-tauri/src/export/camera/mod.rs` - cursor position passed to `CameraSim::step`.
 - `src-tauri/src/export/types.rs` - `ZoomRegion.anchor` stores a `FramePoint`.
 
 ## RectF
@@ -48,8 +48,8 @@ A floating-point axis-aligned rectangle in output pixels.
 
 ### Used by
 
-- `src-tauri/src/export/scene.rs` - `Panel.rect` is a `RectF`.
-- `src-tauri/src/export/gpu_uniforms.rs` - `build_uniforms` normalizes `RectF` to UV.
+- `src-tauri/src/export/scene/mod.rs` - `Panel.rect` is a `RectF`.
+- `src-tauri/src/export/gpu/gpu_uniforms.rs` - `build_uniforms` normalizes `RectF` to UV.
 
 ## Camera
 
@@ -65,9 +65,9 @@ The virtual camera state at one frame.
 
 ### Used by
 
-- `src-tauri/src/export/camera.rs` - `CameraSim::step` returns a `Camera`.
-- `src-tauri/src/export/compositor.rs` - `Compositor::composite_into` receives `cam: Camera`.
-- `src-tauri/src/export/gpu_uniforms.rs` - `build_uniforms` derives `zoom_center` and `inv_scale` from it.
+- `src-tauri/src/export/camera/mod.rs` - `CameraSim::step` returns a `Camera`.
+- `src-tauri/src/export/gpu/compositor.rs` - `Compositor::composite_into` receives `cam: Camera`.
+- `src-tauri/src/export/gpu/gpu_uniforms.rs` - `build_uniforms` derives `zoom_center` and `inv_scale` from it.
 - `src-tauri/src/export/coordmap.rs` - `crop` and `project` use `Camera` to compute the zoom transform.
 
 ## Easing
@@ -114,9 +114,9 @@ All tuneable parameters for click-zoom behavior. Populated from user settings; k
 
 ### Used by
 
-- `src-tauri/src/export/autozoom.rs` - `generate` reads most fields to decide trigger, hold, and release timing.
-- `src-tauri/src/export/camera.rs` - `CameraSim::step` reads `follow_damping` and `target_scale`.
-- `src-tauri/src/export/exporter.rs` - receives `cfg` from settings and passes it to both `generate` and `CameraSim::step`.
+- `src-tauri/src/export/camera/autozoom.rs` - `generate` reads most fields to decide trigger, hold, and release timing.
+- `src-tauri/src/export/camera/mod.rs` - `CameraSim::step` reads `follow_damping` and `target_scale`.
+- `src-tauri/src/export/pipeline/exporter.rs` - receives `cfg` from settings and passes it to both `generate` and `CameraSim::step`.
 
 ## ZoomRegion
 
@@ -140,9 +140,9 @@ A single resolved zoom event, baked from either auto-generated click detection o
 
 ### Used by
 
-- `src-tauri/src/export/camera.rs` - `CameraSim::step` iterates `&[ZoomRegion]` to find the active region.
-- `src-tauri/src/export/autozoom.rs` - `generate` produces `Vec<ZoomRegion>`.
-- `src-tauri/src/export/layout.rs` - `anchor_regions` re-maps region anchors into the active panel.
+- `src-tauri/src/export/camera/mod.rs` - `CameraSim::step` iterates `&[ZoomRegion]` to find the active region.
+- `src-tauri/src/export/camera/autozoom.rs` - `generate` produces `Vec<ZoomRegion>`.
+- `src-tauri/src/export/scene/layout.rs` - `anchor_regions` re-maps region anchors into the active panel.
 
 ## Background
 
@@ -165,7 +165,7 @@ Default is `Gradient` matching the embedded `bg.jpg` fallback in `exporter.rs`.
 
 ### Used by
 
-- `src-tauri/src/export/background.rs` - renders `Background` to a BGRA pixel buffer for `exporter.rs`.
+- `src-tauri/src/export/scene/background.rs` - renders `Background` to a BGRA pixel buffer for `exporter.rs`.
 
 ## Layout
 
@@ -184,9 +184,9 @@ Output canvas and screen panel geometry.
 ### Used by
 
 - `src-tauri/src/export/coordmap.rs` - `inset_rect` and `corner_radius` derive the screen panel position from this.
-- `src-tauri/src/export/compositor.rs` - `Compositor::composite_into` takes `&Layout` for output sizing.
-- `src-tauri/src/export/gpu_uniforms.rs` - `build_uniforms` normalizes rects using `out_w/out_h`.
-- `src-tauri/src/export/exporter.rs` - one `Layout::default()` per export (currently fixed at 4K).
+- `src-tauri/src/export/gpu/compositor.rs` - `Compositor::composite_into` takes `&Layout` for output sizing.
+- `src-tauri/src/export/gpu/gpu_uniforms.rs` - `build_uniforms` normalizes rects using `out_w/out_h`.
+- `src-tauri/src/export/pipeline/exporter.rs` - one `Layout::default()` per export (currently fixed at 4K).
 
 ## OverlayShape
 
@@ -203,7 +203,7 @@ Shape of the webcam/camera overlay panel.
 
 ### Used by
 
-- `src-tauri/src/export/scene.rs` - `panel_radius` dispatches on this to compute the camera panel radius.
+- `src-tauri/src/export/scene/mod.rs` - `panel_radius` dispatches on this to compute the camera panel radius.
 
 ## OverlayPos
 
@@ -220,7 +220,7 @@ Anchor corner for the webcam overlay relative to the output canvas.
 
 ### Used by
 
-- `src-tauri/src/export/scene.rs` - `bubble_rect` maps this to a concrete `RectF`.
+- `src-tauri/src/export/scene/mod.rs` - `bubble_rect` maps this to a concrete `RectF`.
 
 ## OverlayLayout
 
@@ -243,5 +243,5 @@ All overlay (webcam) layout parameters.
 
 ### Used by
 
-- `src-tauri/src/export/scene.rs` - `resolve` passes `&OverlayLayout` to `bubble_rect` and `panel_radius`.
+- `src-tauri/src/export/scene/mod.rs` - `resolve` passes `&OverlayLayout` to `bubble_rect` and `panel_radius`.
 - `src-tauri/src/settings/appearance.rs` - `overlay_for` constructs this from user settings.

@@ -3,7 +3,7 @@ use anyhow::{anyhow, Context, Result};
 use std::io::{ErrorKind, Read};
 use std::path::Path;
 use std::process::{Child, ChildStdout, Stdio};
-use crate::win::proc::ffcmd;
+use crate::win::sys::proc::ffcmd;
 
 /// Probe a video's pixel dimensions via ffprobe (`width,height`).
 pub fn probe_dims(video: &Path) -> Result<(u32, u32)> {

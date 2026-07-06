@@ -2,7 +2,7 @@
   "name": "tcursor-docs-hover",
   "displayName": "TCursor Docs Hover",
   "description": "Project IntelliSense: shows external Markdown docs for TCursor functions on hover, so the source stays free of docstrings.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "publisher": "tcursor",
   "engines": { "vscode": "^1.85.0" },

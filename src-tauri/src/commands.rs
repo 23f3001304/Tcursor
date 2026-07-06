@@ -56,7 +56,7 @@ pub fn set_capturable(app: tauri::AppHandle, capturable: bool) -> bool {
         use tauri::Manager;
         if let Some(win) = app.get_webview_window("main") {
             if let Ok(h) = win.hwnd() {
-                return crate::win::capture_exclusion::set_capture_exclusion(h.0 as isize, !capturable);
+                return crate::win::sys::capture_exclusion::set_capture_exclusion(h.0 as isize, !capturable);
             }
         }
         false

@@ -1,4 +1,4 @@
-# src-tauri/src/export/caption.rs
+# src-tauri/src/export/fx/caption.rs
 
 Renders keyboard-shortcut chord captions onto the BGRA frame using `ab_glyph` with the embedded Inter SemiBold font. Captions are centered in the bottom band of the frame with a 1px drop shadow for legibility on any background. Used by both the CPU and GPU FX paths; caption rendering is always CPU-only. The module also handles the logic for which action maps to which caption string and when the caption expires.
 
@@ -26,7 +26,7 @@ Top-level per-frame entry point: queries `caption_at` and, when a caption is act
 
 ### Used by
 
-- `src-tauri/src/export/fx_state.rs` - `FxState::apply_post` calls `caption::overlay` as the final compositing step on both the CPU and GPU paths; it is the last thing written before the frame is sent to the encoder.
+- `src-tauri/src/export/fx/fx_state.rs` - `FxState::apply_post` calls `caption::overlay` as the final compositing step on both the CPU and GPU paths; it is the last thing written before the frame is sent to the encoder.
 
 ## caption_at
 

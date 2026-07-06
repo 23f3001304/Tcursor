@@ -1,5 +1,5 @@
 use crate::edit::model::{EditDoc};
-use crate::edit::api::EditOp;
+use crate::edit::ops::api::EditOp;
 use crate::session::paths::ProjectPaths;
 
 fn paths(folder: &str) -> ProjectPaths {
@@ -16,7 +16,7 @@ pub fn get_edit(folder: String) -> Result<EditDoc, String> {
 pub fn apply_edit_op(folder: String, op: EditOp) -> Result<EditDoc, String> {
     let p = paths(&folder);
     let mut doc = crate::edit::seed::load_or_seed(&p);
-    crate::edit::api::apply(&mut doc, op);
+    crate::edit::ops::api::apply(&mut doc, op);
     doc.save(&p.edit()).map_err(|e| e.to_string())?;
     Ok(doc)
 }

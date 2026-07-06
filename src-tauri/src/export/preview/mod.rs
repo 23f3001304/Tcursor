@@ -16,7 +16,7 @@ use crate::session::paths::ProjectPaths;
 /// Build a fresh preview renderer for `out_w x out_h`. Scales export's absolute pad/radius
 /// to the (smaller) preview canvas so framing matches export proportionally.
 fn build_renderer(paths: &ProjectPaths, out_w: u32, out_h: u32) -> Result<(FrameRenderer, RenderMeta)> {
-    let fps = crate::win::display::primary_refresh_hz().min(60);
+    let fps = crate::win::sys::display::primary_refresh_hz().min(60);
     let def = Layout::default();
     let s = out_w as f32 / def.out_w as f32;
     let layout = Layout {

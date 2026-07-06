@@ -2,7 +2,7 @@ use crate::capture::frame::Frame;
 use crate::encode::frame_sink::FrameSink;
 use std::io::Write;
 use std::process::{Child, Stdio};
-use crate::win::proc::ffcmd;
+use crate::win::sys::proc::ffcmd;
 use std::sync::OnceLock;
 
 /// Pipes BGRA frames to a system ffmpeg process that writes an H.264 MP4,

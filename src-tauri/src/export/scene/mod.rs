@@ -1,4 +1,5 @@
 use crate::actions::model::LayoutId;
+use crate::export::camera::moves::CamPose;
 use crate::export::coordmap::{corner_radius, inset_rect};
 use crate::export::types::{Layout, OverlayLayout, OverlayPos, OverlayShape, RectF};
 
@@ -31,6 +32,14 @@ pub fn shrink_camera(panel: Panel, scale: f32, target_scale: f32, min: f32) -> P
     let (cx, cy) = (panel.rect.x + panel.rect.w / 2.0, panel.rect.y + panel.rect.h / 2.0);
     let (w, h) = (panel.rect.w * m, panel.rect.h * m);
     Panel { rect: RectF { x: cx - w / 2.0, y: cy - h / 2.0, w, h }, radius: panel.radius * m, alpha: panel.alpha }
+}
+
+/// Convert a sampled `CamPose` (center x/y + height, all fractions of the output frame) into
+/// the camera panel's `RectF` (top-left form). Square for now - the mode's aspect ratio lands
+/// in Task 9 - so width is copied straight from the height-derived side.
+pub fn rect_from_center(p: CamPose, ow: f32, oh: f32) -> RectF {
+    let h = p.size * oh;
+    RectF { x: p.x * ow - h / 2.0, y: p.y * oh - h / 2.0, w: h, h }
 }
 
 impl Scene {
@@ -105,81 +114,8 @@ pub fn resolve(id: LayoutId, layout: &Layout, overlay: &OverlayLayout, sw: u32, 
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::export::coordmap::inset_rect;
-    use crate::settings::appearance::{layout_for, overlay_for, AppearanceSettings, CamCorner, CamShape};
-
-    fn mode(id: LayoutId, sw: u32, sh: u32) -> Scene {
-        let a = AppearanceSettings::default();
-        let ma = a.for_id(id);
-        resolve(id, &layout_for(ma, 3840, 2160), &overlay_for(ma, 3840, 2160, true), sw, sh)
-    }
-
-    #[test]
-    fn screen_default_matches_today_inset_and_bubble() {
-        let s = mode(LayoutId::Screen, 1920, 1080);
-        let lay = layout_for(&AppearanceSettings::default().screen, 3840, 2160);
-        let (ix, iy, iw, ih) = inset_rect(1920, 1080, &lay);
-        assert_eq!(s.screen.rect, RectF { x: ix as f32, y: iy as f32, w: iw as f32, h: ih as f32 });
-        assert_eq!(s.camera.rect.w, 420.0);
-        assert_eq!(s.camera.rect.x, 80.0);
-        assert!((s.camera.rect.y - (2160.0 - 420.0 - 80.0)).abs() < 1.0);
-        assert!((s.camera.radius - 210.0).abs() < 1e-3);   // circle
-        assert_eq!((s.screen.alpha, s.camera.alpha), (1.0, 1.0));
-    }
-    #[test]
-    fn camera_default_is_big_centered_rounded_square() {
-        let s = mode(LayoutId::Camera, 1920, 1080);
-        assert!((s.camera.rect.w - 1920.0).abs() < 1.0);
-        assert!((s.camera.rect.x - (3840.0 - 1920.0) / 2.0).abs() < 1.0);
-        assert!((s.camera.radius - 0.04 * 1920.0).abs() < 1.0); // 76.8
-        assert!(s.camera.rect.w * s.camera.rect.h > s.screen.rect.w * s.screen.rect.h);
-    }
-    #[test]
-    fn corner_and_shape_knobs_apply() {
-        let mut a = AppearanceSettings::default();
-        a.screen.cam_corner = CamCorner::TopRight;
-        a.screen.cam_shape = CamShape::Rect;
-        let ma = a.for_id(LayoutId::Screen);
-        let s = resolve(LayoutId::Screen, &layout_for(ma, 3840, 2160), &overlay_for(ma, 3840, 2160, true), 1920, 1080);
-        assert_eq!(s.camera.rect.x, 3840.0 - 420.0 - 80.0); // right edge
-        assert_eq!(s.camera.rect.y, 80.0);                  // top edge
-        assert_eq!(s.camera.radius, 0.0);                   // rect -> no rounding
-    }
-    #[test]
-    fn camera_only_disables_screen() {
-        let s = mode(LayoutId::CameraOnly, 1920, 1080);
-        assert_eq!(s.screen.alpha, 0.0);
-        assert_eq!(s.camera.alpha, 1.0);
-    }
-    #[test]
-    fn camera_default_pip_screen_keeps_today_inset() {
-        let s = mode(LayoutId::Camera, 1920, 1080);
-        // PiP screen stays inset 80px from the bottom-left (today's behavior), not flush.
-        assert!((s.screen.rect.x - 80.0).abs() < 1.0);
-        let small_h = s.screen.rect.h;
-        assert!((s.screen.rect.y - (2160.0 - small_h - 80.0)).abs() < 1.0);
-    }
-    #[test]
-    fn lerp_midpoint_is_between() {
-        let a = mode(LayoutId::Screen, 1920, 1080);
-        let b = mode(LayoutId::Camera, 1920, 1080);
-        let m = Scene::lerp(&a, &b, 0.5);
-        assert!((m.screen.rect.w - (a.screen.rect.w + b.screen.rect.w) / 2.0).abs() < 1e-3);
-    }
-    #[test]
-    fn shrink_is_identity_at_no_zoom_and_min_at_full() {
-        let p = Panel { rect: RectF { x: 100.0, y: 100.0, w: 200.0, h: 200.0 }, radius: 100.0, alpha: 1.0 };
-        let none = shrink_camera(p, 1.0, 2.2, 0.6);
-        assert_eq!(none.rect.w, 200.0);
-        assert_eq!((none.rect.x, none.rect.y), (100.0, 100.0));
-        let full = shrink_camera(p, 2.2, 2.2, 0.6);
-        assert!((full.rect.w - 120.0).abs() < 0.5);
-        assert!((full.radius - 60.0).abs() < 0.5);
-        assert!((full.rect.x + full.rect.w / 2.0 - 200.0).abs() < 0.5);
-    }
-}
+#[path = "mod_tests.rs"]
+mod tests;
 
 pub mod layout;
 pub mod background;

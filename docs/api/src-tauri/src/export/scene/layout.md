@@ -1,4 +1,4 @@
-# src-tauri/src/export/layout.rs
+# src-tauri/src/export/scene/layout.rs
 
 Resolves the active `Scene` at any video timestamp from the recording's `SetLayout` action track, smoothly cross-fading between layout presets over `transition_ms`. Also re-anchors zoom regions from screen-local coordinates into the screen panel coordinate system active at each zoom's start time.
 
@@ -20,8 +20,8 @@ Holds the precomputed sequence of layout changes for one export. Initialized onc
 
 ### Used by
 
-- `src-tauri/src/export/exporter.rs` - creates a `LayoutTrack` and calls `scene_at` for every output frame.
-- `src-tauri/src/export/layout.rs` - `anchor_regions` calls `scene_at` to find the screen panel rect at each zoom's start time.
+- `src-tauri/src/export/pipeline/exporter.rs` - creates a `LayoutTrack` and calls `scene_at` for every output frame.
+- `src-tauri/src/export/scene/layout.rs` - `anchor_regions` calls `scene_at` to find the screen panel rect at each zoom's start time.
 - `src-tauri/src/edit/seed.rs` - reads layout changes from a `LayoutTrack` when seeding the editor doc.
 
 ## LayoutTrack::new

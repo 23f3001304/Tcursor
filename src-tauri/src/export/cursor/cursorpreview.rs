@@ -2,7 +2,7 @@
 // the frontend so the canvas preview draws the SAME cursor the export renders (gated by style),
 // instead of a generic arrow. Sprites are decoded/cropped/dark-inverted exactly like the export.
 use std::path::PathBuf;
-use crate::events::cursortype::{CursorTrack, CursorType};
+use crate::events::track::cursortype::{CursorTrack, CursorType};
 use crate::export::cursor::cursordraw::decode_sprite;
 use crate::export::cursor::cursorset::SPRITES;
 use crate::export::preview::{base64_encode, png_encode, with_warm, PreviewSession};

@@ -1,4 +1,4 @@
-# src-tauri/src/export/spotdraw.rs
+# src-tauri/src/export/fx/spotdraw.rs
 
 Renders the cursor spotlight effect in all six modes (Classic, Breathing, Vignette, Blur, Nebula, Halo) directly onto a BGRA frame by darkening pixels outside the lit zone and optionally adding a colour tint. Invoked by `fxdraw::CpuFx::apply` as the second effect layer, after video FX and before click effects.
 

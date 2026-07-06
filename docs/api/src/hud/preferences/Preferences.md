@@ -1,0 +1,43 @@
+# src/hud/preferences/Preferences.tsx
+
+Preferences overlay panel with "Interface" and "Layout" tabs for theme/accent and recording-layout appearance settings. Loads the full settings object from Tauri on mount, holds it as a local draft, and writes every change back via IPC immediately with no debounce. Opened from the Hud titlebar via `openPanel("preferences")`.
+
+## Preferences
+
+```ts
+export function Preferences({ onClose, onThemeChange }: {
+  onClose: () => void;
+  onThemeChange: (theme: ThemeMode, accent: [number, number, number]) => void;
+}): JSX.Element | null
+```
+
+A two-tab settings panel. Returns `null` until the initial `getSettings()` resolves (prevents a flash of empty UI during async load).
+
+### Props
+
+- `onClose` (`() => void`) - called when the back-arrow button in the panel header is clicked. *Why a callback rather than internal navigation:* `Hud` owns the panel state and the window morph; it needs to drive the transition back to the bar.
+- `onThemeChange` (`(theme: ThemeMode, accent: [number, number, number]) => void`) - called whenever the Interface tab changes the theme or accent color. *Why propagated up:* `Hud` holds `themeRef` and must call `applyTheme` immediately so CSS variables update in the current session without waiting for the next settings reload.
+
+### Behavior
+
+**State:**
+- `draft` (`Settings | null`) - the full settings object. The component renders `null` until the `getSettings()` promise resolves. *Why a local draft:* allows optimistic local updates; every `patch(next)` call updates the UI immediately and also fires `setSettings(next)` (fire-and-forget, errors silently ignored).
+- `tab` (`"interface" | "layout"`) - the currently active tab, initialized to `"interface"`.
+
+**Mount effect (`useEffect` on `[]`):**
+Calls `getSettings()` and sets `draft` on success. Errors are swallowed with `.catch(() => {})`. *Why no retry:* a failure here means Tauri is unreachable, which is a fatal condition the broader app would surface separately.
+
+**`patch(next: S)`:**
+Sets `draft` to `next` and calls `setSettings(next)`. Errors are silently ignored. *Why no debounce:* settings writes are cheap (a JSON file write on the Rust side) and debouncing would mean the last slider value before closing might not persist.
+
+**Tab animation:**
+Tab panels are wrapped in `AnimatePresence mode="wait"`. Each `motion.div` (keyed by `tab`) slides in from `{ opacity: 0, x: 8 }` and exits to `{ opacity: 0, x: -8 }` over 160ms with ease `[0.4, 0, 0.2, 1]`. *Why `mode="wait"`:* ensures the exiting tab fully disappears before the entering one starts, preventing overlap.
+
+**Tab content:**
+- `"interface"` tab: renders `<SettingsInterface>` receiving `draft.ui`. Its `onChange` calls `patch({ ...draft, ui })` and additionally calls `onThemeChange(ui.theme, ui.accent)` to propagate immediate theme changes to `Hud`.
+- `"layout"` tab: renders `<SettingsAppearance>` receiving `draft.appearance`. Its `onChange` calls `patch({ ...draft, appearance })`.
+
+### Notes
+
+- The panel header uses `data-tauri-drag-region` on the header div so the user can still drag the window while the bar is hidden.
+- Tab definitions are a module-level constant `TABS: { id: Tab; label: string }[]` with `"interface"` and `"layout"` entries; they drive both the tab button row and the conditional rendering block.

@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use crate::actions::model::{ActionEvent, LayoutId};
 use crate::events::model::EventLog;
 use crate::export::scene::background;
-use crate::export::camera::CameraSim;
+use crate::export::camera::{moves::CameraMoveTrack, CameraSim};
 use crate::export::gpu::compositor::{select_compositor, Compositor};
 use crate::export::coordmap::{inset_rect, to_panel};
 use crate::export::cursor::Cursor;
@@ -46,14 +46,14 @@ pub struct FramePose {
     pub cam: Camera,
 }
 
-/// Owns all per-export setup except decoders and the encoder sink.
-/// `step_camera` is cheap (math only); `composite_at` runs the full
-/// compositor + FX + cursor stack and returns a BGRA buffer.
+/// Owns all per-export setup except decoders and the encoder sink. `step_camera` is cheap
+/// (math only); `composite_at` runs the full compositor + FX + cursor stack and returns BGRA.
 pub struct FrameRenderer {
     settings: Settings,
     cfg: ZoomConfig,
     layout: Layout,
     track: LayoutTrack,
+    cam_moves: CameraMoveTrack,
     regions: Vec<ZoomRegion>,
     bg: Vec<u8>,
     compositor: Box<dyn Compositor>,
@@ -71,9 +71,8 @@ pub struct FrameRenderer {
 }
 
 impl FrameRenderer {
-    /// Load doc/settings/regions/compositor/sim from `paths`; return a `RenderMeta`
-    /// the exporter uses to spawn decoders and drive the frame loop.
-    /// `fps` is the capture frame rate (last-resort fallback in `build_timeline`).
+    /// Load doc/settings/regions/compositor/sim from `paths`; return a `RenderMeta` the exporter
+    /// uses to spawn decoders and drive the frame loop. `fps` is the capture-rate fallback.
     pub fn new(paths: &ProjectPaths, layout: Layout, fps: u32) -> Result<(Self, RenderMeta)> {
         let log = EventLog::load(&paths.events()).context("load events.json")?;
         let (sw, sh) = probe_dims(&paths.video())?;
@@ -102,22 +101,21 @@ impl FrameRenderer {
         // Cursor prep is edit-independent for the warm preview (only composite_at uses it) but
         // dominates a build, so it lives here - NOT in EditState/reload_edit.
         let dark = crate::win::theme::resolve_dark(es.settings.ui.theme);
-        let cursor_track = crate::events::cursortype::CursorTrack::load(&paths.cursor());
+        let cursor_track = crate::events::track::cursortype::CursorTrack::load(&paths.cursor());
         let cprep = crate::export::cursor::cursorset::prep(&es.settings.cursor, &log.events, cursor_track, dark);
         let cursor = Cursor::new(log.events, log.screen); // moves the log in after cprep borrowed it
         let meta = RenderMeta { tl, video_start, video_end, out_w, out_h, sw, sh, screen_bytes, webcam_size, audio_offset_ms };
-        Ok((Self { settings: es.settings, cfg: es.cfg, layout, track: es.track, regions: es.regions,
+        Ok((Self { settings: es.settings, cfg: es.cfg, layout, track: es.track, cam_moves: es.cam_moves, regions: es.regions,
             bg, compositor, fx, sim, spot_sim, cursor, cprep, actions, effects: es.effects, sw, sh, events_ms, video_start }, meta))
     }
 
-    /// Refresh only the `edit.json`-derived state in place (zoom/layout/regions/effects/cursor),
-    /// so an editor edit is reflected WITHOUT recreating the GPU compositor, FX, background, or
-    /// re-probing dims (all edit-independent). `with_warm` calls this instead of a full `new()`
-    /// when only `edit.json` changed, so editing zoom/spotlight stays snappy.
+    /// Refresh only the `edit.json`-derived state in place (zoom/layout/regions/effects/cam_moves),
+    /// WITHOUT recreating the GPU compositor, FX, background, or re-probing dims (all edit-
+    /// independent). `with_warm` calls this instead of a full `new()` so edits stay snappy.
     pub fn reload_edit(&mut self, paths: &ProjectPaths) {
         let es = EditState::load(paths, &self.actions, &self.layout, self.sw, self.sh);
         self.settings = es.settings; self.cfg = es.cfg; self.track = es.track;
-        self.regions = es.regions; self.effects = es.effects;
+        self.regions = es.regions; self.effects = es.effects; self.cam_moves = es.cam_moves;
     }
 
     /// Rewind the forward-only camera + cursor state so this (cached) renderer can be
@@ -127,10 +125,9 @@ impl FrameRenderer {
         self.cursor.reset();
     }
 
-    /// Advance the camera sim to output time `t` (ms) and return the full pose.
-    /// Cheap: math only, no decode. `t` MUST be non-decreasing across calls - the
-    /// cursor sample index and the camera low-pass only move forward. To preview an
-    /// arbitrary T, use a fresh renderer and fast-forward step_camera from the start.
+    /// Advance the camera sim to output time `t` (ms) and return the full pose. Cheap: math
+    /// only, no decode. `t` MUST be non-decreasing across calls - the cursor sample index and
+    /// the camera low-pass only move forward; use a fresh renderer to preview an arbitrary T.
     pub fn step_camera(&mut self, t: u64) -> FramePose {
         let ev_t = (t.saturating_sub(self.events_ms)) as u32;
         let smooth = self.cursor.at(ev_t);
@@ -138,6 +135,9 @@ impl FrameRenderer {
         let cur = to_panel(smooth, self.sw, self.sh, scene.screen.rect);
         // Zoom pills live in OUTPUT time (t - video_start), not event time; cursor/layout above stay event-time.
         let out_t = t.saturating_sub(self.video_start) as u32;
+        if let Some(p) = self.cam_moves.sample(out_t) {
+            scene.camera.rect = crate::export::scene::rect_from_center(p, self.layout.out_w as f32, self.layout.out_h as f32);
+        }
         let mut cam = self.sim.step(out_t, cur, &self.regions, &self.cfg);
         if scene.screen.alpha < 0.5 {
             cam = Camera { cx: self.layout.out_w as f32 / 2.0, cy: self.layout.out_h as f32 / 2.0, scale: 1.0 };

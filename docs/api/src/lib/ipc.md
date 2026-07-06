@@ -14,7 +14,7 @@ export const listDisplays = () => invoke<DisplayInfo[]>("list_displays")
 
 ### Used by
 
-`useDevices` (`src/hud/useDevices.ts`) - calls on mount to populate the screen capture dropdown.
+`useDevices` (`src/hud/hooks/useDevices.ts`) - calls on mount to populate the screen capture dropdown.
 
 ## listAudioInputs
 
@@ -28,7 +28,7 @@ export const listAudioInputs = () => invoke<AudioInfo[]>("list_audio_inputs")
 
 ### Used by
 
-`useDevices` (`src/hud/useDevices.ts`) - calls on mount to populate the microphone dropdown.
+`useDevices` (`src/hud/hooks/useDevices.ts`) - calls on mount to populate the microphone dropdown.
 
 ## startRecording
 
@@ -143,8 +143,8 @@ export const getSettings = () => invoke<Settings>("get_settings")
 ### Used by
 
 - `Hud` (`src/hud/Hud.tsx`) - reads on mount to apply the initial theme.
-- `Settings` (`src/hud/SettingsPanel.tsx`) - reads on mount to seed the draft.
-- `Preferences` (`src/hud/Preferences.tsx`) - reads on mount to seed the draft.
+- `Settings` (`src/hud/settings/SettingsPanel.tsx`) - reads on mount to seed the draft.
+- `Preferences` (`src/hud/preferences/Preferences.tsx`) - reads on mount to seed the draft.
 
 ## setSettings
 
@@ -162,8 +162,8 @@ export const setSettings = (settings: Settings) => invoke<void>("set_settings", 
 
 ### Used by
 
-- `Settings` (`src/hud/SettingsPanel.tsx`) - called from `patch()` on every user interaction.
-- `Preferences` (`src/hud/Preferences.tsx`) - called from `patch()` on every user interaction.
+- `Settings` (`src/hud/settings/SettingsPanel.tsx`) - called from `patch()` on every user interaction.
+- `Preferences` (`src/hud/preferences/Preferences.tsx`) - called from `patch()` on every user interaction.
 
 ## getEdit
 
@@ -344,28 +344,6 @@ export const clickTrack = (folder: string) => invoke<ClickSample[]>("click_track
 ### Returns
 
 `Promise<ClickSample[]>` - the mouse-down track for the whole timeline, so the editor can draw click ripples matching the export's click FX.
-
-## HoldSpan
-
-```ts
-export interface HoldSpan { start_ms: number; end_ms: number }
-```
-
-One recorded effect-hold interval in output time (ms), mirroring the Rust `HoldSpan` - e.g. a spotlight held via the hotkey while recording. The preview applies the export's 250ms fade ramp over `[start_ms, end_ms)`.
-
-## spotlightHolds
-
-```ts
-export const spotlightHolds = (folder: string) => invoke<HoldSpan[]>("spotlight_holds", { folder })
-```
-
-### Inputs
-
-- `folder` (`string`) - project directory.
-
-### Returns
-
-`Promise<HoldSpan[]>` - the recorded spotlight-hold intervals, so the editor preview lights held spotlights like the export (not just editor-added effect regions). The editor fetches these once per folder (they are immutable) and unions them into the preview spotlight in `spotlightPreview.ts`.
 
 ## previewBg
 

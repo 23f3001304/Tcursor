@@ -19,7 +19,7 @@ Which mouse button was pressed or released.
 ### Used by
 
 - `src-tauri/src/events/model.rs` (`MouseEvent`) - optional field on `Down`/`Up` events
-- `src-tauri/src/events/tracker.rs` - Windows hook maps `WM_LBUTTONDOWN` etc. to `Button` variants
+- `src-tauri/src/events/track/tracker.rs` - Windows hook maps `WM_LBUTTONDOWN` etc. to `Button` variants
 - `src-tauri/src/events/collector.rs` - forwarded to `MouseEvent` without inspection
 
 ## EventKind
@@ -39,10 +39,10 @@ The type of mouse action.
 ### Used by
 
 - `src-tauri/src/events/collector.rs` - branches on `Move` to apply throttle/dedup filters
-- `src-tauri/src/export/autozoom.rs` - filters to `Down` events only
-- `src-tauri/src/export/fx_state.rs` / `src-tauri/src/export/clickfx.rs` - inspects `Down` and `Up` for click-fx state
-- `src-tauri/src/export/manual.rs` - reads `Down` events near manual zoom actions
-- `src-tauri/src/ai/timeline.rs` - classifies events for AI timeline annotation
+- `src-tauri/src/export/camera/autozoom.rs` - filters to `Down` events only
+- `src-tauri/src/export/fx/fx_state.rs` / `src-tauri/src/export/fx/clickfx.rs` - inspects `Down` and `Up` for click-fx state
+- `src-tauri/src/export/camera/manual.rs` - reads `Down` events near manual zoom actions
+- `src-tauri/src/ai/backend/timeline.rs` - classifies events for AI timeline annotation
 
 ## MouseEvent
 
@@ -67,11 +67,11 @@ One recorded mouse event. Compact and `Copy` so slices can be passed cheaply eve
 
 ### Used by
 
-- `src-tauri/src/export/autozoom.rs` - the full event slice is the primary input to `generate`
-- `src-tauri/src/export/cursor.rs` - positions are interpolated to place the cursor sprite per frame
-- `src-tauri/src/export/clickfx.rs` - `Down`/`Up` pairs drive click-ripple animations
-- `src-tauri/src/export/manual.rs` - used to find the nearest click to a manual zoom action
-- `src-tauri/src/ai/timeline.rs` - events are annotated onto the AI activity timeline
+- `src-tauri/src/export/camera/autozoom.rs` - the full event slice is the primary input to `generate`
+- `src-tauri/src/export/cursor/mod.rs` - positions are interpolated to place the cursor sprite per frame
+- `src-tauri/src/export/fx/clickfx.rs` - `Down`/`Up` pairs drive click-ripple animations
+- `src-tauri/src/export/camera/manual.rs` - used to find the nearest click to a manual zoom action
+- `src-tauri/src/ai/backend/timeline.rs` - events are annotated onto the AI activity timeline
 
 ## ScreenInfo
 
@@ -87,10 +87,10 @@ Geometry of the captured screen (or monitor) at recording time.
 
 ### Used by
 
-- `src-tauri/src/export/autozoom.rs` - `generate` passes `screen` to `coordmap::to_frame` for each click anchor
+- `src-tauri/src/export/camera/autozoom.rs` - `generate` passes `screen` to `coordmap::to_frame` for each click anchor
 - `src-tauri/src/export/coordmap.rs` - the primary consumer for coordinate conversion
-- `src-tauri/src/export/cursor.rs` - normalizes mouse positions for cursor placement
-- `src-tauri/src/ai/timeline.rs` - used to normalize coordinates for the AI director
+- `src-tauri/src/export/cursor/mod.rs` - normalizes mouse positions for cursor placement
+- `src-tauri/src/ai/backend/timeline.rs` - used to normalize coordinates for the AI director
 
 ## EventLog
 
@@ -112,10 +112,10 @@ Root of `events.json`: the full mouse recording for one session.
 
 ### Used by
 
-- `src-tauri/src/session/recorder.rs` / `src-tauri/src/session/recorder_threads.rs` - constructed during recording and saved via `save`
+- `src-tauri/src/session/record/recorder.rs` / `src-tauri/src/session/record/recorder_threads.rs` - constructed during recording and saved via `save`
 - `src-tauri/src/edit/seed.rs` - loaded to build the initial `EditDoc`
-- `src-tauri/src/export/exporter.rs` - the export pipeline's primary event input
-- `src-tauri/src/ai/commands.rs` / `src-tauri/src/ai/timeline.rs` - loaded for AI timeline annotation
+- `src-tauri/src/export/pipeline/exporter.rs` - the export pipeline's primary event input
+- `src-tauri/src/ai/commands.rs` / `src-tauri/src/ai/backend/timeline.rs` - loaded for AI timeline annotation
 
 ## EventLog::save
 

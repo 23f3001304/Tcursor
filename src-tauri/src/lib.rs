@@ -16,15 +16,15 @@ pub mod edit;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .manage(session::recorder::Recorder::default())
+        .manage(session::record::recorder::Recorder::default())
         .manage(export::preview::PreviewSession::default())
         .invoke_handler(tauri::generate_handler![
             commands::list_displays,
             commands::list_audio_inputs,
-            session::recorder::start_recording,
-            session::recorder::pause_recording,
-            session::recorder::resume_recording,
-            session::recorder::stop_recording,
+            session::record::recorder::start_recording,
+            session::record::recorder::pause_recording,
+            session::record::recorder::resume_recording,
+            session::record::recorder::stop_recording,
             commands::save_webcam,
             commands::export_project,
             commands::get_settings,
@@ -38,7 +38,6 @@ pub fn run() {
             export::preview::preview_track::camera_track,
             export::preview::preview_track::preview_layout,
             export::preview::preview_track::click_track,
-            export::preview::preview_track::spotlight_holds,
             export::preview::preview_track::ensure_proxy,
             export::preview::preview_layouts::preview_layouts,
             export::preview::preview_fx::preview_fx_overlay,
@@ -54,7 +53,7 @@ pub fn run() {
             // Resolve the bundled ffmpeg/ffprobe from the app exe dir (robust on
             // installed builds where resource_dir() may not); dev falls back to PATH.
             // The diagnostic log explains "ffmpeg not available" failures on any PC.
-            let diag = crate::win::proc::init_ffmpeg(app.path().resource_dir().ok());
+            let diag = crate::win::sys::proc::init_ffmpeg(app.path().resource_dir().ok());
             let _ = std::fs::write(std::env::temp_dir().join("tcursor-ffmpeg.log"), diag);
             // Probe the encoder off-thread now so the first recording's ffmpeg sink
             // is fast — audio capture must not start behind a slow first ffmpeg launch.
@@ -67,7 +66,7 @@ pub fn run() {
                     const CAPTURE_EXCLUDE: bool = true;
                     if CAPTURE_EXCLUDE {
                         if let Ok(hwnd) = win.hwnd() {
-                            let ok = win::capture_exclusion::set_capture_exclusion(hwnd.0 as isize, true);
+                            let ok = win::sys::capture_exclusion::set_capture_exclusion(hwnd.0 as isize, true);
                             if ok {
                                 println!("capture exclusion applied");
                             } else {

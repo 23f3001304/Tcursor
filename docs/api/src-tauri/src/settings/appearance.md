@@ -57,7 +57,7 @@ Appearance for a single layout mode. All sizes are fractions of the canvas (reso
 ### Used by
 
 - `src-tauri/src/settings/appearance.rs` - input to `layout_for` and `overlay_for`.
-- `src-tauri/src/export/scene.rs`, `src-tauri/src/export/exporter.rs` - resolve the active mode's `ModeAppearance` into render geometry.
+- `src-tauri/src/export/scene/mod.rs`, `src-tauri/src/export/pipeline/exporter.rs` - resolve the active mode's `ModeAppearance` into render geometry.
 
 ## AppearanceSettings
 
@@ -74,7 +74,7 @@ One `ModeAppearance` per layout mode. *Why per-mode:* the big-camera modes (`cam
 ### Used by
 
 - `src-tauri/src/settings/model.rs`, `src-tauri/src/settings/mod.rs` - embedded in the persisted `Settings`.
-- `src-tauri/src/export/layout.rs`, `export/scene.rs`, `export/exporter.rs` - read per-mode appearance during scene resolution.
+- `src-tauri/src/export/scene/layout.rs`, `export/scene.rs`, `export/exporter.rs` - read per-mode appearance during scene resolution.
 
 ## AppearanceSettings::for_id
 

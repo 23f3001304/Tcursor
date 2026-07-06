@@ -30,7 +30,7 @@ Renders the editor layout and manages the editing lifecycle for one recording.
 
 **`applyOp(op)`.** Persists one edit op via `applyEditOp`, swaps in the returned doc, and bumps `rev` - except for ops whose name ends in `_effect` (add/update/remove effect), which skip the bump because effects don't change the camera/layout/clicks/bg (this is why adding or dragging a spotlight is instant rather than laggy; the preview reflects effects straight from the returned doc).
 
-**`addZoom` / `addSpotlight`.** Add a 2s zoom / spotlight at the playhead and select it.
+**`addZoom` / `addSpotlight` / `addCameraMove`.** Add a 2s zoom / spotlight, or a centered camera-move keyframe (`x:0.5, y:0.5, size:0.25`), at the playhead and select it.
 
 **`zoomAt(x, y)`.** The click-to-zoom handler passed to `Stage`: pauses, adds a full zoom (`add_zoom_full`), then sets its target to the clicked 0..1 screen point (`update_zoom` with `{ fixed: { x, y } }`) and selects it.
 
@@ -38,10 +38,10 @@ Renders the editor layout and manages the editing lifecycle for one recording.
 
 **Loading guard.** Renders "Loading edit..." until `doc` resolves.
 
-**Layout.** `ResizeEdges` (frameless-window grips), `TopBar`, then `e-body` containing `Rail`, the active inspector/panel (`ZoomInspector` when a zoom is selected, `EffectInspector` when an effect is selected, `AiPanel` on the AI tab, else a stub panel), and `Stage`; then `Transport` and `Timeline`.
+**Layout.** `ResizeEdges` (frameless-window grips), `TopBar`, then `e-body` containing `Rail`, the active inspector/panel (`ZoomInspector` when a zoom is selected, `EffectInspector` when an effect is selected, `LayoutInspector` when a layout segment is selected, `CameraMoveInspector` when a camera-move keyframe is selected, `AiPanel` on the AI tab, else a stub panel), and `Stage`; then `Transport` and `Timeline`.
 
 ### Notes
 
-- `selZoom` / `selEffect` are derived from `sel` against `doc.zooms` / `doc.effects` to choose which inspector to show.
+- `selZoom` / `selEffect` / `selLayout` / `selCamMove` are derived from `sel` against `doc.zooms` / `doc.effects` / `doc.layout` / `doc.camera_moves` to choose which inspector to show.
 - `quality` cycles 480→720→1080 and re-runs the proxy effect; `muted` toggles the preview `<audio>`.
 - `proj` is the last path segment of `folder`, shown by `TopBar`.

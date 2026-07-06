@@ -18,8 +18,8 @@ The clip's in/out points in milliseconds, measured from the raw recording start.
 
 ### Used by
 
-- `src-tauri/src/edit/api.rs` - `SetTrim` variant replaces both fields; `metrics` reads `in_ms`/`out_ms`
-- `src-tauri/src/export/fromedit.rs` - clip bounds supplied to the compositor
+- `src-tauri/src/edit/ops/api.rs` - `SetTrim` variant replaces both fields; `metrics` reads `in_ms`/`out_ms`
+- `src-tauri/src/export/render/fromedit.rs` - clip bounds supplied to the compositor
 
 ## Cut
 
@@ -35,8 +35,8 @@ A single removed time range within the clip, clamped to the trim window at rende
 
 ### Used by
 
-- `src-tauri/src/edit/api.rs` - appended by `AddCut`; iterated in `metrics` to compute `kept_ms`
-- `src-tauri/src/export/fromedit.rs` - passed to the compositor to skip frames in the cut range
+- `src-tauri/src/edit/ops/api.rs` - appended by `AddCut`; iterated in `metrics` to compute `kept_ms`
+- `src-tauri/src/export/render/fromedit.rs` - passed to the compositor to skip frames in the cut range
 
 ## ZoomTarget
 
@@ -53,9 +53,9 @@ Where the camera centers during a zoom event.
 
 ### Used by
 
-- `src-tauri/src/edit/api.rs` - `AddZoom` defaults to `Cursor`; `AddZoomFull` also defaults to `Cursor`
+- `src-tauri/src/edit/ops/api.rs` - `AddZoom` defaults to `Cursor`; `AddZoomFull` also defaults to `Cursor`
 - `src-tauri/src/edit/seed.rs` - `zooms_from_regions` always writes `Fixed` to lock the click anchor
-- `src-tauri/src/export/fromedit.rs` - the compositor branches on this to compute the camera center per frame
+- `src-tauri/src/export/render/fromedit.rs` - the compositor branches on this to compute the camera center per frame
 
 ## Zoom
 
@@ -79,10 +79,10 @@ One zoom event in the timeline.
 
 ### Used by
 
-- `src-tauri/src/edit/api.rs` - inserted by `AddZoom`/`AddZoomFull`, mutated by `UpdateZoom`, removed by `RemoveZoom`
+- `src-tauri/src/edit/ops/api.rs` - inserted by `AddZoom`/`AddZoomFull`, mutated by `UpdateZoom`, removed by `RemoveZoom`
 - `src-tauri/src/edit/seed.rs` - `zooms_from_regions` constructs the initial list
-- `src-tauri/src/export/fromedit.rs` - rendered by `CameraSim` per frame
-- `src-tauri/src/ai/plan.rs` - AI director reads and writes zoom entries
+- `src-tauri/src/export/render/fromedit.rs` - rendered by `CameraSim` per frame
+- `src-tauri/src/ai/backend/plan.rs` - AI director reads and writes zoom entries
 
 ## Speed
 
@@ -99,8 +99,8 @@ A playback-speed multiplier applied to a time range.
 
 ### Used by
 
-- `src-tauri/src/edit/api.rs` - appended by `SetSpeed`
-- `src-tauri/src/export/fromedit.rs` - applied during frame-time remapping in the compositor
+- `src-tauri/src/edit/ops/api.rs` - appended by `SetSpeed`
+- `src-tauri/src/export/render/fromedit.rs` - applied during frame-time remapping in the compositor
 
 ## LayoutSeg
 
@@ -117,9 +117,27 @@ A contiguous time span that uses a named screen layout (e.g. `"screen"`, `"pip"`
 
 ### Used by
 
-- `src-tauri/src/edit/api.rs` - `SetLayoutSeg` mutates `layout` on a matched entry
+- `src-tauri/src/edit/ops/api.rs` - `SetLayoutSeg` mutates `layout` on a matched entry
 - `src-tauri/src/edit/seed.rs` - `layout_from_actions` builds the initial list from the `SetLayout` action track
-- `src-tauri/src/export/fromedit.rs` - segment list drives per-frame layout selection in the compositor
+- `src-tauri/src/export/render/fromedit.rs` - segment list drives per-frame layout selection in the compositor
+
+## CameraMove
+
+```rust
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct CameraMove {
+    pub id: String, pub t_ms: u32, pub x: f32, pub y: f32, pub size: f32,
+    pub easing: String,
+}
+```
+
+One keyframe of the webcam PiP's position + size track (`EditDoc.camera_moves`). An empty track is the default and is a no-op at render time - a doc with no `camera_moves` composites byte-identically to today.
+
+- `id` - *stable string key (e.g. `"k0"`, `"k3"`) used to target a specific keyframe for update/removal without relying on list position.*
+- `t_ms` - *the frame time this keyframe is pinned to.*
+- `x` / `y` - *the PiP's center, as a fraction (`0.0`-`1.0`) of the output frame.*
+- `size` - *the PiP's size, as a fraction of the output frame; the interpolator (`CameraMoveTrack`) derives the other dimension from the mode's aspect.*
+- `easing` - *named easing curve (`"linear"`, `"smooth"`, `"spring"`) for the ramp into this keyframe; defaults to `"smooth"` when absent from JSON, matching `Zoom`/`LayoutSeg`'s back-compat pattern.*
 
 ## EditDoc
 
@@ -133,6 +151,7 @@ pub struct EditDoc {
     pub zooms: Vec<Zoom>,
     pub speed: Vec<Speed>,
     pub layout: Vec<LayoutSeg>,
+    pub camera_moves: Vec<CameraMove>,
     pub settings: crate::settings::model::Settings,
 }
 ```
@@ -145,15 +164,16 @@ Root of `edit.json`. Carries the complete editor state for one recording project
 - `zooms` - *ordered list of zoom events; `api.rs` manages ids; the renderer tolerates any order.*
 - `speed` - *ordered list of speed-change segments.*
 - `layout` - *ordered, non-overlapping layout segments covering `[0, trim.out_ms]`.*
+- `camera_moves` - *ordered list of webcam PiP keyframes; `#[serde(default)]` so a pre-existing `edit.json` with no `camera_moves` loads as an empty `Vec`, which the exporter/preview treat as "no override" (byte-identical to today).*
 - `settings` - *snapshot of the user's `Settings` at the time the doc was seeded; preserves the zoom config and theme for a re-render even if the user later changes settings.*
 
 ### Used by
 
-- `src-tauri/src/edit/api.rs` - `apply` mutates it; `metrics` reads it
+- `src-tauri/src/edit/ops/api.rs` - `apply` mutates it; `metrics` reads it
 - `src-tauri/src/edit/commands.rs` - all three Tauri commands return or accept `EditDoc`
 - `src-tauri/src/edit/seed.rs` - `load_or_seed` and `build_default` construct it
-- `src-tauri/src/export/fromedit.rs` - consumed to drive the compositor
-- `src-tauri/src/ai/plan.rs` / `src-tauri/src/ai/commands.rs` - AI director reads and patches it
+- `src-tauri/src/export/render/fromedit.rs` - consumed to drive the compositor
+- `src-tauri/src/ai/backend/plan.rs` / `src-tauri/src/ai/commands.rs` - AI director reads and patches it
 
 ## EditDoc::save
 

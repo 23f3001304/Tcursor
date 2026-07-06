@@ -1,4 +1,4 @@
-# src-tauri/src/export/run.rs
+# src-tauri/src/export/pipeline/run.rs
 
 Thin Tauri command adapter that launches the export on a background thread and bridges its result to the frontend as Tauri events. Contains no rendering logic - it only wires `exporter::export` to the Tauri event bus.
 

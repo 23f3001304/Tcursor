@@ -9,6 +9,7 @@
 //! full build, so keeping it out is what makes `reload_edit` cheap.
 use crate::actions::model::ActionEvent;
 use crate::edit::model::EffectRegion;
+use crate::export::camera::moves::CameraMoveTrack;
 use crate::export::scene::layout::LayoutTrack;
 use crate::export::types::{Layout, ZoomConfig, ZoomRegion};
 use crate::session::paths::ProjectPaths;
@@ -26,6 +27,7 @@ pub(crate) struct EditState {
     pub track: LayoutTrack,
     pub regions: Vec<ZoomRegion>,
     pub effects: Vec<EffectRegion>,
+    pub cam_moves: CameraMoveTrack,
 }
 
 impl EditState {
@@ -43,7 +45,8 @@ impl EditState {
         };
         let regions = crate::export::scene::layout::anchor_regions(
             crate::export::render::fromedit::regions_from_doc(&doc, sw, sh), &track, sw, sh);
-        EditState { settings, cfg, track, regions, effects: doc.effects.clone() }
+        let cam_moves = CameraMoveTrack::from_doc(&doc.camera_moves);
+        EditState { settings, cfg, track, regions, effects: doc.effects.clone(), cam_moves }
     }
 }
 

@@ -1,4 +1,4 @@
-# src-tauri/src/export/cursorpreview.rs
+# src-tauri/src/export/cursor/cursorpreview.rs
 
 Editor-preview cursor commands. Expose the export's Capitaine sprite pack and the cursor-type track to the frontend so the editor's canvas preview draws the **same** cursor the export renders (gated by cursor style), instead of a generic arrow. Sprites are decoded/cropped/dark-inverted exactly like the export.
 

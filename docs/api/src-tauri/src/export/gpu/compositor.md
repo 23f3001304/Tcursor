@@ -1,4 +1,4 @@
-# src-tauri/src/export/compositor.rs
+# src-tauri/src/export/gpu/compositor.rs
 
 Defines the `Compositor` trait shared by the CPU and GPU implementations, and provides the software `CpuCompositor` that blends the background, screen, and webcam panels using `fast_image_resize` and a per-pixel rounded-box SDF. CPU only - the GPU path lives in `gpu_compositor.rs`.
 
@@ -37,8 +37,8 @@ Nothing (`()`). The impl resizes `out` to `out_w * out_h * 4` bytes and fully ov
 
 ### Used by
 
-- `src-tauri/src/export/exporter.rs` - calls `compositor.composite_into(...)` in the frame loop.
-- `src-tauri/src/export/gpu_compositor.rs` - `GpuCompositor` implements this trait.
+- `src-tauri/src/export/pipeline/exporter.rs` - calls `compositor.composite_into(...)` in the frame loop.
+- `src-tauri/src/export/gpu/gpu_compositor.rs` - `GpuCompositor` implements this trait.
 
 ## CpuCompositor
 

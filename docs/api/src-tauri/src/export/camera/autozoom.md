@@ -1,4 +1,4 @@
-# src-tauri/src/export/autozoom.rs
+# src-tauri/src/export/camera/autozoom.rs
 
 Generates automatic zoom regions from recorded mouse clicks (and optionally typing). This is the core auto-zoom heuristic: it decides WHEN to zoom in, WHERE to anchor, and HOW LONG to hold before releasing, purely from the click/keystroke timeline. Pure and deterministic - identical inputs always yield identical regions, so exports are reproducible.
 

@@ -1,6 +1,6 @@
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
-import type { DisplayInfo, AudioInfo } from "../hud/selectDevices";
-import type { Settings } from "../hud/settings";
+import type { DisplayInfo, AudioInfo } from "../hud/devices/selectDevices";
+import type { Settings } from "../hud/settings/settings";
 import type { EditDoc, EditOp } from "./edit";
 
 /** One camera-curve sample: output time (ms), the zoom as scale + center, and the cursor
@@ -45,10 +45,6 @@ export const previewLayouts = (folder: string) => invoke<LayoutPresets>("preview
 /** One click ripple: output time (ms) + 0..1 screen-content position (same basis as CamSample's cursor). */
 export interface ClickSample { t: number; x: number; y: number }
 export const clickTrack = (folder: string) => invoke<ClickSample[]>("click_track", { folder });
-/** One recorded effect-hold interval in output time (ms) - e.g. a spotlight held via hotkey while recording. */
-export interface HoldSpan { start_ms: number; end_ms: number }
-/** The recorded spotlight-hold intervals, so the editor preview lights held spotlights like the export. */
-export const spotlightHolds = (folder: string) => invoke<HoldSpan[]>("spotlight_holds", { folder });
 /** The export background (mesh/gradient) as a PNG data URL, so the canvas preview matches the export. */
 export const previewBg = (folder: string) => invoke<string>("preview_bg", { folder });
 /** Render the FX overlay (spotlight + click effects) using the exact export shaders.

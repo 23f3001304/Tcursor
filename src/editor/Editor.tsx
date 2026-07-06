@@ -1,24 +1,26 @@
 import { useState } from "react";
+import { motion, AnimatePresence } from "motion/react";
 import { saveEdit, aiAutoedit, exportProject, applyEditOp, fileSrc } from "../lib/ipc";
 import type { EditDoc, EditOp } from "../lib/edit";
-import { TopBar } from "./TopBar";
-import { ResizeEdges } from "./ResizeEdges";
-import { Rail, type Tab } from "./Rail";
-import { AiPanel } from "./AiPanel";
-import { ZoomInspector } from "./ZoomInspector";
-import { EffectInspector } from "./EffectInspector";
-import { LayoutInspector } from "./LayoutInspector";
-import { BackgroundPanel } from "./BackgroundPanel";
-import { CursorPanel } from "./CursorPanel";
-import { CameraPanel } from "./CameraPanel";
-import { CaptionsPanel } from "./CaptionsPanel";
-import { AudioPanel } from "./AudioPanel";
-import { EffectsPanel } from "./EffectsPanel";
-import { Stage } from "./Stage";
-import { Transport } from "./Transport";
-import { Timeline } from "./Timeline";
-import { useEditorData } from "./useEditorData";
-import { useEditorKeymap } from "./useEditorKeymap";
+import { TopBar } from "./shell/TopBar";
+import { ResizeEdges } from "./controls/ResizeEdges";
+import { Rail, type Tab } from "./shell/Rail";
+import { AiPanel } from "./panels/AiPanel";
+import { ZoomInspector } from "./inspectors/ZoomInspector";
+import { EffectInspector } from "./inspectors/EffectInspector";
+import { LayoutInspector } from "./inspectors/LayoutInspector";
+import { CameraMoveInspector } from "./inspectors/CameraMoveInspector";
+import { BackgroundPanel } from "./panels/BackgroundPanel";
+import { CursorPanel } from "./panels/CursorPanel";
+import { CameraPanel } from "./panels/CameraPanel";
+import { CaptionsPanel } from "./panels/CaptionsPanel";
+import { AudioPanel } from "./panels/AudioPanel";
+import { EffectsPanel } from "./panels/EffectsPanel";
+import { Stage } from "./stage/Stage";
+import { Transport } from "./stage/Transport";
+import { Timeline } from "./timeline/Timeline";
+import { useEditorData } from "./hooks/useEditorData";
+import { useEditorKeymap } from "./hooks/useEditorKeymap";
 import "./editor.css";
 
 /** The post-record editor. The preview plays the recording natively (Stage) and applies
@@ -73,6 +75,10 @@ export function Editor({ folder, onClose }: { folder: string; onClose: () => voi
     const d = await applyOp({ op: "add_effect", kind: "spotlight", start_ms: Math.round(timeMs), end_ms: Math.round(timeMs) + 2000 });
     if (d && d.effects.length) setSel(d.effects[d.effects.length - 1].id);
   };
+  const addCameraMove = async () => {
+    const d = await applyOp({ op: "add_camera_move", t_ms: Math.round(timeMs), x: 0.5, y: 0.5, size: 0.25 });
+    if (d && d.camera_moves.length) setSel(d.camera_moves[d.camera_moves.length - 1].id);
+  };
 
   useEditorKeymap({ sel, doc, timeMs, setSel, setPlaying, applyOp, addZoom, addSpotlight });
 
@@ -98,6 +104,7 @@ export function Editor({ folder, onClose }: { folder: string; onClose: () => voi
   const selZoom = doc.zooms.find((z) => z.id === sel) ?? null;
   const selEffect = doc.effects.find((e) => e.id === sel) ?? null;
   const selLayout = doc.layout.find((l) => l.id === sel) ?? null;
+  const selCamMove = doc.camera_moves.find((m) => m.id === sel) ?? null;
 
   return (
     <div className="editor">
@@ -105,32 +112,40 @@ export function Editor({ folder, onClose }: { folder: string; onClose: () => voi
       <TopBar proj={proj} exporting={exporting} pct={pct} onExport={onExport} onClose={onClose} />
       <div className="e-body">
         <Rail tab={tab} onTab={(t) => { setSel(null); setTab(t); }} />
-        {selZoom ? (
-          <ZoomInspector zoom={selZoom} dur={dur} onApply={applyOp} onClose={() => setSel(null)} />
-        ) : selEffect ? (
-          <EffectInspector effect={selEffect} dur={dur} settings={doc.settings} onApply={applyOp} onClose={() => setSel(null)} />
-        ) : selLayout ? (
-          <LayoutInspector seg={selLayout} dur={dur} onApply={applyOp} onClose={() => setSel(null)} />
-        ) : tab === "ai" ? (
-          <AiPanel running={running} onRun={onRun} />
-        ) : tab === "background" ? (
-          <BackgroundPanel settings={doc.settings.ui} onChange={(ui) => saveDocSettings({ ...doc.settings, ui })} onClose={() => setTab("ai")} />
-        ) : tab === "cursor" ? (
-          <CursorPanel settings={doc.settings.cursor} onChange={(cursor) => saveDocSettings({ ...doc.settings, cursor })} onClose={() => setTab("ai")} />
-        ) : tab === "camera" ? (
-          <CameraPanel settings={doc.settings.appearance} onChange={(appearance) => saveDocSettings({ ...doc.settings, appearance })} onClose={() => setTab("ai")} />
-        ) : tab === "captions" ? (
-          <CaptionsPanel settings={doc.settings.clickfx} onChange={(clickfx) => saveDocSettings({ ...doc.settings, clickfx })} onClose={() => setTab("ai")} />
-        ) : tab === "audio" ? (
-          <AudioPanel offsetMs={doc.settings.audio_offset_ms} onChangeOffset={(v) => saveDocSettings({ ...doc.settings, audio_offset_ms: v })} onClose={() => setTab("ai")} />
-        ) : tab === "effects" ? (
-          <EffectsPanel settings={doc.settings.clickfx} onChange={(clickfx) => saveDocSettings({ ...doc.settings, clickfx })} onClose={() => setTab("ai")} onAddZoom={addZoom} onAddSpotlight={addSpotlight} onAddLayout={async () => { await applyOp({ op: "add_layout_seg", at_ms: Math.round(timeMs), dur_ms: 2000, layout: "camera" }); }} />
-        ) : (
-          <div className="e-panel">
-            <h2 style={{ textTransform: "capitalize" }}>{tab}</h2>
-            <p className="e-lede">{tab} settings land here next.</p>
-          </div>
-        )}
+        <AnimatePresence mode="popLayout" initial={false}>
+          <motion.div key={sel ?? tab} className="e-panel-slot"
+            initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }}
+            transition={{ type: "tween", duration: 0.16, ease: [0.4, 0, 0.2, 1] }}>
+            {selZoom ? (
+              <ZoomInspector zoom={selZoom} dur={dur} onApply={applyOp} onClose={() => setSel(null)} />
+            ) : selEffect ? (
+              <EffectInspector effect={selEffect} dur={dur} settings={doc.settings} onApply={applyOp} onClose={() => setSel(null)} />
+            ) : selLayout ? (
+              <LayoutInspector seg={selLayout} dur={dur} onApply={applyOp} onClose={() => setSel(null)} />
+            ) : selCamMove ? (
+              <CameraMoveInspector move={selCamMove} dur={dur} onApply={applyOp} onClose={() => setSel(null)} />
+            ) : tab === "ai" ? (
+              <AiPanel running={running} onRun={onRun} />
+            ) : tab === "background" ? (
+              <BackgroundPanel settings={doc.settings.ui} onChange={(ui) => saveDocSettings({ ...doc.settings, ui })} onClose={() => setTab("ai")} />
+            ) : tab === "cursor" ? (
+              <CursorPanel settings={doc.settings.cursor} onChange={(cursor) => saveDocSettings({ ...doc.settings, cursor })} onClose={() => setTab("ai")} />
+            ) : tab === "camera" ? (
+              <CameraPanel settings={doc.settings.appearance} onChange={(appearance) => saveDocSettings({ ...doc.settings, appearance })} onClose={() => setTab("ai")} />
+            ) : tab === "captions" ? (
+              <CaptionsPanel settings={doc.settings.clickfx} onChange={(clickfx) => saveDocSettings({ ...doc.settings, clickfx })} onClose={() => setTab("ai")} />
+            ) : tab === "audio" ? (
+              <AudioPanel offsetMs={doc.settings.audio_offset_ms} onChangeOffset={(v) => saveDocSettings({ ...doc.settings, audio_offset_ms: v })} onClose={() => setTab("ai")} />
+            ) : tab === "effects" ? (
+              <EffectsPanel settings={doc.settings.clickfx} onChange={(clickfx) => saveDocSettings({ ...doc.settings, clickfx })} onClose={() => setTab("ai")} onAddZoom={addZoom} onAddSpotlight={addSpotlight} onAddLayout={async () => { await applyOp({ op: "add_layout_seg", at_ms: Math.round(timeMs), dur_ms: 2000, layout: "camera" }); }} onAddCameraMove={addCameraMove} />
+            ) : (
+              <div className="e-panel">
+                <h2 style={{ textTransform: "capitalize" }}>{tab}</h2>
+                <p className="e-lede">{tab} settings land here next.</p>
+              </div>
+            )}
+          </motion.div>
+        </AnimatePresence>
         <Stage src={srcUrl} webcamSrc={fileSrc(`${folder}\\webcam.webm`)} track={track} layout={layout} layoutPresets={layoutPresets} layoutSegs={doc.layout} clicks={clicks} bgUrl={bgUrl} cursorSprites={cursorSpr} cursorKinds={cursorKnd} cursor={doc.settings.cursor} effects={doc.effects} clickfx={doc.settings.clickfx} audioSrc={audioUrl} muted={muted} timeMs={timeMs} playing={playing} onTime={onTime} onDuration={setVidDurMs} onZoomAt={zoomAt} />
       </div>
       <Transport
@@ -152,7 +167,7 @@ export function Editor({ folder, onClose }: { folder: string; onClose: () => voi
         muted={muted}
         onMute={() => setMuted((m) => !m)}
       />
-      <Timeline doc={doc} timeMs={timeMs} dur={dur} onSeek={(ms) => { setPlaying(false); setTimeMs(ms); }} sel={sel} onSel={setSel} onApply={applyOp} thumbs={thumbs} waves={waves} />
+      <Timeline doc={doc} timeMs={timeMs} dur={dur} playing={playing} onSeek={(ms) => { setPlaying(false); setTimeMs(ms); }} sel={sel} onSel={setSel} onApply={applyOp} thumbs={thumbs} waves={waves} />
     </div>
   );
 }

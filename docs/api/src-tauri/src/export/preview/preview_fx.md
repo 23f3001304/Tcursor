@@ -1,4 +1,4 @@
-# src-tauri/src/export/preview_fx.rs
+# src-tauri/src/export/preview/preview_fx.rs
 
 The editor preview's FX overlay (spotlight + click effects) as a standalone **transparent PNG**, which the canvas loop (`useCompositeLoop`) blits over the base frame it composites in JS. The frontend has already resolved every value - the spotlight centre/radius/feather/alpha and the click hits are all in FX-canvas pixels - so this command builds an `FxState` straight from the params (no events/actions/scene) and runs the exact `CpuFx` primitives the export uses. It is a pure function of its arguments: no `folder`, no `PreviewSession`, no decode.
 
@@ -18,7 +18,7 @@ pub fn preview_fx_overlay(
 ) -> Result<String, String>
 ```
 
-Renders the resolved FX at one preview frame and returns a `data:image/png;base64,...` overlay. Registered in `lib.rs`; the frontend calls it via `previewFxOverlay` (`src/lib/ipc.ts`) → `requestFxOverlay` (`src/editor/fxOverlay.ts`). **This command being absent is exactly why the spotlight never appeared in the preview:** the invoke rejected as an unregistered command, `fxOverlay.ts` caught the error and returned `null`, so no overlay was ever blitted.
+Renders the resolved FX at one preview frame and returns a `data:image/png;base64,...` overlay. Registered in `lib.rs`; the frontend calls it via `previewFxOverlay` (`src/lib/ipc.ts`) → `requestFxOverlay` (`src/editor/stage/fxOverlay.ts`). **This command being absent is exactly why the spotlight never appeared in the preview:** the invoke rejected as an unregistered command, `fxOverlay.ts` caught the error and returned `null`, so no overlay was ever blitted.
 
 ### Inputs (what, and why it is needed)
 

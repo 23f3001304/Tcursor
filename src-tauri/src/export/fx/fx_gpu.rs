@@ -130,7 +130,8 @@ mod tests {
         let mut out = vec![200u8; (w * h * 4) as usize];
         let st = FxState { style: ClickFxStyle::None, color: [0, 0, 0], intensity: 1.0, hits: vec![],
             spot: Some(Spot { cx: 32.0, cy: 32.0, dim: 0.7, radius_frac: 0.13, feather_frac: 0.10, alpha: 1.0,
-                mode: SpotlightMode::Classic, tint: [0, 0, 0], t: 0.0 }), video: None };
+                mode: SpotlightMode::Classic, tint: [0, 0, 0], t: 0.0,
+                cam_rect: [0.0; 4], cam_radius: 0.0, dim_camera: true }), video: None };
         g.apply(&mut out, w, h, &st);
         assert!(out[0] < out[((32 * w + 32) * 4) as usize], "GPU spotlight: corner dimmer than center");
     }

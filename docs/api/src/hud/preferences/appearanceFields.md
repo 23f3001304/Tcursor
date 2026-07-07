@@ -108,6 +108,42 @@ export const CORNERS: [CamCorner, string][] = [["bottom_left", "BL"], ["bottom_r
 
 Ordered `[value, label]` pairs for the corner toggle buttons. Short labels keep the toggle compact in the panel.
 
+## ASPECTS
+
+```ts
+export const ASPECTS: [CamAspect, string][] = [["square", "Square"], ["wide", "16:9"]]
+```
+
+Ordered `[value, label]` pairs for the webcam-PiP aspect-ratio picker. Values match the `CamAspect` union from `settings.ts`.
+
+### Used by
+
+- `src/editor/panels/CameraPanel.tsx` - renders the Aspect picker
+
+## RING_WIDTH_SLIDER
+
+```ts
+export const RING_WIDTH_SLIDER: Spec = { label: "Ring width", min: 0.005, max: 0.2, step: 0.005 }
+```
+
+Slider range for the webcam ring/border width - same fraction-of-min-side units as `cam_radius`, so the numeric range is comparable.
+
+### Used by
+
+- `src/editor/panels/CameraRingField.tsx` - drives the ring-width slider bounds
+
+## DEFAULT_RING
+
+```ts
+export const DEFAULT_RING = { width: 0.03, color: [255, 255, 255] as [number, number, number] }
+```
+
+The `CamRing` value written when the ring switch is toggled on (from `null`). *Why a fixed starting point:* gives the user a visible, sensible ring immediately instead of a 0-width or invisible one.
+
+### Used by
+
+- `src/editor/panels/CameraRingField.tsx` - the switch's on-value
+
 ## pct
 
 ```ts
@@ -132,10 +168,11 @@ export const DEFAULT_APPEARANCE: AppearanceSettings
 
 Factory defaults for all five modes, shipped as code rather than a config file so settings initialization can reference this constant without a Tauri round-trip. Two internal presets drive the five modes:
 
-- `bubble` - small 19% circular camera anchored bottom-left, used for `screen` and `screen_only`
+- `bubble` - small 19% circular camera anchored bottom-left, used for `screen` and `screen_only`. Includes `cam_aspect: "square"` and `cam_ring: null`, matching the Rust `ModeAppearance::default()` byte-for-byte.
 - `big` - 89% rounded camera filling most of the frame, spread from `bubble` with `cam_size` and `cam_shape` overridden, used for `camera`, `camera_only`, and `presenter`
 
 ### Used by
 
 - `src/hud/settings/SettingsAppearance.tsx` - reset-to-defaults button
 - `src/hud/Hud.tsx` - initial settings hydration fallback
+- `src/editor/panels/CameraPanel.tsx` - reset-to-defaults button (screen mode only)

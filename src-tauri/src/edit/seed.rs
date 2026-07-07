@@ -14,6 +14,9 @@ fn easing_str(e: Easing) -> String {
         Easing::Smooth => "smooth",
         Easing::Linear => "linear",
         Easing::Spring { .. } => "spring",
+        Easing::EaseIn => "ease_in",
+        Easing::EaseOut => "ease_out",
+        Easing::EaseInOut => "ease_in_out",
     }
     .to_string()
 }

@@ -39,10 +39,10 @@ Returns the exact camera curve over the whole timeline, one `CamSample` per outp
 
 ```rust
 #[derive(serde::Serialize)]
-pub struct PreviewLayout { pub screen: [f32; 4], pub radius: f32, pub cam: Option<[f32; 5]> }
+pub struct PreviewLayout { pub screen: [f32; 4], pub radius: f32, pub cam: Option<[f32; 9]> }
 ```
 
-The static export framing as fractions of the output: `screen` is the screen panel rect `[x, y, w, h]`, `radius` its corner radius (fraction of output *width*), and `cam` the webcam PiP rect `[x, y, w, h, radius]` or `None` when the webcam is hidden. The editor's canvas compositor uses these so the preview frames the screen and webcam exactly like the export instead of guessing.
+The static export framing as fractions of the output: `screen` is the screen panel rect `[x, y, w, h]`, `radius` its corner radius (fraction of output *width*), and `cam` the webcam PiP rect+ring `[x, y, w, h, radius, ring_px, ring_r, ring_g, ring_b]` or `None` when the webcam is hidden. `ring_px` is a fraction of output width (0 = no ring); `ring_r/g/b` are 0..255 - mirrors `Panel.ring_px`/`ring_color` riding alongside its rect/radius (Task 9). The editor's canvas compositor uses these so the preview frames the screen, webcam, and ring exactly like the export instead of guessing.
 
 ## preview_layout
 
@@ -60,12 +60,12 @@ Returns the `PreviewLayout` for the recording.
 
 ### Returns
 
-`Result<PreviewLayout, String>` - the screen/webcam framing fractions. Errors (as a string) if the renderer cannot be built.
+`Result<PreviewLayout, String>` - the screen/webcam framing fractions (+ ring). Errors (as a string) if the renderer cannot be built.
 
 ### Implementation
 
 1. Inside `with_warm`, `reset_camera`, then `step_camera(video_start)` to get the scene at t=0 (the unzoomed base layout).
-2. Divide `pose.scene.screen.rect` and `pose.scene.camera.rect` (+ radii) by the output dimensions to get fractions; set `cam` to `None` when `pose.scene.camera.alpha <= 0.5`.
+2. Divide `pose.scene.screen.rect` and `pose.scene.camera.rect` (+ radii, + `ring_px`) by the output dimensions to get fractions; set `cam` to `None` when `pose.scene.camera.alpha <= 0.5`.
 
 ## ClickSample
 

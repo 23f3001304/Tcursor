@@ -134,8 +134,8 @@ mod tests {
         let bg = solid(8, 8, [255, 0, 0, 255]);
         let layout = Layout { out_w: 8, out_h: 8, pad_px: 1, screen_scale: 1.0, screen_radius_px: 8.0 * 0.016 };
         let scene = Scene {
-            screen: Panel { rect: RectF { x: 2.0, y: 2.0, w: 4.0, h: 4.0 }, radius: 0.0, alpha: 1.0 },
-            camera: Panel { rect: RectF { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }, radius: 0.0, alpha: 0.0 },
+            screen: Panel { rect: RectF { x: 2.0, y: 2.0, w: 4.0, h: 4.0 }, radius: 0.0, alpha: 1.0, ring_px: 0.0, ring_color: [0, 0, 0] },
+            camera: Panel { rect: RectF { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }, radius: 0.0, alpha: 0.0, ring_px: 0.0, ring_color: [0, 0, 0] },
         };
         let cam = Camera { cx: 4.0, cy: 4.0, scale: 1.0 };
         let mut out = Vec::new();
@@ -155,8 +155,8 @@ mod tests {
         let bg = solid(64, 48, [40, 40, 40, 255]);
         let layout = Layout { out_w: 64, out_h: 48, pad_px: 4, screen_scale: 1.0, screen_radius_px: 48.0 * 0.016 };
         let scene = Scene {
-            screen: Panel { rect: RectF { x: 8.0, y: 6.0, w: 30.0, h: 22.0 }, radius: 0.0, alpha: 1.0 },
-            camera: Panel { rect: RectF { x: 40.0, y: 26.0, w: 18.0, h: 18.0 }, radius: 0.0, alpha: 1.0 },
+            screen: Panel { rect: RectF { x: 8.0, y: 6.0, w: 30.0, h: 22.0 }, radius: 0.0, alpha: 1.0, ring_px: 0.0, ring_color: [0, 0, 0] },
+            camera: Panel { rect: RectF { x: 40.0, y: 26.0, w: 18.0, h: 18.0 }, radius: 0.0, alpha: 1.0, ring_px: 0.0, ring_color: [0, 0, 0] },
         };
         let cam = Camera { cx: 32.0, cy: 24.0, scale: 1.0 };
         let mut cpu = Vec::new();

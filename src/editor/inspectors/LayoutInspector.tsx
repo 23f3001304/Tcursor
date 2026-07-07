@@ -66,7 +66,7 @@ export function LayoutInspector({ seg, dur, onApply, onClose }: {
       </div>
 
       <button className="e-del" onClick={() => { void onApply({ op: "remove_layout_seg", id: seg.id }); onClose(); }}>
-        <IconTrash size={15} /> Delete layout
+        <IconTrash size={15} />Delete layout
       </button>
     </div>
   );

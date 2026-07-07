@@ -50,7 +50,7 @@ pub fn start_recording(
     system_audio: bool,
     game_mode: bool,
     recorder: tauri::State<'_, Recorder>,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let mut guard = recorder.inner.lock().unwrap_or_else(|e| e.into_inner());
     if guard.is_some() { return Err("already recording".into()); }
 
@@ -110,9 +110,9 @@ pub fn start_recording(
         mic_thread, system_thread, mouse, keyboard, cursor,
         events_path: paths.events(), actions_path: paths.actions(),
         typing_path: paths.typing(), cursor_path: paths.cursor(),
-        screen, started_unix_ms, events_ms, mic_start, system_start, folder,
+        screen, started_unix_ms, events_ms, mic_start, system_start, folder: folder.clone(),
     });
-    Ok(())
+    Ok(folder) // return the folder so the HUD can stream the webcam into it during recording
 }
 
 #[tauri::command]

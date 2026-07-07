@@ -29,6 +29,17 @@ pub fn save_webcam(folder: String, bytes: Vec<u8>) -> Result<(), String> {
     std::fs::write(path, bytes).map_err(|e| e.to_string())
 }
 
+/// Append one MediaRecorder chunk to webcam.webm during recording (streamed via 1s timeslices), so
+/// Stop has almost nothing left to write instead of one O(clip-length) blob. The recording folder
+/// is freshly created per recording, so the first append creates the file.
+#[tauri::command]
+pub fn append_webcam(folder: String, bytes: Vec<u8>) -> Result<(), String> {
+    use std::io::Write;
+    let path = std::path::Path::new(&folder).join("webcam.webm");
+    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(path).map_err(|e| e.to_string())?;
+    f.write_all(&bytes).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn export_project(folder: String, app: tauri::AppHandle) -> Result<(), String> {
     crate::export::pipeline::run::run_export(app, folder);

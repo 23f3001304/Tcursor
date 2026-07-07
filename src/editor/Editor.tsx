@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { saveEdit, aiAutoedit, exportProject, applyEditOp, fileSrc } from "../lib/ipc";
 import type { EditDoc, EditOp } from "../lib/edit";
+import type { CamPose } from "./stage/cameraMoves";
 import { TopBar } from "./shell/TopBar";
 import { ResizeEdges } from "./controls/ResizeEdges";
 import { Rail, type Tab } from "./shell/Rail";
@@ -21,6 +22,7 @@ import { Transport } from "./stage/Transport";
 import { Timeline } from "./timeline/Timeline";
 import { useEditorData } from "./hooks/useEditorData";
 import { useEditorKeymap } from "./hooks/useEditorKeymap";
+import { useMoveModeGuard } from "./hooks/useMoveModeGuard";
 import "./editor.css";
 
 /** The post-record editor. The preview plays the recording natively (Stage) and applies
@@ -35,6 +37,10 @@ export function Editor({ folder, onClose }: { folder: string; onClose: () => voi
   const [vidDurMs, setVidDurMs] = useState(0);
   const [quality, setQuality] = useState(720);
   const [muted, setMuted] = useState(false);
+  // The UNSAVED Move-mode webcam pose: dragging the PiP updates it live (preview only), the Camera
+  // panel's Update/Add button saves it as a keyframe, and Stage discards it when the playhead moves.
+  // Shared here so both Stage (drag) and CameraPanel (save button) see the same draft.
+  const camDraftRef = useRef<CamPose | null>(null);
 
   const {
     doc, setDoc, track, layout, layoutPresets, clicks, bgUrl, cursorSpr, cursorKnd,
@@ -60,6 +66,9 @@ export function Editor({ folder, onClose }: { folder: string; onClose: () => voi
       return d;
     } catch { return null; }
   };
+  // "Move in preview" toggle + guard: turning it off clears the keyframes (they override the static
+  // webcam controls) after a warning, so the static size/dock sliders take effect again.
+  const { moveMode, requestMoveMode, moveOffDialog } = useMoveModeGuard(doc, applyOp);
   const saveDocSettings = async (nextSettings: EditDoc["settings"]) => {
     if (!doc) return;
     const newDoc = { ...doc, settings: nextSettings };
@@ -119,7 +128,9 @@ export function Editor({ folder, onClose }: { folder: string; onClose: () => voi
             {selZoom ? (
               <ZoomInspector zoom={selZoom} dur={dur} onApply={applyOp} onClose={() => setSel(null)} />
             ) : selEffect ? (
-              <EffectInspector effect={selEffect} dur={dur} settings={doc.settings} onApply={applyOp} onClose={() => setSel(null)} />
+              <EffectInspector effect={selEffect} dur={dur} settings={doc.settings} onApply={applyOp}
+                onDimCamera={(v) => saveDocSettings({ ...doc.settings, clickfx: { ...doc.settings.clickfx, spotlight_dim_camera: v } })}
+                onClose={() => setSel(null)} />
             ) : selLayout ? (
               <LayoutInspector seg={selLayout} dur={dur} onApply={applyOp} onClose={() => setSel(null)} />
             ) : selCamMove ? (
@@ -131,7 +142,8 @@ export function Editor({ folder, onClose }: { folder: string; onClose: () => voi
             ) : tab === "cursor" ? (
               <CursorPanel settings={doc.settings.cursor} onChange={(cursor) => saveDocSettings({ ...doc.settings, cursor })} onClose={() => setTab("ai")} />
             ) : tab === "camera" ? (
-              <CameraPanel settings={doc.settings.appearance} onChange={(appearance) => saveDocSettings({ ...doc.settings, appearance })} onClose={() => setTab("ai")} />
+              <CameraPanel settings={doc.settings.appearance} onChange={(appearance) => saveDocSettings({ ...doc.settings, appearance })} onClose={() => setTab("ai")}
+                doc={doc} timeMs={timeMs} applyOp={applyOp} moveMode={moveMode} onMoveModeChange={requestMoveMode} camDraftRef={camDraftRef} />
             ) : tab === "captions" ? (
               <CaptionsPanel settings={doc.settings.clickfx} onChange={(clickfx) => saveDocSettings({ ...doc.settings, clickfx })} onClose={() => setTab("ai")} />
             ) : tab === "audio" ? (
@@ -146,7 +158,7 @@ export function Editor({ folder, onClose }: { folder: string; onClose: () => voi
             )}
           </motion.div>
         </AnimatePresence>
-        <Stage src={srcUrl} webcamSrc={fileSrc(`${folder}\\webcam.webm`)} track={track} layout={layout} layoutPresets={layoutPresets} layoutSegs={doc.layout} clicks={clicks} bgUrl={bgUrl} cursorSprites={cursorSpr} cursorKinds={cursorKnd} cursor={doc.settings.cursor} effects={doc.effects} clickfx={doc.settings.clickfx} audioSrc={audioUrl} muted={muted} timeMs={timeMs} playing={playing} onTime={onTime} onDuration={setVidDurMs} onZoomAt={zoomAt} />
+        <Stage src={srcUrl} webcamSrc={fileSrc(`${folder}\\webcam.webm`)} track={track} layout={layout} layoutPresets={layoutPresets} layoutSegs={doc.layout} cameraMoves={doc.camera_moves} clicks={clicks} bgUrl={bgUrl} cursorSprites={cursorSpr} cursorKinds={cursorKnd} cursor={doc.settings.cursor} effects={doc.effects} clickfx={doc.settings.clickfx} audioSrc={audioUrl} muted={muted} timeMs={timeMs} playing={playing} moveMode={moveMode} camDraftRef={camDraftRef} onTime={onTime} onDuration={setVidDurMs} onZoomAt={zoomAt} />
       </div>
       <Transport
         timeMs={timeMs}
@@ -168,6 +180,7 @@ export function Editor({ folder, onClose }: { folder: string; onClose: () => voi
         onMute={() => setMuted((m) => !m)}
       />
       <Timeline doc={doc} timeMs={timeMs} dur={dur} playing={playing} onSeek={(ms) => { setPlaying(false); setTimeMs(ms); }} sel={sel} onSel={setSel} onApply={applyOp} thumbs={thumbs} waves={waves} />
+      {moveOffDialog}
     </div>
   );
 }

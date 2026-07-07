@@ -26,6 +26,7 @@ pub fn run() {
             session::record::recorder::resume_recording,
             session::record::recorder::stop_recording,
             commands::save_webcam,
+            commands::append_webcam,
             commands::export_project,
             commands::get_settings,
             commands::set_settings,

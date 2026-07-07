@@ -28,13 +28,26 @@ impl CameraMoveTrack {
         Self { kfs }
     }
 
-    /// `None` for an empty track (caller keeps its static pose). Otherwise: hold the
-    /// first keyframe's pose at/before it, hold the last at/after it, and between two
-    /// keyframes `a`/`b` ease INTO `b` using `b`'s own easing over `[a.t_ms, b.t_ms]` -
-    /// the same "ease into the entered segment" direction `LayoutTrack::scene_at` uses.
-    pub fn sample(&self, t_ms: u32) -> Option<CamPose> {
+    /// `None` for an empty track (caller keeps its static pose). Otherwise: at/before the
+    /// first keyframe, ease FROM `static_pose` (the caller's un-overridden static PiP pose)
+    /// INTO the first keyframe over `[0, first.t_ms]` using the first keyframe's own easing -
+    /// an implicit t=0 keyframe at the static pose, same "ease into the entered segment"
+    /// convention `LayoutTrack::scene_at` uses. `static_pose = None` (or `first.t_ms == 0`,
+    /// nothing to ease from) holds the first keyframe's pose flat, same as before this
+    /// existed. Hold the last keyframe at/after it; between two keyframes `a`/`b` ease INTO
+    /// `b` using `b`'s own easing over `[a.t_ms, b.t_ms]` - unchanged.
+    pub fn sample(&self, t_ms: u32, static_pose: Option<CamPose>) -> Option<CamPose> {
         if self.kfs.is_empty() { return None; }
-        if t_ms <= self.kfs[0].t_ms { return Some(pose(&self.kfs[0])); }
+        let first = &self.kfs[0];
+        if t_ms <= first.t_ms {
+            return Some(match static_pose {
+                Some(s) if first.t_ms > 0 => {
+                    let f = ease(first.easing, t_ms as f32 / first.t_ms as f32);
+                    CamPose { x: s.x + (first.x - s.x) * f, y: s.y + (first.y - s.y) * f, size: s.size + (first.size - s.size) * f }
+                }
+                _ => pose(first),
+            });
+        }
         let last = self.kfs.len() - 1;
         if t_ms >= self.kfs[last].t_ms { return Some(pose(&self.kfs[last])); }
 

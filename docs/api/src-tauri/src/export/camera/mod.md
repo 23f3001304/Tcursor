@@ -12,12 +12,33 @@ Normalized easing curve mapping progress `p` in `[0,1]` to `[0,1]`.
 
 ### Inputs
 
-- `e: Easing` - which curve to apply. *Why:* `Linear` is identity; `Smooth` is smoothstep (`3p^2 - 2p^3`); `Spring { .. }` is ease-out-back, overshooting slightly past 1 near the end before settling (the `stiffness`/`damping` fields are unused - only the variant tag matters).
+- `e: Easing` - which curve to apply. *Why:* `Linear` is identity; `Smooth` is smoothstep (`3p^2 - 2p^3`); `Spring { .. }` is ease-out-back, overshooting slightly past 1 near the end before settling (the `stiffness`/`damping` fields are unused - only the variant tag matters); `EaseIn`/`EaseOut`/`EaseInOut` are quadratic accelerate (`p^2`) / decelerate (`p*(2-p)`) / symmetric (`2p^2` then `1-2(1-p)^2`).
 - `p: f32` - progress, clamped to `[0,1]` before easing. *Why:* callers pass raw fractions that can fall slightly outside range at the boundaries; clamping avoids NaN/overshoot from the cubic terms.
 
 ### Returns
 
 The eased progress value, `~0` at `p=0` and `~1` at `p=1` (with `Spring` briefly exceeding 1).
+
+## static_cam_pose
+
+```rust
+pub fn static_cam_pose(rect: RectF, ow: f32, oh: f32) -> CamPose
+```
+
+Converts the camera panel's un-overridden (static) rect into a `CamPose` - the inverse of `rect_from_center` (`export/scene/mod.rs`). This is the pose `CameraMoveTrack::sample`'s implicit t=0 keyframe eases FROM when a single (or first) `camera_moves` keyframe exists, i.e. "what the webcam would show with zero `camera_moves`".
+
+### Inputs
+
+- `rect: RectF` - the RESOLVED camera panel's rect (output pixels), taken BEFORE any `camera_moves` override is applied. *Why before:* the override replaces `scene.camera` itself, so this must be read from `scene.camera.rect` right after `track.scene_at`/`shrink_camera` resolve it, and before `override_camera` runs.
+- `ow: f32`, `oh: f32` - output frame dimensions in pixels. *Why:* same basis `rect_from_center` converts a `CamPose` back into a rect with, so the two are exact inverses.
+
+### Returns
+
+`CamPose { x: (rect.x + rect.w * 0.5) / ow, y: (rect.y + rect.h * 0.5) / oh, size: rect.h / oh }` - the rect's center as fractions of `ow`/`oh`, and its height as a fraction of `oh` (mirrors `rect_from_center`'s `size * oh = h`).
+
+### Used by
+
+- `src-tauri/src/export/render/mod.rs` - `step_camera` computes this from the pre-override `scene.camera.rect` and passes it to `CameraMoveTrack::sample` as the implicit start pose.
 
 ## fit_durations
 

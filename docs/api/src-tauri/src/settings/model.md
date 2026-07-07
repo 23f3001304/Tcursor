@@ -155,6 +155,7 @@ pub struct ClickFxSettings {
     pub spotlight_mode: SpotlightMode,
     pub spotlight_tint: [u8; 3],
     pub video_fx_mode: VideoFxMode,
+    pub spotlight_dim_camera: bool,
 }
 ```
 
@@ -174,6 +175,7 @@ Fields:
 - `spotlight_mode: SpotlightMode` - which spotlight visual to apply. Default `Classic`.
 - `spotlight_tint: [u8; 3]` - RGB tint for spotlight modes that support it. Default `[130, 90, 255]` (purple). *Why purple:* matches the TCursor brand nebula palette.
 - `video_fx_mode: VideoFxMode` - full-frame fx mode activated by `video_fx_hold`. Default `NebulaWash`.
+- `spotlight_dim_camera: bool` - whether the spotlight dim also darkens the webcam PiP. Default `true` (today's behavior: the camera dims like everything else outside the lit zone). *Why default true:* preserves byte-identical output for existing recordings/config files loaded before this field existed (`#[serde(default = "default_true")]` on the field, since the struct-level `#[serde(default)]` alone would fall back to `bool::default() == false`). Setting it `false` keeps the webcam fully lit while the spotlight still dims the rest of the frame - threaded through `Spot::dim_camera` in `fx_state.rs` to both the GPU shader (`fx.wgsl`'s `camcov` un-dim) and the CPU path (`spotdraw.rs`).
 
 ### Used by
 
@@ -181,6 +183,7 @@ Fields:
 - `src-tauri/src/export/fx/clickdraw.rs` - reads `style` and `color` to select and paint click effects per frame
 - `src-tauri/src/export/fx/fx_uniforms.rs` - converts all fx settings to GPU shader uniforms
 - `src-tauri/src/export/fx/fxdraw.rs` - constructs `FxState` from `ClickFxSettings` fields for rendering tests
+- `src-tauri/src/export/fx/fx_state.rs` (`fx_state_at`) - reads `spotlight_dim_camera` to set `Spot::dim_camera`
 - `src-tauri/src/export/fx/caption.rs` - reads `captions` to decide whether to render action text overlays
 
 ## HotkeySettings

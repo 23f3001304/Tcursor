@@ -44,8 +44,9 @@ function OverrideField({ label, value, defaultValue, min, max, step, onToggle, o
 /** Inspector for the selected effect region (spotlight). v1 edits start/end + delete; the
  *  spotlight's look comes from Settings (per-region params are a later addition). Shown in the
  *  left panel in place of the tab content while an effect region is selected. */
-export function EffectInspector({ effect, dur, settings, onApply, onClose }: {
-  effect: EffectRegion; dur: number; settings: Settings; onApply: (op: EditOp) => Promise<EditDoc | null>; onClose: () => void;
+export function EffectInspector({ effect, dur, settings, onApply, onDimCamera, onClose }: {
+  effect: EffectRegion; dur: number; settings: Settings; onApply: (op: EditOp) => Promise<EditDoc | null>;
+  onDimCamera: (v: boolean) => void; onClose: () => void;
 }) {
   const sec = (ms: number) => +(ms / 1000).toFixed(2);
   const upd = (patch: { start_ms?: number; end_ms?: number; fade_in_ms?: number; fade_out_ms?: number; mode?: string; dim?: number; radius?: number; feather?: number }) =>
@@ -91,8 +92,16 @@ export function EffectInspector({ effect, dur, settings, onApply, onClose }: {
       <OverrideField label="Feather" value={effect.feather} defaultValue={defaultFeather} min={0.02} max={0.25} step={0.01}
         onToggle={(on) => upd({ feather: on ? defaultFeather : -1 })} onChange={(v) => upd({ feather: v })} />
 
+      <div className="e-field" style={{ marginTop: 4 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span className="e-fl" style={{ margin: 0 }}>Dim webcam</span>
+          <Switch on={settings.clickfx.spotlight_dim_camera} onChange={onDimCamera} />
+        </div>
+        <span className="e-lede" style={{ marginTop: 4 }}>Off keeps the webcam PiP lit while the spotlight dims everything else. Applies to all spotlights.</span>
+      </div>
+
       <button className="e-del" onClick={() => { void onApply({ op: "remove_effect", id: effect.id }); onClose(); }}>
-        <IconTrash size={15} /> Delete spotlight
+        <IconTrash size={15} />Delete spotlight
       </button>
     </div>
   );

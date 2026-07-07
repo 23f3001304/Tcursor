@@ -33,6 +33,8 @@ pub enum SpotlightMode { Classic, Blur, Halo, Breathing, Nebula, Vignette }
 #[serde(rename_all = "lowercase")]
 pub enum VideoFxMode { NebulaWash, CinematicDim, ScreenFocus, ColorPop }
 
+fn default_true() -> bool { true }
+
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 #[serde(default)]
 pub struct ClickFxSettings {
@@ -41,9 +43,10 @@ pub struct ClickFxSettings {
     pub spotlight_dim: f32, pub spotlight_radius: f32, pub spotlight_feather: f32,
     pub spotlight_mode: SpotlightMode, pub spotlight_tint: [u8; 3],
     pub video_fx_mode: VideoFxMode,
+    #[serde(default = "default_true")] pub spotlight_dim_camera: bool,
 }
 impl Default for ClickFxSettings {
-    fn default() -> Self { Self { enabled: true, style: ClickFxStyle::Ripple, color: [255, 255, 255], intensity: 0.8, captions: false, spotlight: false, spotlight_dim: 0.60, spotlight_radius: 0.13, spotlight_feather: 0.10, spotlight_mode: SpotlightMode::Classic, spotlight_tint: [130, 90, 255], video_fx_mode: VideoFxMode::NebulaWash } }
+    fn default() -> Self { Self { enabled: true, style: ClickFxStyle::Ripple, color: [255, 255, 255], intensity: 0.8, captions: false, spotlight: false, spotlight_dim: 0.60, spotlight_radius: 0.13, spotlight_feather: 0.10, spotlight_mode: SpotlightMode::Classic, spotlight_tint: [130, 90, 255], video_fx_mode: VideoFxMode::NebulaWash, spotlight_dim_camera: true } }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -151,6 +154,8 @@ mod tests {
         assert_eq!(back.clickfx.spotlight_feather, 0.10);
         assert_eq!(back.clickfx.spotlight_mode, SpotlightMode::Classic);
         assert_eq!(back.clickfx.spotlight_tint, [130, 90, 255]);
+        // old JSON without spotlight_dim_camera loads with default true (today's dim-everything look)
+        assert!(back.clickfx.spotlight_dim_camera);
         // old JSON without camera_shrink/camera_shrink_min loads with defaults
         assert!(back.zoom.camera_shrink);
         assert_eq!(back.zoom.camera_shrink_min, 0.62);

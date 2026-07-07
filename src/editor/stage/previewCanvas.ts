@@ -85,7 +85,7 @@ export function drawPreview(
     ctx.globalAlpha = camAlpha;
     const wv = webcam.videoWidth, wvh = webcam.videoHeight;
     if (layout?.cam) {
-      const [fx, fy, fw, fh, fr] = layout.cam;
+      const [fx, fy, fw, fh, fr, ringPxFrac, ringR, ringG, ringB] = layout.cam;
       const wx = fx * w, wy = fy * h, ww = fw * w, wh = fh * h, wr = fr * w;
       ctx.save();
       ctx.shadowColor = "rgba(0,0,0,.5)"; ctx.shadowBlur = 20; ctx.shadowOffsetY = 6;
@@ -97,6 +97,16 @@ export function drawPreview(
       ctx.restore();
       roundRect(ctx, wx, wy, ww, wh, wr);
       ctx.strokeStyle = "rgba(255,255,255,.18)"; ctx.lineWidth = 2; ctx.stroke();
+      // Export ring/border (Panel.ring_px/ring_color): a band `ringPx` wide, just INSIDE the
+      // panel edge - matches shader.wgsl/compositor.rs, whose SDF band spans d in [-ringPx, 0].
+      // A centered stroke traced on a path inset by ringPx/2 straddles exactly that band (outer
+      // half of the stroke lands on the true edge, inner half ringPx further in).
+      const ringPx = ringPxFrac * w;
+      if (ringPx > 0) {
+        const inset = ringPx / 2;
+        roundRect(ctx, wx + inset, wy + inset, ww - 2 * inset, wh - 2 * inset, Math.max(0, wr - inset));
+        ctx.strokeStyle = `rgb(${ringR}, ${ringG}, ${ringB})`; ctx.lineWidth = ringPx; ctx.stroke();
+      }
     } else {
       const pad = Math.min(w, h) * 0.045;
       const cr = Math.min(w, h) * 0.13;

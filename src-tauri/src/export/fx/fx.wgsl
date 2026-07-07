@@ -26,11 +26,12 @@ struct FxU {
   a: vec4<f32>,                 // ow, oh, style, hit_count
   b: vec4<f32>,                 // spot_cx, spot_cy, spot_dim_alpha, spot_active
   c: vec4<f32>,                 // spot_r_in, spot_r_out, intensity, _pad
-  d: vec4<f32>,                 // spot_mode_id, time_s, _pad, _pad
+  d: vec4<f32>,                 // spot_mode_id, time_s, keep_camera_lit(0/1), cam_radius(px)
   tint: vec4<f32>,              // r, g, b 0..1, _pad
   color: vec4<f32>,             // rgb 0..1, _pad
   hits: array<vec4<f32>, 16>,   // x, y, progress, _pad
   e: vec4<f32>,                 // video_mode_id, alpha, t, _pad
+  cam: vec4<f32>,               // camera-exclusion rect (px): min_x, min_y, max_x, max_y
 };
 @group(0) @binding(0) var frame_tex: texture_2d<f32>;
 @group(0) @binding(1) var samp: sampler;
@@ -77,6 +78,12 @@ fn nebula(p: vec2<f32>, tm: f32) -> vec3<f32> {
   return c;
 }
 
+fn rrect_cov(p: vec2<f32>, mn: vec2<f32>, mx: vec2<f32>, r: f32) -> f32 { // ~1 inside, ~0 outside
+  let q = abs(p - (mn + mx) * 0.5) - ((mx - mn) * 0.5 - vec2<f32>(r, r));
+  let sd = length(max(q, vec2<f32>(0.0, 0.0))) + min(max(q.x, q.y), 0.0) - r;
+  return clamp(0.5 - sd, 0.0, 1.0);
+}
+
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
   let dims = vec2<f32>(u.a.x, u.a.y);
@@ -120,6 +127,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
       color = mix(color, clamp((color - lum) * 1.6 + lum, vec3<f32>(0.0), vec3<f32>(1.0)), va);
     }
   }
+  let pre_spot = color;
   if (u.b.w > 0.5) {
     let mode = u.d.x;
     let time = u.d.y;
@@ -155,6 +163,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
       }
     }
   }
+  color = mix(color, pre_spot, u.d.z * rrect_cov(px, u.cam.xy, u.cam.zw, u.d.w));
   for (var i = 0; i < n; i = i + 1) {
     let h = u.hits[i];
     let a = clamp(1.0 - h.z, 0.0, 1.0) * clamp(u.c.z, 0.0, 1.0);

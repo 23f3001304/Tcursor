@@ -146,6 +146,11 @@ export function EffectsPanel({
               onChange={(v) => set("spotlight_radius", v)}
             />
           </div>
+
+          <div className="e-switchrow">
+            <span>Dim webcam</span>
+            <Switch on={settings.spotlight_dim_camera} onChange={(v) => set("spotlight_dim_camera", v)} />
+          </div>
         </>
       )}
     </div>

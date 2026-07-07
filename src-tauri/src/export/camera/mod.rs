@@ -1,7 +1,9 @@
-use crate::export::types::{Camera, Easing, FramePoint, ZoomConfig, ZoomRegion};
+use crate::export::camera::moves::CamPose;
+use crate::export::types::{Camera, Easing, FramePoint, RectF, ZoomConfig, ZoomRegion};
 
 /// Normalized easing curve `[0,1] -> [0,1]`. `Smooth` = smoothstep; `Linear` = identity;
-/// `Spring` = ease-out-back (a small overshoot past 1 near the end, then settle). `pub(crate)`
+/// `Spring` = ease-out-back (a small overshoot past 1 near the end, then settle);
+/// `EaseIn`/`EaseOut`/`EaseInOut` = quadratic accelerate / decelerate / both. `pub(crate)`
 /// so `fx_state`'s `SpotlightSim` can reuse the same curves for its own handoff transitions.
 pub(crate) fn ease(e: Easing, p: f32) -> f32 {
     let p = p.clamp(0.0, 1.0);
@@ -9,7 +11,18 @@ pub(crate) fn ease(e: Easing, p: f32) -> f32 {
         Easing::Linear => p,
         Easing::Smooth => p * p * (3.0 - 2.0 * p),
         Easing::Spring { .. } => { let c = 1.70158; let q = p - 1.0; 1.0 + (c + 1.0) * q * q * q + c * q * q }
+        Easing::EaseIn => p * p,
+        Easing::EaseOut => p * (2.0 - p),
+        Easing::EaseInOut => if p < 0.5 { 2.0 * p * p } else { 1.0 - 2.0 * (1.0 - p) * (1.0 - p) },
     }
+}
+
+/// The camera panel's un-overridden (static) rect, as a `CamPose` - the pose
+/// `CameraMoveTrack::sample`'s implicit t=0 keyframe eases FROM when a single `camera_moves`
+/// keyframe exists. `ow`/`oh` are the output frame's pixel dims (same basis `rect_from_center`
+/// converts back into); inverse of that conversion (center + height fraction, not top-left rect).
+pub fn static_cam_pose(rect: RectF, ow: f32, oh: f32) -> CamPose {
+    CamPose { x: (rect.x + rect.w * 0.5) / ow, y: (rect.y + rect.h * 0.5) / oh, size: rect.h / oh }
 }
 
 /// Shrink `(zi, zo)` proportionally so `zi + zo <= span`, keeping both ramps inside the pill.

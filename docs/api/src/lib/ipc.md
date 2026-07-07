@@ -275,10 +275,10 @@ export const cameraTrack = (folder: string) => invoke<CamSample[]>("camera_track
 ## PreviewLayout
 
 ```ts
-export interface PreviewLayout { screen: [number, number, number, number]; radius: number; cam: [number, number, number, number, number] | null }
+export interface PreviewLayout { screen: [number, number, number, number]; radius: number; cam: [number, number, number, number, number, number, number, number, number] | null; screenAlpha?: number; camAlpha?: number }
 ```
 
-The static export framing as fractions of the output (mirrors the Rust `PreviewLayout`): `screen` is the screen rect `[x, y, w, h]`, `radius` the corner radius (fraction of width), and `cam` the webcam PiP rect `[x, y, w, h, radius]` or `null` when hidden. The canvas compositor frames the screen and webcam from this so the preview matches the export.
+The static export framing as fractions of the output (mirrors the Rust `PreviewLayout`): `screen` is the screen rect `[x, y, w, h]`, `radius` the corner radius (fraction of width), and `cam` the webcam PiP rect+ring `[x, y, w, h, radius, ringPx, ringR, ringG, ringB]` or `null` when hidden - `ringPx` is a fraction of output width (0 = no ring) and `ringR/G/B` are 0..255, mirroring the export's `Panel.ring_px`/`ring_color` riding alongside the rect/radius. The canvas compositor frames the screen and webcam from this so the preview matches the export.
 
 ## previewLayout
 

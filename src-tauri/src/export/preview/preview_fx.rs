@@ -68,6 +68,7 @@ fn reconstruct(on_black: &[u8], on_white: &[u8]) -> Vec<u8> {
 /// Tauri command: render the frontend-resolved FX overlay and return a transparent PNG data URL.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn preview_fx_overlay(
     ow: u32, oh: u32,
     style: String, color: [u8; 3], intensity: f32, hits: Vec<[f32; 3]>,
@@ -75,6 +76,7 @@ pub fn preview_fx_overlay(
     spot_radius: Option<f32>, spot_feather: Option<f32>, spot_alpha: Option<f32>,
     spot_mode: Option<String>, spot_tint: Option<[u8; 3]>, spot_t: Option<f32>,
     video_mode: Option<String>, video_alpha: Option<f32>, video_t: Option<f32>,
+    cam_rect: Option<[f32; 4]>, cam_radius: Option<f32>, dim_camera: Option<bool>,
 ) -> Result<String, String> {
     let (ow, oh) = (ow.max(1), oh.max(1));
     let spot = match (spot_cx, spot_cy, spot_alpha) {
@@ -83,6 +85,8 @@ pub fn preview_fx_overlay(
             radius_frac: spot_radius.unwrap_or(0.13), feather_frac: spot_feather.unwrap_or(0.10),
             alpha, mode: spot_mode.as_deref().map(spot_mode_of).unwrap_or(SpotlightMode::Classic),
             tint: spot_tint.unwrap_or([130, 90, 255]), t: spot_t.unwrap_or(0.0),
+            cam_rect: cam_rect.unwrap_or([0.0; 4]), cam_radius: cam_radius.unwrap_or(0.0),
+            dim_camera: dim_camera.unwrap_or(true),
         }),
         _ => None,
     };
@@ -140,8 +144,30 @@ mod tests {
             Some(40.0), Some(40.0), Some(0.6), Some(0.13), Some(0.10), Some(1.0),
             Some("classic".into()), Some([130, 90, 255]), Some(0.0),
             None, None, None,
+            None, None, None,
         ).unwrap();
         assert!(url.starts_with("data:image/png;base64,"), "returns a PNG data URL");
         assert!(url.len() > 200, "non-trivial overlay encoded");
+    }
+    #[test]
+    fn dim_camera_false_is_threaded_into_the_spot() {
+        // Same call but with dim_camera:false and a cam rect covering the whole frame - the
+        // corner (which spotlight_command_returns_a_png_data_url dims) should stay untouched,
+        // so the reconstructed overlay must differ from the dim_camera:true case above.
+        let url_dimmed = preview_fx_overlay(
+            80, 80, "none".into(), [255, 255, 255], 1.0, vec![],
+            Some(40.0), Some(40.0), Some(0.6), Some(0.13), Some(0.10), Some(1.0),
+            Some("classic".into()), Some([130, 90, 255]), Some(0.0),
+            None, None, None,
+            Some([0.0, 0.0, 80.0, 80.0]), Some(0.0), Some(true),
+        ).unwrap();
+        let url_kept = preview_fx_overlay(
+            80, 80, "none".into(), [255, 255, 255], 1.0, vec![],
+            Some(40.0), Some(40.0), Some(0.6), Some(0.13), Some(0.10), Some(1.0),
+            Some("classic".into()), Some([130, 90, 255]), Some(0.0),
+            None, None, None,
+            Some([0.0, 0.0, 80.0, 80.0]), Some(0.0), Some(false),
+        ).unwrap();
+        assert_ne!(url_dimmed, url_kept, "dim_camera flag must change the rendered overlay");
     }
 }

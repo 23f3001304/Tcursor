@@ -6,7 +6,7 @@ use std::path::PathBuf;
 #[derive(Clone, Copy, Debug, PartialEq)] pub struct Camera { pub cx: f32, pub cy: f32, pub scale: f32 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Easing { Smooth, Linear, Spring { stiffness: f32, damping: f32 } }
+pub enum Easing { Smooth, Linear, Spring { stiffness: f32, damping: f32 }, EaseIn, EaseOut, EaseInOut }
 
 #[derive(Clone, Copy, Debug)]
 pub struct ZoomConfig {
@@ -45,7 +45,17 @@ impl Default for Layout { fn default() -> Self { Self { out_w: 3840, out_h: 2160
 #[derive(Clone, Copy, Debug)] pub enum OverlayShape { Circle, Rounded { frac: f32 }, Rect }
 #[derive(Clone, Copy, Debug)] pub enum OverlayPos { BottomLeft, BottomRight, TopLeft, TopRight, Custom { x: u32, y: u32 } }
 #[derive(Clone, Copy, Debug)]
-pub struct OverlayLayout { pub shape: OverlayShape, pub pos: OverlayPos, pub size_px: u32, pub margin_x_px: u32, pub margin_y_px: u32, pub enabled: bool }
+pub struct OverlayLayout {
+    pub shape: OverlayShape, pub pos: OverlayPos,
+    pub size_px: u32,   // camera panel HEIGHT
+    pub width_px: u32,  // camera panel WIDTH (== size_px unless cam_aspect is Wide)
+    pub margin_x_px: u32, pub margin_y_px: u32, pub enabled: bool,
+    pub ring_px: u32,        // ring/border width in px, 0 = no ring
+    pub ring_color: [u8; 3],
+}
 impl Default for OverlayLayout {
-    fn default() -> Self { Self { shape: OverlayShape::Circle, pos: OverlayPos::BottomLeft, size_px: 420, margin_x_px: 80, margin_y_px: 80, enabled: true } }
+    fn default() -> Self {
+        Self { shape: OverlayShape::Circle, pos: OverlayPos::BottomLeft, size_px: 420, width_px: 420,
+            margin_x_px: 80, margin_y_px: 80, enabled: true, ring_px: 0, ring_color: [0, 0, 0] }
+    }
 }

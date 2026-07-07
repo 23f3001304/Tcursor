@@ -26,6 +26,9 @@ pub struct Spot {
     pub cx: f32, pub cy: f32,
     pub dim: f32, pub radius_frac: f32, pub feather_frac: f32, pub alpha: f32,
     pub mode: SpotlightMode, pub tint: [u8; 3], pub t: f32,
+    // Camera PiP exclusion (OUTPUT px): the shader undoes the spotlight dim inside this
+    // rounded rect when `dim_camera` is false (the "don't dim the webcam" option).
+    pub cam_rect: [f32; 4], pub cam_radius: f32, pub dim_camera: bool,
 }
 
 /// Active video FX (full-frame effect triggered by VideoFxHold).
@@ -131,9 +134,12 @@ pub fn fx_state_at(
         // of the full frame), so a layout that insets/shrinks the screen left the spotlight
         // oversized. The preview mirrors this via `layout.screen[3]`.
         let sfrac = (scene.screen.rect.h / oh.max(1) as f32).max(0.0);
+        let cr = scene.camera.rect;
         Some(Spot { cx, cy, dim, radius_frac: radius * sfrac,
             feather_frac: feather * sfrac, alpha: s_alpha,
-            mode, tint: fx.spotlight_tint, t: et as f32 / 1000.0 })
+            mode, tint: fx.spotlight_tint, t: et as f32 / 1000.0,
+            cam_rect: [cr.x, cr.y, cr.x + cr.w, cr.y + cr.h],
+            cam_radius: scene.camera.radius, dim_camera: fx.spotlight_dim_camera })
     } else { None };
 
     let mut hits = Vec::new();

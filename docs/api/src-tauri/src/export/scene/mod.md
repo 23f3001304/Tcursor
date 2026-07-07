@@ -6,7 +6,7 @@ Defines the two-panel scene geometry (screen + camera), resolves each `LayoutId`
 
 ```rust
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Panel { pub rect: RectF, pub radius: f32, pub alpha: f32 }
+pub struct Panel { pub rect: RectF, pub radius: f32, pub alpha: f32, pub ring_px: f32, pub ring_color: [u8; 3] }
 ```
 
 One composited layer expressed as a rounded rectangle in output pixels.
@@ -14,11 +14,13 @@ One composited layer expressed as a rounded rectangle in output pixels.
 - `rect: RectF` - position and size. *Why:* both compositors (CPU and GPU) use this rect to place and clip the panel.
 - `radius: f32` - corner radius in output pixels. *Why:* drives the CPU rounded-box SDF blit and the GPU WGSL shader equally; a circle is expressed as `radius = min(w,h)/2`.
 - `alpha: f32` - opacity in 0..1 for cross-dissolve. *Why:* disabled panels (e.g. camera in ScreenOnly mode) keep a valid rect but `alpha=0.0` so compositors can skip drawing without a separate branch.
+- `ring_px: f32` - width in output pixels of an optional colored ring/border drawn just inside the panel edge; `0.0` = no ring. *Why on `Panel`, not threaded as a separate parameter:* it needs to ride through `Scene::lerp`/`shrink_camera`/`override_camera` exactly like `radius` does, so both compositors can read it straight off the resolved panel with no extra plumbing. Only ever non-zero on the camera panel - `resolve` always sets the screen panel's ring to `0.0`/`[0,0,0]`.
+- `ring_color: [u8; 3]` - RGB 0..255 of the ring; unused when `ring_px == 0.0`.
 
 ### Used by
 
-- `src-tauri/src/export/gpu/compositor.rs` - `draw_panel` reads `rect`, `radius`, `alpha` to blit and blend.
-- `src-tauri/src/export/gpu/gpu_uniforms.rs` - `build_uniforms` packs both panels' fields into the WGSL uniform buffer.
+- `src-tauri/src/export/gpu/compositor.rs` - `draw_panel` reads `rect`, `radius`, `alpha` to blit and blend, then `blit_ring` reads `ring_px`/`ring_color` to stroke the border.
+- `src-tauri/src/export/gpu/gpu_uniforms.rs` - `build_uniforms` packs both panels' fields (including `scene.camera.ring_px`/`ring_color`) into the WGSL uniform buffer.
 - `src-tauri/src/export/pipeline/exporter.rs` - checks `scene.screen.alpha < 0.5` to disable zoom on CameraOnly layouts.
 - `src-tauri/src/export/scene/layout.rs` - `LayoutTrack` stores and interpolates panels during transitions.
 
@@ -80,18 +82,18 @@ Scales the camera panel toward its own center, driven by the current zoom level,
 
 ### Returns
 
-A new `Panel` with rect and radius scaled about the panel center by a smoothstepped multiplier; `alpha` is unchanged.
+A new `Panel` with rect, radius, and ring width scaled about the panel center by a smoothstepped multiplier; `alpha` and `ring_color` are unchanged.
 
 ### Implementation
 
 1. Normalize `z = clamp((scale-1) / max(target_scale-1, 0.001), 0, 1)`.
 2. Smoothstep `z` via `t*t*(3-2t)` and compute multiplier `m = 1 + (clamp(min,0.1,1.0) - 1) * smoothstep(z)`.
 3. Compute panel center `(cx, cy)`.
-4. Scale `w`, `h`, and `radius` by `m`; re-center the rect.
+4. Scale `w`, `h`, `radius`, and `ring_px` by `m`; re-center the rect.
 
 ### Behaviors worth knowing
 
-- `shrink_is_identity_at_no_zoom_and_min_at_full` (unit test): at `scale=1.0` the panel is unchanged; at `scale=target_scale=2.2` with `min=0.6` the width shrinks to 120 (60% of 200) and the center stays fixed.
+- `shrink_is_identity_at_no_zoom_and_min_at_full` (unit test): at `scale=1.0` the panel is unchanged (including `ring_px`); at `scale=target_scale=2.2` with `min=0.6` the width shrinks to 120 (60% of 200), `ring_px` shrinks by the same 0.6x, and the center stays fixed.
 
 ## rect_from_center
 
@@ -99,7 +101,7 @@ A new `Panel` with rect and radius scaled about the panel center by a smoothstep
 pub fn rect_from_center(p: CamPose, ow: f32, oh: f32) -> RectF
 ```
 
-Converts a sampled `CamPose` (Task 4's camera_moves interpolator output - center `x`/`y` + `size`, all fractions of the output frame) into the camera panel's `RectF`. Used by `FrameRenderer::step_camera` (`src-tauri/src/export/render/mod.rs`) to override the scene's static camera-panel rect only when `CameraMoveTrack::sample` returns `Some`.
+Converts a sampled `CamPose` (Task 4's camera_moves interpolator output - center `x`/`y` + `size`, all fractions of the output frame) into the camera panel's `RectF`. Used by `override_camera` (below), which is what `FrameRenderer::step_camera` (`src-tauri/src/export/render/mod.rs`) actually calls to override the scene's static camera-panel `Panel` when `CameraMoveTrack::sample` returns `Some`.
 
 ### Inputs
 
@@ -108,11 +110,39 @@ Converts a sampled `CamPose` (Task 4's camera_moves interpolator output - center
 
 ### Returns
 
-`RectF { x, y, w, h }` (top-left form): `h = p.size * oh`; `w = h` (square - the mode's aspect ratio is not applied here, it lands in Task 9); `x = p.x * ow - w/2`, `y = p.y * oh - h/2` so the rect is centered at `(p.x * ow, p.y * oh)`.
+`RectF { x, y, w, h }` (top-left form): `h = p.size * oh`; `w = h` (square - the PiP bubble's `cam_aspect` is not applied here; only `resolve`'s `bubble_rect` reads `width_px`, so an override always resamples a square, matching the pre-Task-9 camera_moves contract); `x = p.x * ow - w/2`, `y = p.y * oh - h/2` so the rect is centered at `(p.x * ow, p.y * oh)`.
 
 ### Behaviors worth knowing
 
 - `rect_from_center_is_squared_and_centered` (unit test): `CamPose { x: 0.5, y: 0.5, size: 0.3 }` at `1920x1080` yields a rect whose height and width both equal `0.3 * 1080` and whose center lands exactly at `(960, 540)`.
+
+## override_camera
+
+```rust
+pub fn override_camera(panel: Panel, p: CamPose, ow: f32, oh: f32) -> Panel
+```
+
+Task 9 Part C. Applies a `camera_moves` keyframe override to a resolved camera `Panel`: replaces its rect via `rect_from_center` AND scales `radius`/`ring_px` by the height ratio, so a circle (`radius == min(w,h)/2` at its STATIC size) stays a true circle - and its ring stays proportionate - after a keyframe grows or shrinks the panel. Fixes the pre-Task-9 bug where only the rect was replaced, leaving `radius` at the panel's static value and distorting a circle into an ellipse-cropped-to-a-circle-mask look whenever a keyframe resized it.
+
+### Inputs
+
+- `panel: Panel` - the scene's currently-resolved camera panel (static size, from `resolve`). *Why take the whole `Panel`, not just its radius:* needs `rect.h` (the pre-override height) to compute the scale ratio, and preserves `alpha`/`ring_color` untouched via struct update syntax.
+- `p: CamPose` - the sampled camera-move keyframe pose (center + new height fraction).
+- `ow: f32`, `oh: f32` - output canvas dimensions in pixels, forwarded to `rect_from_center`.
+
+### Returns
+
+A new `Panel` with `rect = rect_from_center(p, ow, oh)`, `radius = panel.radius * (new_h / old_h.max(0.001))`, `ring_px = panel.ring_px * (new_h / old_h.max(0.001))` (same ratio - both are proportional to panel size), and `alpha`/`ring_color` copied from `panel` unchanged (`old_h.max(0.001)` guards a degenerate zero-height static panel from dividing by zero).
+
+### Behaviors worth knowing
+
+- `override_camera_keeps_circle_round_after_resize` (unit test): a 200x200 circle panel (`radius: 100`) overridden to a `CamPose` that resolves to 100x100 yields `radius: 50` - still exactly `min(w,h)/2`.
+- `override_camera_grows_radius_when_panel_grows` (unit test): a 100x100 panel (`radius: 50`, `ring_px: 4`) overridden to resolve 4x larger yields `radius: 200` and `ring_px: 16` - both scaled by the same 4x; `ring_color` and `alpha` are untouched.
+- `override_camera_matches_rect_from_center_position` (unit test): the returned `rect` is identical to calling `rect_from_center` directly - only `radius`/`ring_px` differ from a naive rect-only replacement.
+
+### Used by
+
+- `src-tauri/src/export/render/mod.rs` - `FrameRenderer::step_camera`'s `camera_moves` override block calls this instead of replacing `scene.camera.rect` directly.
 
 ## resolve
 
@@ -126,23 +156,24 @@ Converts a layout preset ID into a concrete `Scene` in output pixels.
 
 - `id: LayoutId` - which mode to resolve. *Why:* each mode has a distinct spatial arrangement; switching on id here keeps all geometry logic in one place.
 - `layout: &Layout` - output dimensions, padding, scale, and corner radius. *Why:* all output-pixel measurements derive from these values.
-- `overlay: &OverlayLayout` - webcam shape, corner position, size, and margins. *Why:* the camera panel's rect and radius are entirely determined by overlay settings.
+- `overlay: &OverlayLayout` - webcam shape, corner position, size, width, margins, and ring. *Why:* the camera panel's rect, radius, and ring are entirely determined by overlay settings.
 - `sw: u32, sh: u32` - capture source dimensions. *Why:* the screen's aspect ratio must be preserved when fitting it into the inset or computing PiP size.
 
 ### Returns
 
-A `Scene` with both panels fully resolved. Disabled panels (`alpha=0.0`) still have valid rects so cross-dissolve transitions remain smooth.
+A `Scene` with both panels fully resolved. Disabled panels (`alpha=0.0`) still have valid rects so cross-dissolve transitions remain smooth. Only the camera panel ever carries a non-zero `ring_px`/`ring_color` - the screen panel's are always `0.0`/`[0,0,0]`.
 
 ### Implementation
 
 1. Compute the inset rect via `coordmap::inset_rect` and its corner radius via `coordmap::corner_radius`.
-2. Compute the bubble rect via `bubble_rect` (inner helper) and its corner radius via `panel_radius` (inner helper).
+2. Compute the bubble rect via `bubble_rect` (inner helper, using `overlay.width_px` for width and `overlay.size_px` for height) and its corner radius via `panel_radius` (inner helper).
 3. Switch on `id`:
-   - `Screen`: screen=inset at alpha=1; camera=corner bubble at alpha=1.
-   - `Camera`: camera=centered square of `overlay.size_px` at alpha=1; screen=PiP (30% of inset width, aspect-preserved) at the overlay margin, alpha=1.
-   - `Presenter`: side-by-side columns separated by one padding gap; camera fills the left column as a square; screen aspect-fits the right column.
+   - `Screen`: screen=inset at alpha=1; camera=corner bubble (width/height from `overlay.width_px`/`size_px` - aspect-affected) at alpha=1.
+   - `Camera`: camera=centered square of `overlay.size_px` at alpha=1 (ALWAYS square - `width_px`/`cam_aspect` is ignored here); screen=PiP (30% of inset width, aspect-preserved) at the overlay margin, alpha=1.
+   - `Presenter`: side-by-side columns separated by one padding gap; camera fills the left column as a square (also ignores `width_px`); screen aspect-fits the right column.
    - `ScreenOnly`: same as `Screen` but camera `alpha=0.0`.
    - `CameraOnly`: same as `Camera` but screen `alpha=0.0`.
+4. Two panel-building closures: `pan` (screen panel - hardcodes `ring_px: 0.0, ring_color: [0,0,0]`) and `cam_pan` (camera panel - carries `overlay.ring_px as f32, overlay.ring_color`).
 
 ### Behaviors worth knowing
 
@@ -151,6 +182,11 @@ A `Scene` with both panels fully resolved. Disabled panels (`alpha=0.0`) still h
 - `corner_and_shape_knobs_apply` (unit test): TopRight + Rect shape zeroes the camera radius and shifts it to the right edge.
 - `camera_only_disables_screen` (unit test): screen.alpha=0, camera.alpha=1.
 - `camera_default_pip_screen_keeps_today_inset` (unit test): PiP screen is inset 80px from bottom-left, not flush.
+- `wide_aspect_widens_bubble_and_keeps_right_anchor` (unit test): `Wide` aspect widens the Screen-mode bubble to `round(420 * 16/9)` px while height stays 420, and a `BottomRight`-anchored bubble's x-position correctly uses the WIDENED width, not `size_px`.
+- `square_aspect_bubble_rect_matches_pre_task9_shape` (unit test): default (`Square`) bubble rect is still exactly 420x420 - byte-identical to before Task 9.
+- `wide_aspect_does_not_affect_big_camera_modes` (unit test): `Wide` on the `camera` mode's `ModeAppearance` has no effect on `Camera` mode's resolved rect - still square.
+- `cam_ring_flows_onto_camera_panel_only` (unit test): a `cam_ring` setting produces a non-zero `camera.ring_px`/matching `ring_color`, while `screen.ring_px` stays `0.0`.
+- `no_cam_ring_leaves_camera_panel_ring_zero` (unit test): default appearance (no ring) resolves `camera.ring_px == 0.0`.
 
 ## layout
 

@@ -56,26 +56,36 @@ pub fn export(paths: &ProjectPaths, fps: u32, on_progress: impl Fn(u8)) -> Resul
     let mut last_pct = u8::MAX;
     let export_start = std::time::Instant::now();
     let (mut t_dec, mut t_comp, mut t_send) = (0u128, 0u128, 0u128);
+    // Hold the most-recent webcam frame: if the webcam stream is shorter than the screen (dual-
+    // stream start/stop timing, or a lower webcam frame count), `next()` returns None for the tail
+    // and the PiP would vanish early - instead we freeze it on the last decoded frame. Buffers are
+    // pooled (depth 6), so keeping one held out of the pool costs nothing.
+    let mut last_webcam: Option<(Vec<u8>, u32, u32)> = None;
     for k in 0..=total_out {
         let t = meta.video_start + k * 1000 / OUT_FPS;
         let d0 = std::time::Instant::now();
         let screen = spipe.next_at(t)?.unwrap_or(&empty); // blocks on the screen decode channel
-        let webcam = match &mut wpipe { Some(w) => w.next()?, None => None };
+        if let Some(w) = &mut wpipe {
+            if let Some(next) = w.next()? {
+                if let Some((old, _, _)) = last_webcam.take() { w.recycle(old); }
+                last_webcam = Some(next);
+            } // else: webcam EOF - keep last_webcam and hold it for the rest of the export
+        }
         t_dec += d0.elapsed().as_micros();
         let c0 = std::time::Instant::now();
         let pose = r.step_camera(t);
         let mut out = out_pool.take();
-        let wc_ref = webcam.as_ref().map(|(b, w, h)| (b.as_slice(), *w, *h));
+        let wc_ref = last_webcam.as_ref().map(|(b, w, h)| (b.as_slice(), *w, *h));
         r.composite_at(&pose, screen, wc_ref, &mut out);
         t_comp += c0.elapsed().as_micros();
         let s0 = std::time::Instant::now();
         let sent = tx.send(Frame { width: out_w, height: out_h, bgra: out, ts: Timestamp(t) }).is_ok();
-        if let (Some(w), Some((buf, _, _))) = (wpipe.as_ref(), webcam) { w.recycle(buf); }
         t_send += s0.elapsed().as_micros();
         if !sent { break; }
         let pct = ((k * 100 / total_out).min(100)) as u8;
         if pct != last_pct { on_progress(pct); last_pct = pct; }
     }
+    if let (Some(w), Some((buf, _, _))) = (wpipe.as_ref(), last_webcam) { w.recycle(buf); }
 
     drop(tx);
     spipe.join()?;

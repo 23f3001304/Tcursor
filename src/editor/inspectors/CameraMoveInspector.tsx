@@ -1,5 +1,6 @@
 import { IconTrash } from "@tabler/icons-react";
 import { PanelHeader } from "../panels/PanelHeader";
+import { CAM_CURVES } from "./curves";
 import type { CameraMove, EditDoc, EditOp } from "../../lib/edit";
 
 const numStyle: React.CSSProperties = {
@@ -46,12 +47,8 @@ export function CameraMoveInspector({ move, dur, onApply, onClose }: {
       <div className="e-field">
         <span className="e-fl">Transition Curve</span>
         <div className="e-curve-pick">
-          {[
-            { name: "Linear", key: "linear", path: "M 0 100 L 100 0" },
-            { name: "Smooth", key: "smooth", path: "M 0 100 C 35 100, 65 0, 100 0" },
-            { name: "Spring", key: "spring", path: "M 0 100 C 25 100, 45 -25, 75 -25 C 85 -25, 90 0, 100 0" }
-          ].map((c) => (
-            <button key={c.name} className={`e-curve-card ${move.easing === c.key ? "on" : ""}`} onClick={() => upd({ easing: c.key })}>
+          {CAM_CURVES.map((c) => (
+            <button key={c.key} className={`e-curve-card ${move.easing === c.key ? "on" : ""}`} onClick={() => upd({ easing: c.key })}>
               <svg viewBox="0 -30 100 160" className="e-curve-svg">
                 <line x1="0" y1="0" x2="100" y2="0" stroke="var(--e-border2)" strokeDasharray="3 3" />
                 <line x1="0" y1="100" x2="100" y2="100" stroke="var(--e-border2)" strokeDasharray="3 3" />
@@ -64,7 +61,7 @@ export function CameraMoveInspector({ move, dur, onApply, onClose }: {
       </div>
 
       <button className="e-del" onClick={() => { void onApply({ op: "remove_camera_move", id: move.id }); onClose(); }}>
-        <IconTrash size={15} /> Delete keyframe
+        <IconTrash size={15} />Delete keyframe
       </button>
     </div>
   );

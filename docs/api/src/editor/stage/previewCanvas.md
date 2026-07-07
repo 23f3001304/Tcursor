@@ -46,7 +46,7 @@ Composites one preview frame onto `ctx` (a `w`x`h` canvas).
 3. Compute the whole-frame zoom crop `(cx0, cy0, cw, ch)` from `cam.scale` and the panel-local `cam.cx`/`cam.cy`, clamped into `[0, w]`x`[0, h]` - the same math as the export's `coordmap::crop`.
 4. `ctx.drawImage(offscreen, cx0, cy0, cw, ch, 0, 0, w, h)` - crop+resize the *entire* offscreen buffer onto the visible canvas in one call.
 5. Project the cursor's panel-local position through the same crop and draw it on `ctx` (post-zoom, fixed size).
-6. Draw the webcam PiP on `ctx` (rounded rect from `layout.cam`, else a bottom-right circle) - unzoomed, on top of the zoomed result.
+6. Draw the webcam PiP on `ctx` (rounded rect from `layout.cam`, else a bottom-right circle) - unzoomed, on top of the zoomed result. When `layout.cam`'s ring width (`cam[5]`, a fraction of output width) is `> 0`, also stroke the export ring/border: a band `ringPx` wide in `ring_color` (`cam[6..9]`, RGB 0..255), traced just inside the panel edge to match `shader.wgsl`/`compositor.rs`'s inside-only SDF band - achieved by stroking a path inset by `ringPx/2` with `lineWidth = ringPx`, so the centered stroke's outer half lands on the true edge and its inner half sits `ringPx` further in.
 
 ### Notes
 

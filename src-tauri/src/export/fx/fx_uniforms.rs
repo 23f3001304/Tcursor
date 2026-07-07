@@ -12,11 +12,12 @@ pub struct FxU {
     pub a: [f32; 4],                // ow, oh, style(0..6), hit_count
     pub b: [f32; 4],                // spot_cx, spot_cy, spot_dim*alpha, spot_active(0/1)
     pub c: [f32; 4],                // spot_r_in(px), spot_r_out(px), intensity, _pad
-    pub d: [f32; 4],                // spot_mode_id, time_s, _pad, _pad
+    pub d: [f32; 4],                // spot_mode_id, time_s, keep_camera_lit(0/1), cam_radius(px)
     pub tint: [f32; 4],             // r, g, b (0..1), _pad
     pub color: [f32; 4],            // r, g, b (0..1), _pad
     pub hits: [[f32; 4]; MAX_HITS], // x, y, progress, _pad
     pub e: [f32; 4],                // video_mode_id, alpha, t, _pad
+    pub cam: [f32; 4],              // camera-exclusion rect (px): min_x, min_y, max_x, max_y
 }
 
 /// The shader's style id for a click style. SINGLE SOURCE OF TRUTH - the
@@ -62,10 +63,11 @@ pub fn build_fx_u(state: &FxState, ow: u32, oh: u32) -> FxU {
         }
         None => ([0.0, 0.0, 0.0, 0.0], [0.0, 0.0, state.intensity, 0.0]),
     };
-    let (d, tint) = match state.spot {
-        Some(s) => ([spot_mode_id(s.mode), s.t, 0.0, 0.0],
-                    [s.tint[0] as f32 / 255.0, s.tint[1] as f32 / 255.0, s.tint[2] as f32 / 255.0, 0.0]),
-        None => ([0.0; 4], [0.0; 4]),
+    let (d, tint, cam) = match state.spot {
+        Some(s) => ([spot_mode_id(s.mode), s.t, if s.dim_camera { 0.0 } else { 1.0 }, s.cam_radius],
+                    [s.tint[0] as f32 / 255.0, s.tint[1] as f32 / 255.0, s.tint[2] as f32 / 255.0, 0.0],
+                    s.cam_rect),
+        None => ([0.0; 4], [0.0; 4], [0.0; 4]),
     };
     let e = match state.video {
         Some(v) => [video_mode_id(v.mode), v.alpha, v.t, 0.0],
@@ -74,7 +76,7 @@ pub fn build_fx_u(state: &FxState, ow: u32, oh: u32) -> FxU {
     FxU {
         a: [ow as f32, oh as f32, style, n], b, c, d, tint,
         color: [state.color[0] as f32 / 255.0, state.color[1] as f32 / 255.0, state.color[2] as f32 / 255.0, 0.0],
-        hits, e,
+        hits, e, cam,
     }
 }
 
@@ -100,7 +102,8 @@ mod tests {
         let st = FxState { style: ClickFxStyle::Ripple, color: [255, 0, 0], intensity: 0.8,
             hits: vec![FxHit { x: 10.0, y: 20.0, progress: 0.4 }],
             spot: Some(Spot { cx: 5.0, cy: 6.0, dim: 0.5, radius_frac: 0.1, feather_frac: 0.1, alpha: 1.0,
-                mode: SpotlightMode::Classic, tint: [0, 0, 0], t: 0.0 }), video: None };
+                mode: SpotlightMode::Classic, tint: [0, 0, 0], t: 0.0,
+                cam_rect: [0.0; 4], cam_radius: 0.0, dim_camera: true }), video: None };
         let u = build_fx_u(&st, 1000, 2000);
         assert_eq!(u.a, [1000.0, 2000.0, 1.0, 1.0]);     // ow, oh, style=ripple, 1 hit
         assert_eq!(u.b[3], 1.0);                          // spot active
@@ -122,10 +125,31 @@ mod tests {
         let st = crate::export::fx::fx_state::FxState { style: crate::settings::model::ClickFxStyle::None,
             color: [0,0,0], intensity: 1.0, hits: vec![],
             spot: Some(crate::export::fx::fx_state::Spot { cx: 1.0, cy: 2.0, dim: 0.5, radius_frac: 0.1,
-                feather_frac: 0.1, alpha: 1.0, mode: Nebula, tint: [255, 0, 128], t: 3.0 }), video: None };
+                feather_frac: 0.1, alpha: 1.0, mode: Nebula, tint: [255, 0, 128], t: 3.0,
+                cam_rect: [0.0; 4], cam_radius: 0.0, dim_camera: true }), video: None };
         let u = build_fx_u(&st, 100, 100);
         assert_eq!(u.d[0], 4.0);                 // mode = nebula
         assert!((u.d[1] - 3.0).abs() < 1e-6);    // time
         assert!((u.tint[0] - 1.0).abs() < 1e-6 && u.tint[2] > 0.49); // tint r=1, b~0.5
+    }
+    #[test]
+    fn dim_camera_false_sets_keep_flag_and_cam_rect() {
+        let st = FxState { style: ClickFxStyle::None, color: [0, 0, 0], intensity: 1.0, hits: vec![],
+            spot: Some(Spot { cx: 1.0, cy: 2.0, dim: 0.5, radius_frac: 0.1, feather_frac: 0.1, alpha: 1.0,
+                mode: SpotlightMode::Classic, tint: [0, 0, 0], t: 0.0,
+                cam_rect: [10.0, 20.0, 110.0, 220.0], cam_radius: 8.0, dim_camera: false }), video: None };
+        let u = build_fx_u(&st, 200, 200);
+        assert_eq!(u.d[2], 1.0, "dim_camera:false -> keep-camera-lit flag set");
+        assert_eq!(u.d[3], 8.0, "cam_radius packed into d[3]");
+        assert_eq!(u.cam, [10.0, 20.0, 110.0, 220.0], "cam rect packed verbatim");
+    }
+    #[test]
+    fn dim_camera_true_clears_keep_flag() {
+        let st = FxState { style: ClickFxStyle::None, color: [0, 0, 0], intensity: 1.0, hits: vec![],
+            spot: Some(Spot { cx: 1.0, cy: 2.0, dim: 0.5, radius_frac: 0.1, feather_frac: 0.1, alpha: 1.0,
+                mode: SpotlightMode::Classic, tint: [0, 0, 0], t: 0.0,
+                cam_rect: [0.0; 4], cam_radius: 0.0, dim_camera: true }), video: None };
+        let u = build_fx_u(&st, 100, 100);
+        assert_eq!(u.d[2], 0.0, "dim_camera:true -> keep-camera-lit flag clear (today's behavior)");
     }
 }

@@ -46,6 +46,7 @@ pub struct Spot {
     pub cx: f32, pub cy: f32,
     pub dim: f32, pub radius_frac: f32, pub feather_frac: f32, pub alpha: f32,
     pub mode: SpotlightMode, pub tint: [u8; 3], pub t: f32,
+    pub cam_rect: [f32; 4], pub cam_radius: f32, pub dim_camera: bool,
 }
 ```
 
@@ -61,12 +62,17 @@ Active spotlight state in output pixels. Size fields are fractions of output hei
 - `mode` - *spotlight visual variant; passed as a numeric id to the shader.*
 - `tint` - *RGB tint applied to the lit zone in certain modes.*
 - `t` - *current time in seconds; drives animated modes like `Breathing` and `Nebula`.*
+- `cam_rect` - *`[min_x, min_y, max_x, max_y]`, the active camera panel's rect in OUTPUT pixels (`scene.camera.rect` converted from x/y/w/h to a min/max box). Defines the rounded-rect region the "don't dim the webcam" exclusion applies to; meaningless when `dim_camera` is `true` (still populated, just unused).*
+- `cam_radius` - *the camera panel's corner radius in output pixels (`scene.camera.radius`), used as the rounding radius for the `cam_rect` exclusion.*
+- `dim_camera` - *whether the spotlight dim also darkens the camera PiP (`ClickFxSettings::spotlight_dim_camera`). `true` = today's behavior (camera dims like everything else). `false` = the shader/CPU path undoes the dim inside `cam_rect`, keeping the webcam lit while the rest of the frame still dims normally.*
 
 ### Used by
 
-- `src-tauri/src/export/fx/fx_uniforms.rs` - `build_fx_u` packs `Spot` fields into `FxU.b/c/d/tint`.
+- `src-tauri/src/export/fx/fx_uniforms.rs` - `build_fx_u` packs `Spot` fields into `FxU.b/c/d/tint/cam`.
 - `src-tauri/src/export/fx/fxdraw.rs` - `CpuFx::apply` applies the spotlight on the software path.
 - `src-tauri/src/export/fx/fx_gpu.rs` - read indirectly via `FxState.spot` in `GpuFx::apply`.
+- `src-tauri/src/export/fx/spotdraw.rs` - `draw_spot` reads `cam_rect`/`cam_radius`/`dim_camera` to undo the dim inside the camera rect on the CPU path.
+- `src-tauri/src/export/preview/preview_fx.rs` - `preview_fx_overlay` builds a `Spot` with `cam_rect`/`cam_radius`/`dim_camera` from frontend-resolved IPC params, so the editor preview matches the export exactly.
 
 ## VideoFx
 
@@ -151,7 +157,7 @@ Builds the FX state at event-time `et`. Returns `None` when nothing is active so
 ### Implementation
 
 1. Compute `s_alpha` via the stateful `spot_sim: &mut SpotlightSim` (`spot_sim.resolve(effects, et, fx.spotlight)`): the highest-`layer` active Spotlight region wins, its alpha eases across a handoff, unioned with the flat `fx.spotlight` toggle. (Recorded hotkey holds are seeded into `effects` as regions by `edit::seed`, so regions + toggle are the only sources.)
-2. If `s_alpha > 0.0`, call `project(cur.x, cur.y, cam, ow, oh)` for the center, take the winning region's style via `spot_sim.style(effects, fx)`, and build a `Spot`. **The radius/feather are pre-scaled by the screen panel's height fraction (`scene.screen.rect.h / oh`)** so the spotlight is sized to the screen the cursor is on, not the whole output frame (fixes the layout-agnostic spotlight; the preview mirrors it via `layout.screen[3]`).
+2. If `s_alpha > 0.0`, call `project(cur.x, cur.y, cam, ow, oh)` for the center, take the winning region's style via `spot_sim.style(effects, fx)`, and build a `Spot`. **The radius/feather are pre-scaled by the screen panel's height fraction (`scene.screen.rect.h / oh`)** so the spotlight is sized to the screen the cursor is on, not the whole output frame (fixes the layout-agnostic spotlight; the preview mirrors it via `layout.screen[3]`). Also sets `cam_rect` from `scene.camera.rect` (converted to a min/max box), `cam_radius` from `scene.camera.radius`, and `dim_camera` from `fx.spotlight_dim_camera` - these carry the camera panel's current rect straight through to the renderer regardless of layout, so the "don't dim the webcam" exclusion always targets where the camera panel actually is this frame.
 3. If `fx.style` is not `None`, call `hits_at(events, et, LIFE_MS)` and for each hit convert from screen-local to panel-local via `to_panel`, then project to output pixels via `project`. *Why per-hit:* the camera transform differs per frame, so each hit must be projected individually.*
 4. Compute video FX alpha via `hold::hold_alpha` gated on `VideoFxHoldStart`/`VideoFxHoldEnd`. Build `VideoFx` only when `va > 0.0`.
 5. Return `None` when all three are empty/`None`. Otherwise return `Some(FxState)`.

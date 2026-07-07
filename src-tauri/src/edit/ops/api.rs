@@ -50,7 +50,7 @@ fn valid_layout(s: &str) -> String {
     match s { "screen" | "camera" | "presenter" | "screen_only" | "camera_only" => s.to_string(), _ => "screen".into() }
 }
 fn valid_easing(s: &str) -> String {
-    match s { "linear" | "smooth" | "spring" => s.to_string(), _ => "smooth".into() }
+    match s { "linear" | "smooth" | "spring" | "ease_in" | "ease_out" | "ease_in_out" => s.to_string(), _ => "smooth".into() }
 }
 fn next_layout_id(doc: &EditDoc) -> String {
     let n = doc.layout.iter().filter_map(|s| s.id.strip_prefix('l').and_then(|d| d.parse::<u32>().ok()))

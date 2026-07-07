@@ -15,6 +15,7 @@ pub fn preview_fx_overlay(
     spot_radius: Option<f32>, spot_feather: Option<f32>, spot_alpha: Option<f32>,
     spot_mode: Option<String>, spot_tint: Option<[u8; 3]>, spot_t: Option<f32>,
     video_mode: Option<String>, video_alpha: Option<f32>, video_t: Option<f32>,
+    cam_rect: Option<[f32; 4]>, cam_radius: Option<f32>, dim_camera: Option<bool>,
 ) -> Result<String, String>
 ```
 
@@ -27,6 +28,7 @@ Renders the resolved FX at one preview frame and returns a `data:image/png;base6
 - `hits: Vec<[f32; 3]>` - active click hits as `[x, y, progress]` in FX pixels. *Why:* the frontend already resolved which clicks are live and where, through the current zoom crop.
 - `spot_*: Option<...>` - the resolved spotlight: centre `spot_cx/cy`, `spot_dim`, screen-scaled `spot_radius`/`spot_feather`, `spot_alpha`, lowercase `spot_mode`, `spot_tint`, and `spot_t` (seconds, for the breathing phase). *Why:* the region-override + fade resolution happens in `spotlightPreview.ts` (the mirror of `SpotlightSim`), so the backend just draws it. `None` (or `spot_alpha <= 0`) means no spotlight this frame.
 - `video_*: Option<...>` - an optional full-frame video FX (mode/alpha/seconds). *Why:* symmetry with the export's `VideoFx`; unused by the current preview (always `None`).
+- `cam_rect: Option<[f32; 4]>`, `cam_radius: Option<f32>`, `dim_camera: Option<bool>` - the camera panel's rect (min_x, min_y, max_x, max_y) in FX pixels, its corner radius, and the "don't dim the webcam" flag. *Why:* mirrors the export's `Spot.cam_rect`/`cam_radius`/`dim_camera` exactly so the preview's spotlight un-dims the camera PiP the same way the export does; `None` defaults to `[0;4]`/`0.0`/`true` (today's dim-everything behavior) when the frontend has no camera panel to report (e.g. a screen_only layout).
 
 ### Returns
 
@@ -34,8 +36,12 @@ Renders the resolved FX at one preview frame and returns a `data:image/png;base6
 
 ### Implementation
 
-1. Assemble an `FxState` from the params: build `Spot`/`VideoFx` only when their alpha is present and `> 0`, map the lowercase enum strings (`click_style_of`/`spot_mode_of`/`video_mode_of`), and turn `hits` into `FxHit`s.
+1. Assemble an `FxState` from the params: build `Spot`/`VideoFx` only when their alpha is present and `> 0`, map the lowercase enum strings (`click_style_of`/`spot_mode_of`/`video_mode_of`), turn `hits` into `FxHit`s, and set the built `Spot`'s `cam_rect`/`cam_radius`/`dim_camera` from the `cam_*`/`dim_camera` params (defaulting as above when absent).
 2. **Alpha reconstruction.** `CpuFx` composites *onto an opaque frame* (it multiply-dims and additively tints in place), so there is no source alpha to read back. Render the same `FxState` twice - once over solid **black**, once over solid **white** - then invert the over-composite per pixel: `white - black = 255·(1 - a)` per channel, so `a = 1 - (white - black)/255` (take the strongest-touched channel), and the straight colour is `black / a`. Pixels the effect never touched come out fully transparent, dim areas resolve to black-with-alpha (so the blit darkens the base), and additive click pixels resolve to bright-colour-with-alpha.
 3. `png_encode` the reconstructed BGRA overlay (it preserves the alpha channel) and base64 into a data URL, reusing `preview.rs`'s helpers.
 
 *Why `CpuFx` and not `select_fx`:* the preview overlay is small and requested ~25×/sec; creating a GPU device per call would thrash. `CpuFx` (`fxdraw.rs`) is also the reference the wgpu `fx.wgsl` shader was aligned to, so the look matches the export.
+
+### Behaviors worth knowing
+
+- `dim_camera_false_is_threaded_into_the_spot` - the same spotlight call with `dim_camera: Some(true)` vs `Some(false)` and an identical `cam_rect` produces two different PNG data URLs, confirming the flag actually changes the rendered overlay end-to-end (IPC params -> `Spot` -> `CpuFx`/`spotdraw.rs`).

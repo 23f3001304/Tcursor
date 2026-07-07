@@ -74,19 +74,23 @@ The virtual camera state at one frame.
 
 ```rust
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Easing { Smooth, Linear, Spring { stiffness: f32, damping: f32 } }
+pub enum Easing { Smooth, Linear, Spring { stiffness: f32, damping: f32 }, EaseIn, EaseOut, EaseInOut }
 ```
 
-Selects the interpolation curve for zoom animations.
+Selects the interpolation curve for zoom, layout cross-fade, and camera-move animations.
 
-- `Smooth` - ease-out cubic (`1-(1-t)^3`). *Why default:* decelerates into the zoom target so it "lands" naturally.
-- `Linear` - constant velocity. *Why present:* useful for testing; also allows user-authored linear transitions in the edit doc.
-- `Spring { stiffness: f32, damping: f32 }` - spring-damper simulation. *Why present as a variant now:* the variant is in the type system so recorded edit docs with spring easing are forward-compatible with M3+ when the real simulation lands. Currently behaves identically to `Smooth` in `easing::ease`.
+- `Smooth` - default S-curve (`easing::ease` uses ease-out cubic `1-(1-t)^3`; `camera::ease` uses smoothstep `3t^2-2t^3`). *Why default:* decelerates into the target so it "lands" naturally.
+- `Linear` - constant velocity.
+- `Spring { stiffness: f32, damping: f32 }` - ease-out-back (a small overshoot past 1, then settle) in `camera::ease`; the params are currently unused.
+- `EaseIn` - quadratic accelerate (`t^2`): slow start, fast finish.
+- `EaseOut` - quadratic decelerate (`t*(2-t)`): fast start, slow finish.
+- `EaseInOut` - quadratic symmetric (`2t^2` up to 0.5, then `1-2(1-t)^2`): slow-fast-slow.
 
 ### Used by
 
-- `src-tauri/src/export/easing.rs` - `ease(e, t)` dispatches on this.
+- `src-tauri/src/export/easing.rs` and `src-tauri/src/export/camera/mod.rs` - both `ease(e, t)` fns dispatch on this.
 - `src-tauri/src/export/types.rs` - `ZoomConfig.easing` and `ZoomRegion.easing` store it.
+- `src-tauri/src/export/camera/moves.rs` - camera-move keyframes resolve their `easing` wire-name to this via `easing_from`.
 
 ## ZoomConfig
 
@@ -228,7 +232,9 @@ Anchor corner for the webcam overlay relative to the output canvas.
 #[derive(Clone, Copy, Debug)]
 pub struct OverlayLayout {
     pub shape: OverlayShape, pub pos: OverlayPos,
-    pub size_px: u32, pub margin_x_px: u32, pub margin_y_px: u32, pub enabled: bool
+    pub size_px: u32, pub width_px: u32,
+    pub margin_x_px: u32, pub margin_y_px: u32, pub enabled: bool,
+    pub ring_px: u32, pub ring_color: [u8; 3],
 }
 ```
 
@@ -236,12 +242,15 @@ All overlay (webcam) layout parameters.
 
 - `shape: OverlayShape` - overlay mask shape. Default: `Circle`.
 - `pos: OverlayPos` - corner placement. Default: `BottomLeft`.
-- `size_px: u32` - diameter or side length in output pixels. Default: 420.
+- `size_px: u32` - camera panel HEIGHT in output pixels. Default: 420.
+- `width_px: u32` - camera panel WIDTH in output pixels. Default: 420 (== `size_px`; only diverges when `ModeAppearance.cam_aspect` is `Wide`, giving `round(size_px * 16/9)`). *Why a separate field, not derived at draw time:* the width:height ratio is a per-mode setting (`CamAspect`), so it is resolved once here alongside every other pixel value, the same as `size_px`.
 - `margin_x_px: u32` - horizontal inset from the canvas edge. Default: 80.
 - `margin_y_px: u32` - vertical inset from the canvas edge. Default: 80.
 - `enabled: bool` - whether the overlay is drawn at all. Default: `true`. *Why kept here:* a disabled overlay still contributes its rect for cross-dissolve transitions; the `alpha` in the resolved `Panel` drops to 0 instead.
+- `ring_px: u32` - width in output pixels of an optional colored ring/border drawn just inside the panel edge. Default: `0` (no ring). *Why px, not fraction:* resolved once here from `ModeAppearance.cam_ring`'s fraction-of-min-side, same pattern as every other geometry field.
+- `ring_color: [u8; 3]` - RGB 0..255 of the ring. Default: `[0, 0, 0]` (unused when `ring_px == 0`).
 
 ### Used by
 
-- `src-tauri/src/export/scene/mod.rs` - `resolve` passes `&OverlayLayout` to `bubble_rect` and `panel_radius`.
+- `src-tauri/src/export/scene/mod.rs` - `resolve` passes `&OverlayLayout` to `bubble_rect` and `panel_radius`, and copies `ring_px`/`ring_color` onto the resolved camera `Panel`.
 - `src-tauri/src/settings/appearance.rs` - `overlay_for` constructs this from user settings.

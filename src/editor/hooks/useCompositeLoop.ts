@@ -1,10 +1,11 @@
 import { useEffect, useRef, type RefObject } from "react";
 import type { CamSample, ClickSample, PreviewLayout, CursorKindSample, LayoutPresets } from "../../lib/ipc";
 import type { ClickFxSettings, CursorSettings } from "../../hud/settings/settings";
-import type { EffectRegion, LayoutSeg } from "../../lib/edit";
+import type { CameraMove, EffectRegion, LayoutSeg } from "../../lib/edit";
 import { camAt } from "../stage/camera";
+import { camMoveAt, overrideCamPanel, type CamPose } from "../stage/cameraMoves";
 import { drawPreview } from "../stage/previewCanvas";
-import { requestFxOverlay } from "../stage/fxOverlay";
+import { requestFxOverlay, type FxCamRect } from "../stage/fxOverlay";
 import { resolveSpotlight, newSpotlightSimState } from "../stage/spotlightPreview";
 import { layoutAt } from "../timeline/layoutTrack";
 import type { CursorSpritesState } from "./useCursorSprites";
@@ -27,7 +28,7 @@ const FX_SCALE = 0.5; // internal render resolution factor vs the canvas; blit u
 export function useCompositeLoop({
   screenRef, webcamRef, audioRef, canvasRef,
   playRef, timeRef, onTimeRef,
-  trackRef, layoutRef, layoutPresetsRef, layoutSegsRef, clicksRef, effectsRef, clickfxRef, kindsRef, cursorRef,
+  trackRef, layoutRef, layoutPresetsRef, layoutSegsRef, cameraMovesRef, dragPoseRef, clicksRef, effectsRef, clickfxRef, kindsRef, cursorRef,
   spritesRef, trailRef, dirtyRef, bgImgRef,
 }: {
   screenRef: RefObject<HTMLVideoElement | null>;
@@ -41,6 +42,8 @@ export function useCompositeLoop({
   layoutRef: RefObject<PreviewLayout | null>;
   layoutPresetsRef: RefObject<LayoutPresets | null>;
   layoutSegsRef: RefObject<LayoutSeg[]>;
+  cameraMovesRef: RefObject<CameraMove[]>;
+  dragPoseRef: RefObject<CamPose | null>;
   clicksRef: RefObject<ClickSample[]>;
   effectsRef: RefObject<EffectRegion[]>;
   clickfxRef: RefObject<ClickFxSettings>;
@@ -85,7 +88,25 @@ export function useCompositeLoop({
             // The active layout at this exact frame time (cross-faded across a layout-segment
             // boundary); falls back to the static layout when presets haven't loaded or there
             // are no segments. Used for both the base draw below and the FX screen-rect math.
-            const frameLayout = layoutAt(layoutSegsRef.current, layoutPresetsRef.current, t) ?? layoutRef.current;
+            const baseLayout = layoutAt(layoutSegsRef.current, layoutPresetsRef.current, t) ?? layoutRef.current;
+            // camera_moves override: when the track is non-empty AND a camera panel is resolved
+            // this frame, replace its rect/radius/ring-width with the sampled pose via
+            // overrideCamPanel (mirrors Rust's `override_camera`, Task 9 Part C: same ow/oh px
+            // space - the canvas's fixed 1280x720 backing store - radius AND ring scale by the
+            // height ratio so both stay proportional instead of distorting on resize; ring color
+            // + alpha are untouched). Empty track / no camera panel this frame: leave as-is. Mid-
+            // drag (Move mode), dragPoseRef's live pointer pose takes precedence over the sampled
+            // track - the PiP tracks the pointer without writing to the backend every frame; the
+            // drag commits a real keyframe only on release. `staticPose` (from baseLayout.cam) is the
+            // implicit t=0 keyframe a lone camera_moves keyframe eases in from (mirrors step_camera).
+            const staticPose = baseLayout?.cam
+              ? { x: baseLayout.cam[0] + baseLayout.cam[2] / 2, y: baseLayout.cam[1] + baseLayout.cam[3] / 2, size: baseLayout.cam[3] }
+              : null;
+            const cp = dragPoseRef.current ?? camMoveAt(cameraMovesRef.current, t, staticPose);
+            let frameLayout = baseLayout;
+            if (cp && baseLayout?.cam) {
+              frameLayout = { ...baseLayout, cam: overrideCamPanel(baseLayout.cam, cp, c.width, c.height) };
+            }
             // Draw the base frame (background + screen + webcam + cursor) WITHOUT FX
             if (!offscreenRef.current) offscreenRef.current = document.createElement("canvas");
             drawPreview(ctx, c.width, c.height, sv, webcamRef.current, cam,
@@ -122,6 +143,13 @@ export function useCompositeLoop({
             const spot = { effects: effectsRef.current, on: cf.spotlight,
               params: { dim: cf.spotlight_dim, radius: cf.spotlight_radius, feather: cf.spotlight_feather,
                 mode: cf.spotlight_mode, tint: cf.spotlight_tint } };
+            // Camera PiP rect for the spotlight's "don't dim the webcam" exclusion: the webcam is
+            // a fixed, unzoomed overlay drawn on top (see drawPreview/previewCanvas.ts), so its
+            // rect is the layout fraction applied directly to the FX canvas, not the zoom crop.
+            const camRect: FxCamRect = lay?.cam
+              ? { rect: [lay.cam[0] * fxW, lay.cam[1] * fxH, (lay.cam[0] + lay.cam[2]) * fxW, (lay.cam[1] + lay.cam[3]) * fxH],
+                  radius: lay.cam[4] * fxW }
+              : null;
 
             // Built from the RESOLVED spotlight (region overrides applied), not the raw global
             // settings - otherwise editing a region's dim/radius/feather/mode in the inspector
@@ -134,18 +162,19 @@ export function useCompositeLoop({
               : "off";
             const clicksStr = clicksRef.current.map(clk => `${clk.t}-${clk.x}-${clk.y}`).join(";");
             const cursorStr = cpos ? `${Math.round(cpos[0])}-${Math.round(cpos[1])}` : "none";
-            const fxParamsStr = `${cf.style}-${cf.color.join(",")}-${cf.intensity}-${cf.enabled}`;
+            const fxParamsStr = `${cf.style}-${cf.color.join(",")}-${cf.intensity}-${cf.enabled}-${cf.spotlight_dim_camera}`;
+            const camStr = camRect ? camRect.rect.map(v => Math.round(v)).join(",") + `-${Math.round(camRect.radius)}` : "none";
             // The spotlight tracks the cursor, which moves almost every frame during playback, so
             // cursorStr alone would invalidate the cache at full 60fps regardless of anything else.
             // Bucket time to a fixed cadence to cap how often that's allowed to trigger a backend
             // round-trip; the last rendered overlay stays on screen between updates.
             const tBucket = Math.round(t / FX_BUCKET_MS) * FX_BUCKET_MS;
-            const cacheKey = `${tBucket}_${cursorStr}_${spotParamsStr}_${clicksStr}_${fxParamsStr}`;
+            const cacheKey = `${tBucket}_${cursorStr}_${spotParamsStr}_${clicksStr}_${fxParamsStr}_${camStr}`;
 
             if (!fxInflightRef.current && cacheKey !== fxLastTRef.current) {
               fxInflightRef.current = true;
               fxLastTRef.current = cacheKey;
-              requestFxOverlay(fxW, fxH, clicksRef.current, t, cpos, spot, cf, mapFn, spotSimRef.current, screenScale)
+              requestFxOverlay(fxW, fxH, clicksRef.current, t, cpos, spot, cf, mapFn, spotSimRef.current, screenScale, camRect)
                 .then(url => {
                   fxInflightRef.current = false;
                   if (url) {

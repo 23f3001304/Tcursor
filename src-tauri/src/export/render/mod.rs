@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use crate::actions::model::{ActionEvent, LayoutId};
 use crate::events::model::EventLog;
 use crate::export::scene::background;
-use crate::export::camera::{moves::CameraMoveTrack, CameraSim};
+use crate::export::camera::{moves::CameraMoveTrack, static_cam_pose, CameraSim};
 use crate::export::gpu::compositor::{select_compositor, Compositor};
 use crate::export::coordmap::{inset_rect, to_panel};
 use crate::export::cursor::Cursor;
@@ -26,25 +26,12 @@ pub const OUT_FPS: u64 = 60;
 
 /// What the export loop needs to set up its decoders and drive the frame loop.
 pub struct RenderMeta {
-    pub tl: Timeline,
-    pub video_start: u64,
-    pub video_end: u64,
-    pub out_w: u32,
-    pub out_h: u32,
-    pub sw: u32,
-    pub sh: u32,
-    pub screen_bytes: usize,
-    pub webcam_size: u32,
-    pub audio_offset_ms: i32,
+    pub tl: Timeline, pub video_start: u64, pub video_end: u64, pub out_w: u32, pub out_h: u32,
+    pub sw: u32, pub sh: u32, pub screen_bytes: usize, pub webcam_size: u32, pub audio_offset_ms: i32,
 }
 
 /// Camera + scene resolved for one output frame; returned by `step_camera`.
-pub struct FramePose {
-    pub ev_t: u32,
-    pub scene: Scene,
-    pub cur: FramePoint,
-    pub cam: Camera,
-}
+pub struct FramePose { pub ev_t: u32, pub scene: Scene, pub cur: FramePoint, pub cam: Camera }
 
 /// Owns all per-export setup except decoders and the encoder sink. `step_camera` is cheap
 /// (math only); `composite_at` runs the full compositor + FX + cursor stack and returns BGRA.
@@ -135,8 +122,10 @@ impl FrameRenderer {
         let cur = to_panel(smooth, self.sw, self.sh, scene.screen.rect);
         // Zoom pills live in OUTPUT time (t - video_start), not event time; cursor/layout above stay event-time.
         let out_t = t.saturating_sub(self.video_start) as u32;
-        if let Some(p) = self.cam_moves.sample(out_t) {
-            scene.camera.rect = crate::export::scene::rect_from_center(p, self.layout.out_w as f32, self.layout.out_h as f32);
+        let (ow, oh) = (self.layout.out_w as f32, self.layout.out_h as f32);
+        let sp = Some(static_cam_pose(scene.camera.rect, ow, oh)); // implicit t=0 keyframe: the pre-override static pose
+        if let Some(p) = self.cam_moves.sample(out_t, sp) {
+            scene.camera = crate::export::scene::override_camera(scene.camera, p, ow, oh);
         }
         let mut cam = self.sim.step(out_t, cur, &self.regions, &self.cfg);
         if scene.screen.alpha < 0.5 {

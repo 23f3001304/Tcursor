@@ -24,11 +24,12 @@ pub struct FxU {
     pub a: [f32; 4],                // ow, oh, style(0..6), hit_count
     pub b: [f32; 4],                // spot_cx, spot_cy, spot_dim*alpha, spot_active(0/1)
     pub c: [f32; 4],                // spot_r_in(px), spot_r_out(px), intensity, _pad
-    pub d: [f32; 4],                // spot_mode_id, time_s, _pad, _pad
+    pub d: [f32; 4],                // spot_mode_id, time_s, keep_camera_lit(0/1), cam_radius(px)
     pub tint: [f32; 4],             // r, g, b (0..1), _pad
     pub color: [f32; 4],            // r, g, b (0..1), _pad
     pub hits: [[f32; 4]; MAX_HITS], // x, y, progress, _pad
     pub e: [f32; 4],                // video_mode_id, alpha, t, _pad
+    pub cam: [f32; 4],              // camera-exclusion rect (px): min_x, min_y, max_x, max_y
 }
 ```
 
@@ -39,15 +40,17 @@ The shader uniform block. All fields are `[f32; 4]` (vec4) for std140 alignment.
 - `a` - *`[ow, oh, style_id, hit_count]`: output dimensions in pixels, click-style numeric id (0..6), active hit count (capped at `MAX_HITS`). The shader reads `a.z` to select a click-effect branch and `a.w` to bound the hit loop.*
 - `b` - *`[spot_cx, spot_cy, dim*alpha, spot_active]`: spotlight center in output pixels, pre-multiplied dim strength, and a 0/1 presence flag. Pre-multiplying dim by alpha saves a per-pixel multiply in the hot shader path.*
 - `c` - *`[spot_r_in, spot_r_out, intensity, _pad]`: inner radius in output pixels (`oh * radius_frac`), outer radius (`r_in + oh * feather_frac`, minimum feather 0.001 to prevent divide-by-zero in the shader's feather step), global effect intensity scalar.*
-- `d` - *`[spot_mode_id, time_s, _pad, _pad]`: numeric spotlight mode (0..5) and elapsed time in seconds for animated modes.*
+- `d` - *`[spot_mode_id, time_s, keep_camera_lit, cam_radius]`: numeric spotlight mode (0..5), elapsed time in seconds for animated modes, a 0/1 flag meaning "undo the dim inside `cam`" (set when `Spot::dim_camera` is `false`, i.e. the "don't dim the webcam" option), and the camera panel's corner radius in output pixels.*
 - `tint` - *spotlight tint as normalized RGB floats (`0..1`), converted from the `[u8; 3]` tint bytes.*
 - `color` - *click-effect color as normalized RGB floats, converted from the `[u8; 3]` color bytes.*
 - `hits` - *up to `MAX_HITS` click hits, each `[x, y, progress, 0.0]` in output pixels.*
 - `e` - *`[video_mode_id, alpha, time_s, _pad]`: video FX mode (0..3), fade alpha, and elapsed time; all zero when no video FX is active.*
+- `cam` - *`[min_x, min_y, max_x, max_y]`: the active camera panel's rect in output pixels (`Spot::cam_rect`, itself from `scene.camera.rect`). The shader's `rrect_cov` helper tests pixels against this rect + `d.w`'s radius to build the un-dim mask; zero when there is no active spot.*
 
 ### Used by
 
 - `src-tauri/src/export/fx/fx_gpu.rs` - `GpuFx::apply` uploads `FxU` as a wgpu `UNIFORM` buffer at binding 2.
+- `src-tauri/src/export/fx/fx.wgsl` - declares the mirrored WGSL `struct FxU` with the identical field layout; `d.z`/`d.w`/`cam` drive the `camcov` un-dim mix immediately after the spotlight block.
 
 ## style_id
 
@@ -126,8 +129,8 @@ Packs a complete `FxState` into an `FxU` ready for GPU upload.
    - `r_in = oh * s.radius_frac.max(0.0)`, `r_out = r_in + oh * s.feather_frac.max(0.001)`. *Why `.max(0.001)`:* prevents `r_in == r_out`, which would produce a divide-by-zero in the shader feather step.*
    - `b[2] = dim.clamp(0,1) * alpha.clamp(0,1)`. *Why pre-multiply:* avoids a per-pixel multiply in the hot spotlight path.*
    - `b[3] = 1.0` (spot active).
-   - Pack `d = [spot_mode_id(s.mode), s.t, 0, 0]`, tint as `[r/255, g/255, b/255, 0]`.
-4. If `state.spot` is `None`: `b` and `d` and `tint` are zero-initialized (`b[3] = 0.0` tells the shader no spotlight).
+   - Pack `d = [spot_mode_id(s.mode), s.t, keep, s.cam_radius]` where `keep = if s.dim_camera { 0.0 } else { 1.0 }`, tint as `[r/255, g/255, b/255, 0]`, and `cam = s.cam_rect`.
+4. If `state.spot` is `None`: `b`, `d`, `tint`, and `cam` are all zero-initialized (`b[3] = 0.0` tells the shader no spotlight; `d[2] = 0.0` also means the camera-keep mix is a no-op since there is nothing to exclude).
 5. If `state.video` is `Some(v)`: `e = [video_mode_id(v.mode), v.alpha, v.t, 0]`; else `e = [0; 4]`.
 6. Normalize `state.color` from `u8` to `f32` per channel -> `color`.
 
@@ -136,3 +139,5 @@ Packs a complete `FxState` into an `FxU` ready for GPU upload.
 - `maps_style_hits_spot_and_color` - verifies `a` fields, `b[3]=1` (spot active), `b[2]=dim*alpha`, `color[0]=1.0` (red normalized), `hits[0]` layout.
 - `no_spot_sets_inactive` - `state.spot = None` -> `b[3] = 0.0`.
 - `spot_mode_id_and_tint_pack` - `Nebula` mode -> `d[0]=4.0`, time in `d[1]`, tint channel normalization verified.
+- `dim_camera_false_sets_keep_flag_and_cam_rect` - `Spot::dim_camera = false` -> `d[2] = 1.0`, `d[3]` equals `cam_radius`, `cam` equals `cam_rect` verbatim.
+- `dim_camera_true_clears_keep_flag` - `Spot::dim_camera = true` (today's default) -> `d[2] = 0.0`.

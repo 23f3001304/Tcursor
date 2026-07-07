@@ -30,7 +30,7 @@ Pure inverse of `seed::zooms_from_regions`. Rebuilds one `ZoomRegion` per `Zoom`
 - `regions_round_trip_through_edit_doc` - regions -> `seed::zooms_from_regions` -> `EditDoc` -> `regions_from_doc` returns field-identical regions. This is the proof of losslessness.
 - `empty_zooms_make_no_regions` - default `EditDoc` produces an empty vec.
 - `cursor_target_defaults_to_screen_center` - `ZoomTarget::Cursor` anchor becomes `(sw/2, sh/2)`.
-- `easing_unknown_or_spring_falls_back_to_config` - "spring" and unknown easing strings fall back to the config's easing; "smooth" and "linear" are reconstructed exactly.
+- `easing_unknown_or_spring_falls_back_to_config` - "spring" and unknown easing strings fall back to the config's easing; "smooth", "linear", "ease_in", "ease_out", and "ease_in_out" are reconstructed exactly.
 
 ## layout_segs_from_doc
 

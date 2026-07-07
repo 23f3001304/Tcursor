@@ -5,6 +5,10 @@ import { resolveSpotlight, type SpotlightInput, type SpotlightSimState } from ".
 
 const RIPPLE_MS = 500;
 
+/** Camera PiP rect in FX-render px (min_x, min_y, max_x, max_y) + corner radius, or null when
+ *  no camera panel is active this frame - mirrors the export's Spot.cam_rect/cam_radius. */
+export type FxCamRect = { rect: [number, number, number, number]; radius: number } | null;
+
 /** Build FxOverlayParams from the current preview state and call the backend.
  *  Returns a data URL PNG or null if nothing is active. The backend runs the
  *  exact same GPU/CPU shader pipeline the export uses. */
@@ -21,6 +25,10 @@ export async function requestFxOverlay(
   // backend's `oh * frac` - mirrors the export's `fx_state_at` (scene.screen.h / oh) so the
   // spotlight tracks the screen panel in every layout instead of the whole frame.
   screenScale: number,
+  // The active camera panel's rect this frame (FX-render px), or null when no camera panel is
+  // shown - threaded to the backend so it can undo the spotlight dim inside it when the
+  // "don't dim the webcam" setting (clickfx.spotlight_dim_camera) is off.
+  camRect: FxCamRect,
 ): Promise<string | null> {
   // Build active click hits in output pixels
   const hits: [number, number, number][] = [];
@@ -57,6 +65,11 @@ export async function requestFxOverlay(
     params.spotMode = resolved!.mode;
     params.spotTint = resolved!.tint;
     params.spotT = now / 1000.0;
+    if (camRect) {
+      params.camRect = camRect.rect;
+      params.camRadius = camRect.radius;
+      params.dimCamera = clickfx.spotlight_dim_camera;
+    }
   }
 
   try {

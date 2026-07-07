@@ -1,7 +1,19 @@
 use crate::export::fx::fx_state::Spot;
 use crate::settings::model::SpotlightMode;
 
-/// Render the cursor spotlight (mode-dependent) onto the BGRA frame.
+/// Rounded-rect coverage: ~1 inside, ~0 outside. Mirrors fx.wgsl's `rrect_cov` exactly.
+fn rrect_cov(x: f32, y: f32, mn: [f32; 2], mx: [f32; 2], r: f32) -> f32 {
+    let (cx, cy) = ((mn[0] + mx[0]) * 0.5, (mn[1] + mx[1]) * 0.5);
+    let (hx, hy) = ((mx[0] - mn[0]) * 0.5 - r, (mx[1] - mn[1]) * 0.5 - r);
+    let (qx, qy) = ((x - cx).abs() - hx, (y - cy).abs() - hy);
+    let sd = (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt() + qx.max(qy).min(0.0) - r;
+    (0.5 - sd).clamp(0.0, 1.0)
+}
+
+/// Render the cursor spotlight (mode-dependent) onto the BGRA frame. When `s.dim_camera` is
+/// false, the dim is undone inside `s.cam_rect` (the camera PiP), mirroring fx.wgsl's
+/// `camcov` un-dim so the CPU path (used by both the export CPU fallback and the editor
+/// preview via `preview_fx.rs`) matches the GPU shader exactly.
 pub fn draw_spot(out: &mut [u8], ow: u32, oh: u32, s: &Spot) {
     let dim = s.dim.clamp(0.0, 1.0) * s.alpha.clamp(0.0, 1.0);
     if dim <= 0.0 { return; }
@@ -11,9 +23,13 @@ pub fn draw_spot(out: &mut [u8], ow: u32, oh: u32, s: &Spot) {
     let (fcx, fcy) = (ow as f32 / 2.0, oh as f32 / 2.0);
     let maxd = (fcx * fcx + fcy * fcy).sqrt();
     let halo_w = oh as f32 * 0.02;
+    let keep_cam = !s.dim_camera;
+    let cam_mn = [s.cam_rect[0], s.cam_rect[1]];
+    let cam_mx = [s.cam_rect[2], s.cam_rect[3]];
     for y in 0..oh {
         for x in 0..ow {
             let i = ((y * ow + x) * 4) as usize;
+            let pre = [out[i], out[i + 1], out[i + 2]];
             let t = if s.mode == SpotlightMode::Vignette {
                 (((x as f32 - fcx).hypot(y as f32 - fcy) / maxd) - 0.4).max(0.0) / 0.6
             } else {
@@ -32,6 +48,16 @@ pub fn draw_spot(out: &mut [u8], ow: u32, oh: u32, s: &Spot) {
                 let band = (1.0 - (d - r_in).abs() / halo_w.max(1.0)).clamp(0.0, 1.0);
                 if band > 0.0 { add_tint(out, i, s.tint, band); }
             }
+            // Undo the dim (and any tint this pixel just picked up) inside the camera rect
+            // when the "don't dim the webcam" option is on - matches fx.wgsl's `camcov` mix.
+            if keep_cam {
+                let cov = rrect_cov(x as f32, y as f32, cam_mn, cam_mx, s.cam_radius);
+                if cov > 0.0 {
+                    for c in 0..3 {
+                        out[i + c] = (out[i + c] as f32 + (pre[c] as f32 - out[i + c] as f32) * cov).round() as u8;
+                    }
+                }
+            }
         }
     }
 }
@@ -49,7 +75,8 @@ mod tests {
     use super::*;
     use crate::settings::model::SpotlightMode;
     fn spot(mode: SpotlightMode) -> Spot {
-        Spot { cx: 50.0, cy: 50.0, dim: 0.6, radius_frac: 0.13, feather_frac: 0.10, alpha: 1.0, mode, tint: [120, 60, 255], t: 0.0 }
+        Spot { cx: 50.0, cy: 50.0, dim: 0.6, radius_frac: 0.13, feather_frac: 0.10, alpha: 1.0, mode, tint: [120, 60, 255], t: 0.0,
+            cam_rect: [0.0; 4], cam_radius: 0.0, dim_camera: true }
     }
     #[test]
     fn vignette_dims_corner_not_center() {
@@ -62,5 +89,28 @@ mod tests {
         let (w,h)=(100u32,100u32); let mut out = vec![10u8; (w*h*4) as usize];
         draw_spot(&mut out, w, h, &spot(SpotlightMode::Halo));
         assert!(out.chunks(4).any(|p| p[0] > 40), "halo paints blue tint (B idx 0)");
+    }
+    #[test]
+    fn dim_camera_false_keeps_camera_rect_lit() {
+        let (w, h) = (100u32, 100u32);
+        let mut out = vec![200u8; (w * h * 4) as usize];
+        let mut s = spot(SpotlightMode::Classic);
+        // Cam rect [0,0,20,20] sits far from the spotlight center (50,50), so its interior
+        // would normally dim hard. Probe its center (10,10) - unambiguously inside the rounded
+        // rect regardless of corner radius, unlike the bounding-box corner pixel itself (which
+        // the rounding legitimately excludes, same as a real rounded-rect SDF).
+        s.cam_rect = [0.0, 0.0, 20.0, 20.0]; s.cam_radius = 2.0; s.dim_camera = false;
+        draw_spot(&mut out, w, h, &s);
+        let center_i = ((10 * w + 10) * 4) as usize;
+        assert_eq!(out[center_i], 200, "cam-rect center stays at full brightness when dim_camera is false");
+    }
+    #[test]
+    fn dim_camera_true_dims_the_camera_rect_too() {
+        let (w, h) = (100u32, 100u32);
+        let mut out = vec![200u8; (w * h * 4) as usize];
+        let mut s = spot(SpotlightMode::Classic);
+        s.cam_rect = [0.0, 0.0, 20.0, 20.0]; s.cam_radius = 2.0; s.dim_camera = true;
+        draw_spot(&mut out, w, h, &s);
+        assert!(out[0] < 200, "dim_camera:true -> today's behavior, camera rect dims like everything else");
     }
 }

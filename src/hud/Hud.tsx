@@ -11,7 +11,7 @@ import { useMicWaveform } from "./hooks/useMicWaveform";
 import { formatTimer } from "./components/formatTimer";
 import { Dropdown } from "./components/Dropdown";
 import { Grip, Monitor, Mic, MicOff, Speaker, SpeakerOff, Camera, CameraOff, MinIcon, CloseIcon, Gear, Gamepad, Palette } from "./components/icons";
-import { startRecording, stopRecording, pauseRecording, resumeRecording, saveWebcam, getSettings } from "../lib/ipc";
+import { startRecording, stopRecording, pauseRecording, resumeRecording, getSettings } from "../lib/ipc";
 import { applyTheme } from "./preferences/applyTheme";
 import type { ThemeMode } from "./settings/settings";
 import { useWebcamRecorder } from "./hooks/useWebcamRecorder";
@@ -29,6 +29,7 @@ export function Hud({ onEdit }: { onEdit?: (folder: string) => void }) {
   const cameras = useCameraDevices(cam.on ? 1 : 0);
   const [recording, setRecording] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [saving, setSaving] = useState(false); // finalizing + saving the recording after Stop, before the editor opens
   const [menu, setMenu] = useState<string | null>(null);
   const [micOn, setMicOn] = useState(true);
   const [sysOn, setSysOn] = useState(false);
@@ -82,25 +83,36 @@ export function Hud({ onEdit }: { onEdit?: (folder: string) => void }) {
   }, []);
 
   async function toggle() {
+    if (saving) return;
     if (!recording) {
       setErr(null);
+      let folder: string;
       try {
-        await startRecording(`rec-${Date.now()}`, micOn ? sel.micId : null, sysOn, gameMode);
+        folder = await startRecording(`rec-${Date.now()}`, micOn ? sel.micId : null, sysOn, gameMode);
       } catch (e) {
         setErr(String(e));
         return;
       }
-      if (camOn) webcam.start(cam.stream());
+      if (camOn) webcam.start(cam.stream(), folder);
       setRecording(true);
     } else {
-      const webcamStopPromise = webcam.stop();
-      const res = await stopRecording();
-      const bytes = await webcamStopPromise;
-      if (bytes) await saveWebcam(res.folder, bytes);
-      lastFolder.current = res.folder;
+      // Immediate feedback: drop the recording UI the instant Stop is pressed, then finalize + save
+      // under a "Saving" state. The encode finalize + webcam-blob write are O(clip length), and
+      // awaiting them before touching the UI made Stop feel unresponsive (it stayed "recording").
       setRecording(false);
       setPaused(false);
-      onEdit?.(res.folder); // open the editor; export now happens from there
+      setSaving(true);
+      try {
+        // Screen finalize + the webcam's tail-chunk flush run in parallel - both quick now that the
+        // webcam streamed to disk during recording (no big blob write left).
+        const [res] = await Promise.all([stopRecording(), webcam.stop()]);
+        lastFolder.current = res.folder;
+        onEdit?.(res.folder); // open the editor; export now happens from there
+      } catch (e) {
+        setErr(String(e));
+      } finally {
+        setSaving(false);
+      }
     }
   }
   async function togglePause() {
@@ -174,8 +186,8 @@ export function Hud({ onEdit }: { onEdit?: (folder: string) => void }) {
 
             {recording && <span className="timer">{formatTimer(elapsed)}</span>}
             {recording && <button className="btn" onClick={togglePause}>{paused ? "Resume" : "Pause"}</button>}
-            <button className={`btn rec ${recording ? "is-rec" : ""}`} onClick={toggle} disabled={exporting}>
-              <span className="dot" />{recording ? "Stop" : "Record"}
+            <button className={`btn rec ${recording ? "is-rec" : ""}`} onClick={toggle} disabled={exporting || saving}>
+              <span className="dot" />{saving ? "Saving…" : recording ? "Stop" : "Record"}
             </button>
           </div>
         </>

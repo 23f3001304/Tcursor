@@ -5,8 +5,10 @@ use crate::actions::model::LayoutId;
 use crate::export::preview::{with_warm, PreviewSession};
 use crate::export::scene::Panel;
 
+/// `ring_px` is normalized like `radius` (fraction of output width); `ring_color` is only
+/// meaningful when `ring_px > 0` (0/`[0,0,0]` on the screen panel, which never has a ring).
 #[derive(serde::Serialize)]
-pub struct PanelRectDto { pub rect: [f32; 4], pub radius: f32, pub alpha: f32 }
+pub struct PanelRectDto { pub rect: [f32; 4], pub radius: f32, pub alpha: f32, pub ring_px: f32, pub ring_color: [u8; 3] }
 
 #[derive(serde::Serialize)]
 pub struct LayoutPresetDto { pub screen: PanelRectDto, pub cam: PanelRectDto }
@@ -19,7 +21,7 @@ pub struct LayoutPresets {
 
 fn panel_dto(p: &Panel, ow: f32, oh: f32) -> PanelRectDto {
     PanelRectDto { rect: [p.rect.x / ow, p.rect.y / oh, p.rect.w / ow, p.rect.h / oh],
-        radius: p.radius / ow, alpha: p.alpha }
+        radius: p.radius / ow, alpha: p.alpha, ring_px: p.ring_px / ow, ring_color: p.ring_color }
 }
 
 /// All 5 layout presets' panel rects + alpha in one call, so the editor preview can resolve and

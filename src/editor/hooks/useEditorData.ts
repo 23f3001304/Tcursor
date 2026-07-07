@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getEdit, setCapturable, cameraTrack, previewLayout, previewLayouts, clickTrack, previewBg, cursorSprites, cursorKinds, ensureThumbs, ensureWaveform, ensurePreviewAudio, ensureProxy, fileSrc } from "../../lib/ipc";
 import type { EditDoc } from "../../lib/edit";
@@ -49,10 +49,17 @@ export function useEditorData(folder: string, rev: number, quality: number) {
   // Fast load: show the raw capture instantly (no transcode wait), then hot-swap to the light
   // proxy once it has transcoded (for smoother scrubbing). Pause first so the src remount can't
   // restart playback from 0.
+  const proxyReadyRef = useRef(false);
+  const lastFolderRef = useRef(folder);
   useEffect(() => {
     setPlaying(false);
-    setSrcUrl(fileSrc(`${folder}\\video.mp4`));
-    ensureProxy(folder, quality).then((p) => setSrcUrl(fileSrc(p))).catch(() => {});
+    if (lastFolderRef.current !== folder) { lastFolderRef.current = folder; proxyReadyRef.current = false; }
+    // Raw fast-path ONLY before the first proxy is ready. On a quality SWITCH the current proxy is
+    // already showing, so keep it (its re-timed timeline/duration match) instead of flashing the raw
+    // video.mp4 - the raw is re-timed differently, so flashing it briefly changed the duration and
+    // frame, jumping the playhead ("changing quality changes preview time").
+    if (!proxyReadyRef.current) setSrcUrl(fileSrc(`${folder}\\video.mp4`));
+    ensureProxy(folder, quality).then((p) => { setSrcUrl(fileSrc(p)); proxyReadyRef.current = true; }).catch(() => {});
   }, [folder, quality]);
 
   useEffect(() => {

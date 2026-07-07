@@ -21,6 +21,6 @@ export function CameraMoveInspector({ move, dur, onApply, onClose }: {
 
 **Fields.** Time (seconds, converted to/from `t_ms`), X, Y, and Size are plain number inputs (`x`/`y`/`size` clamped to `[0, 1]` client-side to match the Edit API's own clamp) - not `NumberField`, since that control hardcodes a seconds (`s`) suffix that doesn't fit the 0-1 fraction fields.
 
-**Transition Curve.** The same `e-curve-pick` linear/smooth/spring cards as `ZoomInspector`, applying `{ easing }`.
+**Transition Curve.** An `e-curve-pick` grid of the shared `CAM_CURVES` (linear, ease-in, ease-out, in/out, smooth, spring - see `src/editor/inspectors/curves.ts`), each card applying `{ easing }` on click. The same curves are pickable straight off the timeline via `CameraLane`'s per-segment popover.
 
 **Delete.** Removes the keyframe and deselects.

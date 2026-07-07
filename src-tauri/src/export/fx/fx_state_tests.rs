@@ -7,15 +7,15 @@ use crate::settings::model::{ClickFxSettings, ClickFxStyle, SpotlightMode};
 
 fn full_scene(w: u32, h: u32) -> Scene {
     Scene {
-        screen: Panel { rect: RectF { x: 0.0, y: 0.0, w: w as f32, h: h as f32 }, radius: 0.0, alpha: 1.0 },
-        camera: Panel { rect: RectF { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }, radius: 0.0, alpha: 0.0 },
+        screen: Panel { rect: RectF { x: 0.0, y: 0.0, w: w as f32, h: h as f32 }, radius: 0.0, alpha: 1.0, ring_px: 0.0, ring_color: [0, 0, 0] },
+        camera: Panel { rect: RectF { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }, radius: 0.0, alpha: 0.0, ring_px: 0.0, ring_color: [0, 0, 0] },
     }
 }
 fn fx(style: ClickFxStyle, spot: bool) -> ClickFxSettings {
     ClickFxSettings { enabled: true, style, color: [255, 0, 0], intensity: 1.0, captions: false,
         spotlight: spot, spotlight_dim: 0.6, spotlight_radius: 0.13, spotlight_feather: 0.10,
         spotlight_mode: SpotlightMode::Classic, spotlight_tint: [130, 90, 255],
-        video_fx_mode: crate::settings::model::VideoFxMode::NebulaWash }
+        video_fx_mode: crate::settings::model::VideoFxMode::NebulaWash, spotlight_dim_camera: true }
 }
 fn cam() -> Camera { Camera { cx: 50.0, cy: 50.0, scale: 1.0 } }
 fn down(t: u32) -> MouseEvent { MouseEvent { t, kind: EventKind::Down, x: 50, y: 50, button: Some(Button::Left) } }
@@ -54,8 +54,8 @@ fn spotlight_radius_scales_with_screen_panel_height() {
     // vs. the old layout-agnostic behaviour (a fixed fraction of the full frame regardless of
     // where/how big the screen actually is).
     let half = Scene {
-        screen: Panel { rect: RectF { x: 0.0, y: 0.0, w: 100.0, h: 50.0 }, radius: 0.0, alpha: 1.0 },
-        camera: Panel { rect: RectF { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }, radius: 0.0, alpha: 0.0 },
+        screen: Panel { rect: RectF { x: 0.0, y: 0.0, w: 100.0, h: 50.0 }, radius: 0.0, alpha: 1.0, ring_px: 0.0, ring_color: [0, 0, 0] },
+        camera: Panel { rect: RectF { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }, radius: 0.0, alpha: 0.0, ring_px: 0.0, ring_color: [0, 0, 0] },
     };
     let s = fx_state_at(&fx(ClickFxStyle::None, true), &[], &[], &[], &half, cam(),
         FramePoint{x:50,y:50}, 100,100,100,100, 0, &mut SpotlightSim::new()).unwrap();

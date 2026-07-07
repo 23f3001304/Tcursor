@@ -13,6 +13,9 @@ pub fn easing_from(name: &str, cfg_easing: Easing) -> Easing {
     match name {
         "smooth" => Easing::Smooth,
         "linear" => Easing::Linear,
+        "ease_in" => Easing::EaseIn,
+        "ease_out" => Easing::EaseOut,
+        "ease_in_out" => Easing::EaseInOut,
         _ => cfg_easing, // "spring" (params lost) or unknown -> config's easing
     }
 }

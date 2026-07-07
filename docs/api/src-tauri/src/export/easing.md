@@ -26,6 +26,9 @@ Maps `t` in [0, 1] to an eased value in [0, 1]. Input is clamped to [0, 1] befor
    - `Easing::Linear`: return `t` unchanged.
    - `Easing::Smooth`: return `1.0 - (1.0 - t).powi(3)` (ease-out cubic). *Why ease-out:* the zoom decelerates into its target position so it feels like it "lands", rather than approaching linearly which feels mechanical.
    - `Easing::Spring { .. }`: currently returns `1.0 - (1.0 - t).powi(3)`, identical to `Smooth`. The spring parameters (`stiffness`, `damping`) are accepted but ignored. *Why:* a real spring simulation is deferred to M3+; the variant exists in the type system now so recorded data with spring easing is forward-compatible.
+   - `Easing::EaseIn`: `t*t` (quadratic accelerate - slow start).
+   - `Easing::EaseOut`: `t*(2-t)` (quadratic decelerate - slow finish).
+   - `Easing::EaseInOut`: `2t^2` for `t<0.5`, else `1-2(1-t)^2` (symmetric). *Why:* user-selectable camera-move transitions need the full accelerate/decelerate/both set; `camera::ease` mirrors these exactly (and so does the TS `ease` for the preview).
 
 ### Behaviors worth knowing
 

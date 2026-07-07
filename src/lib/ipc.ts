@@ -10,13 +10,15 @@ export interface CamSample { t: number; scale: number; cx: number; cy: number; c
 export const listDisplays = () => invoke<DisplayInfo[]>("list_displays");
 export const listAudioInputs = () => invoke<AudioInfo[]>("list_audio_inputs");
 export const startRecording = (projectName: string, micId: string | null, systemAudio: boolean, gameMode: boolean) =>
-  invoke<void>("start_recording", { projectName, micId, systemAudio, gameMode });
+  invoke<string>("start_recording", { projectName, micId, systemAudio, gameMode });
 export const pauseRecording = () => invoke<void>("pause_recording");
 export const resumeRecording = () => invoke<void>("resume_recording");
 export const stopRecording = () =>
   invoke<{ folder: string; frames: number }>("stop_recording");
 export const saveWebcam = (folder: string, bytes: Uint8Array) =>
   invoke<void>("save_webcam", { folder, bytes });
+export const appendWebcam = (folder: string, bytes: Uint8Array) =>
+  invoke<void>("append_webcam", { folder, bytes });
 export const exportProject = (folder: string) =>
   invoke<void>("export_project", { folder });
 export const getSettings = () => invoke<Settings>("get_settings");
@@ -28,12 +30,15 @@ export const aiAutoedit = (folder: string, model?: string) =>
   invoke<EditDoc>("ai_autoedit", { folder, model });
 export const cameraTrack = (folder: string) => invoke<CamSample[]>("camera_track", { folder });
 /** The static export layout: screen rect + corner radius + webcam rect, as fractions of the
- *  output, so the canvas preview frames the screen + webcam from the export layout (not a guess). */
-export interface PreviewLayout { screen: [number, number, number, number]; radius: number; cam: [number, number, number, number, number] | null; screenAlpha?: number; camAlpha?: number }
+ *  output, so the canvas preview frames the screen + webcam from the export layout (not a guess).
+ *  `cam`'s last 4 entries are the webcam ring: width (fraction of output width, 0 = no ring) then
+ *  RGB 0..255 - mirrors the export's `Panel.ring_px`/`ring_color` riding alongside rect/radius. */
+export interface PreviewLayout { screen: [number, number, number, number]; radius: number; cam: [number, number, number, number, number, number, number, number, number] | null; screenAlpha?: number; camAlpha?: number }
 export const previewLayout = (folder: string) => invoke<PreviewLayout>("preview_layout", { folder });
 /** One panel's rect (fraction of output, [x, y, w, h]) + corner radius (fraction of output width)
- *  + cross-dissolve alpha (0..1) - the same basis `PreviewLayout` uses. */
-export interface PanelRectDto { rect: [number, number, number, number]; radius: number; alpha: number }
+ *  + cross-dissolve alpha (0..1) + ring width (fraction of output width, 0 = no ring) + ring color
+ *  (RGB 0..255) - the same basis `PreviewLayout` uses. */
+export interface PanelRectDto { rect: [number, number, number, number]; radius: number; alpha: number; ring_px: number; ring_color: [number, number, number] }
 /** One layout preset's two panels: screen (zoomed base layer) + cam (fixed top layer). */
 export interface LayoutPresetDto { screen: PanelRectDto; cam: PanelRectDto }
 export type LayoutPresetName = "screen" | "camera" | "presenter" | "screen_only" | "camera_only";
@@ -57,6 +62,9 @@ export interface FxOverlayParams {
   spotRadius?: number; spotFeather?: number; spotAlpha?: number;
   spotMode?: string; spotTint?: [number, number, number]; spotT?: number;
   videoMode?: string; videoAlpha?: number; videoT?: number;
+  // Camera PiP exclusion (FX-render px): min_x, min_y, max_x, max_y + corner radius, and
+  // whether to keep it lit at all - mirrors export's Spot.cam_rect/cam_radius/dim_camera.
+  camRect?: [number, number, number, number]; camRadius?: number; dimCamera?: boolean;
 }
 export const previewFxOverlay = (p: FxOverlayParams) =>
   invoke<string>("preview_fx_overlay", {
@@ -68,6 +76,7 @@ export const previewFxOverlay = (p: FxOverlayParams) =>
     spotTint: p.spotTint ?? null, spotT: p.spotT ?? null,
     videoMode: p.videoMode ?? null, videoAlpha: p.videoAlpha ?? null,
     videoT: p.videoT ?? null,
+    camRect: p.camRect ?? null, camRadius: p.camRadius ?? null, dimCamera: p.dimCamera ?? null,
   });
 /** One cursor sprite (Capitaine pack) for the canvas preview: lowercase type name, a PNG data
  *  URL (cropped + dark-inverted like the export), the hotspot (0..1 of the cropped sprite), and

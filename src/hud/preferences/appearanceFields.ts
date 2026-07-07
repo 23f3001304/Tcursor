@@ -1,4 +1,4 @@
-import type { CamShape, CamCorner } from "../settings/settings";
+import type { CamShape, CamCorner, CamAspect } from "../settings/settings";
 
 export type ModeKey = "screen" | "camera" | "presenter" | "screen_only" | "camera_only";
 export const MODES: [ModeKey, string][] = [
@@ -17,6 +17,10 @@ export const SLIDERS: Record<Knob, Spec> = {
   cam_margin_x:  { label: "Margin X",      min: 0,    max: 0.1,  step: 0.002 },
   cam_margin_y:  { label: "Margin Y",      min: 0,    max: 0.1,  step: 0.002 },
 };
+// Ring width is stored separately from CamRing.color (a color input, not a slider) -
+// same fraction-of-min-side units as cam_radius, so the range matches it.
+export const RING_WIDTH_SLIDER: Spec = { label: "Ring width", min: 0.005, max: 0.2, step: 0.005 };
+export const DEFAULT_RING = { width: 0.03, color: [255, 255, 255] as [number, number, number] };
 
 // Which sliders each mode shows (per the design matrix). Shape/corner are separate.
 export const MODE_SLIDERS: Record<ModeKey, Knob[]> = {
@@ -31,6 +35,7 @@ export const MODE_HAS_CORNER: Record<ModeKey, boolean> = { screen: true, camera:
 
 export const SHAPES: [CamShape, string][] = [["circle", "Circle"], ["rounded", "Rounded"], ["rect", "Rect"]];
 export const CORNERS: [CamCorner, string][] = [["bottom_left", "BL"], ["bottom_right", "BR"], ["top_left", "TL"], ["top_right", "TR"]];
+export const ASPECTS: [CamAspect, string][] = [["square", "Square"], ["wide", "16:9"]];
 
 export const pct = (v: number) => `${Math.round(v * 100)}%`;
 
@@ -38,6 +43,7 @@ const bubble: import("../settings/settings").ModeAppearance = {
   pad: 0.03125, screen_size: 1.0, screen_radius: 0.016,
   cam_size: 0.1944, cam_shape: "circle", cam_radius: 0.04,
   cam_corner: "bottom_left", cam_margin_x: 0.0208, cam_margin_y: 0.037,
+  cam_aspect: "square", cam_ring: null,
 };
 const big: import("../settings/settings").ModeAppearance = {
   ...bubble, cam_size: 0.889, cam_shape: "rounded",

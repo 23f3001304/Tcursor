@@ -30,6 +30,37 @@ Which corner of the screen panel anchors the floating camera bubble. Only meanin
 - `src/hud/preferences/appearanceFields.ts` - `CORNERS` constant, `MODE_HAS_CORNER` map
 - `src/hud/settings/SettingsAppearance.tsx` - renders the corner picker
 
+## CamAspect
+
+```ts
+export type CamAspect = "square" | "wide";
+```
+
+Aspect ratio of the webcam PiP bubble (Screen/ScreenOnly modes only - big-camera modes always stay square). `"square"` is 1:1 (today's only shape, and the default); `"wide"` is 16:9, widening the panel while `cam_size` stays the HEIGHT basis.
+
+### Used by
+
+- `src/hud/settings/settings.ts` - `ModeAppearance.cam_aspect`
+- `src/hud/preferences/appearanceFields.ts` - `ASPECTS` constant
+- `src/editor/panels/CameraPanel.tsx` - renders the Aspect picker
+
+## CamRing
+
+```ts
+export interface CamRing { width: number; color: [number, number, number] }
+```
+
+Optional colored ring/border drawn just inside the webcam panel edge. Mirrors the Rust `CamRing` (`src-tauri/src/settings/appearance.rs`) byte-for-byte.
+
+- `width: number` - fraction of the panel's min side (same units as `cam_radius`).
+- `color: [number, number, number]` - RGB triplet (0-255).
+
+### Used by
+
+- `src/hud/settings/settings.ts` - `ModeAppearance.cam_ring` (`null` = no ring)
+- `src/hud/preferences/appearanceFields.ts` - `DEFAULT_RING` constant
+- `src/editor/panels/CameraRingField.tsx` - renders the ring on/off switch, width slider, and color swatches
+
 ## ModeAppearance
 
 ```ts
@@ -43,6 +74,8 @@ export interface ModeAppearance {
   cam_corner: CamCorner;
   cam_margin_x: number;
   cam_margin_y: number;
+  cam_aspect: CamAspect;
+  cam_ring: CamRing | null;
 }
 ```
 
@@ -51,17 +84,20 @@ All visual layout parameters for one recording mode. All numeric fields are norm
 - `pad` - padding around the composite frame. *Why:* creates visual breathing room between the frame edge and the canvas boundary.
 - `screen_size` - fraction of the output that the screen panel occupies (0.6-1.0). *Why:* in split-view modes the screen competes with the camera for canvas space.
 - `screen_radius` - corner roundness of the screen panel (0-0.05). *Why:* modern broadcast aesthetics use rounded corners on screen panels.
-- `cam_size` - fraction of the output that the camera overlay occupies (0.08-1.0). *Why:* ranges from a small bubble (bubble preset ~0.19) to a large frame fill (big preset ~0.89).
+- `cam_size` - fraction of the output that the camera overlay occupies as its HEIGHT (0.08-1.0). *Why:* ranges from a small bubble (bubble preset ~0.19) to a large frame fill (big preset ~0.89); `cam_aspect` derives the width from this when `"wide"`.
 - `cam_shape: CamShape` - mask shape applied to the camera overlay.
 - `cam_radius` - corner radius when `cam_shape` is `"rounded"` (0-0.5). *Why:* 0.5 produces a near-circle; lower values give soft-rounded rectangles.
 - `cam_corner: CamCorner` - which screen corner anchors the bubble camera when mode is `"screen"`.
 - `cam_margin_x` / `cam_margin_y` - gap between the camera bubble and the frame edge (0-0.1 each). *Why:* prevents the camera from being flush against the edge, which looks cramped.
+- `cam_aspect: CamAspect` - PiP bubble width:height ratio. Default `"square"` (byte-identical to before this field existed).
+- `cam_ring: CamRing | null` - optional colored border just inside the panel edge. Default `null` (no ring).
 
 ### Used by
 
 - `src/hud/settings/settings.ts` - `AppearanceSettings` holds one per mode
 - `src/hud/preferences/appearanceFields.ts` - `DEFAULT_APPEARANCE` typed as `AppearanceSettings`
 - `src/hud/settings/SettingsAppearance.tsx` - reads and mutates per-mode appearance
+- `src/editor/panels/CameraPanel.tsx` - reads and mutates `cam_aspect`/`cam_ring` for the "screen" mode's webcam PiP
 - `src/hud/components/LayoutPreview.tsx` - renders a thumbnail of the current layout
 
 ## AppearanceSettings
@@ -242,6 +278,7 @@ export interface ClickFxSettings {
   spotlight_mode: SpotlightMode;
   spotlight_tint: [number, number, number];
   video_fx_mode: VideoFxMode;
+  spotlight_dim_camera: boolean;
 }
 ```
 
@@ -259,11 +296,14 @@ Configuration for click effects and the spotlight overlay.
 - `spotlight_mode: SpotlightMode` - rendering variant for the spotlight.
 - `spotlight_tint` - RGB tint applied inside the spotlight circle.
 - `video_fx_mode: VideoFxMode` - full-screen overlay mode.
+- `spotlight_dim_camera` - whether the spotlight dim also darkens the webcam PiP. Default `true` (today's behavior). Set `false` to keep the webcam fully lit while the rest of the frame still dims - mirrors the Rust `ClickFxSettings::spotlight_dim_camera` byte-for-byte; both the export (GPU + CPU) and the editor preview read it.
 
 ### Used by
 
 - `src/hud/settings/settings.ts` - `Settings.clickfx`
-- `src/hud/settings/SettingsClickFx.tsx` - renders all click-fx and spotlight controls
+- `src/hud/settings/SettingsClickFx.tsx` - renders all click-fx and spotlight controls (does not yet expose `spotlight_dim_camera` - only `src/editor/panels/EffectsPanel.tsx` does, as of this field's introduction)
+- `src/editor/panels/EffectsPanel.tsx` - renders the "Dim webcam" toggle bound to `spotlight_dim_camera`
+- `src/editor/hooks/useCompositeLoop.ts` - reads `spotlight_dim_camera` to thread `dimCamera` into `requestFxOverlay`
 
 ## HotkeySettings
 

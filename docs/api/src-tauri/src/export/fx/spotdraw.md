@@ -1,6 +1,18 @@
 # src-tauri/src/export/fx/spotdraw.rs
 
-Renders the cursor spotlight effect in all six modes (Classic, Breathing, Vignette, Blur, Nebula, Halo) directly onto a BGRA frame by darkening pixels outside the lit zone and optionally adding a colour tint. Invoked by `fxdraw::CpuFx::apply` as the second effect layer, after video FX and before click effects.
+Renders the cursor spotlight effect in all six modes (Classic, Breathing, Vignette, Blur, Nebula, Halo) directly onto a BGRA frame by darkening pixels outside the lit zone and optionally adding a colour tint, then optionally undoes that dim inside the camera panel's rect (the "don't dim the webcam" option). Invoked by `fxdraw::CpuFx::apply` as the second effect layer, after video FX and before click effects. This is also the only renderer the editor preview ever uses (`preview_fx.rs`'s `preview_fx_overlay` always calls `CpuFx`, never the GPU path), so this file is parity-critical for both the export CPU fallback and the live preview.
+
+## rrect_cov
+
+```rust
+fn rrect_cov(x: f32, y: f32, mn: [f32; 2], mx: [f32; 2], r: f32) -> f32
+```
+
+Rounded-rect coverage at pixel `(x, y)`: ~1 inside the rounded rect bounded by `mn`/`mx` with corner radius `r`, ~0 outside, with a roughly 1px antialiased transition at the edge. A line-for-line Rust port of `fx.wgsl`'s `rrect_cov` (signed-distance rounded-box formula) so the CPU and GPU paths agree pixel-for-pixel. *Why the bounding-box corner itself reads ~0:* a true rounded rect's corner arc is inset by `r` from the bounding box's literal corner, so the pixel at e.g. `mn` exactly is legitimately outside the shape - this matches a real rounded-rect SDF, not a bug (see `dim_camera_false_keeps_camera_rect_lit`, which probes the rect's center rather than its corner for this reason).
+
+### Used by
+
+- `src-tauri/src/export/fx/spotdraw.rs` (`draw_spot`) - builds the per-pixel camera-exclusion mask.
 
 ## draw_spot
 
@@ -14,7 +26,7 @@ Modifies `out` in place according to `s.mode`, attenuated by `s.dim * s.alpha`.
 
 - `out: &mut [u8]` - the composited BGRA frame after video FX. *Why mutable:* the spotlight operates as a multiplicative darkening pass directly on the frame; no separate buffer is needed.
 - `ow: u32`, `oh: u32` - output frame dimensions. *Why:* used to compute the frame centre `(fcx, fcy)`, the vignette normaliser `maxd`, and all size fractions (radii, halo width) that scale with `oh`.
-- `s: &Spot` - the full spotlight state snapshot: `s.cx`/`s.cy` are the output-space cursor position; `s.radius_frac` and `s.feather_frac` are fractions of `oh`; `s.dim` is max darkness 0..1; `s.alpha` is the animated fade-in 0..1; `s.mode` selects the algorithm; `s.tint` is the `[r,g,b]` additive colour; `s.t` is the animation phase for Breathing mode. *Why a single struct:* all spotlight parameters are authored together and change together as the user moves; passing one struct keeps the function signature stable as new modes are added.
+- `s: &Spot` - the full spotlight state snapshot: `s.cx`/`s.cy` are the output-space cursor position; `s.radius_frac` and `s.feather_frac` are fractions of `oh`; `s.dim` is max darkness 0..1; `s.alpha` is the animated fade-in 0..1; `s.mode` selects the algorithm; `s.tint` is the `[r,g,b]` additive colour; `s.t` is the animation phase for Breathing mode; `s.cam_rect`/`s.cam_radius`/`s.dim_camera` describe the camera-panel exclusion (see Implementation step 5). *Why a single struct:* all spotlight parameters are authored together and change together as the user moves; passing one struct keeps the function signature stable as new modes are added.
 
 ### Returns
 
@@ -32,8 +44,11 @@ Modifies `out` in place according to `s.mode`, attenuated by `s.dim * s.alpha`.
    - Compute `k = (1.0 - clamp(dim * factor, 0, 1) * t).max(0.0)`. When `k < 1.0`, multiply each of the 3 BGR channels by `k`. *Why not touch alpha:* the frame's alpha channel is used for downstream compositing; modifying it would break the pipeline.
    - **Nebula extra pass**: for `t > 0`, call `add_tint(out, i, s.tint, 0.25 * t)`. *Why 0.25:* a subtle additive tint wash that shifts colour toward the nebula hue without washing out the content.
    - **Halo extra pass**: compute `band = clamp(1 - |dist - r_in| / (oh * 0.02), 0, 1)` for every pixel. When `band > 0`, call `add_tint` at `band` strength. *Why computed for every pixel:* the halo ring sits along `r_in` (the inner lit edge) so pixels both inside and outside the edge contribute to the ring's glow.
+5. **Camera-keep pass** (only when `s.dim_camera` is `false`): before any of the above modifies the pixel, snapshot its pre-dim BGR value (`pre`). After the mode-specific dim/tint passes run, compute `cov = rrect_cov(x, y, s.cam_rect.mn, s.cam_rect.mx, s.cam_radius)` and blend `out[i+c] = out[i+c] + (pre[c] - out[i+c]) * cov` per channel - i.e. `mix(dimmed, pre, cov)`, undoing the dim (and any tint just applied) in proportion to how far inside the camera's rounded rect the pixel is. *Why snapshot per-pixel rather than a second full pass:* avoids a second `ow*oh` loop and keeps the exact per-pixel `pre` value regardless of which mode ran, mirroring `fx.wgsl`'s `let pre_spot = color;` snapshot exactly.
 
 ### Behaviors
 
 - `vignette_dims_corner_not_center` - a uniform 200-valued frame with `Vignette` mode has a lower byte value at the corner pixel than at the centre pixel.
 - `halo_tints_the_ring_edge` - a `Halo` spotlight with a blue-purple tint paints at least one pixel with B > 40 (additive blue at the ring edge).
+- `dim_camera_false_keeps_camera_rect_lit` - with `dim_camera = false` and a cam rect far from the spotlight center, the cam rect's *center* pixel (not its bounding-box corner - see `rrect_cov`) stays at full brightness (200) despite being outside the lit spotlight zone.
+- `dim_camera_true_dims_the_camera_rect_too` - the same setup with `dim_camera = true` dims that pixel normally, confirming the exclusion is opt-in and today's behavior (default `true`) is unchanged.

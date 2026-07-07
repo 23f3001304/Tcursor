@@ -56,12 +56,18 @@ Software compositor with no GPU dependency; zero interior state, trivially `Send
 4. Clear `out` and copy `resized` into it.
 5. Draw the camera panel on top of `out` via `draw_panel`; the camera is not subject to zoom.
 
+### draw_panel / rrect_sd_px / blit_ring (Task 9 Part B - software ring mirror)
+
+`draw_panel` (private) resizes `src` into `panel.rect` and alpha-blends it with rounded-rect SDF coverage (same formula as the GPU shader's `rrect_sd`, factored out here as the private `rrect_sd_px(tx, ty, pw, ph, r) -> f32` helper so both the panel-coverage closure and the ring blend share one SDF implementation). When `panel.ring_px > 0.0`, it then calls the private `blit_ring` to stroke a colored band just inside the panel edge, mirroring the WGSL shader's post-camera-mix ring blend pixel-for-pixel: `band = clamp((ring_px + d) / max(ring_px, 1.0), 0, 1)` for pixels with `-ring_px <= d <= 0`, weighted by the panel's own alpha, blended into the BGRA destination bytes (ring_color is RGB; `dst[0]=B, dst[1]=G, dst[2]=R`).
+
 ### Behaviors worth knowing
 
 - `draw_panel` computes a safe opaque inner rectangle (the panel interior, inset by `ceil(radius) + 2` px) whenever `panel.alpha >= 1.0`, and passes it to `blit` as `opaque_inner`. Inside that rect the rounded-box SDF is provably `1.0`, so `blit` skips the sqrt-based coverage math there and forces `a = 1.0` directly - a byte-identical fast path. Pixels outside the inner rect (the antialiased corners/edges) still run the full SDF.
 - `screen_panel_composites_onto_background` (unit test): a 4x4 red screen placed at (2,2) in an 8x8 blue background leaves the corner blue and the panel interior red.
 - `disabled_and_degenerate_panels_do_not_panic` (unit test): a camera panel larger than the output and a disabled screen must not trigger out-of-bounds access or panic.
 - `blit_opaque_inner_skip_is_byte_identical_to_full_sdf` (unit test): blits the same rounded (r=6) opaque panel via `blit` twice - once with the computed `opaque_inner` rect, once with `None` (full SDF everywhere) - and asserts the two output buffers are byte-identical, including the antialiased corners outside the inner rect.
+- `ring_paints_a_band_just_inside_the_camera_edge_and_leaves_center_alone` (unit test): a 20x20 square camera panel with a 3px red ring over a green webcam source - the pixel row/column just inside the edge is strongly ring-tinted (antialiased, not pure - matching the SDF feathering everywhere else in this file) while the panel center stays untouched green.
+- `zero_ring_px_leaves_panel_byte_identical_to_no_ring_field` (unit test): `ring_px: 0.0` with a non-black `ring_color` set produces byte-identical output to a panel with no ring fields touched at all - proves the ring never activates on the sentinel value regardless of color.
 
 ## select_compositor
 

@@ -5,7 +5,7 @@ The preview stage: a vertical frame-tool strip (`StageToolbar`) on the left and 
 ## Stage
 
 ```tsx
-export function Stage({ src, webcamSrc, track, layout, clicks, bgUrl, cursorSprites, cursorKinds, cursor, effects, clickfx, audioSrc, muted, timeMs, playing, onTime, onDuration, onZoomAt }): JSX.Element
+export function Stage({ src, webcamSrc, track, layout, layoutPresets, layoutSegs, cameraMoves, clicks, bgUrl, cursorSprites, cursorKinds, cursor, effects, clickfx, audioSrc, muted, timeMs, playing, moveMode, applyOp, onTime, onDuration, onZoomAt }): JSX.Element
 ```
 
 Composites and shows the current preview frame, driven by the native `<video>`'s clock while playing and by `timeMs` while paused.
@@ -16,6 +16,8 @@ Composites and shows the current preview frame, driven by the native `<video>`'s
 - `webcamSrc: string` - the webcam video URL, drawn as the PiP panel (or `""`).
 - `track: CamSample[]` - the exact camera curve; `camAt` interpolates it at the current time to drive the zoom + cursor position.
 - `layout: PreviewLayout | null` - the export framing (screen rect + radius + webcam rect) as fractions of the canvas; `null` falls back to an inset.
+- `layoutPresets: LayoutPresets | null` / `layoutSegs: LayoutSeg[]` - all 5 layout presets' panel rects and `doc.layout`'s segments, so the preview cross-fades across layout-segment boundaries itself (`layoutAt`) instead of only showing the single static `layout` above.
+- `cameraMoves: CameraMove[]` - `doc.camera_moves`; when non-empty, `camMoveAt` overrides the resolved layout's webcam rect each frame (position + size only - radius/alpha stay as resolved), so the preview PiP follows the same track the export does. Empty is a no-op (byte-identical to before the feature existed). A single (or first) keyframe animates in from the webcam's static pose over `[0, first.t_ms]` rather than holding flat, via `camMoveAt`'s `staticPose` argument (derived from `baseLayout.cam`) - mirrors the export's `step_camera`/`static_cam_pose`.
 - `clicks: ClickSample[]` - the mouse-down track, drawn as expanding ripples mapped through the zoom crop.
 - `bgUrl: string` - the export background as a data URL, decoded once into an `<img>` the canvas draws under the screen.
 - `cursorSprites: CursorSpriteDto[]` / `cursorKinds: CursorKindSample[]` / `cursor: CursorSettings` - the Capitaine sprite pack, the cursor-shape track, and the recording's cursor settings, so the preview draws the real export cursor (Enhanced style only).
@@ -24,6 +26,8 @@ Composites and shows the current preview frame, driven by the native `<video>`'s
 - `audioSrc: string` / `muted: boolean` - the mixed preview-audio URL played by a hidden `<audio>`, and the mute toggle.
 - `timeMs: number` - the playhead; while paused it seeks the videos, while playing the video's own clock drives the frame.
 - `playing: boolean` - play/pause; starts/stops the `<video>`/`<audio>` elements.
+- `moveMode: boolean` - "Move in preview" (`CameraPanel`'s toggle). When on, renders the `.e-camdrag` drag handle over the current PiP rect so the user can drag the webcam directly in the preview.
+- `applyOp: (op: EditOp) => Promise<EditDoc | null>` - the shared edit-op applier (from `Editor.tsx`); the drag handle uses it (via `commitCamKeyframe`) to write/update a `camera_moves` keyframe at the playhead on pointer-up.
 - `onTime: (ms: number) => void` - reports the video's current time while playing (the editor's playhead source of truth), throttled to ~16fps since it re-renders the whole editor tree; the canvas itself stays 60fps.
 - `onDuration: (ms: number) => void` - reports the `<video>`'s true duration once metadata loads (the encoded length can differ from the seeded timeline span).
 - `onZoomAt: (x: number, y: number) => void` - called with a 0..1 screen-content point when the canvas is clicked, so the editor adds a zoom focused there.
@@ -41,6 +45,8 @@ Composites and shows the current preview frame, driven by the native `<video>`'s
 **Raw→proxy swap.** `onLoadedMetadata` reports the duration, restores `currentTime` from the ref, and resumes playback if it was playing - so swapping `src` from the raw capture to the proxy doesn't snap the playhead to 0.
 
 **Click-to-zoom (`onCanvasClick`).** Delegates to `mapCanvasClickToZoomTarget` (`zoomTargetMapper.ts`), which un-projects the click through the current whole-frame zoom crop back to a 0..1 screen-content fraction, then calls `onZoomAt`. Clicks outside the screen rect (on the background or PiP) are ignored (`null`).
+
+**Move-mode drag (`onHandlePointerDown` + the `dragPose` effect).** When `moveMode` is on and a camera panel is resolved this frame, an `.e-camdrag` handle renders over the PiP rect (`pipRect`, computed the same way `useCompositeLoop` computes `frameLayout.cam`: `layoutAt` -> `camMoveAt`/the static rect -> `rectFromCenter`, in fractions of `.e-stage`, whose box IS the canvas' own displayed rect - no letterbox math needed for CSS placement). Pointer-down on the handle captures the existing keyframe's size (or `0.25` if none), maps the pointer to a plain frame fraction via `mapPointerToCamFraction` (`camDragMapper.ts` - no zoom un-projection, unlike `onCanvasClick`, since the PiP is the fixed top layer), and writes the pose into `dragPoseRef` (read every frame by `useCompositeLoop`, live feedback with zero backend calls) plus `dragPose` (React state, repositions the handle itself). Window `pointermove`/`pointerup` listeners (mirroring `CameraLane`'s drag lifecycle) continue the drag even off the small handle; on release, `commitCamKeyframe` (`camKeyframeAt.ts`) updates the keyframe within the snap window or adds a new one at the (rounded) playhead, then both the ref and state clear back to `null` so the sampled/static pose shows through again.
 
 **Frame-tool strip.** `<StageToolbar />` - four icon buttons (aspect ratio, cursor, captions, 3D camera), decorative stubs for now.
 

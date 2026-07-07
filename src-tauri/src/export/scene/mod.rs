@@ -6,8 +6,9 @@ use crate::export::types::{Layout, OverlayLayout, OverlayPos, OverlayShape, Rect
 /// One composited panel: a rounded rectangle (a circle is `radius = min(w,h)/2`)
 /// with `alpha` in 0..1 for cross-dissolve (0 = absent). Both the screen panel and
 /// the camera panel are `Panel`s, drawn with the same rounded-rect coverage.
+/// `ring_px`/`ring_color` are only ever set on the camera panel (0/`[0,0,0]` = no ring).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Panel { pub rect: RectF, pub radius: f32, pub alpha: f32 }
+pub struct Panel { pub rect: RectF, pub radius: f32, pub alpha: f32, pub ring_px: f32, pub ring_color: [u8; 3] }
 
 /// The two panels of a frame: the screen (zoomed base layer) + the camera (fixed top layer).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -18,7 +19,13 @@ fn lr(a: RectF, b: RectF, t: f32) -> RectF {
     RectF { x: lf(a.x, b.x, t), y: lf(a.y, b.y, t), w: lf(a.w, b.w, t), h: lf(a.h, b.h, t) }
 }
 fn lp(a: Panel, b: Panel, t: f32) -> Panel {
-    Panel { rect: lr(a.rect, b.rect, t), radius: lf(a.radius, b.radius, t), alpha: lf(a.alpha, b.alpha, t) }
+    // Ring color doesn't interpolate (RGB lerp mid-transition would look muddy); it snaps to `b`'s
+    // color once the ring has any width, matching how `shape`/`pos` are also never blended - only
+    // continuous numeric fields (rect/radius/alpha/ring width) cross-fade.
+    Panel {
+        rect: lr(a.rect, b.rect, t), radius: lf(a.radius, b.radius, t), alpha: lf(a.alpha, b.alpha, t),
+        ring_px: lf(a.ring_px, b.ring_px, t), ring_color: if t < 0.5 { a.ring_color } else { b.ring_color },
+    }
 }
 
 fn smoothstep(t: f32) -> f32 { t * t * (3.0 - 2.0 * t) }
@@ -31,7 +38,10 @@ pub fn shrink_camera(panel: Panel, scale: f32, target_scale: f32, min: f32) -> P
     let m = 1.0 + (min.clamp(0.1, 1.0) - 1.0) * smoothstep(z);
     let (cx, cy) = (panel.rect.x + panel.rect.w / 2.0, panel.rect.y + panel.rect.h / 2.0);
     let (w, h) = (panel.rect.w * m, panel.rect.h * m);
-    Panel { rect: RectF { x: cx - w / 2.0, y: cy - h / 2.0, w, h }, radius: panel.radius * m, alpha: panel.alpha }
+    Panel {
+        rect: RectF { x: cx - w / 2.0, y: cy - h / 2.0, w, h }, radius: panel.radius * m, alpha: panel.alpha,
+        ring_px: panel.ring_px * m, ring_color: panel.ring_color,
+    }
 }
 
 /// Convert a sampled `CamPose` (center x/y + height, all fractions of the output frame) into
@@ -40,6 +50,18 @@ pub fn shrink_camera(panel: Panel, scale: f32, target_scale: f32, min: f32) -> P
 pub fn rect_from_center(p: CamPose, ow: f32, oh: f32) -> RectF {
     let h = p.size * oh;
     RectF { x: p.x * ow - h / 2.0, y: p.y * oh - h / 2.0, w: h, h }
+}
+
+/// Apply a `camera_moves` keyframe override to `panel`: replace its rect with the sampled
+/// pose (via `rect_from_center`) AND scale `radius` by the height ratio, so a circle
+/// (`radius == min(w,h)/2` at the static size) stays a true circle after a keyframe
+/// grows/shrinks the panel instead of distorting toward the STATIC radius. Ring width
+/// scales the same way (matches `shrink_camera`'s treatment), for the same reason.
+pub fn override_camera(panel: Panel, p: CamPose, ow: f32, oh: f32) -> Panel {
+    let old_h = panel.rect.h.max(0.001);
+    let rect = rect_from_center(p, ow, oh);
+    let m = rect.h / old_h;
+    Panel { rect, radius: panel.radius * m, ring_px: panel.ring_px * m, ..panel }
 }
 
 impl Scene {
@@ -54,17 +76,19 @@ fn centered_square(layout: &Layout, s: f32) -> RectF {
 }
 
 /// The webcam bubble rect for a corner position + per-axis margins (output px).
+/// Width comes from `ov.width_px` (== `size_px` unless `cam_aspect` is Wide) so the
+/// panel can be wider than tall without affecting the height-driven `cam_size`.
 fn bubble_rect(ov: &OverlayLayout, ow: f32, oh: f32) -> RectF {
-    let s = ov.size_px as f32;
+    let (w, h) = (ov.width_px as f32, ov.size_px as f32);
     let (mx, my) = (ov.margin_x_px as f32, ov.margin_y_px as f32);
     let (x, y) = match ov.pos {
-        OverlayPos::BottomLeft => (mx, oh - s - my),
-        OverlayPos::BottomRight => (ow - s - mx, oh - s - my),
+        OverlayPos::BottomLeft => (mx, oh - h - my),
+        OverlayPos::BottomRight => (ow - w - mx, oh - h - my),
         OverlayPos::TopLeft => (mx, my),
-        OverlayPos::TopRight => (ow - s - mx, my),
+        OverlayPos::TopRight => (ow - w - mx, my),
         OverlayPos::Custom { x, y } => (x as f32, y as f32),
     };
-    RectF { x, y, w: s, h: s }
+    RectF { x, y, w, h }
 }
 
 /// Corner radius for a camera panel of size `w` x `h` given its shape.
@@ -93,10 +117,13 @@ pub fn resolve(id: LayoutId, layout: &Layout, overlay: &OverlayLayout, sw: u32, 
     let small_h = small_w * sh.max(1) as f32 / sw.max(1) as f32;
     let small_screen = RectF { x: overlay.margin_x_px as f32, y: oh - small_h - overlay.margin_y_px as f32, w: small_w, h: small_h };
     let small_r = corner_radius(layout, small_w as u32, small_h as u32);
-    let pan = |rect, radius, alpha| Panel { rect, radius, alpha };
+    // Screen panel never has a ring; camera panel carries `overlay.ring_px`/`ring_color` (0/black
+    // when `cam_ring` is unset, so the shader's `ring.x > 0.0` gate stays closed by default).
+    let pan = |rect, radius, alpha| Panel { rect, radius, alpha, ring_px: 0.0, ring_color: [0, 0, 0] };
+    let cam_pan = |rect, radius, alpha| Panel { rect, radius, alpha, ring_px: overlay.ring_px as f32, ring_color: overlay.ring_color };
     match id {
-        LayoutId::Screen => Scene { screen: pan(inset, inset_r, 1.0), camera: pan(bubble, bubble_r, 1.0) },
-        LayoutId::Camera => Scene { screen: pan(small_screen, small_r, 1.0), camera: pan(big_cam, big_r, 1.0) },
+        LayoutId::Screen => Scene { screen: pan(inset, inset_r, 1.0), camera: cam_pan(bubble, bubble_r, 1.0) },
+        LayoutId::Camera => Scene { screen: pan(small_screen, small_r, 1.0), camera: cam_pan(big_cam, big_r, 1.0) },
         LayoutId::Presenter => {
             let gap = pad;
             let col = (ow - 2.0 * pad - gap) / 2.0;
@@ -106,10 +133,10 @@ pub fn resolve(id: LayoutId, layout: &Layout, overlay: &OverlayLayout, sw: u32, 
             let sa = sw.max(1) as f32 / sh.max(1) as f32;
             let (rw, rh) = if col / avail_h > sa { (avail_h * sa, avail_h) } else { (col, col / sa) };
             let scr = RectF { x: pad + col + gap + (col - rw) / 2.0, y: (oh - rh) / 2.0, w: rw, h: rh };
-            Scene { screen: pan(scr, corner_radius(layout, rw as u32, rh as u32), 1.0), camera: pan(cam, panel_radius(overlay.shape, cam_side, cam_side), 1.0) }
+            Scene { screen: pan(scr, corner_radius(layout, rw as u32, rh as u32), 1.0), camera: cam_pan(cam, panel_radius(overlay.shape, cam_side, cam_side), 1.0) }
         }
-        LayoutId::ScreenOnly => Scene { screen: pan(inset, inset_r, 1.0), camera: pan(bubble, bubble_r, 0.0) },
-        LayoutId::CameraOnly => Scene { screen: pan(inset, inset_r, 0.0), camera: pan(big_cam, big_r, 1.0) },
+        LayoutId::ScreenOnly => Scene { screen: pan(inset, inset_r, 1.0), camera: cam_pan(bubble, bubble_r, 0.0) },
+        LayoutId::CameraOnly => Scene { screen: pan(inset, inset_r, 0.0), camera: cam_pan(big_cam, big_r, 1.0) },
     }
 }
 

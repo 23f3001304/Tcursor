@@ -14,16 +14,8 @@ Constant output frame rate (60 fps). Defined here so both `exporter.rs` and futu
 
 ```rust
 pub struct RenderMeta {
-    pub tl: Timeline,
-    pub video_start: u64,
-    pub video_end: u64,
-    pub out_w: u32,
-    pub out_h: u32,
-    pub sw: u32,
-    pub sh: u32,
-    pub screen_bytes: usize,
-    pub webcam_size: u32,
-    pub audio_offset_ms: i32,
+    pub tl: Timeline, pub video_start: u64, pub video_end: u64, pub out_w: u32, pub out_h: u32,
+    pub sw: u32, pub sh: u32, pub screen_bytes: usize, pub webcam_size: u32, pub audio_offset_ms: i32,
 }
 ```
 
@@ -47,12 +39,7 @@ All information the export (or preview) loop needs to set up its raw decoders an
 ## FramePose
 
 ```rust
-pub struct FramePose {
-    pub ev_t: u32,
-    pub scene: Scene,
-    pub cur: FramePoint,
-    pub cam: Camera,
-}
+pub struct FramePose { pub ev_t: u32, pub scene: Scene, pub cur: FramePoint, pub cam: Camera }
 ```
 
 The resolved camera and scene for one output frame, returned by `step_camera` and passed unchanged to `composite_at`. Grouping these four values as a struct avoids passing them as separate arguments and lets the preview engine inspect the pose (e.g. to know zoom scale) without compositing.
@@ -150,17 +137,20 @@ Advances the camera simulation to output time `t` and returns the resolved pose.
 
 Replicates `Cursor::at` inline (index advance + exponential low-pass at `A=0.35`) using owned event data, because `FrameRenderer` owns the event log and cannot hold a `Cursor<'a>` that borrows from itself. Cursor and `LayoutTrack::scene_at` sample at the event-relative `ev_t = t - events_ms`; `CameraSim::step` is then called at the output-time `out_t = t - video_start` (zoom regions are stored in output time), followed by the CameraOnly identity override (`scene.screen.alpha < 0.5`) and `shrink_camera` when enabled and the screen panel is dominant.
 
-**`camera_moves` override (Task 4):** right after `scene` is resolved and `out_t` is computed, `step_camera` samples `self.cam_moves` (a `CameraMoveTrack` built once from `doc.camera_moves` in `EditState::load`, refreshed by both `FrameRenderer::new` and `reload_edit`):
+**`camera_moves` override (Task 4; radius/ring fix in Task 9 Part C; implicit start keyframe below):** right after `scene` is resolved and `out_t` is computed, `step_camera` derives the pre-override static pose from the just-resolved `scene.camera.rect` and samples `self.cam_moves` (a `CameraMoveTrack` built once from `doc.camera_moves` in `EditState::load`, refreshed by both `FrameRenderer::new` and `reload_edit`) with it:
 
 ```rust
-if let Some(p) = self.cam_moves.sample(out_t) {
-    scene.camera.rect = crate::export::scene::rect_from_center(p, self.layout.out_w as f32, self.layout.out_h as f32);
+let (ow, oh) = (self.layout.out_w as f32, self.layout.out_h as f32);
+let sp = Some(static_cam_pose(scene.camera.rect, ow, oh));
+if let Some(p) = self.cam_moves.sample(out_t, sp) {
+    scene.camera = crate::export::scene::override_camera(scene.camera, p, ow, oh);
 }
 ```
 
-- `CameraMoveTrack::sample(out_t) -> Option<CamPose>` (`export/camera/moves.rs`) - `None` for an empty track, which is the seeded-doc default, so this block never runs and the scene's camera rect is exactly whatever `overlay_for`/`resolve` produced (byte-identical to pre-Task-4 behavior).
-- `rect_from_center(p: CamPose, ow: f32, oh: f32) -> RectF` (`export/scene/mod.rs`) - converts the sampled center-based pose into the panel's top-left `RectF`: height `h = p.size * oh`, width `w = h` (square; the mode's aspect ratio arrives in Task 9), top-left `x = p.x * ow - w/2`, `y = p.y * oh - h/2`.
-- Only `scene.camera.rect` is overridden - `radius`/`alpha` stay whatever the static resolve already set. The override runs before the `camera_shrink` block below it, so an in-flight zoom-shrink composes on top of the overridden rect's center, same as it would on top of the static one.
+- `static_cam_pose(rect, ow, oh) -> CamPose` (`export/camera/mod.rs`) - the inverse of `rect_from_center`: converts the RESOLVED (un-overridden) camera panel's rect into a `CamPose` (center x/y + height fraction), the "what the webcam would show with zero `camera_moves`" pose.
+- `CameraMoveTrack::sample(out_t, static_pose) -> Option<CamPose>` (`export/camera/moves.rs`) - `None` for an empty track, which is the seeded-doc default, so this block never runs and the scene's camera panel is exactly whatever `overlay_for`/`resolve` produced (byte-identical to pre-Task-4 behavior). With exactly one keyframe (or querying at/before the first of several), `sample` treats `static_pose` as an implicit keyframe at `t=0` and eases FROM it INTO the first real keyframe over `[0, first.t_ms]` using that keyframe's own easing - so a single `camera_moves` keyframe animates the webcam in from its static resting pose instead of freezing there for the whole clip.
+- `override_camera(panel: Panel, p: CamPose, ow: f32, oh: f32) -> Panel` (`export/scene/mod.rs`) - replaces `scene.camera` wholesale (not just its rect): the new rect comes from `rect_from_center` (height `h = p.size * oh`, width `w = h` - square; the PiP's `cam_aspect` only affects the STATIC `resolve` path, not a camera_moves override), and `radius`/`ring_px` are scaled by the height ratio `new_h / old_h.max(0.001)` so a circle panel (`radius == min(w,h)/2` at its static size) stays a true circle instead of distorting toward the pre-override radius - the bug this Task 9 Part C fix corrects. `alpha`/`ring_color` are carried over unchanged.
+- The override runs before the `camera_shrink` block below it, so an in-flight zoom-shrink composes on top of the overridden panel's center/radius, same as it would on top of the static one.
 - Uses the same `ow`/`oh` (`self.layout.out_w`/`out_h`, `f32`) already in scope for the surrounding per-frame math - no separate output-dimension lookup.
 
 ## FrameRenderer::composite_at

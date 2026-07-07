@@ -47,9 +47,11 @@ pub fn camera_track(folder: String, session: tauri::State<'_, PreviewSession>) -
 }
 
 /// The static preview layout - screen rect + corner radius + webcam rect, as fractions of the
-/// output - so the canvas preview frames the screen and webcam exactly like the export.
+/// output - so the canvas preview frames the screen and webcam exactly like the export. `cam`'s
+/// last 4 entries are the camera panel's ring: width (fraction of output width, 0 = no ring)
+/// then RGB 0..255, mirroring how `Panel::ring_px`/`ring_color` ride alongside its rect/radius.
 #[derive(serde::Serialize)]
-pub struct PreviewLayout { pub screen: [f32; 4], pub radius: f32, pub cam: Option<[f32; 5]> }
+pub struct PreviewLayout { pub screen: [f32; 4], pub radius: f32, pub cam: Option<[f32; 9]> }
 
 #[tauri::command]
 pub fn preview_layout(folder: String, session: tauri::State<'_, PreviewSession>) -> Result<PreviewLayout, String> {
@@ -59,8 +61,10 @@ pub fn preview_layout(folder: String, session: tauri::State<'_, PreviewSession>)
         let (ow, oh) = (c.out_w as f32, c.out_h as f32);
         let s = pose.scene.screen.rect;
         let cam = if pose.scene.camera.alpha > 0.5 {
-            let r = pose.scene.camera.rect;
-            Some([r.x / ow, r.y / oh, r.w / ow, r.h / oh, pose.scene.camera.radius / ow])
+            let cp = pose.scene.camera;
+            let [rr, rg, rb] = cp.ring_color;
+            Some([cp.rect.x / ow, cp.rect.y / oh, cp.rect.w / ow, cp.rect.h / oh, cp.radius / ow,
+                cp.ring_px / ow, rr as f32, rg as f32, rb as f32])
         } else { None };
         Ok(PreviewLayout { screen: [s.x / ow, s.y / oh, s.w / ow, s.h / oh], radius: pose.scene.screen.radius / ow, cam })
     })

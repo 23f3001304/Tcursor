@@ -1,9 +1,10 @@
 import { useEffect, useRef, type RefObject } from "react";
 import type { CamSample, ClickSample, PreviewLayout, CursorKindSample, LayoutPresets } from "../../lib/ipc";
-import type { ClickFxSettings, CursorSettings } from "../../hud/settings/settings";
-import type { CameraMove, EffectRegion, LayoutSeg } from "../../lib/edit";
+import type { ClickFxSettings, CursorSettings, ZoomSettings } from "../../hud/settings/settings";
+import type { CameraMove, EffectRegion, LayoutSeg, Zoom } from "../../lib/edit";
 import { camAt } from "../stage/camera";
-import { camMoveAt, overrideCamPanel, type CamPose } from "../stage/cameraMoves";
+import { type CamPose } from "../stage/cameraMoves";
+import { frameCamLayout } from "../stage/frameCam";
 import { drawPreview } from "../stage/previewCanvas";
 import { requestFxOverlay, type FxCamRect } from "../stage/fxOverlay";
 import { resolveSpotlight, newSpotlightSimState } from "../stage/spotlightPreview";
@@ -28,7 +29,7 @@ const FX_SCALE = 0.5; // internal render resolution factor vs the canvas; blit u
 export function useCompositeLoop({
   screenRef, webcamRef, audioRef, canvasRef,
   playRef, timeRef, onTimeRef,
-  trackRef, layoutRef, layoutPresetsRef, layoutSegsRef, cameraMovesRef, dragPoseRef, clicksRef, effectsRef, clickfxRef, kindsRef, cursorRef,
+  trackRef, layoutRef, layoutPresetsRef, layoutSegsRef, cameraMovesRef, zoomsRef, zoomSettingsRef, dragPoseRef, clicksRef, effectsRef, clickfxRef, kindsRef, cursorRef,
   spritesRef, trailRef, dirtyRef, bgImgRef,
 }: {
   screenRef: RefObject<HTMLVideoElement | null>;
@@ -43,6 +44,8 @@ export function useCompositeLoop({
   layoutPresetsRef: RefObject<LayoutPresets | null>;
   layoutSegsRef: RefObject<LayoutSeg[]>;
   cameraMovesRef: RefObject<CameraMove[]>;
+  zoomsRef: RefObject<Zoom[]>;
+  zoomSettingsRef: RefObject<ZoomSettings>;
   dragPoseRef: RefObject<CamPose | null>;
   clicksRef: RefObject<ClickSample[]>;
   effectsRef: RefObject<EffectRegion[]>;
@@ -89,24 +92,10 @@ export function useCompositeLoop({
             // boundary); falls back to the static layout when presets haven't loaded or there
             // are no segments. Used for both the base draw below and the FX screen-rect math.
             const baseLayout = layoutAt(layoutSegsRef.current, layoutPresetsRef.current, t) ?? layoutRef.current;
-            // camera_moves override: when the track is non-empty AND a camera panel is resolved
-            // this frame, replace its rect/radius/ring-width with the sampled pose via
-            // overrideCamPanel (mirrors Rust's `override_camera`, Task 9 Part C: same ow/oh px
-            // space - the canvas's fixed 1280x720 backing store - radius AND ring scale by the
-            // height ratio so both stay proportional instead of distorting on resize; ring color
-            // + alpha are untouched). Empty track / no camera panel this frame: leave as-is. Mid-
-            // drag (Move mode), dragPoseRef's live pointer pose takes precedence over the sampled
-            // track - the PiP tracks the pointer without writing to the backend every frame; the
-            // drag commits a real keyframe only on release. `staticPose` (from baseLayout.cam) is the
-            // implicit t=0 keyframe a lone camera_moves keyframe eases in from (mirrors step_camera).
-            const staticPose = baseLayout?.cam
-              ? { x: baseLayout.cam[0] + baseLayout.cam[2] / 2, y: baseLayout.cam[1] + baseLayout.cam[3] / 2, size: baseLayout.cam[3] }
-              : null;
-            const cp = dragPoseRef.current ?? camMoveAt(cameraMovesRef.current, t, staticPose);
-            let frameLayout = baseLayout;
-            if (cp && baseLayout?.cam) {
-              frameLayout = { ...baseLayout, cam: overrideCamPanel(baseLayout.cam, cp, c.width, c.height) };
-            }
+            // What drives the webcam PiP this frame (keyframe/drag override, else the smart
+            // zoom action) - see frameCamLayout, which mirrors step_camera's ordering.
+            const frameLayout = frameCamLayout(baseLayout, t, cam.scale, cameraMovesRef.current,
+              dragPoseRef.current, zoomsRef.current, zoomSettingsRef.current, c.width, c.height);
             // Draw the base frame (background + screen + webcam + cursor) WITHOUT FX
             if (!offscreenRef.current) offscreenRef.current = document.createElement("canvas");
             drawPreview(ctx, c.width, c.height, sv, webcamRef.current, cam,

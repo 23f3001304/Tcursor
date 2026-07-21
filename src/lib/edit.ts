@@ -2,6 +2,11 @@ import type { Settings } from "../hud/settings/settings";
 
 export type ZoomTarget = "cursor" | { fixed: { x: number; y: number } };
 
+// Defined next to ZoomSettings (mirroring Rust, where it lives in settings::model) and
+// re-exported here so edit-doc consumers can import it alongside Zoom.
+export type { CamZoomAction } from "../hud/settings/settings";
+import type { CamZoomAction } from "../hud/settings/settings";
+
 export interface Zoom {
   id: string;
   start_ms: number;
@@ -12,6 +17,8 @@ export interface Zoom {
   zoom_in_ms: number;
   zoom_out_ms: number;
   layer: number;
+  /** Per-zoom webcam override; absent = inherit the global default. */
+  cam_action?: CamZoomAction | null;
 }
 
 export interface Cut { start_ms: number; end_ms: number }
@@ -39,6 +46,7 @@ export type EditOp =
   | { op: "add_zoom_full"; at_ms: number; dur_ms: number; scale: number }
   | { op: "update_zoom"; id: string; start_ms?: number; end_ms?: number; scale?: number; target?: ZoomTarget; easing?: string; zoom_in_ms?: number; zoom_out_ms?: number; layer?: number }
   | { op: "remove_zoom"; id: string }
+  | { op: "set_zoom_cam_action"; id: string; action: CamZoomAction | null }
   | { op: "set_trim"; in_ms: number; out_ms: number }
   | { op: "add_cut"; start_ms: number; end_ms: number }
   | { op: "set_speed"; start_ms: number; end_ms: number; factor: number }

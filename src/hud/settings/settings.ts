@@ -19,7 +19,11 @@ export interface CursorSettings { style: CursorStyle; size: number; motion_blur:
 export type ClickFxStyle = "none" | "ripple" | "pulse" | "glow" | "shockwave" | "particles" | "neon";
 export type SpotlightMode = "classic" | "blur" | "halo" | "breathing" | "nebula" | "vignette";
 export type VideoFxMode = "nebulawash" | "cinematicdim" | "screenfocus" | "colorpop";
-export interface ZoomSettings { enabled: boolean; target_scale: number; hold_ms: number; smoothness: number; clicks: number; camera_shrink: boolean; camera_shrink_min: number; smart_hold: boolean; smart_follow: boolean }
+/** What the webcam PiP does while a zoom is active. Wire form of Rust's `CamZoomAction`
+ *  (settings/model.rs): serde's externally-tagged encoding gives `{shrink:{to}}` for the struct
+ *  variant and bare `"hide"`/`"stay"` for the unit ones. */
+export type CamZoomAction = { shrink: { to: number } } | "hide" | "stay";
+export interface ZoomSettings { enabled: boolean; target_scale: number; hold_ms: number; smoothness: number; clicks: number; camera_shrink: boolean; camera_shrink_min: number; smart_hold: boolean; smart_follow: boolean; cam_zoom_default?: CamZoomAction | null }
 export interface ClickFxSettings { enabled: boolean; style: ClickFxStyle; color: [number, number, number]; intensity: number; captions: boolean; spotlight: boolean; spotlight_dim: number; spotlight_radius: number; spotlight_feather: number; spotlight_mode: SpotlightMode; spotlight_tint: [number, number, number]; video_fx_mode: VideoFxMode; spotlight_dim_camera: boolean }
 export interface HotkeySettings {
   zoom_hold: string; layout_screen: string; layout_camera: string;

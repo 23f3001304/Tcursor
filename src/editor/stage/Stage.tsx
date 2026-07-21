@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import type { CamSample, ClickSample, CursorSpriteDto, CursorKindSample, PreviewLayout, LayoutPresets } from "../../lib/ipc";
-import type { CursorSettings, ClickFxSettings } from "../../hud/settings/settings";
-import type { CameraMove, EffectRegion, LayoutSeg } from "../../lib/edit";
+import type { CursorSettings, ClickFxSettings, ZoomSettings } from "../../hud/settings/settings";
+import type { CameraMove, EffectRegion, LayoutSeg, Zoom } from "../../lib/edit";
 import { camAt } from "./camera";
 import { camMoveAt, rectFromCenter, type CamPose } from "./cameraMoves";
 import { mapPointerToCamFraction } from "./camDragMapper";
@@ -22,9 +22,10 @@ const CANVAS_W = 1280, CANVAS_H = 720; // fixed output backing store - same basi
  *  native <video>s, and each animation frame is composited onto a 2D canvas (background +
  *  rounded zoomed screen + webcam PiP) via drawPreview. The zoom comes from the exact
  *  camera_track curve. Native decode + Canvas2D drawImage = 60fps. */
-export function Stage({ src, webcamSrc, track, layout, layoutPresets, layoutSegs, cameraMoves, clicks, bgUrl, cursorSprites, cursorKinds, cursor, effects, clickfx, audioSrc, muted, timeMs, playing, moveMode, camDraftRef, onTime, onDuration, onZoomAt }: {
+export function Stage({ src, webcamSrc, track, layout, layoutPresets, layoutSegs, cameraMoves, zooms, zoomSettings, clicks, bgUrl, cursorSprites, cursorKinds, cursor, effects, clickfx, audioSrc, muted, timeMs, playing, moveMode, camDraftRef, onTime, onDuration, onZoomAt }: {
   src: string; webcamSrc: string; track: CamSample[]; layout: PreviewLayout | null;
   layoutPresets: LayoutPresets | null; layoutSegs: LayoutSeg[]; cameraMoves: CameraMove[];
+  zooms: Zoom[]; zoomSettings: ZoomSettings;
   clicks: ClickSample[]; bgUrl: string;
   cursorSprites: CursorSpriteDto[]; cursorKinds: CursorKindSample[]; cursor: CursorSettings;
   effects: EffectRegion[]; clickfx: ClickFxSettings;
@@ -62,6 +63,9 @@ export function Stage({ src, webcamSrc, track, layout, layoutPresets, layoutSegs
   const layoutPresetsRef = useRef(layoutPresets); layoutPresetsRef.current = layoutPresets;
   const layoutSegsRef = useRef(layoutSegs); layoutSegsRef.current = layoutSegs;
   const cameraMovesRef = useRef(cameraMoves); cameraMovesRef.current = cameraMoves;
+  // Zooms + zoom settings drive the smart webcam-on-zoom action (mirrors step_camera).
+  const zoomsRef = useRef(zooms); zoomsRef.current = zooms;
+  const zoomSettingsRef = useRef(zoomSettings); zoomSettingsRef.current = zoomSettings;
   // camDraftRef (lifted to Editor, shared with CameraPanel's save button) holds the UNSAVED Move-
   // mode pose: the loop draws the PiP here when non-null. Dragging updates it live but does NOT
   // commit a keyframe - only the panel's Update/Add button saves it, and moving the playhead
@@ -73,7 +77,7 @@ export function Stage({ src, webcamSrc, track, layout, layoutPresets, layoutSegs
 
   // Mark the canvas dirty on any draw-affecting change so the PAUSED rAF recomposites exactly once
   // per change instead of redrawing the same static frame at 60fps (the idle/interaction-lag fix).
-  useEffect(() => { dirtyRef.current = true; }, [timeMs, playing, track, layout, layoutPresets, layoutSegs, cameraMoves, clicks, effects, cursor, clickfx, cursorKinds]);
+  useEffect(() => { dirtyRef.current = true; }, [timeMs, playing, track, layout, layoutPresets, layoutSegs, cameraMoves, zooms, zoomSettings, clicks, effects, cursor, clickfx, cursorKinds]);
   // Moving the playhead discards the unsaved Move-mode draft - the PiP resets to its sampled pose.
   useEffect(() => { camDraftRef.current = null; setDragPose(null); dirtyRef.current = true; }, [timeMs]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -92,7 +96,7 @@ export function Stage({ src, webcamSrc, track, layout, layoutPresets, layoutSegs
   useCompositeLoop({
     screenRef: screen, webcamRef: webcam, audioRef: audio, canvasRef: canvas,
     playRef, timeRef, onTimeRef,
-    trackRef, layoutRef, layoutPresetsRef, layoutSegsRef, cameraMovesRef, dragPoseRef: camDraftRef, clicksRef, effectsRef, clickfxRef, kindsRef, cursorRef,
+    trackRef, layoutRef, layoutPresetsRef, layoutSegsRef, cameraMovesRef, zoomsRef, zoomSettingsRef, dragPoseRef: camDraftRef, clicksRef, effectsRef, clickfxRef, kindsRef, cursorRef,
     spritesRef, trailRef, dirtyRef, bgImgRef: bgImg,
   });
 

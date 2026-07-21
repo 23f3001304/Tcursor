@@ -1,7 +1,8 @@
 use crate::actions::model::LayoutId;
 use crate::export::camera::moves::CamPose;
 use crate::export::coordmap::{corner_radius, inset_rect};
-use crate::export::types::{Layout, OverlayLayout, OverlayPos, OverlayShape, RectF};
+use crate::export::types::{Layout, OverlayLayout, OverlayPos, OverlayShape, RectF, ZoomRegion};
+use crate::settings::model::{CamZoomAction, ZoomSettings};
 
 /// One composited panel: a rounded rectangle (a circle is `radius = min(w,h)/2`)
 /// with `alpha` in 0..1 for cross-dissolve (0 = absent). Both the screen panel and
@@ -30,11 +31,42 @@ fn lp(a: Panel, b: Panel, t: f32) -> Panel {
 
 fn smoothstep(t: f32) -> f32 { t * t * (3.0 - 2.0 * t) }
 
+/// Zoom progress 0..1: 0 at `scale` 1.0, 1 at `target_scale`. Shared by every
+/// `CamZoomAction` so the shrink and the fade ride the exact same curve.
+fn zoom_progress(scale: f32, target_scale: f32) -> f32 {
+    ((scale - 1.0) / (target_scale - 1.0).max(0.001)).clamp(0.0, 1.0)
+}
+
+/// The webcam action in force at output time `out_t`: the highest-`layer` zoom region
+/// containing `out_t` supplies it (the same overlap rule `CameraSim::step` uses to pick a
+/// winner), falling back to the global default when that region inherits or none is active.
+/// Outside every region the zoom scale is 1.0, so the returned default is a no-op anyway.
+pub fn cam_action_at(regions: &[ZoomRegion], zoom: &ZoomSettings, out_t: u32) -> CamZoomAction {
+    regions.iter()
+        .filter(|r| out_t >= r.start_ms && out_t <= r.end_ms)
+        .max_by_key(|r| r.layer)
+        .and_then(|r| r.cam_action)
+        .unwrap_or_else(|| zoom.resolved_cam_action())
+}
+
+/// Apply the resolved webcam-on-zoom action to the camera panel. `Shrink` delegates straight
+/// to `shrink_camera`, so a default-resolved action reproduces the pre-action behavior exactly;
+/// `Hide` fades the panel out on the same smoothstepped progress; `Stay` is the identity.
+pub fn apply_cam_zoom_action(panel: Panel, action: CamZoomAction, scale: f32, target_scale: f32) -> Panel {
+    match action {
+        CamZoomAction::Shrink { to } => shrink_camera(panel, scale, target_scale, to),
+        CamZoomAction::Hide => Panel {
+            alpha: panel.alpha * (1.0 - smoothstep(zoom_progress(scale, target_scale))), ..panel
+        },
+        CamZoomAction::Stay => panel,
+    }
+}
+
 /// Shrink the camera panel toward its center by a factor driven by the zoom scale:
 /// full size at `scale` 1.0, down to `min` at `target_scale` (smoothstepped), so the
 /// webcam stays out of the way during zoom-in and returns on zoom-out.
 pub fn shrink_camera(panel: Panel, scale: f32, target_scale: f32, min: f32) -> Panel {
-    let z = ((scale - 1.0) / (target_scale - 1.0).max(0.001)).clamp(0.0, 1.0);
+    let z = zoom_progress(scale, target_scale);
     let m = 1.0 + (min.clamp(0.1, 1.0) - 1.0) * smoothstep(z);
     let (cx, cy) = (panel.rect.x + panel.rect.w / 2.0, panel.rect.y + panel.rect.h / 2.0);
     let (w, h) = (panel.rect.w * m, panel.rect.h * m);
@@ -143,6 +175,10 @@ pub fn resolve(id: LayoutId, layout: &Layout, overlay: &OverlayLayout, sw: u32, 
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "action_tests.rs"]
+mod action_tests;
 
 pub mod layout;
 pub mod background;

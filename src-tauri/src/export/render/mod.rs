@@ -124,16 +124,23 @@ impl FrameRenderer {
         let out_t = t.saturating_sub(self.video_start) as u32;
         let (ow, oh) = (self.layout.out_w as f32, self.layout.out_h as f32);
         let sp = Some(static_cam_pose(scene.camera.rect, ow, oh)); // implicit t=0 keyframe: the pre-override static pose
-        if let Some(p) = self.cam_moves.sample(out_t, sp) {
-            scene.camera = crate::export::scene::override_camera(scene.camera, p, ow, oh);
-        }
+        // Keyframes win: when `camera_moves` drives the PiP this frame the smart zoom action is
+        // skipped entirely. Previously the shrink still ran ON TOP of an override, so a
+        // hand-keyframed camera was silently scaled down during zooms.
+        let keyframed = match self.cam_moves.sample(out_t, sp) {
+            Some(p) => { scene.camera = crate::export::scene::override_camera(scene.camera, p, ow, oh); true }
+            None => false,
+        };
         let mut cam = self.sim.step(out_t, cur, &self.regions, &self.cfg);
         if scene.screen.alpha < 0.5 {
             cam = Camera { cx: self.layout.out_w as f32 / 2.0, cy: self.layout.out_h as f32 / 2.0, scale: 1.0 };
         }
-        if self.settings.zoom.camera_shrink && scene.camera.rect.w < scene.screen.rect.w {
-            scene.camera = crate::export::scene::shrink_camera(
-                scene.camera, cam.scale, self.cfg.target_scale, self.settings.zoom.camera_shrink_min);
+        // The legacy `camera_shrink` bool is folded into `resolved_cam_action` (toggle off ==
+        // `Stay` == the identity), so it is no longer needed as a separate guard here.
+        if !keyframed && scene.camera.rect.w < scene.screen.rect.w {
+            let action = crate::export::scene::cam_action_at(&self.regions, &self.settings.zoom, out_t);
+            scene.camera = crate::export::scene::apply_cam_zoom_action(
+                scene.camera, action, cam.scale, self.cfg.target_scale);
         }
         FramePose { ev_t, scene, cur, cam }
     }

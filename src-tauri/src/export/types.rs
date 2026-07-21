@@ -26,6 +26,9 @@ impl Default for ZoomConfig {
 pub struct ZoomRegion {
     pub start_ms: u32, pub end_ms: u32, pub zoom_in_ms: u32, pub zoom_out_ms: u32,
     pub target_scale: f32, pub anchor: FramePoint, pub easing: Easing,
+    /// Per-zoom webcam-on-zoom override carried from `Zoom.cam_action`; `None` inherits the
+    /// global default. Ignored by `CameraSim` - only the camera-panel compositing reads it.
+    pub cam_action: Option<crate::settings::model::CamZoomAction>,
     /// Priority when this region overlaps another - higher wins (see `CameraSim::step`).
     pub layer: u32,
 }

@@ -11,7 +11,7 @@ fn sample_doc() -> EditDoc {
         version: 1,
         trim: Trim { in_ms: 100, out_ms: 5000 },
         cuts: vec![Cut { start_ms: 500, end_ms: 1000 }],
-        zooms: vec![Zoom { id: "z1".into(), start_ms: 200, end_ms: 800, target: ZoomTarget::Cursor, scale: 2.2, easing: "ease".into(), zoom_in_ms: 350, zoom_out_ms: 450, layer: 0 }],
+        zooms: vec![Zoom { id: "z1".into(), start_ms: 200, end_ms: 800, target: ZoomTarget::Cursor, scale: 2.2, easing: "ease".into(), zoom_in_ms: 350, zoom_out_ms: 450, layer: 0, cam_action: None }],
         speed: vec![Speed { id: "s1".into(), start_ms: 1000, end_ms: 2000, factor: 2.0 }],
         layout: vec![LayoutSeg { id: "l1".into(), start_ms: 0, end_ms: 5000, layout: "screen".into(), transition_ms: 350, easing: "smooth".into() }],
         effects: vec![],
@@ -95,6 +95,28 @@ fn camera_move_round_trip_save_load() {
     let loaded = EditDoc::load(&p).unwrap();
     assert_eq!(loaded.camera_moves.len(), 1);
     assert_eq!(loaded, doc);
+}
+
+/// Back-compat: a zoom saved before `cam_action` existed loads as `None` (inherit the global
+/// default), AND an unset action is omitted from the JSON entirely - so simply re-saving an
+/// untouched doc does not start writing a new key.
+#[test]
+fn zoom_cam_action_defaults_to_none_and_is_omitted_when_unset() {
+    let json = r#"{"id":"z0","start_ms":0,"end_ms":100,"target":"cursor","scale":2.0,"easing":"smooth"}"#;
+    let z: Zoom = serde_json::from_str(json).unwrap();
+    assert_eq!(z.cam_action, None);
+    let out = serde_json::to_string(&z).unwrap();
+    assert!(!out.contains("cam_action"), "unset action must not be written: {}", out);
+}
+
+#[test]
+fn zoom_cam_action_round_trips_when_set() {
+    use crate::settings::model::CamZoomAction;
+    let mut z: Zoom = serde_json::from_str(
+        r#"{"id":"z0","start_ms":0,"end_ms":100,"target":"cursor","scale":2.0,"easing":"smooth"}"#).unwrap();
+    z.cam_action = Some(CamZoomAction::Shrink { to: 0.4 });
+    let back: Zoom = serde_json::from_str(&serde_json::to_string(&z).unwrap()).unwrap();
+    assert_eq!(back.cam_action, Some(CamZoomAction::Shrink { to: 0.4 }));
 }
 
 #[test]

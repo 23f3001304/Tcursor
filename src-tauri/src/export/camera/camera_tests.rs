@@ -4,7 +4,7 @@ use crate::export::types::{Easing, FramePoint, ZoomConfig, ZoomRegion};
 
 fn region() -> ZoomRegion {
     ZoomRegion { start_ms: 0, end_ms: 2000, zoom_in_ms: 300, zoom_out_ms: 300,
-        target_scale: 2.0, anchor: FramePoint { x: 400, y: 300 }, easing: Easing::Smooth, layer: 0 }
+        target_scale: 2.0, anchor: FramePoint { x: 400, y: 300 }, easing: Easing::Smooth, layer: 0, cam_action: None }
 }
 
 #[test]
@@ -106,9 +106,9 @@ fn handoff_eases_from_current_camera_state_not_frame_center() {
     let cfg = ZoomConfig::default();
     let regions = vec![
         ZoomRegion { start_ms: 0, end_ms: 4000, zoom_in_ms: 300, zoom_out_ms: 300,
-            target_scale: 1.5, anchor: FramePoint { x: 700, y: 500 }, easing: Easing::Smooth, layer: 0 },
+            target_scale: 1.5, anchor: FramePoint { x: 700, y: 500 }, easing: Easing::Smooth, layer: 0, cam_action: None },
         ZoomRegion { start_ms: 2000, end_ms: 3000, zoom_in_ms: 200, zoom_out_ms: 200,
-            target_scale: 2.5, anchor: FramePoint { x: 100, y: 100 }, easing: Easing::Smooth, layer: 1 },
+            target_scale: 2.5, anchor: FramePoint { x: 100, y: 100 }, easing: Easing::Smooth, layer: 1, cam_action: None },
     ];
     let mut before = Camera { cx: 0.0, cy: 0.0, scale: 1.0 };
     for t in (0..2000).step_by(16) {
@@ -127,9 +127,9 @@ fn handoff_reaches_the_new_winners_target_once_its_transition_completes() {
     let cfg = ZoomConfig::default();
     let regions = vec![
         ZoomRegion { start_ms: 0, end_ms: 4000, zoom_in_ms: 300, zoom_out_ms: 300,
-            target_scale: 1.5, anchor: FramePoint { x: 700, y: 500 }, easing: Easing::Smooth, layer: 0 },
+            target_scale: 1.5, anchor: FramePoint { x: 700, y: 500 }, easing: Easing::Smooth, layer: 0, cam_action: None },
         ZoomRegion { start_ms: 2000, end_ms: 3000, zoom_in_ms: 200, zoom_out_ms: 200,
-            target_scale: 2.5, anchor: FramePoint { x: 100, y: 100 }, easing: Easing::Smooth, layer: 1 },
+            target_scale: 2.5, anchor: FramePoint { x: 100, y: 100 }, easing: Easing::Smooth, layer: 1, cam_action: None },
     ];
     let mut c = Camera { cx: 0.0, cy: 0.0, scale: 1.0 };
     for t in (0..2400).step_by(16) { c = s.step(t, FramePoint { x: 700, y: 500 }, &regions, &cfg); }

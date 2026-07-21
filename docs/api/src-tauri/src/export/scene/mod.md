@@ -65,6 +65,54 @@ A new `Scene` with each `rect` field (`x`, `y`, `w`, `h`), `radius`, and `alpha`
 
 - `lerp_midpoint_is_between` (unit test): at t=0.5 the screen rect width lies exactly halfway between Screen-mode and Camera-mode widths.
 
+## cam_action_at
+
+```rust
+pub fn cam_action_at(regions: &[ZoomRegion], zoom: &ZoomSettings, out_t: u32) -> CamZoomAction
+```
+
+Resolves which webcam-on-zoom action is in force at a given output time - the three-layer lookup (per-zoom override, then global default) collapsed into one pure function so it can be unit-tested without building a `FrameRenderer`.
+
+### Inputs
+
+- `regions: &[ZoomRegion]` - the resolved zoom regions. *Why the regions and not the `EditDoc`:* `step_camera` only has regions at frame time.
+- `zoom: &ZoomSettings` - supplies the fallback via `resolved_cam_action`.
+- `out_t: u32` - output-time milliseconds (`t - video_start`), the same clock the regions are stored in.
+
+### Returns
+
+The `cam_action` of the highest-`layer` region containing `out_t`, or the global default when that region inherits (`None`) or no region is active.
+
+### Behaviors worth knowing
+
+- `highest_layer_region_supplies_the_action_when_zooms_overlap` (unit test): overlap resolution deliberately matches `CameraSim::step`'s highest-layer-wins rule - if they disagreed, the webcam would follow one zoom while the framing followed another.
+- `cam_action_falls_back_to_the_global_default` (unit test): outside every region the zoom scale is 1.0, so the returned default is a no-op regardless of which action it is.
+
+## apply_cam_zoom_action
+
+```rust
+pub fn apply_cam_zoom_action(panel: Panel, action: CamZoomAction, scale: f32, target_scale: f32) -> Panel
+```
+
+Applies the resolved webcam-on-zoom action to the camera panel. This is the single seam every zoom-driven camera behavior goes through, so the export and the TS preview mirror (`src/editor/stage/camZoomAction.ts`) only have one function to agree on.
+
+### Inputs
+
+- `panel: Panel` - the camera panel at its resolved size. *Why:* returns a modified copy; the caller decides per frame whether to apply it.
+- `action: CamZoomAction` - the resolved action (`zoom.cam_action` falling back to `ZoomSettings::resolved_cam_action`). *Why resolved by the caller:* resolution needs the active zoom region and the settings, neither of which this pure function should reach for.
+- `scale: f32` - current camera zoom scale from `CameraSim`.
+- `target_scale: f32` - the zoom region's full zoom multiplier. *Why both:* together they give the 0..1 progress that drives every action's curve.
+
+### Returns
+
+`Shrink { to }` delegates to `shrink_camera(panel, scale, target_scale, to)`; `Hide` returns the panel with `alpha` multiplied by `1 - smoothstep(z)`; `Stay` returns `panel` unchanged.
+
+### Behaviors worth knowing
+
+- `shrink_action_is_identical_to_shrink_camera` (unit test): because `Shrink` delegates rather than reimplementing, a default-resolved action reproduces the pre-action behavior at every sampled scale - the byte-identity guard for existing docs.
+- `hide_fades_alpha_out_as_the_zoom_deepens` (unit test): `Hide` only ever touches `alpha`; rect, radius and ring width are left alone.
+- Keyframes win: `FrameRenderer::step_camera` skips this call entirely when a `camera_moves` keyframe is active, so a keyframed camera is never also shrunk.
+
 ## shrink_camera
 
 ```rust

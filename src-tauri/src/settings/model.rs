@@ -2,13 +2,33 @@ use serde::{Deserialize, Serialize};
 use crate::export::types::ZoomConfig;
 use crate::settings::appearance::AppearanceSettings;
 
+/// What the webcam PiP does while a zoom is active. `Shrink` is today's behavior (the panel
+/// scales toward `to` as the zoom deepens), `Hide` fades it out on the same curve, `Stay`
+/// leaves it untouched. Resolved per-zoom (`Zoom.cam_action`), falling back to the global
+/// `ZoomSettings::resolved_cam_action`.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum CamZoomAction { Shrink { to: f32 }, Hide, Stay }
+
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 #[serde(default)]
-pub struct ZoomSettings { pub enabled: bool, pub target_scale: f32, pub hold_ms: u32, pub smoothness: f32, pub clicks: u32, pub camera_shrink: bool, pub camera_shrink_min: f32, pub smart_hold: bool, pub smart_follow: bool }
+pub struct ZoomSettings { pub enabled: bool, pub target_scale: f32, pub hold_ms: u32, pub smoothness: f32, pub clicks: u32, pub camera_shrink: bool, pub camera_shrink_min: f32, pub smart_hold: bool, pub smart_follow: bool,
+    /// Global default webcam-on-zoom action. `None` = derive it from the legacy
+    /// `camera_shrink`/`camera_shrink_min` pair (see `resolved_cam_action`).
+    pub cam_zoom_default: Option<CamZoomAction> }
 impl Default for ZoomSettings {
-    fn default() -> Self { Self { enabled: true, target_scale: 2.2, hold_ms: 2200, smoothness: 0.10, clicks: 1, camera_shrink: true, camera_shrink_min: 0.62, smart_hold: true, smart_follow: false } }
+    fn default() -> Self { Self { enabled: true, target_scale: 2.2, hold_ms: 2200, smoothness: 0.10, clicks: 1, camera_shrink: true, camera_shrink_min: 0.62, smart_hold: true, smart_follow: false, cam_zoom_default: None } }
 }
 impl ZoomSettings {
+    /// The global default action. Derived from the legacy `camera_shrink`/`camera_shrink_min`
+    /// pair when `cam_zoom_default` is unset, so settings written before this field existed
+    /// resolve to EXACTLY today's behavior (shrink to 0.62, or `Stay` when the toggle is off).
+    pub fn resolved_cam_action(&self) -> CamZoomAction {
+        self.cam_zoom_default.unwrap_or(if self.camera_shrink {
+            CamZoomAction::Shrink { to: self.camera_shrink_min }
+        } else { CamZoomAction::Stay })
+    }
+
     /// Full ZoomConfig from the user-facing subset; other fields keep tuned defaults.
     pub fn to_zoom_config(&self) -> ZoomConfig {
         ZoomConfig {

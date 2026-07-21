@@ -31,6 +31,7 @@ pub fn zooms_from_regions(regions: &[ZoomRegion]) -> Vec<Zoom> {
         target: ZoomTarget::Fixed { x: r.anchor.x as f32, y: r.anchor.y as f32 },
         scale: r.target_scale, easing: easing_str(r.easing),
         zoom_in_ms: r.zoom_in_ms, zoom_out_ms: r.zoom_out_ms, layer: r.layer,
+        cam_action: r.cam_action,
     }).collect()
 }
 
@@ -140,7 +141,7 @@ mod tests {
 
     fn region(start: u32, end: u32, x: i32, y: i32) -> ZoomRegion {
         ZoomRegion { start_ms: start, end_ms: end, zoom_in_ms: 350, zoom_out_ms: 450,
-            target_scale: 2.2, anchor: FramePoint { x, y }, easing: Easing::Smooth, layer: 0 }
+            target_scale: 2.2, anchor: FramePoint { x, y }, easing: Easing::Smooth, layer: 0, cam_action: None }
     }
 
     #[test]

@@ -2,6 +2,28 @@
 
 Defines the complete user-facing `Settings` tree: one top-level struct and all nested configuration structs and enums that are persisted to `config.json`. Every struct carries `#[serde(default)]` so that old config files gain new fields silently, enabling additive schema evolution with no migration code.
 
+## CamZoomAction
+
+```rust
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum CamZoomAction { Shrink { to: f32 }, Hide, Stay }
+```
+
+What the webcam PiP does while a zoom is active. Resolved per-zoom (`Zoom.cam_action`), falling back to the global `ZoomSettings::resolved_cam_action`.
+
+Variants:
+
+- `Shrink { to: f32 }` - the panel scales toward `to` (a fraction of full size) as the zoom deepens. *Why a payload rather than reusing `camera_shrink_min`:* a per-zoom override needs its own floor, independent of the global setting.
+- `Hide` - the panel fades out (alpha -> 0) on the same smoothstepped progress. *Why alpha rather than shrinking to zero:* a fade reads as intentional; a panel collapsing to a point reads as a glitch.
+- `Stay` - the panel is untouched by the zoom.
+
+### Used by
+
+- `src-tauri/src/export/scene/mod.rs` (`apply_cam_zoom_action`) - the single place the action is turned into a `Panel`
+- `src-tauri/src/edit/model.rs` (`Zoom.cam_action`) - the per-zoom override
+- `src/editor/stage/camZoomAction.ts` - the TS preview mirror
+
 ## ZoomSettings
 
 ```rust
@@ -17,6 +39,7 @@ pub struct ZoomSettings {
     pub camera_shrink_min: f32,
     pub smart_hold: bool,
     pub smart_follow: bool,
+    pub cam_zoom_default: Option<CamZoomAction>,
 }
 ```
 
@@ -33,6 +56,7 @@ Fields:
 - `camera_shrink_min: f32` - the smallest scale the camera panel can reach during zoom. Default `0.62`. *Why:* prevents the camera from disappearing completely; 0.62 is small enough to be unobtrusive while still showing the presenter.
 - `smart_hold: bool` - enables typing-aware hold extension (keystrokes extend the zoom hold). Default `true`. *Why opt-out rather than opt-in:* most recordings involve typing after clicking; holding the zoom through keystrokes is almost always the right behavior.
 - `smart_follow: bool` - enables predictive pan that anticipates cursor direction. Default `false`. *Why off by default:* the feature is experimental and can feel jarring on recordings with erratic mouse movement.
+- `cam_zoom_default: Option<CamZoomAction>` - global default webcam-on-zoom action. Default `None`. *Why `Option` rather than a plain `CamZoomAction` default:* `None` means "derive from the legacy `camera_shrink`/`camera_shrink_min` pair", so every config written before this field existed keeps rendering exactly as it did. See `resolved_cam_action`.
 
 ### Used by
 
@@ -40,6 +64,27 @@ Fields:
 - `src-tauri/src/edit/seed.rs` - calls `to_zoom_config()` to seed an `EditDoc` from a raw recording
 - `src-tauri/src/export/pipeline/exporter.rs` - calls `to_zoom_config()` when building the export pipeline
 - `src-tauri/src/export/render/fromedit.rs` - calls `to_zoom_config()` when exporting from an `EditDoc`
+
+## ZoomSettings::resolved_cam_action
+
+```rust
+pub fn resolved_cam_action(&self) -> CamZoomAction
+```
+
+The global default webcam-on-zoom action, with back-compat folded in.
+
+### Inputs
+
+- `self` - the `ZoomSettings` snapshot. *Why a method:* the fallback depends on two other fields on the same struct, so resolution belongs next to them rather than at each call site.
+
+### Returns
+
+`cam_zoom_default` when set; otherwise `Shrink { to: camera_shrink_min }` if `camera_shrink` is on, else `Stay`.
+
+### Behaviors worth knowing
+
+- `resolved_default_derives_from_the_legacy_shrink_fields` (unit test): default settings resolve to `Shrink { to: 0.62 }`; `camera_shrink: false` resolves to `Stay`; an explicit `cam_zoom_default` beats both.
+- `settings_json_without_cam_zoom_default_loads_and_resolves_to_shrink` (unit test): old JSON with no `cam_zoom_default` key deserializes to `None` and still resolves to today's shrink.
 
 ## ZoomSettings::to_zoom_config
 

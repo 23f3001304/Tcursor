@@ -129,6 +129,8 @@ All tuneable parameters for click-zoom behavior. Populated from user settings; k
 pub struct ZoomRegion {
     pub start_ms: u32, pub end_ms: u32, pub zoom_in_ms: u32, pub zoom_out_ms: u32,
     pub target_scale: f32, pub anchor: FramePoint, pub easing: Easing,
+    pub layer: u32,
+    pub cam_action: Option<CamZoomAction>,
 }
 ```
 
@@ -141,6 +143,8 @@ A single resolved zoom event, baked from either auto-generated click detection o
 - `target_scale: f32` - peak zoom multiplier during the hold phase.
 - `anchor: FramePoint` - the screen-local pixel that stays centered during zoom-in. *Why:* the anchor is the first click of the trigger cluster (see `autozoom::generate`); anchoring on the first click, not the last, keeps intent stable.
 - `easing: Easing` - interpolation curve for this specific region.
+- `layer: u32` - priority when this region overlaps another; higher wins in `CameraSim::step`.
+- `cam_action: Option<CamZoomAction>` - per-zoom webcam-on-zoom override carried from `Zoom.cam_action`; `None` inherits the global default. *Why it rides on the region:* `FrameRenderer::step_camera` only has the resolved regions at frame time, so the action must travel with the region it belongs to. `CameraSim` ignores it entirely - it is read only by the camera-panel compositing.
 
 ### Used by
 

@@ -22,6 +22,10 @@ pub struct Zoom {
     /// which timeline row it renders on. Auto-assigned on creation (see `edit::ops::api::auto_layer`),
     /// user-overridable via `UpdateZoom`.
     #[serde(default)] pub layer: u32,
+    /// Per-zoom webcam-on-zoom override. `None` inherits the global
+    /// `ZoomSettings::resolved_cam_action`, so docs written before this existed are unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cam_action: Option<crate::settings::model::CamZoomAction>,
 }
 
 fn default_zoom_in_ms() -> u32 { 350 }

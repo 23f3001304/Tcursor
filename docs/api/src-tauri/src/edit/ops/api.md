@@ -22,6 +22,7 @@ pub enum EditOp {
         layer: Option<u32>,
     },
     RemoveZoom { id: String },
+    SetZoomCamAction { id: String, action: Option<CamZoomAction> },
     SetTrim { in_ms: u32, out_ms: u32 },
     AddCut { start_ms: u32, end_ms: u32 },
     SetSpeed { start_ms: u32, end_ms: u32, factor: f32 },
@@ -43,6 +44,7 @@ Discriminated-union command type serialized to/from the Tauri IPC channel and th
 - `AddZoomFull` - *same as `AddZoom` but the caller supplies `scale`; used by the AI director when it picks a specific zoom level from its plan.*
 - `UpdateZoom` - *partial update by `id`; only `Some` fields are written, so the frontend can patch a single changed field without re-transmitting the full zoom.*
 - `RemoveZoom` - *drop a zoom by string id; triggered by the delete key and AI-plan rollback.*
+- `SetZoomCamAction` - *set (`Some`) or clear (`None`) one zoom's webcam-on-zoom override. **Why a dedicated op rather than a field on `UpdateZoom`:** that op's "field is `None` => leave unchanged" convention cannot express "clear back to inherit the global default" without an `Option<Option<_>>`, which serializes ambiguously over IPC.*
 - `SetTrim` - *replace the clip trim window atomically; in/out always travel together so no partial-update variant is needed.*
 - `AddCut` - *append a cut segment; cut order and overlap resolution are rendering concerns, not enforced here.*
 - `SetSpeed` - *append a speed segment with the given `factor`; the id is auto-assigned and the caller controls ordering via the plan.*

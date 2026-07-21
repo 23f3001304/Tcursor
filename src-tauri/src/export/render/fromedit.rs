@@ -51,6 +51,7 @@ pub fn regions_from_doc(doc: &EditDoc, sw: u32, sh: u32) -> Vec<ZoomRegion> {
             anchor: anchor_for(z, sw, sh),
             easing: easing_from(&z.easing, cfg.easing),
             layer: z.layer,
+            cam_action: z.cam_action,
         })
         .collect()
 }
@@ -92,6 +93,7 @@ mod tests {
         ZoomRegion {
             start_ms: start, end_ms: end, zoom_in_ms: cfg.zoom_in_ms, zoom_out_ms: cfg.zoom_out_ms,
             target_scale: cfg.target_scale, anchor: FramePoint { x, y }, easing: cfg.easing, layer: 0,
+            cam_action: None,
         }
     }
 
@@ -99,6 +101,7 @@ mod tests {
         a.start_ms == b.start_ms && a.end_ms == b.end_ms && a.zoom_in_ms == b.zoom_in_ms
             && a.zoom_out_ms == b.zoom_out_ms && a.target_scale == b.target_scale && a.layer == b.layer
             && a.anchor == b.anchor && format!("{:?}", a.easing) == format!("{:?}", b.easing)
+            && a.cam_action == b.cam_action
     }
 
     /// THE PROOF: regions -> seed::zooms_from_regions -> EditDoc -> regions_from_doc
@@ -123,9 +126,25 @@ mod tests {
         use crate::edit::model::{Zoom, ZoomTarget};
         let mut doc = EditDoc::default();
         doc.zooms.push(Zoom { id: "z0".into(), start_ms: 0, end_ms: 1000, target: ZoomTarget::Cursor,
-            scale: 2.0, easing: "smooth".into(), zoom_in_ms: 350, zoom_out_ms: 450, layer: 3 });
+            scale: 2.0, easing: "smooth".into(), zoom_in_ms: 350, zoom_out_ms: 450, layer: 3, cam_action: None });
         let regs = regions_from_doc(&doc, 1920, 1080);
         assert_eq!(regs[0].layer, 3);
+    }
+
+    /// A per-zoom `cam_action` survives doc -> regions, AND back out through the seed
+    /// inverse - so the round-trip stays lossless now that the field exists.
+    #[test]
+    fn cam_action_round_trips_through_edit_doc() {
+        use crate::edit::model::{Zoom, ZoomTarget};
+        use crate::settings::model::CamZoomAction;
+        let mut doc = EditDoc::default();
+        doc.zooms.push(Zoom { id: "z0".into(), start_ms: 0, end_ms: 1000, target: ZoomTarget::Cursor,
+            scale: 2.0, easing: "smooth".into(), zoom_in_ms: 350, zoom_out_ms: 450, layer: 0,
+            cam_action: Some(CamZoomAction::Hide) });
+        let regs = regions_from_doc(&doc, 1920, 1080);
+        assert_eq!(regs[0].cam_action, Some(CamZoomAction::Hide));
+        let back = crate::edit::seed::zooms_from_regions(&regs);
+        assert_eq!(back[0].cam_action, Some(CamZoomAction::Hide), "seed inverse must carry it too");
     }
 
     #[test]
@@ -139,7 +158,7 @@ mod tests {
         use crate::edit::model::{Zoom, ZoomTarget};
         let doc = EditDoc {
             zooms: vec![Zoom { id: "z0".into(), start_ms: 0, end_ms: 100,
-                target: ZoomTarget::Cursor, scale: 2.0, easing: "smooth".into(), zoom_in_ms: 350, zoom_out_ms: 450, layer: 0 }],
+                target: ZoomTarget::Cursor, scale: 2.0, easing: "smooth".into(), zoom_in_ms: 350, zoom_out_ms: 450, layer: 0, cam_action: None }],
             ..Default::default()
         };
         let r = regions_from_doc(&doc, 1920, 1080);
@@ -151,7 +170,7 @@ mod tests {
         use crate::edit::model::{Zoom, ZoomTarget};
         let mut doc = EditDoc::default();
         doc.zooms.push(Zoom { id: "z0".into(), start_ms: 0, end_ms: 1000, target: ZoomTarget::Cursor,
-            scale: 2.0, easing: "smooth".into(), zoom_in_ms: 120, zoom_out_ms: 640, layer: 0 });
+            scale: 2.0, easing: "smooth".into(), zoom_in_ms: 120, zoom_out_ms: 640, layer: 0, cam_action: None });
         let regs = regions_from_doc(&doc, 800, 600);
         assert_eq!((regs[0].zoom_in_ms, regs[0].zoom_out_ms), (120, 640));
     }

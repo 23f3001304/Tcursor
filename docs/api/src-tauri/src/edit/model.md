@@ -65,6 +65,8 @@ pub struct Zoom {
     pub id: String, pub start_ms: u32, pub end_ms: u32,
     pub target: ZoomTarget, pub scale: f32, pub easing: String,
     pub zoom_in_ms: u32, pub zoom_out_ms: u32,
+    pub layer: u32,
+    pub cam_action: Option<CamZoomAction>,
 }
 ```
 
@@ -76,6 +78,8 @@ One zoom event in the timeline.
 - `target` - *where the camera should point; see `ZoomTarget`.*
 - `scale` - *peak zoom multiplier (e.g. `2.0` = 2x). Passed directly to the compositor.*
 - `easing` - *named easing curve (`"smooth"`, `"linear"`, `"spring"`); looked up by the compositor at render time.*
+- `layer` - *priority when this zoom overlaps another in time (higher wins) and the timeline row it renders on. Auto-assigned by `auto_layer` on creation, user-overridable via `UpdateZoom`.*
+- `cam_action` - *per-zoom webcam-on-zoom override. `None` inherits `ZoomSettings::resolved_cam_action`. Serialized only when set (`skip_serializing_if`), so re-saving a doc written before this field existed does not start emitting a new key.*
 
 ### Used by
 

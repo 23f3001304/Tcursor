@@ -36,6 +36,23 @@ fn add_zoom_auto_assigns_a_free_layer() {
     assert_eq!(doc.zooms[1].layer, 1);
 }
 
+/// A dedicated op so "clear back to inherit" is expressible - `UpdateZoom`'s
+/// None-means-unchanged convention cannot say that without an `Option<Option<_>>`.
+#[test]
+fn set_zoom_cam_action_sets_then_clears() {
+    use crate::settings::model::CamZoomAction;
+    let mut doc = empty();
+    apply(&mut doc, EditOp::AddZoom { at_ms: 0, dur_ms: 500 });
+    let id = doc.zooms[0].id.clone();
+    assert_eq!(doc.zooms[0].cam_action, None, "new zooms inherit the global default");
+
+    apply(&mut doc, EditOp::SetZoomCamAction { id: id.clone(), action: Some(CamZoomAction::Stay) });
+    assert_eq!(doc.zooms[0].cam_action, Some(CamZoomAction::Stay));
+
+    apply(&mut doc, EditOp::SetZoomCamAction { id, action: None });
+    assert_eq!(doc.zooms[0].cam_action, None, "must be able to clear back to inherit");
+}
+
 #[test]
 fn update_zoom_sets_layer() {
     let mut doc = empty();

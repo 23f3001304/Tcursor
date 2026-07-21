@@ -37,6 +37,7 @@ pub fn from_actions(actions: &[ActionEvent], events: &[MouseEvent], screen: &Scr
                         target_scale: cfg.target_scale,
                         anchor: cursor_at(events, screen, s),
                         easing: cfg.easing,
+                        cam_action: None,
                         layer: 0,
                     });
                 }

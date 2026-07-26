@@ -1,4 +1,6 @@
 use std::path::PathBuf;
+use serde::{Deserialize, Serialize};
+use crate::export::settings::Resolution;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)] pub struct Rgb { pub r: u8, pub g: u8, pub b: u8 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)] pub struct FramePoint { pub x: i32, pub y: i32 }
@@ -41,9 +43,89 @@ impl Default for Background {
     }
 }
 
+/// Output frame aspect ratio, chosen in the editor (`EditDoc.aspect`) and applied at both
+/// export and preview via `Layout::apply_aspect`. Never crops the capture: the screen still
+/// aspect-fits inside the frame (`coordmap::inset_rect`) and the background fills the rest -
+/// only the frame's own `out_w`/`out_h` change. `Source` is the default and matches today's
+/// behavior exactly (`Layout::adapt_to_source`).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Aspect {
+    #[default]
+    #[serde(rename = "source")]
+    Source,
+    #[serde(rename = "wide_16x9")]
+    Wide16x9,
+    #[serde(rename = "vertical_9x16")]
+    Vertical9x16,
+    #[serde(rename = "square_1x1")]
+    Square1x1,
+    #[serde(rename = "classic_4x3")]
+    Classic4x3,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Layout { pub out_w: u32, pub out_h: u32, pub pad_px: u32, pub screen_scale: f32, pub screen_radius_px: f32 }
 impl Default for Layout { fn default() -> Self { Self { out_w: 3840, out_h: 2160, pad_px: 120, screen_scale: 1.0, screen_radius_px: 2160.0 * 0.016 } } }
+impl Layout {
+    /// Adapt the still-default (4K) output resolution to match the source video's
+    /// dimensions when the source is not itself 4K, so a 1080p recording exports at
+    /// 1080p instead of being upscaled to a fixed 4K canvas. Dimensions are evenized
+    /// (`& !1`) because H.264 requires even width/height. A no-op when `out_w`/`out_h`
+    /// have already been changed from the default (e.g. by `ExportSettings`), or when
+    /// the source already matches 4K.
+    pub fn adapt_to_source(&mut self, sw: u32, sh: u32) {
+        if self.out_w == 3840 && self.out_h == 2160 && (sw != 3840 || sh != 2160) {
+            self.out_w = sw & !1;
+            self.out_h = sh & !1;
+        }
+    }
+
+    /// ONE function mapping an `Aspect` selection to the frame's pixel dimensions - shared by
+    /// export (`exporter::export`, via `FrameRenderer::new`) and the editor preview
+    /// (`preview::build_renderer`), so both always agree on the output size for a given source +
+    /// aspect choice. `Source` keeps today's exact behavior (`adapt_to_source`); the 4 fixed
+    /// presets pin a base resolution at that ratio (long edge 1920) regardless of the source's
+    /// own dimensions. Only `out_w`/`out_h` change - the screen still aspect-fits inside via
+    /// `inset_rect` (never cropped) and the background (`scene::background::render`) fills the
+    /// new frame. A later export-resolution picker can extend this match with more presets.
+    pub fn apply_aspect(&mut self, aspect: Aspect, sw: u32, sh: u32) {
+        match aspect {
+            Aspect::Source => self.adapt_to_source(sw, sh),
+            Aspect::Wide16x9 => { self.out_w = 1920; self.out_h = 1080; }
+            Aspect::Vertical9x16 => { self.out_w = 1080; self.out_h = 1920; }
+            Aspect::Square1x1 => { self.out_w = 1080; self.out_h = 1080; }
+            Aspect::Classic4x3 => { self.out_w = 1440; self.out_h = 1080; }
+        }
+    }
+
+    /// Scale `(w, h)` down (exact ratio preserved) so the long edge is at most `max_long`,
+    /// evenized (`& !1`) for H.264; never upscales a source already smaller than the budget.
+    /// Used to pick a cheap preview canvas that matches the export aspect exactly.
+    pub fn scale_to_long_edge(w: u32, h: u32, max_long: u32) -> (u32, u32) {
+        let long = w.max(h).max(1) as f32;
+        let k = (max_long as f32 / long).min(1.0);
+        (((w as f32 * k).round() as u32 & !1).max(2), ((h as f32 * k).round() as u32 & !1).max(2))
+    }
+
+    /// Resolve the final `out_w`/`out_h` for one `FrameRenderer` build: apply the aspect mapping
+    /// against the true source dimensions, rescale to `resolution`'s preset size (a no-op for
+    /// `Resolution::Source` - see `rescale_to_resolution`), then - when `preview_cap` is set -
+    /// downscale to that long-edge budget, scaling `pad_px`/`screen_radius_px` by the same factor
+    /// so the preview stays proportional to the full export frame instead of a fixed absolute pad
+    /// looking oversized on a smaller canvas. Preview call sites always pass `Resolution::Source`
+    /// (the export resolution setting only applies to the export build).
+    pub fn resolve(&mut self, aspect: Aspect, resolution: Resolution, sw: u32, sh: u32, preview_cap: Option<u32>) {
+        self.apply_aspect(aspect, sw, sh);
+        self.rescale_to_resolution(resolution);
+        if let Some(cap) = preview_cap {
+            let (pw, ph) = Self::scale_to_long_edge(self.out_w, self.out_h, cap);
+            let s = pw as f32 / self.out_w.max(1) as f32;
+            self.pad_px = (self.pad_px as f32 * s).round() as u32;
+            self.screen_radius_px *= s;
+            self.out_w = pw; self.out_h = ph;
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug)] pub enum OverlayShape { Circle, Rounded { frac: f32 }, Rect }
 #[derive(Clone, Copy, Debug)] pub enum OverlayPos { BottomLeft, BottomRight, TopLeft, TopRight, Custom { x: u32, y: u32 } }
@@ -60,5 +142,56 @@ impl Default for OverlayLayout {
     fn default() -> Self {
         Self { shape: OverlayShape::Circle, pos: OverlayPos::BottomLeft, size_px: 420, width_px: 420,
             margin_x_px: 80, margin_y_px: 80, enabled: true, ring_px: 0, ring_color: [0, 0, 0] }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn aspect_default_is_source() {
+        assert_eq!(Aspect::default(), Aspect::Source);
+    }
+
+    /// Back-compat guard: `Aspect::Source` is exactly `adapt_to_source`, not a reimplementation -
+    /// so a doc with the default aspect resolves output dims identically to today.
+    #[test]
+    fn source_aspect_matches_adapt_to_source_exactly() {
+        let mut a = Layout::default();
+        a.apply_aspect(Aspect::Source, 1920, 1080);
+        let mut b = Layout::default();
+        b.adapt_to_source(1920, 1080);
+        assert_eq!((a.out_w, a.out_h), (b.out_w, b.out_h));
+        assert_eq!((a.out_w, a.out_h), (1920, 1080));
+    }
+
+    #[test]
+    fn fixed_presets_map_to_a_1920_long_edge() {
+        let mut l = Layout::default();
+        l.apply_aspect(Aspect::Wide16x9, 640, 480);
+        assert_eq!((l.out_w, l.out_h), (1920, 1080));
+        l.apply_aspect(Aspect::Vertical9x16, 640, 480);
+        assert_eq!((l.out_w, l.out_h), (1080, 1920));
+        l.apply_aspect(Aspect::Square1x1, 640, 480);
+        assert_eq!((l.out_w, l.out_h), (1080, 1080));
+        l.apply_aspect(Aspect::Classic4x3, 640, 480);
+        assert_eq!((l.out_w, l.out_h), (1440, 1080));
+    }
+
+    #[test]
+    fn scale_to_long_edge_preserves_ratio_and_evenizes() {
+        assert_eq!(Layout::scale_to_long_edge(1920, 1080, 1280), (1280, 720));
+        assert_eq!(Layout::scale_to_long_edge(1080, 1920, 1280), (720, 1280));
+        // Never upscale a source already under the budget.
+        assert_eq!(Layout::scale_to_long_edge(640, 480, 1280), (640, 480));
+    }
+
+    #[test]
+    fn resolve_scales_pad_and_radius_with_the_preview_cap() {
+        let mut l = Layout::default(); // 3840x2160, pad_px 120
+        l.resolve(Aspect::Wide16x9, Resolution::Source, 640, 480, Some(1280));
+        assert_eq!((l.out_w, l.out_h), (1280, 720)); // 1920x1080 downscaled by 2/3
+        assert_eq!(l.pad_px, 80); // 120 * 2/3
     }
 }

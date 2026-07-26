@@ -1,15 +1,11 @@
-import { useState } from "react";
-import { IconPlus } from "@tabler/icons-react";
+import { useEffect, useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { IconFolderPlus } from "@tabler/icons-react";
 import { PanelHeader } from "./PanelHeader";
 import type { CursorSettings } from "../../hud/settings/settings";
+import type { CursorPackInfo } from "../../lib/ipc";
+import { listCursorPacks, importCursorPack } from "../../lib/ipc";
 import { Switch, Slider } from "../controls/Controls";
-
-const PACKS = [
-  { id: "mac", path: "M 0 0 L 0 15 L 4 11.5 L 9 16.5 L 11 14.5 L 6 9.5 L 11 9 Z", label: "macOS" },
-  { id: "win", path: "M 3 0 L 15 12 L 9 12 L 13 18 L 10 19.5 L 6.5 13.5 L 3 17 Z", label: "Windows" },
-  { id: "white_circle", path: "M 6 0 A 6 6 0 1 0 6 12 A 6 6 0 1 0 6 0 Z", label: "Dot" },
-  { id: "black_pointer", path: "M 0 0 L 12 12 L 5 12 L 0 7 Z", label: "Classic" },
-];
 
 export function CursorPanel({
   settings,
@@ -20,48 +16,44 @@ export function CursorPanel({
   onChange: (v: CursorSettings) => void;
   onClose: () => void;
 }) {
-  const [showCursor, setShowCursor] = useState(true);
-  const [loopCursor, setLoopCursor] = useState(false);
-  const [selectedPack, setSelectedPack] = useState("mac");
+  const [packs, setPacks] = useState<CursorPackInfo[]>([]);
+  const [importing, setImporting] = useState(false);
+  const [importErr, setImportErr] = useState("");
 
-  // Local sliders state loaded from localStorage if present
-  const [smoothing, setSmoothing] = useState(() => {
-    const v = localStorage.getItem("tcursor_smoothing");
-    return v ? parseFloat(v) : 0.67;
-  });
-  const [sway, setSway] = useState(() => {
-    const v = localStorage.getItem("tcursor_sway");
-    return v ? parseFloat(v) : 0.13;
-  });
-  const [bounceSpeed, setBounceSpeed] = useState(() => {
-    const v = localStorage.getItem("tcursor_bounce_speed");
-    return v ? parseInt(v, 10) : 350;
-  });
-  const [bounceInt, setBounceInt] = useState(() => {
-    const v = localStorage.getItem("tcursor_bounce_int");
-    return v ? parseFloat(v) : 3.50;
-  });
-
-  const changeSmoothing = (v: number) => { setSmoothing(v); localStorage.setItem("tcursor_smoothing", v.toString()); };
-  const changeSway = (v: number) => { setSway(v); localStorage.setItem("tcursor_sway", v.toString()); };
-  const changeBounceSpeed = (v: number) => { setBounceSpeed(v); localStorage.setItem("tcursor_bounce_speed", v.toString()); };
-  const changeBounceInt = (v: number) => { setBounceInt(v); localStorage.setItem("tcursor_bounce_int", v.toString()); };
+  useEffect(() => { listCursorPacks().then(setPacks).catch(() => {}); }, []);
 
   const set = <K extends keyof CursorSettings>(k: K, v: CursorSettings[K]) => {
     onChange({ ...settings, [k]: v });
   };
 
   const handleReset = () => {
-    setShowCursor(true);
-    setLoopCursor(false);
-    setSelectedPack("mac");
-    changeSmoothing(0.67);
-    changeSway(0.13);
-    changeBounceSpeed(350);
-    changeBounceInt(3.50);
-    set("size", 2.2);
-    set("motion_blur", 0.4);
+    onChange({
+      style: "enhanced",
+      size: 1.0,
+      motion_blur: 0.35,
+      click_bounce: true,
+      bounce_intensity: 0.5,
+      pack: "default",
+    });
   };
+
+  const handleImport = async () => {
+    setImportErr("");
+    const dir = await open({ directory: true, multiple: false, title: "Choose a cursor pack folder" }).catch(() => null);
+    if (!dir || Array.isArray(dir)) return;
+    setImporting(true);
+    try {
+      const info = await importCursorPack(dir);
+      setPacks((prev) => [...prev, info]);
+      set("pack", info.id);
+    } catch (e) {
+      setImportErr(typeof e === "string" ? e : "Import failed - check the folder has cursor PNGs.");
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const isVisible = settings.style !== "hidden";
 
   return (
     <div className="e-panel e-insp">
@@ -71,12 +63,12 @@ export function CursorPanel({
       {/* Switches in Grid */}
       <div className="e-field">
         <div className="e-switchrow">
-          <span>Show cursor</span>
-          <Switch on={showCursor} onChange={setShowCursor} />
+          <span>Show synthetic cursor</span>
+          <Switch on={isVisible} onChange={(v) => set("style", v ? "enhanced" : "hidden")} />
         </div>
         <div className="e-switchrow">
-          <span>Loop cursor motion</span>
-          <Switch on={loopCursor} onChange={setLoopCursor} />
+          <span>Click bounce animation</span>
+          <Switch on={settings.click_bounce} onChange={(v) => set("click_bounce", v)} />
         </div>
       </div>
 
@@ -84,44 +76,31 @@ export function CursorPanel({
       <div className="e-field">
         <span className="e-sechead">Cursor style pack</span>
         <div className="e-pack-grid">
-          {PACKS.map((p) => {
-            const isSelected = selectedPack === p.id;
+          {packs.map((p) => {
+            const isSelected = settings.pack === p.id;
             return (
               <button
                 key={p.id}
                 type="button"
                 className={`e-pack-card ${isSelected ? "on" : ""}`}
-                onClick={() => setSelectedPack(p.id)}
+                title={p.builtin ? `${p.name} (built-in)` : p.name}
+                onClick={() => set("pack", p.id)}
               >
-                <svg viewBox="0 0 20 20" style={{ width: 16, height: 16, fill: "var(--e-fg)", stroke: "var(--e-bg)", strokeWidth: 1, pointerEvents: "none" }}>
-                  <path d={p.path} />
-                </svg>
-                <span>{p.label}</span>
+                <span>{p.name}</span>
               </button>
             );
           })}
-          
-          {/* Add custom pack */}
-          <button
-            type="button"
-            onClick={() => alert("Upload custom cursor pack (.zip)")}
-            className="e-pack-add"
-          >
-            <IconPlus size={14} style={{ pointerEvents: "none" }} />
-            <span>Add</span>
-          </button>
         </div>
+        <button type="button" className="e-upload-dashed" onClick={handleImport} disabled={importing}>
+          <IconFolderPlus size={14} /> {importing ? "Importing..." : "Import pack..."}
+        </button>
+        {importErr && <span className="e-fl" style={{ color: "#f87171" }}>{importErr}</span>}
       </div>
 
       {/* Sliders */}
       <div className="e-field">
         <span className="e-fl">Cursor Size <b>{settings.size.toFixed(2)}x</b></span>
-        <Slider min={0.5} max={4.0} step={0.1} value={settings.size} onChange={(v) => set("size", v)} />
-      </div>
-
-      <div className="e-field">
-        <span className="e-fl">Smoothing <b>{smoothing.toFixed(2)}</b></span>
-        <Slider min={0.0} max={1.0} step={0.01} value={smoothing} onChange={changeSmoothing} />
+        <Slider min={0.4} max={3.0} step={0.1} value={settings.size} onChange={(v) => set("size", v)} />
       </div>
 
       <div className="e-field">
@@ -130,18 +109,8 @@ export function CursorPanel({
       </div>
 
       <div className="e-field">
-        <span className="e-fl">Click Bounce <b>{bounceInt.toFixed(2)}x</b></span>
-        <Slider min={1.0} max={5.0} step={0.05} value={bounceInt} onChange={changeBounceInt} />
-      </div>
-
-      <div className="e-field">
-        <span className="e-fl">Bounce Duration <b>{bounceSpeed} ms</b></span>
-        <Slider min={100} max={1000} step={10} value={bounceSpeed} onChange={changeBounceSpeed} />
-      </div>
-
-      <div className="e-field">
-        <span className="e-fl">Cursor Sway <b>{sway.toFixed(2)}x</b></span>
-        <Slider min={0.0} max={1.0} step={0.01} value={sway} onChange={changeSway} />
+        <span className="e-fl">Click Bounce Intensity <b>{settings.bounce_intensity.toFixed(2)}x</b></span>
+        <Slider min={0.1} max={1.0} step={0.05} value={settings.bounce_intensity} onChange={(v) => set("bounce_intensity", v)} />
       </div>
     </div>
   );

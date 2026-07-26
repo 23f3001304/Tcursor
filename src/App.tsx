@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
-import { setCapturable } from "./lib/ipc";
+import { setCapturable, getLaunchProject } from "./lib/ipc";
 import { Hud } from "./hud/Hud";
 import { Editor } from "./editor/Editor";
 
@@ -40,6 +40,15 @@ export function App() {
     await safe(() => win.center());
     setView({ v: "hud" });
   };
+
+  // Cold-start file association: if this process was launched by double-clicking a `.tcursor`
+  // file, the backend resolved its folder in `setup()`; route straight to the editor instead of
+  // flashing the HUD first. A normal launch resolves `null` here and nothing happens. Warm-launch
+  // (the app already running when another `.tcursor` is opened) is not covered - see the Rust
+  // `LaunchProject` doc comment.
+  useEffect(() => {
+    getLaunchProject().then((folder) => { if (folder) void openEditor(folder); }).catch(() => {});
+  }, []);
 
   return view.v === "editor"
     ? <Editor folder={view.folder} onClose={closeEditor} />

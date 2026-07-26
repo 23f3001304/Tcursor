@@ -35,11 +35,13 @@ fn invert_rgb(bgra: &mut [u8]) {
 
 /// Decode every cursor sprite (inverting for dark theme). None unless Enhanced or if the
 /// Arrow fallback fails to decode. Non-arrow sprites that fail to decode are skipped.
+/// Sprite bytes come from `cursor.pack` (the built-in set, or an imported pack falling back to
+/// the built-in per-kind) via `pack::sprite_sources` - see `export/cursor/pack.rs`.
 pub fn prep(cursor: &CursorSettings, events: &[MouseEvent], track: CursorTrack, dark: bool) -> Option<CursorPrep> {
     if cursor.style != CursorStyle::Enhanced { return None; }
     let mut set = HashMap::new();
-    for &(ty, png, hot) in SPRITES {
-        if let Some(mut spr) = decode_sprite(png, hot) {
+    for (ty, png, hot) in crate::export::cursor::pack::sprite_sources(&cursor.pack) {
+        if let Some(mut spr) = decode_sprite(&png, hot) {
             if dark { invert_rgb(&mut spr.bgra); }
             set.insert(ty, spr);
         }
@@ -119,3 +121,4 @@ mod tests {
         assert!(sprite_for(&set, &track, 9999).is_some());
     }
 }
+

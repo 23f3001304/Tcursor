@@ -5,7 +5,7 @@ Data model for `edit.json`: the complete type hierarchy from atomic clip edits (
 ## Trim
 
 ```rust
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 #[serde(default)]
 pub struct Trim { pub in_ms: u32, pub out_ms: u32 }
 impl Default for Trim { fn default() -> Self { Self { in_ms: 0, out_ms: 0 } } }
@@ -20,6 +20,21 @@ The clip's in/out points in milliseconds, measured from the raw recording start.
 
 - `src-tauri/src/edit/ops/api.rs` - `SetTrim` variant replaces both fields; `metrics` reads `in_ms`/`out_ms`
 - `src-tauri/src/export/render/fromedit.rs` - clip bounds supplied to the compositor
+- `src-tauri/src/export/pipeline/exporter.rs` - `export()` calls `Trim::resolve` to gate the frame loop
+- `src-tauri/src/export/preview/preview_track.rs` - the frontend's playhead clamp reads the same resolved range via `resolveTrim` (`src/lib/edit.ts`)
+
+## Trim::resolve
+
+```rust
+pub fn resolve(&self, total_dur_ms: u32) -> (u32, u32)
+```
+
+The effective `[in_ms, out_ms)` export/preview range against a clip of `total_dur_ms`. `out_ms == 0` (the doc-level default, "not yet set") means "no trim / whole clip"; both bounds are clamped into `[0, total_dur_ms]` and `in_ms` never exceeds the resolved `out_ms`, so a degenerate/inverted range safely collapses to zero-length instead of underflowing at the call site. The ONE function export (`exporter::export`) and preview both read the trim through, so they always agree on the effective range - mirrored on the TS side by `resolveTrim` (`src/lib/edit.ts`).
+
+### Behaviors
+
+- `default_trim_resolves_to_the_whole_clip` - `Trim::default()` (`{0,0}`) resolves to `(0, total_dur_ms)` - back-compat guard.
+- `trim_resolve_clamps_in_to_out_and_both_to_the_clip` - an out beyond the real duration clamps down; an in beyond the resolved out clamps to it.
 
 ## Cut
 
@@ -156,6 +171,7 @@ pub struct EditDoc {
     pub speed: Vec<Speed>,
     pub layout: Vec<LayoutSeg>,
     pub camera_moves: Vec<CameraMove>,
+    pub aspect: crate::export::types::Aspect,
     pub settings: crate::settings::model::Settings,
 }
 ```
@@ -169,6 +185,7 @@ Root of `edit.json`. Carries the complete editor state for one recording project
 - `speed` - *ordered list of speed-change segments.*
 - `layout` - *ordered, non-overlapping layout segments covering `[0, trim.out_ms]`.*
 - `camera_moves` - *ordered list of webcam PiP keyframes; `#[serde(default)]` so a pre-existing `edit.json` with no `camera_moves` loads as an empty `Vec`, which the exporter/preview treat as "no override" (byte-identical to today).*
+- `aspect` - *output frame aspect ratio; `#[serde(default)]` so a pre-existing `edit.json` with no `aspect` loads as `Aspect::Source` - today's behavior exactly. See `export::types::Aspect`.*
 - `settings` - *snapshot of the user's `Settings` at the time the doc was seeded; preserves the zoom config and theme for a re-render even if the user later changes settings.*
 
 ### Used by
@@ -247,3 +264,5 @@ An editable effect region on the timeline (v1: Spotlight). `EditDoc.effects` is 
 - `load_missing_path_is_none` - a path that does not exist returns `None`.
 - `partial_json_fills_defaults` - JSON with only a `zooms` key fills all other fields from `Default`.
 - `zoom_target_fixed_serializes_with_xy` - `ZoomTarget::Fixed` round-trips with `"fixed"`, `"x"`, and `"y"` keys present.
+- `aspect_missing_field_defaults_to_source` - JSON without an `aspect` key loads `Aspect::Source` (back-compat).
+- `aspect_round_trips_through_json` - a non-default `Aspect` round-trips through `EditDoc` serialization.

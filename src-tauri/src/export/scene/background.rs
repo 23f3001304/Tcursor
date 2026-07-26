@@ -1,4 +1,69 @@
 use crate::export::types::{Background, Rgb};
+use crate::settings::background::{BackgroundKind, BackgroundSettings};
+
+/// Build the static export background buffer from user settings. `Mesh` decodes the bundled
+/// `mesh_jpg` (falling back to the gradient `Background::default()` if ffmpeg can't decode it);
+/// `Solid`/`Gradient` render the matching `Background` variant directly, no ffmpeg subprocess.
+/// Called once per export/preview build (`FrameRenderer::new`/`reload_edit`), never per frame,
+/// so the optional blur pass below is cheap even though it isn't itself per-pixel-parallel.
+pub fn build(settings: &BackgroundSettings, mesh_jpg: &[u8], w: u32, h: u32) -> Vec<u8> {
+    let mut buf = match settings.kind {
+        BackgroundKind::Mesh => crate::export::pipeline::ffio::decode_image(mesh_jpg, w, h)
+            .unwrap_or_else(|_| render(&Background::default(), w, h)),
+        BackgroundKind::Solid => render(&Background::Solid(rgb(settings.solid)), w, h),
+        BackgroundKind::Gradient => render(&Background::Gradient {
+            from: rgb(settings.gradient_from), to: rgb(settings.gradient_to), angle_deg: settings.gradient_angle_deg,
+        }, w, h),
+    };
+    if settings.blur > 0.0 { blur(&mut buf, w, h, settings.blur); }
+    buf
+}
+
+fn rgb(c: [u8; 3]) -> Rgb { Rgb { r: c[0], g: c[1], b: c[2] } }
+
+/// Separable box blur (horizontal pass, then vertical), O(w*h) via a sliding-window sum -
+/// cheap enough to run once per background rebuild. `amount` (0..1) maps to a radius up to 3%
+/// of the shorter side. Edge pixels clamp (no vignette darkening at the border).
+fn blur(buf: &mut Vec<u8>, w: u32, h: u32, amount: f32) {
+    let r = (amount.clamp(0.0, 1.0) * 0.03 * w.min(h) as f32).round() as i32;
+    if r <= 0 { return; }
+    let mid = blur_h(buf, w, h, r);
+    *buf = blur_v(&mid, w, h, r);
+}
+
+/// One row at a time, sliding-window box sum across columns (edge-clamped reads).
+fn blur_h(src: &[u8], w: u32, h: u32, r: i32) -> Vec<u8> {
+    let (wi, hi) = (w as i32, h as i32);
+    let mut out = vec![0u8; src.len()];
+    for y in 0..hi {
+        for c in 0..4usize {
+            let at = |x: i32| src[((y * wi + x.clamp(0, wi - 1)) * 4) as usize + c] as i32;
+            let mut sum: i32 = (-r..=r).map(at).sum();
+            for x in 0..wi {
+                out[((y * wi + x) * 4) as usize + c] = (sum / (2 * r + 1)) as u8;
+                sum += at(x + r + 1) - at(x - r);
+            }
+        }
+    }
+    out
+}
+
+/// Same sliding-window box sum, down each column (edge-clamped reads).
+fn blur_v(src: &[u8], w: u32, h: u32, r: i32) -> Vec<u8> {
+    let (wi, hi) = (w as i32, h as i32);
+    let mut out = vec![0u8; src.len()];
+    for x in 0..wi {
+        for c in 0..4usize {
+            let at = |y: i32| src[((y.clamp(0, hi - 1) * wi + x) * 4) as usize + c] as i32;
+            let mut sum: i32 = (-r..=r).map(at).sum();
+            for y in 0..hi {
+                out[((y * wi + x) * 4) as usize + c] = (sum / (2 * r + 1)) as u8;
+                sum += at(y + r + 1) - at(y - r);
+            }
+        }
+    }
+    out
+}
 
 pub fn render(bg: &Background, w: u32, h: u32) -> Vec<u8> {
     let mut buf = vec![0u8; (w * h * 4) as usize];
@@ -50,5 +115,46 @@ mod tests {
         let g = Background::Gradient { from: Rgb { r: 0, g: 0, b: 0 }, to: Rgb { r: 255, g: 255, b: 255 }, angle_deg: 0.0 };
         let buf = render(&g, 4, 1);
         assert!(buf[0] < buf[(3 * 4) as usize]); // left darker than right at 0deg
+    }
+
+    // `build` tests only exercise Solid/Gradient (pure Rust, deterministic) - `Mesh` shells out
+    // to ffmpeg and is intentionally left untested here, same as `render`'s Image stub above.
+    #[test]
+    fn build_solid_matches_direct_render() {
+        use crate::settings::background::{BackgroundKind, BackgroundSettings};
+        let s = BackgroundSettings { kind: BackgroundKind::Solid, solid: [10, 20, 30], ..Default::default() };
+        let buf = build(&s, &[], 2, 2); // mesh bytes irrelevant for Solid
+        assert_eq!(buf, render(&Background::Solid(Rgb { r: 10, g: 20, b: 30 }), 2, 2));
+    }
+    #[test]
+    fn build_zero_blur_is_a_no_op() {
+        use crate::settings::background::{BackgroundKind, BackgroundSettings};
+        let s = BackgroundSettings { kind: BackgroundKind::Gradient, blur: 0.0, ..Default::default() };
+        let buf = build(&s, &[], 16, 16);
+        let direct = render(&Background::Gradient { from: rgb(s.gradient_from), to: rgb(s.gradient_to), angle_deg: s.gradient_angle_deg }, 16, 16);
+        assert_eq!(buf, direct);
+    }
+    #[test]
+    fn blur_softens_a_sharp_edge() {
+        // 40x40 (not tiny): the blur radius is a fraction of `w.min(h)`, so a 1px-tall test
+        // image would always round down to radius 0 - this size guarantees a non-zero radius.
+        let (w, h) = (40u32, 40u32);
+        let mut buf = vec![0u8; (w * h * 4) as usize];
+        for y in 0..h { for x in 20..w {
+            let i = ((y * w + x) * 4) as usize;
+            buf[i] = 255; buf[i + 1] = 255; buf[i + 2] = 255; buf[i + 3] = 255;
+        } }
+        blur(&mut buf, w, h, 1.0);
+        // The pixel just left of the old hard edge (x=19) should have picked up some brightness -
+        // a sharp 0/255 edge no longer jumps straight from black to white.
+        let i = ((20 * w + 19) * 4) as usize;
+        assert!(buf[i] > 0, "edge should have softened into the dark side");
+    }
+    #[test]
+    fn blur_amount_zero_is_untouched() {
+        let mut buf = vec![7u8, 8, 9, 255, 1, 2, 3, 255];
+        let before = buf.clone();
+        blur(&mut buf, 2, 1, 0.0);
+        assert_eq!(buf, before);
     }
 }

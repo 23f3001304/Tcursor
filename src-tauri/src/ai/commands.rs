@@ -2,6 +2,14 @@ use std::path::PathBuf;
 use crate::edit::model::{EditDoc, Trim};
 use crate::session::paths::ProjectPaths;
 
+/// List locally-installed Ollama models, for the AI panel's Engine picker (`AiPanel.tsx`).
+/// Empty (never an error) when Ollama isn't running - the picker then just shows the backend's
+/// own fallback name instead of a populated list.
+#[tauri::command]
+pub fn list_ollama_models() -> Vec<String> {
+    crate::ai::backend::ollama::list_models()
+}
+
 #[tauri::command]
 pub fn ai_autoedit(folder: String, model: Option<String>) -> Result<EditDoc, String> {
     let paths = ProjectPaths { folder: PathBuf::from(folder) };

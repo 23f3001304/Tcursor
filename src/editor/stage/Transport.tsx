@@ -14,6 +14,13 @@ import {
 import { fmt } from "../timeline/time";
 import { Slider } from "../controls/Controls";
 import { motion, AnimatePresence } from "motion/react";
+import type { Aspect } from "../../lib/edit";
+
+/** Cycle order + short chip labels for the aspect selector - mirrors the Rust `Aspect` enum. */
+const ASPECT_ORDER: Aspect[] = ["source", "wide_16x9", "vertical_9x16", "square_1x1", "classic_4x3"];
+const ASPECT_LABEL: Record<Aspect, string> = {
+  source: "Source", wide_16x9: "16:9", vertical_9x16: "9:16", square_1x1: "1:1", classic_4x3: "4:3",
+};
 
 export function Transport({
   timeMs,
@@ -24,7 +31,10 @@ export function Transport({
   onAddZoom,
   onAutoedit,
   onSplit,
-  onTrim,
+  trimmed,
+  onResetTrim,
+  aspect,
+  onAspect,
   quality,
   onQuality,
   muted,
@@ -38,7 +48,10 @@ export function Transport({
   onAddZoom: () => void;
   onAutoedit: () => void;
   onSplit: () => void;
-  onTrim: () => void;
+  trimmed: boolean;
+  onResetTrim: () => void;
+  aspect: Aspect;
+  onAspect: (aspect: Aspect) => void;
   quality: number;
   onQuality: () => void;
   muted: boolean;
@@ -46,22 +59,18 @@ export function Transport({
 }) {
   const [volume, setVolume] = useState(100);
   const [showVolumeSlider, setShowVolumeSlider] = useState(false);
-  const [aspectRatio, setAspectRatio] = useState<"16:9" | "9:16" | "1:1" | "4:3">("16:9");
 
   const cycleAspect = () => {
-    setAspectRatio((prev) => {
-      if (prev === "16:9") return "9:16";
-      if (prev === "9:16") return "1:1";
-      if (prev === "1:1") return "4:3";
-      return "16:9";
-    });
+    const i = ASPECT_ORDER.indexOf(aspect);
+    onAspect(ASPECT_ORDER[(i + 1) % ASPECT_ORDER.length]);
   };
 
   return (
     <div className="e-transport">
-      {/* Left: Trim pill + divider + timeline tools */}
+      {/* Left: Trim pill (drag the timeline's edge handles to trim; this resets it) + divider + timeline tools */}
       <div className="e-tgroup">
-        <button onClick={onTrim} className="e-tbtn" title="Trim clip range">
+        <button onClick={onResetTrim} className={`e-tbtn${trimmed ? " on" : ""}`}
+          title={trimmed ? "Reset trim range" : "Drag the timeline's edge handles to trim"} disabled={!trimmed}>
           <IconCut size={15} />
           <span>Trim</span>
         </button>
@@ -94,7 +103,7 @@ export function Transport({
 
       {/* Right: aspect + quality chips + volume */}
       <div className="e-tgroup" style={{ gap: 10 }}>
-        <button className="e-chip" title="Change aspect ratio" onClick={cycleAspect}>{aspectRatio}</button>
+        <button className="e-chip" title="Change aspect ratio" onClick={cycleAspect}>{ASPECT_LABEL[aspect]}</button>
         <button className="e-chip" title="Preview quality" onClick={onQuality}>{quality}p</button>
 
         <div

@@ -1,6 +1,26 @@
 # src-tauri/src/ai/backend/ollama.rs
 
-Thin synchronous HTTP client that posts a two-message chat request to a local Ollama instance and returns the model's reply as a raw string. This is the only file in the codebase that makes an outbound network call; the 180-second read timeout is intentional to accommodate slow local inference on a laptop GPU or CPU.
+Thin synchronous HTTP client for a local Ollama instance: `chat` posts a two-message chat request and returns the model's reply as a raw string; `list_models` queries which models are installed. This is the only file in the codebase that makes an outbound network call; `chat`'s 180-second read timeout is intentional to accommodate slow local inference on a laptop GPU or CPU.
+
+## list_models
+
+```rust
+pub fn list_models() -> Vec<String>
+```
+
+Lists locally-installed Ollama model names via `GET http://localhost:11434/api/tags`.
+
+### Returns
+
+`Vec<String>` of model names (e.g. `["llama3.2", "mistral"]`), or an empty `Vec` - never an `Err` - if the request fails (Ollama not running) or the response doesn't parse as the expected `{"models":[{"name":...}]}` shape. *Why swallow errors here but not in `chat`:* this powers an optional UI convenience (the Engine picker's dropdown); `ai_autoedit` must still work via `chat`'s own default model name when Ollama is up but this call fails for an unrelated reason.
+
+### Implementation
+
+Builds a short-timeout (2s connect) `ureq::Agent` - deliberately much shorter than `chat`'s, since this call gates how quickly the AI panel becomes interactive, not the (already-consented-to) auto-edit run. `.get(...).call()` failure or a failed `.into_json::<TagsResp>()` both fall through to an empty `Vec` via `unwrap_or_default()`.
+
+### Used by
+
+- `src-tauri/src/ai/commands.rs` (`list_ollama_models`) - the only caller, a direct passthrough over Tauri IPC.
 
 ## chat
 

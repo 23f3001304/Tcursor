@@ -53,6 +53,7 @@ impl EditState {
 #[cfg(test)]
 mod tests {
     use crate::export::render::{FrameRenderer, OUT_FPS};
+    use crate::export::settings::Resolution;
     use crate::export::types::Layout;
     use crate::session::paths::ProjectPaths;
 
@@ -75,9 +76,9 @@ mod tests {
         let folder = std::env::var("TCURSOR_REC").expect("set TCURSOR_REC to a recording folder");
         let paths = ProjectPaths { folder: std::path::PathBuf::from(&folder) };
         let t0 = std::time::Instant::now();
-        let (mut r1, m) = FrameRenderer::new(&paths, Layout::default(), 60).expect("build r1");
+        let (mut r1, m) = FrameRenderer::new(&paths, Layout::default(), 60, Resolution::Source, None).expect("build r1");
         let build = t0.elapsed();
-        let (mut r2, _) = FrameRenderer::new(&paths, Layout::default(), 60).expect("build r2");
+        let (mut r2, _) = FrameRenderer::new(&paths, Layout::default(), 60, Resolution::Source, None).expect("build r2");
         let baseline = sweep(&mut r2, m.video_start);
         assert_eq!(sweep(&mut r1, m.video_start), baseline, "two fresh builds diverged");
         let t1 = std::time::Instant::now();

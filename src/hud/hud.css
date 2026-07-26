@@ -78,6 +78,21 @@ body { display: flex; align-items: flex-start; justify-content: center; overflow
 .dd-item-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dd-check { color: var(--accent); flex: none; display: flex; }
 
+/* target picker: groups windows under their own header, decorates each row with the
+   resolution + a "Primary" badge for the main display - reuses .dd-trigger/.dd-menu/.dd-item. */
+.tp-menu { min-width: 270px; }
+.tp-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.tp-res { font-size: 11px; color: var(--muted); font-weight: 500; }
+.tp-trail { display: flex; align-items: center; gap: 8px; flex: none; }
+.tp-badge {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
+  color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 1px 6px; line-height: 1.5;
+}
+.tp-divider {
+  padding: 7px 10px 4px; margin-top: 4px; border-top: 1px solid var(--line);
+  font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em;
+}
+
 /* camera preview tile (the on/off toggle is the camera icon in the controls row) */
 .camtoggle {
   position: relative; width: 40px; height: 40px; border-radius: 8px; border: 1px solid var(--line);

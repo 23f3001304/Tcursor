@@ -29,15 +29,17 @@ const lerpRect = (a: PanelRectDto, b: PanelRectDto, t: number): PanelRectDto => 
   ring_px: lerpN(a.ring_px, b.ring_px, t), ring_color: t < 0.5 ? a.ring_color : b.ring_color,
 });
 
-/** Collapse a resolved (screen, cam) PanelRect pair to the PreviewLayout the canvas draws. */
-function toPreviewLayout(screen: PanelRectDto, cam: PanelRectDto): PreviewLayout {
+/** Collapse a resolved (screen, cam) PanelRect pair to the PreviewLayout the canvas draws.
+ *  `canvas` is passed through unchanged from the caller's own `PreviewLayout` (this cross-fade
+ *  never changes the backing-store size, only the panel rects within it). */
+function toPreviewLayout(screen: PanelRectDto, cam: PanelRectDto, canvas: [number, number]): PreviewLayout {
   return {
     screen: screen.rect, radius: screen.radius, screenAlpha: screen.alpha,
     cam: cam.alpha > 0.004
       ? [cam.rect[0], cam.rect[1], cam.rect[2], cam.rect[3], cam.radius,
          cam.ring_px, cam.ring_color[0], cam.ring_color[1], cam.ring_color[2]]
       : null,
-    camAlpha: cam.alpha,
+    camAlpha: cam.alpha, canvas,
   };
 }
 
@@ -54,19 +56,19 @@ function rawPresetAt(ordered: LayoutSeg[], presets: LayoutPresets, t: number): L
  *  back to the base `screen` preset ("empty means default"). Latest-starting containing segment
  *  wins. On entering a segment, cross-fades from whatever was active just before it over that
  *  segment's own transition_ms/easing. Returns null when presets haven't loaded (caller falls back). */
-export function layoutAt(segs: LayoutSeg[], presets: LayoutPresets | null, t: number): PreviewLayout | null {
+export function layoutAt(segs: LayoutSeg[], presets: LayoutPresets | null, t: number, canvas: [number, number]): PreviewLayout | null {
   if (!presets) return null;
   const ordered = [...segs].sort((a, b) => a.start_ms - b.start_ms);
   let idx = -1;
   for (let k = 0; k < ordered.length; k++) { const s = ordered[k]; if (t >= s.start_ms && t < s.end_ms) idx = k; }
-  if (idx < 0) { const b = presets.screen; return toPreviewLayout(b.screen, b.cam); } // gap/outside -> screen
+  if (idx < 0) { const b = presets.screen; return toPreviewLayout(b.screen, b.cam, canvas); } // gap/outside -> screen
 
   const s = ordered[idx];
   const cur = presetOf(presets, s.layout);
   const elapsed = t - s.start_ms;
-  if (s.transition_ms <= 0 || elapsed >= s.transition_ms) return toPreviewLayout(cur.screen, cur.cam);
+  if (s.transition_ms <= 0 || elapsed >= s.transition_ms) return toPreviewLayout(cur.screen, cur.cam, canvas);
 
   const from = rawPresetAt(ordered, presets, Math.max(0, s.start_ms - 1)); // active just before this seg
   const f = ease(s.easing, elapsed / s.transition_ms);
-  return toPreviewLayout(lerpRect(from.screen, cur.screen, f), lerpRect(from.cam, cur.cam, f));
+  return toPreviewLayout(lerpRect(from.screen, cur.screen, f), lerpRect(from.cam, cur.cam, f), canvas);
 }

@@ -352,7 +352,7 @@ Returns `true` only for `CursorStyle::System`.
 ## CursorSettings
 
 ```rust
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct CursorSettings {
     pub style: CursorStyle,
@@ -360,10 +360,11 @@ pub struct CursorSettings {
     pub motion_blur: f32,
     pub click_bounce: bool,
     pub bounce_intensity: f32,
+    pub pack: String,
 }
 ```
 
-Per-cursor appearance and animation settings. Applies only when `style == Enhanced`.
+Per-cursor appearance and animation settings. Applies only when `style == Enhanced`. No longer `Copy` (the `pack` field is a `String`) - callers that need an owned copy alongside a live borrow now `.clone()` explicitly.
 
 Fields:
 
@@ -372,17 +373,20 @@ Fields:
 - `motion_blur: f32` - trail strength for the motion blur effect (0 = off, 1 = maximum). Default `0.35`. *Why 0.35:* noticeable but not overwhelming on fast pans; zero would make the sprite look teleporting.
 - `click_bounce: bool` - whether the cursor sprite plays a bounce-dip animation on mouse down. Default `true`. *Why on by default:* the bounce makes click detection trivially legible without any visual effect ring.
 - `bounce_intensity: f32` - depth of the bounce dip on a 0..1 scale (0.5 gives approx 0.18 scale-dip, 1.0 gives approx 0.36 dip). Default `0.5`. *Why not 1.0:* a full dip at 1.0 looks cartoonish; 0.5 gives a subtle-but-readable response.
+- `pack: String` - which cursor sprite pack draws the Enhanced cursor. Default `"default"` (the built-in embedded set - byte-identical to every recording made before this field existed). Any other value is an imported pack id (`export/cursor/pack.rs`'s `CursorPackInfo.id`); a pack missing a given kind's PNG falls back to the built-in sprite for just that kind. *Why a plain `String` id rather than an enum:* imported packs are discovered at runtime from the filesystem, so the set of valid values isn't known at compile time.
 
 ### Used by
 
 - `src-tauri/src/settings/model.rs` (`Settings.cursor`) - persisted in `config.json`
-- `src-tauri/src/export/cursor/cursorset.rs` (`prep`) - reads `style`, `motion_blur`, `click_bounce`, `bounce_intensity` to configure cursor sprite animation
+- `src-tauri/src/export/cursor/cursorset.rs` (`prep`) - reads `style` to gate, and `pack` (via `export::cursor::pack::sprite_sources`) to resolve which sprite bytes to decode, plus `motion_blur`/`click_bounce`/`bounce_intensity` to configure animation
+- `src-tauri/src/export/cursor/cursorpreview.rs` (`cursor_sprites`) - resolves `pack` the same way so the editor preview matches the export
 - `src-tauri/src/session/record/recorder.rs` - reads `style.captures_os_cursor()` and checks `style == Enhanced` to initialize the cursor type tracker
+- `src/editor/panels/CursorPanel.tsx` - lists/selects/imports packs, writing the chosen id into `pack`
 
 ## Settings
 
 ```rust
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Settings {
     pub zoom: ZoomSettings,
@@ -392,10 +396,14 @@ pub struct Settings {
     pub cursor: CursorSettings,
     pub ui: InterfaceSettings,
     pub audio_offset_ms: i32,
+    pub background: BackgroundSettings,
+    pub audio_mic_volume: f32,
+    pub audio_sys_volume: f32,
+    pub ai_model: String,
 }
 ```
 
-Top-level settings struct persisted to and loaded from `config.json` via `settings::store`. Derives `Default` so `Settings::default()` always produces a fully usable configuration without reading any file.
+Top-level settings struct persisted to and loaded from `config.json` via `settings::store`. Has a MANUAL `impl Default` (not derived): `audio_mic_volume`/`audio_sys_volume` need `1.0` (unity gain), which a derived `Default` would get wrong (`f32::default() == 0.0`, silently muted audio) since those two fields have no nested type of their own to carry a custom `Default` impl the way every other field does.
 
 Fields:
 
@@ -406,6 +414,9 @@ Fields:
 - `cursor: CursorSettings` - cursor rendering mode and animation parameters.
 - `ui: InterfaceSettings` - HUD theme and accent color.
 - `audio_offset_ms: i32` - manual mic-vs-video sync nudge in milliseconds. Negative values pull the mic track earlier to cancel device input latency. Zero means no adjustment. Default `0`. *Why signed:* input latency is subtractive; positive values also exist to handle rare setups where the mic arrives ahead of video.
+- `background: BackgroundSettings` - background style (mesh/solid/gradient + blur). Default `BackgroundSettings::default()` (`Mesh`, today's bundled image, byte-identical to before this field existed). See `settings::background`.
+- `audio_mic_volume: f32`, `audio_sys_volume: f32` - linear gain multipliers applied to each track at mux (0 = muted, 1 = unchanged, up to 1.5). Default `1.0` for both. *Why an explicit field-level `#[serde(default = "default_volume")]` in addition to the manual `impl Default` above:* belt-and-suspenders matching `spotlight_dim_camera`'s pattern, so a config saved without this key loads full volume under either code path.
+- `ai_model: String` - Ollama model name for `ai_autoedit`. Default `""` (empty = let the backend pick its own default, `"llama3.2"`), so configs saved before this field existed behave identically.
 
 ### Used by
 
@@ -413,3 +424,5 @@ Fields:
 - `src-tauri/src/commands.rs` (`get_settings`, `set_settings`) - surfaced over IPC so the frontend can read and write settings
 - `src-tauri/src/session/record/recorder.rs` - loaded at recording start via `store::load()` to snapshot all settings for the session
 - `src-tauri/src/export/pipeline/exporter.rs` - received from the IPC call and drives every export subsystem
+- `src-tauri/src/ai/commands.rs` (`ai_autoedit`) - receives `ai_model` (via the frontend passing `doc.settings.ai_model || undefined`)
+- `src-tauri/src/export/pipeline/audio_mux.rs` (`mux`) - receives `audio_mic_volume`/`audio_sys_volume` via `RenderMeta`

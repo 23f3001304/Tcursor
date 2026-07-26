@@ -8,10 +8,12 @@ import { useRecordingTimer } from "./hooks/useRecordingTimer";
 import { useWebcamPreview } from "./hooks/useWebcamPreview";
 import { useCameraDevices } from "./hooks/useCameraDevices";
 import { useMicWaveform } from "./hooks/useMicWaveform";
+import { useRecordingFlow } from "./hooks/useRecordingFlow";
 import { formatTimer } from "./components/formatTimer";
 import { Dropdown } from "./components/Dropdown";
-import { Grip, Monitor, Mic, MicOff, Speaker, SpeakerOff, Camera, CameraOff, MinIcon, CloseIcon, Gear, Gamepad, Palette } from "./components/icons";
-import { startRecording, stopRecording, pauseRecording, resumeRecording, getSettings } from "../lib/ipc";
+import { TargetPicker } from "./devices/TargetPicker";
+import { Grip, Mic, MicOff, Speaker, SpeakerOff, Camera, CameraOff, MinIcon, CloseIcon, Gear, Gamepad, Palette, FolderOpen } from "./components/icons";
+import { getSettings, openProject } from "../lib/ipc";
 import { applyTheme } from "./preferences/applyTheme";
 import type { ThemeMode } from "./settings/settings";
 import { useWebcamRecorder } from "./hooks/useWebcamRecorder";
@@ -23,25 +25,23 @@ const WIDTH = 980;
 
 export function Hud({ onEdit }: { onEdit?: (folder: string) => void }) {
   const { displays, mics, sel, setSel } = useDevices();
-  const [camId, setCamId] = useState<string | null>(null);
-  const [camOn, setCamOn] = useState(true);
+  const [camId, setCamId] = useState<string | null>(null); const [camOn, setCamOn] = useState(true);
   const cam = useWebcamPreview(camId, camOn);
   const cameras = useCameraDevices(cam.on ? 1 : 0);
-  const [recording, setRecording] = useState(false);
-  const [paused, setPaused] = useState(false);
-  const [saving, setSaving] = useState(false); // finalizing + saving the recording after Stop, before the editor opens
   const [menu, setMenu] = useState<string | null>(null);
-  const [micOn, setMicOn] = useState(true);
-  const [sysOn, setSysOn] = useState(false);
-  const [gameMode, setGameMode] = useState(false);
-  const [exporting, setExporting] = useState(false);
-  const [pct, setPct] = useState(0);
-  const [err, setErr] = useState<string | null>(null);
+  const [micOn, setMicOn] = useState(true); const [sysOn, setSysOn] = useState(false); const [gameMode, setGameMode] = useState(false);
+  const [exporting, setExporting] = useState(false); const [pct, setPct] = useState(0);
   const [panel, setPanel] = useState<"settings" | "preferences" | null>(null);
   const [barShown, setBarShown] = useState(true);
   const lastFolder = useRef<string>("");
   const themeRef = useRef<{ theme: ThemeMode; accent: [number, number, number] }>({ theme: "light", accent: [239, 68, 68] });
   const webcam = useWebcamRecorder();
+  // Owns record/stop/preprocess state + the toggle/togglePause handlers - see useRecordingFlow's
+  // doc comment for why preprocessing is awaited (with progress) between Stop and onEdit.
+  const { recording, paused, saving, savePct, err, toggle, togglePause } = useRecordingFlow({
+    micOn, micId: sel.micId, displayId: sel.displayId, sysOn, gameMode, camOn,
+    camStream: cam.stream, webcam, onEdit, lastFolderRef: lastFolder,
+  });
   const elapsed = useRecordingTimer(recording, paused);
   const levels = useMicWaveform(recording && !paused);
   const win = getCurrentWindow();
@@ -82,42 +82,9 @@ export function Hud({ onEdit }: { onEdit?: (folder: string) => void }) {
     return () => { unsubs.forEach(u => u.then(f => f())); };
   }, []);
 
-  async function toggle() {
-    if (saving) return;
-    if (!recording) {
-      setErr(null);
-      let folder: string;
-      try {
-        folder = await startRecording(`rec-${Date.now()}`, micOn ? sel.micId : null, sysOn, gameMode);
-      } catch (e) {
-        setErr(String(e));
-        return;
-      }
-      if (camOn) webcam.start(cam.stream(), folder);
-      setRecording(true);
-    } else {
-      // Immediate feedback: drop the recording UI the instant Stop is pressed, then finalize + save
-      // under a "Saving" state. The encode finalize + webcam-blob write are O(clip length), and
-      // awaiting them before touching the UI made Stop feel unresponsive (it stayed "recording").
-      setRecording(false);
-      setPaused(false);
-      setSaving(true);
-      try {
-        // Screen finalize + the webcam's tail-chunk flush run in parallel - both quick now that the
-        // webcam streamed to disk during recording (no big blob write left).
-        const [res] = await Promise.all([stopRecording(), webcam.stop()]);
-        lastFolder.current = res.folder;
-        onEdit?.(res.folder); // open the editor; export now happens from there
-      } catch (e) {
-        setErr(String(e));
-      } finally {
-        setSaving(false);
-      }
-    }
-  }
-  async function togglePause() {
-    if (paused) { await resumeRecording(); setPaused(false); }
-    else { await pauseRecording(); setPaused(true); }
+  // Opens a *.tcursor file picker and routes to the editor via the same onEdit path Stop uses.
+  async function openExistingProject() {
+    try { onEdit?.(await openProject()); } catch { /* dialog cancelled - nothing to surface */ }
   }
   const tg = (id: string) => setMenu((m) => (m === id ? null : id));
   const camOpts = cameras.length ? cameras.map((c) => ({ id: c.id, label: c.label })) : [{ id: "", label: "Camera" }];
@@ -143,6 +110,7 @@ export function Hud({ onEdit }: { onEdit?: (folder: string) => void }) {
             {err && <span style={{ color: "#ff6b6b", fontSize: 11, marginLeft: 10 }} title={err}>⚠ recording failed: {err}</span>}
             <span className="winctrls">
               {!recording && !exporting && (<>
+                <button className="winbtn" title="Open Project" onClick={openExistingProject} disabled={saving}><FolderOpen /></button>
                 <button className="winbtn" title="Preferences" onClick={() => openPanel("preferences")}><Palette /></button>
                 <button className="winbtn gear" title="Settings" onClick={() => openPanel("settings")}><Gear /></button>
               </>)}
@@ -161,13 +129,15 @@ export function Hud({ onEdit }: { onEdit?: (folder: string) => void }) {
 
             {exporting ? (
               <span className="exporting">Exporting… {pct}%</span>
+            ) : saving ? (
+              <span className="exporting saving">Saving… {savePct}%</span>
             ) : !recording ? (
               <>
                 <Dropdown icon={<Camera />} value={camId ?? cameras[0]?.id ?? ""} options={camOpts}
                   open={menu === "cam"} onToggle={() => tg("cam")} onPick={(id) => { setCamId(id || null); setMenu(null); }} />
                 <div className="divider" />
-                <Dropdown icon={<Monitor />} value={String(sel.displayId ?? "")} options={displays.map((d) => ({ id: String(d.id), label: d.label }))}
-                  open={menu === "screen"} onToggle={() => tg("screen")} onPick={(id) => { setSel({ ...sel, displayId: Number(id) }); setMenu(null); }} />
+                <TargetPicker targets={displays} value={sel.displayId ?? ""}
+                  open={menu === "screen"} onToggle={() => tg("screen")} onPick={(id) => { setSel({ ...sel, displayId: id }); setMenu(null); }} />
                 <Dropdown icon={<Mic />} value={sel.micId ?? ""} options={mics.map((m) => ({ id: m.id, label: m.label }))}
                   open={menu === "mic"} onToggle={() => tg("mic")} onPick={(id) => { setSel({ ...sel, micId: id }); setMenu(null); }} />
                 <button className={`toggle ${camOn ? "on" : ""}`} title={camOn ? "Camera on" : "Camera off"} onClick={() => setCamOn(v => !v)}>{camOn ? <Camera /> : <CameraOff />}</button>

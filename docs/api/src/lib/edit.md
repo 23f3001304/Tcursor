@@ -112,6 +112,41 @@ In/out trim points for the recording. Frames before `in_ms` and after `out_ms` a
 - `src/lib/edit.ts` - field `EditDoc.trim`.
 - `src/lib/ipc.ts` - `set_trim` `EditOp` variant sets both fields atomically.
 
+## Aspect
+
+```ts
+export type Aspect = "source" | "wide_16x9" | "vertical_9x16" | "square_1x1" | "classic_4x3";
+```
+
+Output frame aspect ratio - mirrors Rust `export::types::Aspect`. `"source"` (the default) matches today's behavior (the frame adapts to the recording's own dimensions); the 4 fixed presets pin a base resolution at that ratio. Never crops: the screen aspect-fits inside the (possibly resized) frame and the background fills the rest.
+
+### Used by
+
+- `src/lib/edit.ts` - field `EditDoc.aspect`; `EditOp` variant `set_aspect`.
+- `src/editor/stage/Transport.tsx` - the aspect chip cycles through all 5 values and calls `set_aspect`.
+
+## resolveTrim
+
+```ts
+export function resolveTrim(trim: Trim, durMs: number): { inMs: number; outMs: number }
+```
+
+Effective trim range against the clip's real duration - mirrors Rust `Trim::resolve` exactly, so the preview (playhead clamp, timeline dimming) always agrees with what export will cut. `trim.out_ms === 0` (unset) reads as "no trim yet": the whole clip.
+
+### Inputs
+
+- `trim: Trim` - the doc's raw trim fields.
+- `durMs: number` - the clip's real duration (ms).
+
+### Returns
+
+`{ inMs, outMs }` - both clamped into `[0, durMs]`, with `inMs` never exceeding `outMs`.
+
+### Used by
+
+- `src/editor/Editor.tsx` - clamps playback to the trim range and snaps the play-start to `inMs`.
+- `src/editor/timeline/TrimOverlay.tsx` - the dimmed head/tail regions and drag-handle positions.
+
 ## EditDoc
 
 ```ts
@@ -122,6 +157,8 @@ export interface EditDoc {
   zooms: Zoom[];
   speed: Speed[];
   layout: LayoutSeg[];
+  camera_moves: CameraMove[];
+  aspect: Aspect;
   settings: Settings;
 }
 ```
@@ -134,6 +171,8 @@ The complete editable state for one recording session. Loaded from `edit.json` i
 - `zooms: Zoom[]` - zoom segments, ordered ascending by `start_ms`. *Why ordered:* the exporter walks them in order; out-of-order entries would produce incorrect frame transforms.
 - `speed: Speed[]` - speed-ramp segments.
 - `layout: LayoutSeg[]` - output-layout segments; typically one segment covering the full recording, overridden for specific time ranges.
+- `camera_moves: CameraMove[]` - webcam PiP keyframes; empty is a no-op (byte-identical to before the feature existed).
+- `aspect: Aspect` - output frame aspect ratio; `"source"` (the default) matches today's behavior exactly, so a doc saved before this field existed loads unchanged.
 - `settings: Settings` - snapshot of the recorder settings at the time of capture. *Why embedded:* the exporter is fully self-contained per project; it must not depend on the current live settings, which may have changed since recording.
 
 ### Used by
@@ -149,6 +188,7 @@ export type EditOp =
   | { op: "update_zoom"; id: string; start_ms?: number; end_ms?: number; scale?: number; target?: ZoomTarget; easing?: string; zoom_in_ms?: number; zoom_out_ms?: number }
   | { op: "remove_zoom"; id: string }
   | { op: "set_trim"; in_ms: number; out_ms: number }
+  | { op: "set_aspect"; aspect: Aspect }
   | { op: "add_cut"; start_ms: number; end_ms: number }
   | { op: "set_speed"; start_ms: number; end_ms: number; factor: number }
   | { op: "set_layout_seg"; id: string; layout: string }
@@ -164,6 +204,7 @@ Discriminated union of all edit verbs. Each variant is tagged by the `op` string
 - `update_zoom` - patches any subset of a zoom's fields by `id`. All fields except `id` are optional. *Why partial update:* a drag-to-resize gesture changes only `end_ms`; sending the full zoom would be verbose and race-prone.
 - `remove_zoom` - deletes the zoom with the given `id`.
 - `set_trim` - replaces the document's `trim` in/out points atomically. *Why both together:* trim is always a pair; a partial update would leave an inconsistent state.
+- `set_aspect` - replaces `EditDoc.aspect`; the next export or preview build re-resolves the output `Layout` from it.
 - `add_cut` - appends a new `Cut` for the given time range.
 - `set_speed` - sets or replaces the speed ramp covering `[start_ms, end_ms]` with the given `factor`. *Why set rather than add:* the backend merges or replaces overlapping speed segments; the caller describes the desired outcome, not the mutation.
 - `set_layout_seg` - changes the `layout` field of the segment identified by `id`.

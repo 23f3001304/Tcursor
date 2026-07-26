@@ -134,4 +134,21 @@ mod tests {
         assert_eq!(corner_radius(&layout, 400, 300), 40.0);   // honored
         assert_eq!(corner_radius(&layout, 50, 60), 25.0);     // clamped to min(w,h)/2
     }
+
+    /// Never-crop guard: a 16:9 source aspect-fit into a `Vertical9x16` frame must letterbox
+    /// (fit fully inside, on both axes) rather than exceed the frame on either dimension - the
+    /// aspect switch resizes the OUTPUT frame, it never crops the captured screen content.
+    #[test]
+    fn vertical_aspect_letterboxes_a_16x9_source_never_exceeding_the_frame() {
+        use crate::export::types::Aspect;
+        let mut layout = Layout::default();
+        layout.apply_aspect(Aspect::Vertical9x16, 1920, 1080);
+        assert_eq!((layout.out_w, layout.out_h), (1080, 1920));
+        let (ix, iy, iw, ih) = inset_rect(1920, 1080, &layout);
+        assert!(iw <= layout.out_w && ih <= layout.out_h, "inset must fit inside the frame");
+        assert!(ix + iw <= layout.out_w && iy + ih <= layout.out_h, "inset must not overflow the frame");
+        // A 16:9 source in a 9:16 frame is far taller than wide relative to it, so the fit is
+        // letterboxed (pillarboxed) on the width, not an exact fill.
+        assert!(iw < layout.out_w, "expected pillarboxing, not an exact-width fill");
+    }
 }

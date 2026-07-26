@@ -1,6 +1,6 @@
 # src/editor/stage/Stage.tsx
 
-The preview stage: a vertical frame-tool strip (`StageToolbar`) on the left and a live composited preview on the right. The screen (a low-res proxy) and webcam play in hidden native `<video>` elements, a hidden `<audio>` plays the mixed preview audio, and `useCompositeLoop` runs the one `requestAnimationFrame` loop that composites each frame onto a 2D canvas via `drawPreview` (background + rounded zoomed screen + cursor + webcam PiP, matching the export's whole-frame zoom crop) plus the backend FX overlay (spotlight + click ripples) blitted on top. Native decode + `drawImage` holds 60fps. Clicking the canvas adds a zoom focused on the clicked point. This file stays thin - playback control (`useMediaPlayback`), live-value mirroring (`useSyncRefs`), sprite decoding (`useCursorSprites`), and the compositing loop itself (`useCompositeLoop`) are all extracted into sibling hooks.
+The preview stage: a vertical frame-tool strip (`StageToolbar`) on the left and a live composited preview on the right. The screen (a low-res proxy) and webcam play in hidden native `<video>` elements, a hidden `<audio>` plays the mixed preview audio, and `useCompositeLoop` runs the one `requestAnimationFrame` loop that composites each frame onto a 2D canvas via `drawPreview` (background + rounded zoomed screen + cursor + webcam PiP, matching the export's whole-frame zoom crop) plus the backend FX overlay (spotlight + click ripples) blitted on top. Native decode + `drawImage` holds 60fps. Clicking the canvas adds a zoom focused on the clicked point. This file stays thin - playback control (`useMediaPlayback`), live-value mirroring (`useSyncRefs`), sprite decoding (`useCursorSprites`), the compositing loop itself (`useCompositeLoop`), and the hidden media elements' markup (`StageMedia`) are all extracted into sibling hooks/components.
 
 ## Stage
 
@@ -52,5 +52,5 @@ Composites and shows the current preview frame, driven by the native `<video>`'s
 
 ### Notes
 
-- The canvas is a fixed 1280x720 backing store; CSS scales it to fit. `onCanvasClick`/`mapCanvasClickToZoomTarget` divide by the displayed rect to recover backing-store pixels.
+- The canvas backing store follows `layout.canvas` (from `PreviewLayout`, resolved server-side via `Layout::resolve` from `EditDoc.aspect`) - `DEFAULT_CANVAS` (1280x720) is only the pre-load fallback. `.e-stage`'s `aspect-ratio` is set inline from the same `[canvasW, canvasH]` so the stage box, the canvas, and every fraction in this file share one basis regardless of the chosen aspect. CSS then scales that box to fit; `onCanvasClick`/`mapCanvasClickToZoomTarget` divide by the displayed rect to recover backing-store pixels.
 - The spotlight/click-FX overlay is rendered by the backend at pixel-perfect parity with the export (not approximated in Canvas2D) - see `previewCanvas.md`, `fxOverlay.md`, `useCompositeLoop.md`.

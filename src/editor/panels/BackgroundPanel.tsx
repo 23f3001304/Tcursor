@@ -1,101 +1,128 @@
 import { useState } from "react";
-import { IconUpload } from "@tabler/icons-react";
 import { PanelHeader } from "./PanelHeader";
-import type { InterfaceSettings } from "../../hud/settings/settings";
-import { Switch, Slider } from "../controls/Controls";
-import { COLOR_PRESETS, GRADIENT_PRESETS, IMAGE_PRESETS, VIDEO_PRESETS, ACCENTS } from "./backgroundPresets";
+import type { EditDoc } from "../../lib/edit";
+import type { BackgroundSettings } from "../../hud/settings/settings";
+import { Slider } from "../controls/Controls";
+import { COLOR_PRESETS, GRADIENT_PRESETS, ACCENTS } from "./backgroundPresets";
 
-type BgType = "image" | "video" | "color" | "gradient";
+type BgTab = "image" | "video" | "color" | "gradient";
 const rgb = (c: [number, number, number]) => `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
+const DEFAULT_BG: BackgroundSettings = {
+  kind: "mesh", solid: [24, 24, 30],
+  gradient_from: [36, 41, 56], gradient_to: [88, 64, 120], gradient_angle_deg: 135, blur: 0,
+};
 
 export function BackgroundPanel({
-  settings,
-  onChange,
+  doc,
+  onSaveSettings,
   onClose,
 }: {
-  settings: InterfaceSettings;
-  onChange: (v: InterfaceSettings) => void;
+  doc: EditDoc;
+  onSaveSettings: (nextSettings: EditDoc["settings"]) => void;
   onClose: () => void;
 }) {
-  const [blur, setBlur] = useState(0.0);
-  const [bgType, setBgType] = useState<BgType>("gradient");
-  const [selectedPreset, setSelectedPreset] = useState(0);
-  const [shadow, setShadow] = useState(24);
-  const [radius, setRadius] = useState(43);
-  const [padding, setPadding] = useState(20);
-  const [removeBg, setRemoveBg] = useState(false);
+  const app = doc.settings.appearance;
+  const bg = doc.settings.background;
+  const padPct = Math.round((app.screen?.pad ?? 0.03125) * 100);
+  const radiusPx = Math.round((app.screen?.screen_radius ?? 0.016) * 1000);
+  // Which preset grid is showing. Derived from the saved kind so reopening the panel lands on
+  // the right tab, but merely BROWSING the image/video tabs (no real backend) never saves -
+  // only picking a color/gradient swatch below does.
+  const [tab, setTab] = useState<BgTab>(bg.kind === "solid" ? "color" : bg.kind === "gradient" ? "gradient" : "image");
+
+  const setBg = (patch: Partial<BackgroundSettings>) =>
+    onSaveSettings({ ...doc.settings, background: { ...bg, ...patch } });
 
   const handleReset = () => {
-    setBlur(0);
-    setBgType("gradient");
-    setShadow(24);
-    setRadius(43);
-    setPadding(20);
-    setRemoveBg(false);
+    setTab("image");
+    onSaveSettings({
+      ...doc.settings,
+      background: DEFAULT_BG,
+      appearance: { ...app, screen: { ...app.screen, pad: 0.03125, screen_radius: 0.016 } },
+      ui: { ...doc.settings.ui, accent: [239, 68, 68] },
+    });
+  };
+
+  const setPad = (v: number) => {
+    const frac = v / 100;
+    onSaveSettings({ ...doc.settings, appearance: { ...app, screen: { ...app.screen, pad: frac } } });
+  };
+
+  const setRadius = (v: number) => {
+    const frac = v / 1000;
+    onSaveSettings({ ...doc.settings, appearance: { ...app, screen: { ...app.screen, screen_radius: frac } } });
+  };
+
+  const setAccent = (c: [number, number, number]) => {
+    onSaveSettings({ ...doc.settings, ui: { ...doc.settings.ui, accent: c } });
   };
 
   return (
     <div className="e-panel e-insp">
-      <PanelHeader title="Background" lede="Frame padding, shadow, corner, and background style."
+      <PanelHeader title="Background" lede="Frame padding, corner radius, and background style."
         onReset={handleReset} onClose={onClose} />
 
       {/* Background Type Selector */}
       <div className="e-field">
         <span className="e-sechead">Background Type</span>
         <div className="e-seg">
-          {(["image", "video", "color", "gradient"] as BgType[]).map((t) => (
-            <button
-              key={t}
-              type="button"
-              className={bgType === t ? "on" : ""}
-              onClick={() => setBgType(t)}
-              style={{ textTransform: "capitalize" }}
-            >
+          {(["image", "video", "color", "gradient"] as BgTab[]).map((t) => (
+            <button key={t} type="button" className={tab === t ? "on" : ""}
+              onClick={() => setTab(t)} style={{ textTransform: "capitalize" }}>
               {t}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Upload Button */}
-      <div className="e-field">
-        <button className="e-upload-dashed" onClick={() => alert("Upload custom background image")}>
-          <IconUpload size={14} /> Upload Custom
-        </button>
-      </div>
-
-      {/* Presets Grid */}
-      <div className="e-field">
-        <span className="e-sechead">Presets</span>
-        <div className="e-preset-grid">
-          {(() => {
-            const activePresets =
-              bgType === "color"
-                ? COLOR_PRESETS
-                : bgType === "image"
-                ? IMAGE_PRESETS
-                : bgType === "video"
-                ? VIDEO_PRESETS
-                : GRADIENT_PRESETS;
-            return activePresets.map((preset, idx) => {
-              const isSelected = selectedPreset === idx;
-              return (
-                <button
-                  key={idx}
-                  type="button"
-                  className={`e-preset-circle ${isSelected ? "on" : ""}`}
-                  style={{
-                    background: preset,
-                    backgroundSize: "cover",
-                    backgroundPosition: "center"
-                  }}
-                  onClick={() => setSelectedPreset(idx)}
-                />
-              );
-            });
-          })()}
+      {tab === "image" && (
+        <div className="e-field">
+          <span className="e-sechead">Presets</span>
+          <div className="e-preset-grid">
+            <button type="button" className={`e-preset-circle ${bg.kind === "mesh" ? "on" : ""}`}
+              title="Default" style={{ background: "linear-gradient(135deg, #242938, #58406f)" }}
+              onClick={() => setBg({ kind: "mesh" })} />
+          </div>
+          <p className="e-lede" style={{ marginTop: 8 }}>Custom image backgrounds are coming soon.</p>
         </div>
-      </div>
+      )}
+
+      {tab === "video" && (
+        <div className="e-field">
+          <p className="e-lede">Video backgrounds are coming soon.</p>
+        </div>
+      )}
+
+      {tab === "color" && (
+        <div className="e-field">
+          <span className="e-sechead">Presets</span>
+          <div className="e-preset-grid">
+            {COLOR_PRESETS.map((c, idx) => {
+              const isSelected = bg.kind === "solid" && rgb(bg.solid) === rgb(c);
+              return (
+                <button key={idx} type="button" className={`e-preset-circle ${isSelected ? "on" : ""}`}
+                  style={{ background: rgb(c) }} onClick={() => setBg({ kind: "solid", solid: c })} />
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {tab === "gradient" && (
+        <div className="e-field">
+          <span className="e-sechead">Presets</span>
+          <div className="e-preset-grid">
+            {GRADIENT_PRESETS.map((g, idx) => {
+              const isSelected = bg.kind === "gradient" && rgb(bg.gradient_from) === rgb(g.from) && rgb(bg.gradient_to) === rgb(g.to);
+              return (
+                <button key={idx} type="button" className={`e-preset-circle ${isSelected ? "on" : ""}`}
+                  style={{ background: `linear-gradient(${g.angle}deg, ${rgb(g.from)}, ${rgb(g.to)})` }}
+                  onClick={() => setBg({ kind: "gradient", gradient_from: g.from, gradient_to: g.to, gradient_angle_deg: g.angle })} />
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Accent Colors */}
       <div className="e-field">
@@ -103,14 +130,14 @@ export function BackgroundPanel({
         <div className="e-accent-list">
           {ACCENTS.map((c) => {
             const colorStr = rgb(c);
-            const isSelected = rgb(settings.accent) === colorStr;
+            const isSelected = rgb(doc.settings.ui.accent) === colorStr;
             return (
               <button
                 key={colorStr}
                 type="button"
                 className={`e-accent-circle ${isSelected ? "on" : ""}`}
                 style={{ background: colorStr }}
-                onClick={() => onChange({ ...settings, accent: c })}
+                onClick={() => setAccent(c)}
               />
             );
           })}
@@ -119,31 +146,18 @@ export function BackgroundPanel({
 
       {/* Custom Sliders */}
       <div className="e-field">
-        <span className="e-fl">Background Blur <b>{blur.toFixed(1)}px</b></span>
-        <Slider min={0} max={20} step={0.5} value={blur} onChange={setBlur} />
+        <span className="e-fl">Background Blur <b>{Math.round(bg.blur * 100)}%</b></span>
+        <Slider min={0} max={100} step={5} value={Math.round(bg.blur * 100)} onChange={(v) => setBg({ blur: v / 100 })} />
       </div>
 
       <div className="e-field">
-        <span className="e-fl">Frame Shadow <b>{shadow}%</b></span>
-        <Slider min={0} max={100} step={1} value={shadow} onChange={setShadow} />
+        <span className="e-fl">Corner Radius <b>{radiusPx}px</b></span>
+        <Slider min={0} max={80} step={1} value={radiusPx} onChange={setRadius} />
       </div>
 
       <div className="e-field">
-        <span className="e-fl">Corner Radius <b>{radius}px</b></span>
-        <Slider min={0} max={80} step={1} value={radius} onChange={setRadius} />
-      </div>
-
-      <div className="e-field">
-        <span className="e-fl">Padding <b>{padding}%</b></span>
-        <Slider min={0} max={50} step={1} value={padding} onChange={setPadding} />
-      </div>
-
-      {/* Switches */}
-      <div className="e-sec">
-        <div className="e-switchrow">
-          <span>Remove background</span>
-          <Switch on={removeBg} onChange={setRemoveBg} />
-        </div>
+        <span className="e-fl">Padding <b>{padPct}%</b></span>
+        <Slider min={0} max={25} step={1} value={padPct} onChange={setPad} />
       </div>
     </div>
   );

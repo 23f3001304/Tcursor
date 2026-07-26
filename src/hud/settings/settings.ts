@@ -15,7 +15,7 @@ export interface AppearanceSettings {
 export type ThemeMode = "light" | "dark" | "system";
 export interface InterfaceSettings { theme: ThemeMode; accent: [number, number, number] }
 export type CursorStyle = "system" | "enhanced" | "hidden";
-export interface CursorSettings { style: CursorStyle; size: number; motion_blur: number; click_bounce: boolean; bounce_intensity: number }
+export interface CursorSettings { style: CursorStyle; size: number; motion_blur: number; click_bounce: boolean; bounce_intensity: number; pack: string }
 export type ClickFxStyle = "none" | "ripple" | "pulse" | "glow" | "shockwave" | "particles" | "neon";
 export type SpotlightMode = "classic" | "blur" | "halo" | "breathing" | "nebula" | "vignette";
 export type VideoFxMode = "nebulawash" | "cinematicdim" | "screenfocus" | "colorpop";
@@ -30,4 +30,22 @@ export interface HotkeySettings {
   layout_presenter: string; layout_screen_only: string; layout_camera_only: string;
   spotlight_hold: string; video_fx_hold: string;
 }
-export interface Settings { zoom: ZoomSettings; clickfx: ClickFxSettings; hotkeys: HotkeySettings; appearance: AppearanceSettings; cursor: CursorSettings; ui: InterfaceSettings; audio_offset_ms: number }
+/** Which of `BackgroundSettings`' fields the renderer uses - mirrors Rust `settings::background::BackgroundKind`.
+ *  `mesh` (default) is today's bundled image; `solid`/`gradient` are real user colors. Custom
+ *  image/video backgrounds have no backend yet - `BackgroundPanel` flags them as "coming soon". */
+export type BackgroundKind = "mesh" | "solid" | "gradient";
+export interface BackgroundSettings {
+  kind: BackgroundKind;
+  solid: [number, number, number];
+  gradient_from: [number, number, number];
+  gradient_to: [number, number, number];
+  gradient_angle_deg: number;
+  /** 0..1 softness applied once to the static background buffer (cheap - rebuilt once per
+   *  export/preview, not per frame). 0 = off (today's behavior). */
+  blur: number;
+}
+export interface Settings {
+  zoom: ZoomSettings; clickfx: ClickFxSettings; hotkeys: HotkeySettings; appearance: AppearanceSettings;
+  cursor: CursorSettings; ui: InterfaceSettings; audio_offset_ms: number; background: BackgroundSettings;
+  audio_mic_volume: number; audio_sys_volume: number; ai_model: string;
+}

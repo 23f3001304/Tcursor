@@ -1,20 +1,36 @@
-use wgpu::util::DeviceExt;
+use std::sync::Mutex;
 use crate::export::gpu::compositor::Compositor;
 use crate::export::gpu::Gpu;
 use crate::export::gpu::gpu_uniforms::build_uniforms;
 use crate::export::scene::Scene;
 use crate::export::types::{Camera, Layout};
 
+#[path = "gpu_compositor_tex.rs"]
+mod gpu_compositor_tex;
+
+struct CompositorResources {
+    sw: u32,
+    sh: u32,
+    ww: u32,
+    wh: u32,
+    screen_tex: wgpu::Texture,
+    webcam_tex: wgpu::Texture,
+    bg_tex: wgpu::Texture,
+    ubuf: wgpu::Buffer,
+    bind: wgpu::BindGroup,
+    bg_uploaded: bool,
+}
+
 pub struct GpuCompositor {
     gpu: Gpu,
     out_w: u32,
     out_h: u32,
-    bg_tex: std::sync::OnceLock<wgpu::Texture>,
+    res: Mutex<Option<CompositorResources>>,
 }
 
 impl GpuCompositor {
     pub fn new(out_w: u32, out_h: u32) -> Option<GpuCompositor> {
-        Some(GpuCompositor { gpu: Gpu::new(out_w, out_h)?, out_w, out_h, bg_tex: std::sync::OnceLock::new() })
+        Some(GpuCompositor { gpu: Gpu::new(out_w, out_h)?, out_w, out_h, res: Mutex::new(None) })
     }
 }
 
@@ -28,37 +44,35 @@ impl Compositor for GpuCompositor {
         scene: &Scene,
         out: &mut Vec<u8>,
     ) {
-        let g = &self.gpu;
         let (ow, oh) = (self.out_w, self.out_h);
-
-        let screen_tex = g.upload_tex("screen", screen, sw, sh);
-        // The background is constant for the whole export -- upload it once, reuse it.
-        let bg_tex = self.bg_tex.get_or_init(|| g.upload_tex("bg", bg, ow, oh));
+        // Fast-path: 1:1 unzoomed full screen without camera PiP or corner rounding
+        if cam.scale <= 1.0001 && scene.camera.alpha <= 0.0 && scene.screen.alpha >= 0.999 && scene.screen.radius <= 0.1 && scene.screen.ring_px <= 0.1 && sw == ow && sh == oh && screen.len() == (ow * oh * 4) as usize {
+            out.clear();
+            out.extend_from_slice(screen);
+            return;
+        }
+        let g = &self.gpu;
         let (wc_data, ww, wh) = webcam.unwrap_or((&[0u8; 4], 1, 1));
-        let wc_tex = g.upload_tex("webcam", wc_data, ww, wh);
-
-        let sv = screen_tex.create_view(&Default::default());
-        let bv = bg_tex.create_view(&Default::default());
-        let wv = wc_tex.create_view(&Default::default());
-
         let u = build_uniforms(scene, cam, layout, webcam.is_some());
-        let ubuf = g.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("uniforms"),
-            contents: bytemuck::bytes_of(&u),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
 
-        let bind = g.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("bind"),
-            layout: &g.bind_layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&bv) },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&sv) },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&wv) },
-                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(&g.sampler) },
-                wgpu::BindGroupEntry { binding: 4, resource: ubuf.as_entire_binding() },
-            ],
-        });
+        let mut lock = self.res.lock().unwrap();
+        let rebuild = match lock.as_ref() {
+            Some(r) => r.sw != sw || r.sh != sh || r.ww != ww || r.wh != wh,
+            None => true,
+        };
+
+        if rebuild {
+            *lock = Some(gpu_compositor_tex::build_resources(g, sw, sh, ww, wh, ow, oh, &u));
+        }
+
+        let r = lock.as_mut().unwrap();
+        g.update_tex(&r.screen_tex, screen, sw, sh);
+        g.update_tex(&r.webcam_tex, wc_data, ww, wh);
+        if !r.bg_uploaded {
+            g.update_tex(&r.bg_tex, bg, ow, oh);
+            r.bg_uploaded = true;
+        }
+        g.queue.write_buffer(&r.ubuf, 0, bytemuck::bytes_of(&u));
 
         let mut enc = g.device.create_command_encoder(&Default::default());
         {
@@ -77,7 +91,7 @@ impl Compositor for GpuCompositor {
                 occlusion_query_set: None,
             });
             rp.set_pipeline(&g.pipeline);
-            rp.set_bind_group(0, &bind, &[]);
+            rp.set_bind_group(0, &r.bind, &[]);
             rp.draw(0..3, 0..1);
         }
         enc.copy_texture_to_buffer(

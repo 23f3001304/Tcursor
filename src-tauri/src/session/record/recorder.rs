@@ -11,6 +11,8 @@ use crate::events::track::tracker::MouseTracker;
 use crate::actions::keyboard::KeyboardTracker;
 use crate::actions::matcher::arming_from_settings;
 use crate::session::paths::ProjectPaths;
+use crate::session::project::manifest::ProjectManifest;
+use crate::session::project::recents;
 use crate::session::record::recorder_threads::{save_inputs, spawn_mic_thread, spawn_system_thread};
 use crate::session::record::video_sink::{start_video, VideoSink};
 
@@ -47,6 +49,7 @@ pub struct RecordingResult { pub folder: String, pub frames: u64 }
 pub fn start_recording(
     project_name: String,
     mic_id: Option<String>,
+    target_id: Option<String>,
     system_audio: bool,
     game_mode: bool,
     recorder: tauri::State<'_, Recorder>,
@@ -95,11 +98,11 @@ pub fn start_recording(
     // (Media Foundation, no readback) by default; the compatibility toggle (game_mode) or a
     // GPU-encoder init failure falls back to the legacy ffmpeg path. Returns the captured (w, h).
     let video_path = paths.video().to_string_lossy().into_owned();
-    let (video, w, h) = start_video(game_mode, clock.clone(), stop.clone(), paused.clone(),
-        fps, snap.cursor.style.captures_os_cursor(), &video_path)?;
-    println!("recording {w}x{h} @ {fps}fps");
+    let (video, w, h, origin_x, origin_y) = start_video(game_mode, clock.clone(), stop.clone(), paused.clone(),
+        fps, snap.cursor.style.captures_os_cursor(), target_id.as_deref(), &video_path)?;
+    println!("recording {w}x{h} @ {fps}fps (origin {origin_x},{origin_y})");
 
-    let screen = ScreenInfo { w, h, origin_x: 0, origin_y: 0 };
+    let screen = ScreenInfo { w, h, origin_x, origin_y };
     let started_unix_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
@@ -158,9 +161,18 @@ pub fn stop_recording(recorder: tauri::State<'_, Recorder>) -> Result<RecordingR
     let sync_path = std::path::Path::new(&running.folder).join("sync.json");
     if let Err(e) = sync.save(&sync_path) { eprintln!("sync.json save failed: {e}"); }
 
-    // Capture has fully stopped: pre-generate the editor's heavy media off-thread (instant editor open).
-    let pf = running.folder.clone();
-    std::thread::spawn(move || crate::export::preview::thumbs::prewarm(pf));
+    // Write the .tcursor project manifest (best-effort - never fails the recording; the folder
+    // is still a fully valid project without it, just not open-project-able by dialog until the
+    // NEXT time it is written). preprocessed=false here: the frontend calls `preprocess_project`
+    // right after this command resolves (shown as the HUD's "Saving..." progress) and that flips
+    // it once the pass finishes. NOT done here as a detached background thread anymore - that
+    // used to race the editor's mount (it could still be transcoding when the editor opened),
+    // which is exactly the "preview still takes a while to load" lag; awaiting it with progress
+    // in the caller fixes that.
+    let paths = ProjectPaths { folder: PathBuf::from(&running.folder) };
+    let manifest = ProjectManifest::new(running.screen.w, running.screen.h);
+    if let Err(e) = manifest.save(&paths.manifest()) { eprintln!("project.tcursor save failed: {e}"); }
+    recents::touch(&running.folder); // best-effort; also makes fresh recordings show up as "recent"
 
     Ok(RecordingResult { folder: running.folder, frames })
 }

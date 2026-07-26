@@ -28,6 +28,12 @@ impl Compositor for CpuCompositor {
         out: &mut Vec<u8>,
     ) {
         let (ow, oh) = (layout.out_w, layout.out_h);
+        // Fast-path: 1:1 unzoomed full screen without camera PiP or corner rounding
+        if cam.scale <= 1.0001 && scene.camera.alpha <= 0.0 && scene.screen.alpha >= 0.999 && scene.screen.radius <= 0.1 && scene.screen.ring_px <= 0.1 && sw == ow && sh == oh && screen.len() == (ow * oh * 4) as usize {
+            out.clear();
+            out.extend_from_slice(screen);
+            return;
+        }
         let mut base = bg.to_vec();
         draw_panel(&mut base, ow, oh, screen, sw, sh, scene.screen);
         let (cx0, cy0, cw, ch) = crate::export::coordmap::crop(cam, ow, oh);
@@ -42,8 +48,8 @@ impl Compositor for CpuCompositor {
 
 /// GPU compositor if available, else CPU fallback. Never fails.
 pub fn select_compositor(layout: &Layout) -> Box<dyn Compositor> {
-    if crate::export::gpu::gpu_available() {
-        if let Some(c) = crate::export::gpu::gpu_compositor::GpuCompositor::new(layout.out_w, layout.out_h) { return Box::new(c); }
+    if let Some(c) = crate::export::gpu::gpu_compositor::GpuCompositor::new(layout.out_w, layout.out_h) {
+        return Box::new(c);
     }
     Box::new(CpuCompositor)
 }

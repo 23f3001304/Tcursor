@@ -1,10 +1,10 @@
-// Editor-preview cursor: expose the export's Capitaine sprite pack + the cursor-type track to
+// Editor-preview cursor: expose the export's selected cursor pack + the cursor-type track to
 // the frontend so the canvas preview draws the SAME cursor the export renders (gated by style),
 // instead of a generic arrow. Sprites are decoded/cropped/dark-inverted exactly like the export.
 use std::path::PathBuf;
 use crate::events::track::cursortype::{CursorTrack, CursorType};
 use crate::export::cursor::cursordraw::decode_sprite;
-use crate::export::cursor::cursorset::SPRITES;
+use crate::export::cursor::pack;
 use crate::export::preview::{base64_encode, png_encode, with_warm, PreviewSession};
 use crate::session::paths::ProjectPaths;
 
@@ -14,16 +14,18 @@ use crate::session::paths::ProjectPaths;
 #[derive(serde::Serialize)]
 pub struct CursorSpriteDto { pub kind: CursorType, pub url: String, pub hot: [f32; 2], pub canvas_h: u32 }
 
-/// The Capitaine cursor pack as PNG data URLs, decoded like the export (crop to alpha, hotspot
-/// re-based, RGB-inverted for a dark theme). The preview draws these when the recording's
-/// cursor style is Enhanced. Errors only if the Arrow fallback fails.
+/// The recording's selected cursor pack (built-in, or an imported pack falling back to the
+/// built-in per-kind - see `export/cursor/pack.rs`) as PNG data URLs, decoded like the export
+/// (crop to alpha, hotspot re-based, RGB-inverted for a dark theme). The preview draws these
+/// when the recording's cursor style is Enhanced. Errors only if the Arrow fallback fails.
 #[tauri::command]
 pub fn cursor_sprites(folder: String) -> Result<Vec<CursorSpriteDto>, String> {
     let paths = ProjectPaths { folder: PathBuf::from(&folder) };
-    let dark = crate::win::theme::resolve_dark(crate::edit::seed::load_or_seed(&paths).settings.ui.theme);
+    let settings = crate::edit::seed::load_or_seed(&paths).settings;
+    let dark = crate::win::theme::resolve_dark(settings.ui.theme);
     let mut out = Vec::new();
-    for &(kind, png, hot) in SPRITES {
-        if let Some(mut spr) = decode_sprite(png, hot) {
+    for (kind, png, hot) in pack::sprite_sources(&settings.cursor.pack) {
+        if let Some(mut spr) = decode_sprite(&png, hot) {
             if dark { invert_rgb(&mut spr.bgra); }
             if let Ok(bytes) = png_encode(&spr.bgra, spr.w, spr.h) {
                 out.push(CursorSpriteDto {

@@ -1,6 +1,8 @@
 pub mod cursordraw;
 pub mod cursorset;
 pub mod cursorpreview;
+pub mod pack;
+pub mod pack_import;
 
 use crate::events::model::{EventKind, MouseEvent, ScreenInfo};
 use crate::export::coordmap::to_frame;

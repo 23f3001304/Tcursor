@@ -20,8 +20,11 @@ pub struct CamSample { pub t: u32, pub scale: f32, pub cx: f32, pub cy: f32, pub
 /// applies this as a transform for a smooth, exact-timing zoom preview. Reuses the warm cache.
 #[tauri::command]
 pub fn camera_track(folder: String, session: tauri::State<'_, PreviewSession>) -> Result<Vec<CamSample>, String> {
-    with_warm(&session, &folder, |c, paths| {
-        let dur = crate::edit::seed::load_or_seed(paths).trim.out_ms.max(1) as u64;
+    with_warm(&session, &folder, |c, _paths| {
+        // The TRUE full clip length (not `trim.out_ms`, which once a user actually trims is a
+        // strict sub-range) - so scrubbing into a trimmed-out region still shows an animated
+        // curve instead of freezing on the last in-range sample.
+        let dur = c.meta.video_end.saturating_sub(c.meta.video_start).max(1);
         let vs = c.meta.video_start;
         c.renderer.reset_camera();
         let step = (1000 / OUT_FPS).max(1);
@@ -50,15 +53,17 @@ pub fn camera_track(folder: String, session: tauri::State<'_, PreviewSession>) -
 /// output - so the canvas preview frames the screen and webcam exactly like the export. `cam`'s
 /// last 4 entries are the camera panel's ring: width (fraction of output width, 0 = no ring)
 /// then RGB 0..255, mirroring how `Panel::ring_px`/`ring_color` ride alongside its rect/radius.
+/// `canvas` is the resolved preview frame's pixel dimensions (`Layout::resolve`'s output) - the
+/// editor sizes its canvas + `.e-stage` aspect-ratio from this instead of a hardcoded 16:9.
 #[derive(serde::Serialize)]
-pub struct PreviewLayout { pub screen: [f32; 4], pub radius: f32, pub cam: Option<[f32; 9]> }
+pub struct PreviewLayout { pub screen: [f32; 4], pub radius: f32, pub cam: Option<[f32; 9]>, pub canvas: [u32; 2] }
 
 #[tauri::command]
 pub fn preview_layout(folder: String, session: tauri::State<'_, PreviewSession>) -> Result<PreviewLayout, String> {
     with_warm(&session, &folder, |c, _paths| {
         c.renderer.reset_camera();
         let pose = c.renderer.step_camera(c.meta.video_start);
-        let (ow, oh) = (c.out_w as f32, c.out_h as f32);
+        let (ow, oh) = (c.meta.out_w as f32, c.meta.out_h as f32);
         let s = pose.scene.screen.rect;
         let cam = if pose.scene.camera.alpha > 0.5 {
             let cp = pose.scene.camera;
@@ -66,7 +71,8 @@ pub fn preview_layout(folder: String, session: tauri::State<'_, PreviewSession>)
             Some([cp.rect.x / ow, cp.rect.y / oh, cp.rect.w / ow, cp.rect.h / oh, cp.radius / ow,
                 cp.ring_px / ow, rr as f32, rg as f32, rb as f32])
         } else { None };
-        Ok(PreviewLayout { screen: [s.x / ow, s.y / oh, s.w / ow, s.h / oh], radius: pose.scene.screen.radius / ow, cam })
+        Ok(PreviewLayout { screen: [s.x / ow, s.y / oh, s.w / ow, s.h / oh], radius: pose.scene.screen.radius / ow, cam,
+            canvas: [c.meta.out_w, c.meta.out_h] })
     })
 }
 
@@ -96,10 +102,12 @@ pub fn ensure_proxy(folder: String, height: u32) -> Result<String, String> {
     let proxy = paths.folder.join(format!("preview_{h}_rt.mp4"));
     crate::win::sys::proc::generate_once(&proxy, || {
         // The capture encoder writes CFR at a nominal fps usually faster than the real capture
-        // rate, so video.mp4 plays sped up. Stretch the proxy to the real recording duration
-        // (trim.out_ms - the exact span the export spans) via setpts, so the preview plays at
-        // true speed and stays aligned with the camera curve, clicks, webcam and audio.
-        let real = (crate::edit::seed::load_or_seed(&paths).trim.out_ms as f64 / 1000.0).max(0.05); // assumes trim.in_ms == 0
+        // rate, so video.mp4 plays sped up. Stretch the proxy to the real recording duration via
+        // setpts, so the preview plays at true speed and stays aligned with the camera curve,
+        // clicks, webcam and audio. Uses the TRUE full duration (not `trim.out_ms`, which once a
+        // user actually trims no longer spans the whole clip) - the proxy covers the entire
+        // scrubbable timeline, trimmed or not.
+        let real = (crate::edit::seed::true_duration_ms(&paths) as f64 / 1000.0).max(0.05);
         // A non-positive probe means the duration is unknown (ffprobe ran but couldn't parse it,
         // which returns Ok(0.0) not Err) - leave the proxy unstretched (k=1) rather than dividing
         // by the 0.05 floor and producing an absurd multi-hour stretch.
@@ -109,7 +117,7 @@ pub fn ensure_proxy(folder: String, height: u32) -> Result<String, String> {
         let vf = if (k - 1.0).abs() > 0.02 { format!("scale=-2:{h},setpts={k:.6}*PTS") } else { format!("scale=-2:{h}") };
         let tmp = crate::win::sys::proc::tmp_sibling(&proxy); // write then atomic-rename (no partial reads)
         let status = ffcmd_bg("ffmpeg")
-            .args(["-v", "error", "-y", "-i"]).arg(paths.video())
+            .args(["-v", "error", "-hwaccel", "auto", "-y", "-i"]).arg(paths.video())
             .args(["-vf", &vf, "-c:v", "libx264", "-preset", "veryfast",
                 "-crf", "27", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an"])
             .arg(&tmp)

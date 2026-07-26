@@ -82,9 +82,71 @@ pub struct GpuRecorder {
 }
 
 impl GpuRecorder {
-    /// Start GPU-native capture+encode of the primary monitor to `video_path` (H.264 MP4).
+    /// Start GPU-native capture+encode of the specified monitor or application window to `video_path` (H.264 MP4).
     /// Returns the recorder plus the captured `(w, h)`. Audio is disabled (recorded separately).
-    pub fn start(clock: Arc<dyn Clock>, paused: Arc<AtomicBool>, fps: u32, with_cursor: bool, video_path: &str) -> anyhow::Result<(Self, u32, u32)> {
+    pub fn start(clock: Arc<dyn Clock>, paused: Arc<AtomicBool>, fps: u32, with_cursor: bool, target_id: Option<&str>, video_path: &str) -> anyhow::Result<(Self, u32, u32)> {
+        use windows_capture::window::Window;
+
+        let cursor_setting = if with_cursor { CursorCaptureSettings::WithCursor } else { CursorCaptureSettings::WithoutCursor };
+        let interval_setting = MinimumUpdateIntervalSettings::Custom(std::time::Duration::from_micros(1_000_000 / fps.max(1) as u64));
+        let frame_ts: FrameTimes = Arc::new(Mutex::new(Vec::new()));
+
+        if let Some(tid) = target_id {
+            if let Some(hex) = tid.strip_prefix("window:0x") {
+                if let Ok(hwnd_val) = usize::from_str_radix(hex, 16) {
+                    let hwnd = windows::Win32::Foundation::HWND(hwnd_val as *mut _);
+                    let win = Window::from_raw_hwnd(hwnd.0 as *mut _);
+                    let mut r = windows::Win32::Foundation::RECT::default();
+                    let (w, h) = if unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd, &mut r) }.is_ok() {
+                        ((r.right - r.left).max(100) as u32, (r.bottom - r.top).max(100) as u32)
+                    } else {
+                        (1920, 1080)
+                    };
+                    let encoder = VideoEncoder::new(
+                        video_settings(w, h, fps),
+                        AudioSettingsBuilder::default().disabled(true),
+                        ContainerSettingsBuilder::default(),
+                        video_path,
+                    )?;
+                    let settings = Settings::new(
+                        win,
+                        cursor_setting,
+                        DrawBorderSettings::WithoutBorder,
+                        SecondaryWindowSettings::Default,
+                        interval_setting,
+                        DirtyRegionSettings::Default,
+                        ColorFormat::Bgra8,
+                        (encoder, clock, frame_ts.clone(), paused),
+                    );
+                    return Ok((Self { control: Cap::start_free_threaded(settings)?, frame_ts }, w, h));
+                }
+            } else if let Some(idx_str) = tid.strip_prefix("display:") {
+                if let Ok(idx) = idx_str.parse::<usize>() {
+                    if let Ok(mon) = Monitor::from_index(idx) {
+                        let w = mon.width().unwrap_or(1920);
+                        let h = mon.height().unwrap_or(1080);
+                        let encoder = VideoEncoder::new(
+                            video_settings(w, h, fps),
+                            AudioSettingsBuilder::default().disabled(true),
+                            ContainerSettingsBuilder::default(),
+                            video_path,
+                        )?;
+                        let settings = Settings::new(
+                            mon,
+                            cursor_setting,
+                            DrawBorderSettings::WithoutBorder,
+                            SecondaryWindowSettings::Default,
+                            interval_setting,
+                            DirtyRegionSettings::Default,
+                            ColorFormat::Bgra8,
+                            (encoder, clock, frame_ts.clone(), paused),
+                        );
+                        return Ok((Self { control: Cap::start_free_threaded(settings)?, frame_ts }, w, h));
+                    }
+                }
+            }
+        }
+
         let monitor = Monitor::primary()?;
         let (w, h) = (monitor.width()?, monitor.height()?);
         let encoder = VideoEncoder::new(
@@ -93,13 +155,12 @@ impl GpuRecorder {
             ContainerSettingsBuilder::default(),
             video_path,
         )?;
-        let frame_ts: FrameTimes = Arc::new(Mutex::new(Vec::new()));
         let settings = Settings::new(
             monitor,
-            if with_cursor { CursorCaptureSettings::WithCursor } else { CursorCaptureSettings::WithoutCursor },
+            cursor_setting,
             DrawBorderSettings::WithoutBorder,
             SecondaryWindowSettings::Default,
-            MinimumUpdateIntervalSettings::Custom(std::time::Duration::from_micros(1_000_000 / fps.max(1) as u64)),
+            interval_setting,
             DirtyRegionSettings::Default,
             ColorFormat::Bgra8,
             (encoder, clock, frame_ts.clone(), paused),

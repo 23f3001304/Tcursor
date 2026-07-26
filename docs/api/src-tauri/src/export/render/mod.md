@@ -16,6 +16,8 @@ Constant output frame rate (60 fps). Defined here so both `exporter.rs` and futu
 pub struct RenderMeta {
     pub tl: Timeline, pub video_start: u64, pub video_end: u64, pub out_w: u32, pub out_h: u32,
     pub sw: u32, pub sh: u32, pub screen_bytes: usize, pub webcam_size: u32, pub audio_offset_ms: i32,
+    pub trim: crate::edit::model::Trim,
+    pub mic_volume: f32, pub sys_volume: f32,
 }
 ```
 
@@ -31,6 +33,8 @@ All information the export (or preview) loop needs to set up its raw decoders an
 - `screen_bytes: usize` - `sw * sh * 4`: exact BGRA buffer size for the screen decoder. *Why:* pre-computed to avoid re-doing the multiply at every `RawDecoder::spawn` call.
 - `webcam_size: u32` - square side length (pixels) for webcam decode, capped to 1440. *Why:* `RawDecoder::spawn` for the webcam takes this as the `Some(size)` resize argument; returned here so the exporter can allocate the matching buffer.
 - `audio_offset_ms: i32` - the user's manual mic-sync nudge from settings. *Why:* carried here so `exporter.rs` does not need to reload the edit doc a second time after `new()`.
+- `trim: crate::edit::model::Trim` - the doc's trim window, unresolved (see `Trim::resolve`). *Why:* `exporter::export` resolves it against its own `video_end - video_start` and gates the frame loop (`pipeline::trim_frame_bounds`), again avoiding a second doc load.
+- `mic_volume: f32`, `sys_volume: f32` - linear gain multipliers from `Settings.audio_mic_volume`/`audio_sys_volume` (0 = muted, 1 = unchanged, up to 1.5). *Why carried here rather than reloaded in `exporter.rs`:* same reasoning as `audio_offset_ms` - `FrameRenderer::new` already loaded settings once; `exporter::export` passes both straight through to `audio_mux::mux`.
 
 ### Used by
 
@@ -93,12 +97,14 @@ Private fields include:
 pub fn reload_edit(&mut self, paths: &ProjectPaths)
 ```
 
-Refreshes only the `edit.json`-derived state (settings, zoom config, layout track, anchored regions, effects) in place, via `render_edit::EditState`. Called by `preview::with_warm` when only `edit.json` changed: it avoids a full `new()` - no new GPU device, no background decode, no video probe, no cursor prep - so an editor zoom/spotlight edit costs ~microseconds instead of rebuilding the renderer (~seconds). Cursor prep (`cprep`) is intentionally not refreshed: it is edit-independent for the metadata the live editor uses (only `composite_at` reads it, which the editor's canvas preview never calls), so a cursor-settings change would need a full rebuild to reflect in `composite_at`.
+Refreshes the `edit.json`-derived state (settings, zoom config, layout track, anchored regions, effects) in place, via `render_edit::EditState`. Called by `preview::with_warm` when only `edit.json` changed: it avoids a full `new()` - no new GPU device, no video probe, no cursor prep - so an editor zoom/spotlight edit costs ~microseconds instead of rebuilding the renderer (~seconds). Cursor prep (`cprep`) is intentionally not refreshed: it is edit-independent for the metadata the live editor uses (only `composite_at` reads it, which the editor's canvas preview never calls), so a cursor-settings change would need a full rebuild to reflect in `composite_at`.
+
+**Background is the one exception to "no background decode":** `bg` IS conditionally rebuilt here, via `background::build`, but ONLY when `es.settings.background != self.settings.background` (compared before `self.settings` is overwritten). This keeps the common case (a zoom/cursor/effects edit, background unchanged) exactly as cheap as before, while a background-panel edit (type/color/gradient/blur) still reaches the warm preview renderer instead of requiring a full rebuild. The comparison matters because `BackgroundKind::Mesh` decodes via an ffmpeg subprocess - unconditionally rebuilding on every `reload_edit` call would make unrelated edits noticeably slower.
 
 ## FrameRenderer::new
 
 ```rust
-pub fn new(paths: &ProjectPaths, layout: Layout, fps: u32) -> Result<(Self, RenderMeta)>
+pub fn new(paths: &ProjectPaths, layout: Layout, fps: u32, resolution: Resolution, preview_cap: Option<u32>) -> Result<(Self, RenderMeta)>
 ```
 
 Loads the edit doc and event log, resolves all per-export setup, and returns both the renderer and the metadata the caller needs to spawn decoders. The `edit.json`-derived state (settings, zoom config, layout track, anchored regions, effects) is built via `render_edit::EditState`, shared with `reload_edit` so a warm-preview edit can refresh it in place.
@@ -106,8 +112,10 @@ Loads the edit doc and event log, resolves all per-export setup, and returns bot
 ### Inputs (what, and why it is needed)
 
 - `paths: &ProjectPaths` - root of the project folder. *Why:* all asset paths (`events.json`, `actions.json`, `video`, `webcam`, `cursor.json`, `sync.json`, `edit.json`) are derived from it.
-- `layout: Layout` - output canvas geometry. *Why:* taken by value so `new` can pass it to `LayoutTrack::new`, `CameraSim::new`, and the compositor constructor without copying; the exporter uses `Layout::default()` and the preview engine will pass a smaller layout.
-- `fps: u32` - capture frame rate. *Why:* passed to `build_timeline` as a last-resort denominator when `sync.json` is absent and no audio duration is available; matches the `fps` parameter of `exporter::export`.
+- `layout: Layout` - output canvas geometry SEED. *Why:* taken by value; `new` resolves the doc's `aspect` (RATIO) and `resolution` (SIZE) against the true probed source dims via `layout.resolve(...)` before using it, so the caller's own `out_w`/`out_h` are overwritten regardless (the exporter passes `Layout::default()`; the preview engine also passes `Layout::default()` and relies on `preview_cap` to downscale).
+- `fps: u32` - capture frame rate. *Why:* passed to `build_timeline` as a last-resort denominator when `sync.json` is absent and no audio duration is available; matches `exporter::export`'s own `capture_fps` (unrelated to the export's OUTPUT frame rate, which comes from `ExportSettings.fps` / `Fps::resolve_hz`).
+- `resolution: Resolution` (`export::settings::Resolution`) - the user's chosen export SIZE preset (short-edge px), combined with `aspect`'s RATIO in `Layout::resolve`. *Why a separate param from `aspect`:* export-settings resolution and the doc's own aspect ratio are independent choices (see `ExportSettings`). Preview call sites (`preview::build_renderer`, and the `render_edit` tests) always pass `Resolution::Source` (a no-op) since the export resolution setting only applies to the export build.
+- `preview_cap: Option<u32>` - `None` for a full export build (no downscale); `Some(long_edge)` downscales the aspect+resolution-resolved frame to that budget (`Layout::resolve`) for a cheap preview build, scaling `pad_px`/`screen_radius_px` proportionally.
 
 ### Returns
 
@@ -115,7 +123,7 @@ Loads the edit doc and event log, resolves all per-export setup, and returns bot
 
 ### Implementation
 
-Follows the same sequence as the original `exporter::export` setup block (lines ~32-107), with the encoder/sink and the `RawDecoder::spawn` calls excluded. The webcam-size calculation (`max_cam` over all layout modes, capped to 1440) is done here and returned in `RenderMeta.webcam_size` so the exporter does not need to repeat it.
+Follows the same sequence as the original `exporter::export` setup block (lines ~32-107), with the encoder/sink and the `RawDecoder::spawn` calls excluded. Peeks `edit::seed::load_or_seed(paths)` once, up front, for `seed.aspect` (resolves `layout` together with the caller's `resolution`) and `seed.trim` (carried into `RenderMeta.trim` unresolved). The webcam-size calculation (`max_cam` over all layout modes, capped to 1440) is done here and returned in `RenderMeta.webcam_size` so the exporter does not need to repeat it.
 
 ## FrameRenderer::step_camera
 

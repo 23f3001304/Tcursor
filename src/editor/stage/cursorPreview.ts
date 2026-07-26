@@ -40,7 +40,8 @@ export function drawCursorSprite(
   const ch = c.canvasH.get(kind) ?? c.canvasH.get("arrow");
   const hot = c.hots.get(kind) ?? c.hots.get("arrow");
   if (!img || !img.complete || !img.naturalWidth || !ch || !hot) return;
-  let sizePx = c.size * outH * 0.033;
+  const clampedSize = Math.min(Math.max(c.size, 0.4), 3.0);
+  let sizePx = clampedSize * outH * 0.033;
   if (c.clickBounce) {
     for (let i = clicks.length - 1; i >= 0; i--) {
       const dt = now - clicks[i].t;
@@ -58,9 +59,13 @@ export function drawCursorSprite(
   c.recent.push(p); if (c.recent.length > 6) c.recent.shift();
   if (c.motionBlur > 0) {
     const trail = c.recent.slice(0, -1).reverse();
+    let lastP = p;
     for (let i = 0; i < trail.length; i++) {
+      const dist = Math.hypot(trail[i][0] - lastP[0], trail[i][1] - lastP[1]);
+      if (dist < 1.5) continue;
       ctx.globalAlpha = Math.min(1, c.motionBlur * (1 - i / trail.length) * 0.5);
       blit(trail[i]);
+      lastP = trail[i];
     }
     ctx.globalAlpha = 1;
   }

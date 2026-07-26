@@ -175,6 +175,28 @@ Default is `Gradient` matching the embedded `bg.jpg` fallback in `exporter.rs`.
 
 - `src-tauri/src/export/scene/background.rs` - renders `Background` to a BGRA pixel buffer for `exporter.rs`.
 
+## Aspect
+
+```rust
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Aspect { Source, Wide16x9, Vertical9x16, Square1x1, Classic4x3 }
+```
+
+Output frame aspect ratio, chosen in the editor (`EditDoc.aspect`) and applied via `Layout::apply_aspect`. Never crops the capture: the screen aspect-fits inside the frame (`coordmap::inset_rect`) and the background fills the rest - only the frame's own `out_w`/`out_h` change.
+
+- `Source` (default, wire name `"source"`) - the frame adapts to the recording's own dimensions - today's `adapt_to_source` behavior exactly.
+- `Wide16x9` (`"wide_16x9"`) - 1920x1080.
+- `Vertical9x16` (`"vertical_9x16"`) - 1080x1920.
+- `Square1x1` (`"square_1x1"`) - 1080x1080.
+- `Classic4x3` (`"classic_4x3"`) - 1440x1080.
+
+### Used by
+
+- `src-tauri/src/edit/model.rs` - `EditDoc.aspect` field.
+- `src-tauri/src/edit/ops/api.rs` - `SetAspect` op replaces it.
+- `src-tauri/src/export/render/mod.rs` - `FrameRenderer::new` resolves the output `Layout` from it.
+- `src-tauri/src/export/preview/mod.rs` - `with_warm` rebuilds the warm renderer when it changes.
+
 ## Layout
 
 ```rust
@@ -195,6 +217,82 @@ Output canvas and screen panel geometry.
 - `src-tauri/src/export/gpu/compositor.rs` - `Compositor::composite_into` takes `&Layout` for output sizing.
 - `src-tauri/src/export/gpu/gpu_uniforms.rs` - `build_uniforms` normalizes rects using `out_w/out_h`.
 - `src-tauri/src/export/pipeline/exporter.rs` - one `Layout::default()` per export (currently fixed at 4K).
+
+## Layout::adapt_to_source
+
+```rust
+pub fn adapt_to_source(&mut self, sw: u32, sh: u32)
+```
+
+Adapts a still-default (4K) output resolution to match the source video's actual dimensions, so e.g. a 1080p recording exports at 1080p instead of being upscaled to a fixed 4K canvas.
+
+### Inputs
+
+- `sw: u32`, `sh: u32` - probed source video dimensions. *Why:* only consulted when `out_w`/`out_h` are still exactly the 3840x2160 default - a caller that already resolved a different output size (e.g. from `ExportSettings`) is left untouched.*
+
+### Returns
+
+Nothing (`()`) - mutates `self` in place.
+
+### Implementation
+
+1. If `out_w == 3840 && out_h == 2160` (still default) AND `(sw, sh) != (3840, 2160)` (source isn't itself 4K): set `out_w = sw & !1`, `out_h = sh & !1`. The `& !1` evenizes both dimensions, since H.264 requires even width/height.
+2. Otherwise a no-op.
+
+### Used by
+
+- `src-tauri/src/export/render/mod.rs` - `FrameRenderer::new` calls this right after probing the source video's dimensions, before building any GPU/layout-dependent state.
+
+## Layout::apply_aspect
+
+```rust
+pub fn apply_aspect(&mut self, aspect: Aspect, sw: u32, sh: u32)
+```
+
+ONE function mapping an `Aspect` selection to the frame's pixel dimensions - shared by export (`exporter::export`, via `FrameRenderer::new`) and the editor preview (`preview::build_renderer`), so both always agree on the output size for a given source + aspect choice.
+
+### Inputs
+
+- `aspect: Aspect` - the chosen ratio.
+- `sw: u32`, `sh: u32` - probed source video dimensions, forwarded to `adapt_to_source` for the `Source` case.
+
+### Implementation
+
+`Source` calls `adapt_to_source(sw, sh)` unchanged (today's behavior). Each fixed preset unconditionally sets `out_w`/`out_h` to its base resolution (long edge 1920), regardless of the source's own dimensions or any prior value - the screen still aspect-fits inside via `inset_rect` (never cropped) and the background fills the new frame.
+
+### Behaviors
+
+- `source_aspect_matches_adapt_to_source_exactly` - `Source` produces the identical `(out_w, out_h)` as calling `adapt_to_source` directly (back-compat guard).
+- `fixed_presets_map_to_a_1920_long_edge` - each of the 4 presets yields its documented dimensions regardless of the source's own size.
+
+## Layout::scale_to_long_edge
+
+```rust
+pub fn scale_to_long_edge(w: u32, h: u32, max_long: u32) -> (u32, u32)
+```
+
+Scales `(w, h)` down (exact ratio preserved) so the long edge is at most `max_long`, evenized (`& !1`) for H.264; never upscales a source already smaller than the budget. Used to pick a cheap preview canvas that matches the export aspect exactly.
+
+### Behaviors
+
+- `scale_to_long_edge_preserves_ratio_and_evenizes` - a 1920x1080 frame capped at 1280 yields exactly 1280x720; a source already under the cap is returned unchanged.
+
+## Layout::resolve
+
+```rust
+pub fn resolve(&mut self, aspect: Aspect, resolution: Resolution, sw: u32, sh: u32, preview_cap: Option<u32>)
+```
+
+Resolves the final `out_w`/`out_h` for one `FrameRenderer` build: applies `apply_aspect` against the true source dimensions (the RATIO), then `rescale_to_resolution` (`export::settings`, a no-op for `Resolution::Source` - the SIZE), then - when `preview_cap` is `Some(long_edge)` - downscales to that budget via `scale_to_long_edge`, scaling `pad_px`/`screen_radius_px` by the same factor so a preview build stays visually proportional to the full export frame. `preview_cap: None` (export) leaves the aspect+resolution-resolved dimensions untouched. Preview call sites always pass `Resolution::Source`, so this is back-compat identical to the pre-`Resolution` behavior for every existing caller except the export path.
+
+### Used by
+
+- `src-tauri/src/export/render/mod.rs` - `FrameRenderer::new` calls this once per build.
+
+### Behaviors
+
+- `resolve_scales_pad_and_radius_with_the_preview_cap` - a `Wide16x9` + `Resolution::Source` build capped at 1280 yields 1280x720 with `pad_px` scaled by the same 2/3 factor.
+- See `src-tauri/src/export/settings.rs`'s `Layout::rescale_to_resolution` for the `Resolution` short-edge convention and its own tests.
 
 ## OverlayShape
 

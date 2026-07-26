@@ -30,7 +30,7 @@ A unique temporary path in the same directory as `out` (so a `rename` into place
 
 ### Used by
 
-- `src-tauri/src/export/preview/preview_track.rs` (`ensure_proxy`) and `src-tauri/src/export/preview/thumbs.rs` (`ensure_waveform`, `ensure_preview_audio`) - so the editor opening mid `prewarm` never loads a partial proxy/waveform/audio file.
+- `src-tauri/src/export/preview/preview_track.rs` (`ensure_proxy`) and `src-tauri/src/export/preview/thumbs.rs` (`ensure_waveform`, `ensure_preview_audio`) - so an editor opening while the post-record `preprocess_project` pass is still running never loads a partial proxy/waveform/audio file.
 
 ## generate_once
 
@@ -51,7 +51,7 @@ Serializes and de-duplicates editor-media generation across concurrent callers. 
 
 ### Why
 
-Right after recording stops, the background `prewarm` **and** the editor's lazy `ensure_*` both fire for the same proxy/thumbnails/waveforms/preview-audio. Without this they launch a storm of concurrent ffmpeg passes over the same 4K source - each ffmpeg itself multi-threaded - oversubscribing every core exactly when the editor opens (the "editor lags while the preview loads" symptom). The global lock caps it at one pass at a time; the existence check means the second caller for a file reuses the first's result instead of transcoding again. `gen` stays idempotent (it still writes via `tmp_sibling` + atomic rename).
+Right after recording stops, the HUD's `preprocess_project` pass and (for a legacy/un-preprocessed project, or a non-default proxy quality) the editor's own lazy `ensure_*` can both fire for the same proxy/thumbnails/waveforms/preview-audio. Without this they'd launch a storm of concurrent ffmpeg passes over the same 4K source - each ffmpeg itself multi-threaded - oversubscribing every core exactly when the editor opens (the "editor lags while the preview loads" symptom `preprocess_project` exists to eliminate for the common case). The global lock caps it at one pass at a time; the existence check means the second caller for a file reuses the first's result instead of transcoding again. `gen` stays idempotent (it still writes via `tmp_sibling` + atomic rename).
 
 ### Used by
 

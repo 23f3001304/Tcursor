@@ -18,11 +18,16 @@ pub struct WgcFrameSource {
 
 impl WgcFrameSource {
     pub fn for_primary_display(clock: Arc<dyn Clock>, fps: u32, with_cursor: bool) -> anyhow::Result<Self> {
+        Self::for_target(clock, fps, with_cursor, None)
+    }
+
+    pub fn for_target(clock: Arc<dyn Clock>, fps: u32, with_cursor: bool, target_id: Option<&str>) -> anyhow::Result<Self> {
         use windows_capture::{
             capture::{Context, GraphicsCaptureApiHandler},
             frame::Frame as WgcFrame,
             graphics_capture_api::InternalCaptureControl,
             monitor::Monitor,
+            window::Window,
             settings::{
                 ColorFormat, CursorCaptureSettings, DirtyRegionSettings,
                 DrawBorderSettings, MinimumUpdateIntervalSettings,
@@ -72,20 +77,70 @@ impl WgcFrameSource {
             fn on_closed(&mut self) -> Result<(), Self::Error> { Ok(()) }
         }
 
+        let (tx, rx) = channel();
+        let cursor_setting = if with_cursor { CursorCaptureSettings::WithCursor } else { CursorCaptureSettings::WithoutCursor };
+        let interval_setting = MinimumUpdateIntervalSettings::Custom(std::time::Duration::from_micros(
+            1_000_000 / fps.max(1) as u64,
+        ));
+
+        if let Some(tid) = target_id {
+            if let Some(hex) = tid.strip_prefix("window:0x") {
+                if let Ok(hwnd_val) = usize::from_str_radix(hex, 16) {
+                    let hwnd = windows::Win32::Foundation::HWND(hwnd_val as *mut _);
+                    let win = Window::from_raw_hwnd(hwnd.0 as *mut _);
+                    let mut r = windows::Win32::Foundation::RECT::default();
+                    let (w, h) = if unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd, &mut r) }.is_ok() {
+                        ((r.right - r.left).max(100) as u32, (r.bottom - r.top).max(100) as u32)
+                    } else {
+                        (1920, 1080)
+                    };
+                    let settings = Settings::new(
+                        win,
+                        cursor_setting,
+                        DrawBorderSettings::WithoutBorder,
+                        SecondaryWindowSettings::Default,
+                        interval_setting,
+                        DirtyRegionSettings::Default,
+                        ColorFormat::Bgra8,
+                        (tx, clock),
+                    );
+                    let control = Handler::start_free_threaded(settings)?;
+                    let halt = control.halt_handle();
+                    let stopper: Box<dyn FnOnce() + Send> = Box::new(move || { let _ = control.stop(); });
+                    return Ok(Self { rx, dims: (w, h), halt, stopper: Some(stopper) });
+                }
+            } else if let Some(idx_str) = tid.strip_prefix("display:") {
+                if let Ok(idx) = idx_str.parse::<usize>() {
+                    if let Ok(mon) = Monitor::from_index(idx) {
+                        let w = mon.width().unwrap_or(1920);
+                        let h = mon.height().unwrap_or(1080);
+                        let settings = Settings::new(
+                            mon,
+                            cursor_setting,
+                            DrawBorderSettings::WithoutBorder,
+                            SecondaryWindowSettings::Default,
+                            interval_setting,
+                            DirtyRegionSettings::Default,
+                            ColorFormat::Bgra8,
+                            (tx, clock),
+                        );
+                        let control = Handler::start_free_threaded(settings)?;
+                        let halt = control.halt_handle();
+                        let stopper: Box<dyn FnOnce() + Send> = Box::new(move || { let _ = control.stop(); });
+                        return Ok(Self { rx, dims: (w, h), halt, stopper: Some(stopper) });
+                    }
+                }
+            }
+        }
+
         let monitor = Monitor::primary()?;
         let (w, h) = (monitor.width()?, monitor.height()?);
-        let (tx, rx) = channel();
         let settings = Settings::new(
             monitor,
-            if with_cursor { CursorCaptureSettings::WithCursor } else { CursorCaptureSettings::WithoutCursor },
+            cursor_setting,
             DrawBorderSettings::WithoutBorder,
             SecondaryWindowSettings::Default,
-            // Match the encoder framerate (caller passes the display refresh, capped).
-            // Default fires at the monitor refresh and would mismatch the labeled fps,
-            // which made recordings play at the wrong speed.
-            MinimumUpdateIntervalSettings::Custom(std::time::Duration::from_micros(
-                1_000_000 / fps.max(1) as u64,
-            )),
+            interval_setting,
             DirtyRegionSettings::Default,
             ColorFormat::Bgra8,
             (tx, clock),

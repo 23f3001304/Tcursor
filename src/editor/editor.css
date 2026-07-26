@@ -126,12 +126,15 @@
   transition: background .14s ease, color .14s ease; }
 .e-ftool button:hover { background: var(--e-soft); color: var(--e-fg); }
 .e-ftool button.on { background: var(--e-soft); color: var(--e-fg); }
-/* Full-composite preview. The stage IS the 16:9 sizer (aspect-ratio) capped by both max-width
-   and max-height, so it's always the largest 16:9 box that fits the available area WITHOUT
-   cropping or distorting - the canvas just fills it. (A prior version let the canvas size itself
-   via max-height:100%, but that % resolves against the stage's auto height and collapsed to no
-   constraint, so a wide-short stage grew the canvas too tall and clipped it top/bottom.) The
-   stage still hugs the canvas exactly, which the Move-mode drag handle relies on. */
+/* Full-composite preview. The stage IS the aspect-ratio sizer capped by both max-width and
+   max-height, so it's always the largest box (at the CHOSEN aspect) that fits the available area
+   WITHOUT cropping or distorting - the canvas just fills it. `aspect-ratio` here is only the
+   pre-load default (16:9, matching Stage.tsx's `DEFAULT_CANVAS`); Stage.tsx sets it inline from
+   `layout.canvas` (the resolved `EditDoc.aspect`), which wins once the preview loads. (A prior
+   version let the canvas size itself via max-height:100%, but that % resolves against the stage's
+   auto height and collapsed to no constraint, so a wide-short stage grew the canvas too tall and
+   clipped it top/bottom.) The stage still hugs the canvas exactly, which the Move-mode drag
+   handle relies on. */
 .e-stage { position: relative; display: flex; align-items: center; justify-content: center;
   aspect-ratio: 16 / 9; max-width: 100%; max-height: 100%; min-height: 0; border-radius: var(--e-r-lg);
   overflow: hidden; border: 1px solid var(--e-border); background: #0b0b0d;
@@ -172,6 +175,10 @@
 .e-tbtn:hover { background: var(--e-soft); color: var(--e-fg); border-color: var(--e-mut);
   transform: translateY(-1px); box-shadow: var(--e-lift), var(--e-shadow-raise); }
 .e-tbtn:active { transform: translateY(0); }
+/* Trim "on" = a trim is currently active (the pill doubles as a reset button then). */
+.e-tbtn.on { color: var(--e-primary); border-color: rgba(239,68,68,.4); background: rgba(239,68,68,.08); }
+.e-tbtn.on:hover { background: rgba(239,68,68,.14); border-color: rgba(239,68,68,.6); }
+.e-tbtn:disabled { opacity: .45; cursor: default; transform: none; box-shadow: var(--e-lift); }
 /* Single readout: current time in --e-fg, "/ total" dimmed. */
 .e-time { font-variant-numeric: tabular-nums; color: var(--e-fg); font-weight: 500; font-size: 12.5px;
   min-width: 88px; text-align: center; }
@@ -204,6 +211,12 @@
 .e-ruler span:first-child { transform: none; }
 .e-ruler span:first-child::after { left: 0; transform: none; }
 .e-tlbody { position: relative; cursor: pointer; }
+/* Trim overlay (TrimOverlay.tsx): dims the head/tail outside SetTrim's range across the whole
+   track stack, with a thin draggable handle at each edge (in/out). */
+.e-trimdim { position: absolute; top: 0; bottom: 0; background: rgba(0,0,0,.55); z-index: 3; pointer-events: none; }
+.e-trimhandle { position: absolute; top: 0; bottom: 0; width: 3px; margin-left: -1.5px; cursor: ew-resize;
+  background: var(--e-primary); z-index: 6; box-shadow: 0 0 6px rgba(239,68,68,.5); transition: width .12s ease, margin-left .12s ease; }
+.e-trimhandle:hover { width: 5px; margin-left: -2.5px; }
 /* Filmstrip clip: frame thumbnails filling the width, in an inset (3D) well. */
 .e-filmstrip { display: flex; height: 54px; border-radius: var(--e-r); margin-bottom: 8px; overflow: hidden;
   background: var(--e-card); border: 1px solid var(--e-border);
@@ -321,6 +334,7 @@
 .e-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .e-modal-btn { height: 34px; padding: 0 14px; border-radius: var(--e-r-sm); border: 1px solid var(--e-border);
   background: var(--e-soft); color: var(--e-fg); font-size: 13px; font-weight: 550; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   transition: background .12s ease, border-color .12s ease; }
 .e-modal-btn:hover { border-color: var(--e-mut); }
 .e-modal-btn.primary { background: var(--e-fg); color: var(--e-bg); border-color: var(--e-fg); }
@@ -328,6 +342,26 @@
 .e-modal-btn.primary.danger:hover { background: #d93a3f; border-color: #d93a3f; }
 .e-ph { position: absolute; top: 0; bottom: 0; width: 1.5px; background: var(--e-primary); z-index: 5; pointer-events: none; }
 .e-ph i { position: absolute; top: -2px; left: -4.5px; width: 10px; height: 8px; background: var(--e-primary); border-radius: 2.5px; }
+
+/* Export dialog (ExportDialog + ExportProgress) - reuses the modal scrim/card/actions above. */
+.e-export-modal { width: 400px; }
+.e-export-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.e-export-head .e-modal-title { margin: 0; }
+.e-export-row { margin-bottom: 14px; }
+.e-export-row label { display: block; margin-bottom: 6px; font-size: 12.5px; font-weight: 550; color: var(--e-mut); }
+.e-export-hint { margin: 6px 0 0; font-size: 11.5px; color: var(--e-dim); }
+.e-export-progress { padding: 8px 0 4px; }
+.e-export-progress-row { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 550; margin-bottom: 12px; }
+.e-export-pct { margin-left: auto; color: var(--e-mut); font-variant-numeric: tabular-nums; }
+.e-export-bar-track { height: 6px; border-radius: 999px; background: var(--e-soft); border: 1px solid var(--e-border2); overflow: hidden; }
+.e-export-bar-fill { height: 100%; background: var(--e-primary); border-radius: 999px; }
+.e-export-eta { margin: 10px 0 0; font-size: 12px; color: var(--e-dim); text-align: center; }
+.e-export-outcome { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 10px 0 4px; gap: 4px; }
+.e-export-icon.done { color: var(--e-ok); }
+.e-export-icon.error { color: var(--e-primary); }
+.e-export-outcome-title { margin: 6px 0 0; font-size: 14.5px; font-weight: 600; }
+.e-export-outcome-body { margin: 0 0 12px; font-size: 12.5px; color: var(--e-mut); max-width: 320px; word-break: break-word; }
+.e-export-outcome .e-modal-actions { margin-top: 10px; width: 100%; }
 
 /* Invisible resize grips for the frameless window (decorations:false → no OS border).
    Edges are 6px; corners 13px and stacked above edges so the diagonal cursor wins. */
@@ -543,36 +577,6 @@
 }
 .e-pack-card.on span {
   color: var(--e-fg);
-}
-
-.e-pack-add {
-  height: 56px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  border-radius: var(--e-r-sm);
-  background: transparent;
-  border: 1px dashed var(--e-dim);
-  color: var(--e-dim);
-  cursor: pointer;
-  padding: 6px 0 4px;
-  outline: none;
-  transition: transform 0.14s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.14s ease;
-}
-.e-pack-add:hover {
-  transform: translateY(-1px);
-  border-color: var(--e-fg);
-  color: var(--e-fg);
-  box-shadow: var(--e-shadow-raise);
-}
-.e-pack-add:active { transform: translateY(0); }
-.e-pack-add span {
-  font-size: 10.5px;
-  font-weight: 500;
-  text-transform: none;
-  letter-spacing: -0.01em;
 }
 
 .e-upload-dashed {

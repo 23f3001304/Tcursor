@@ -42,6 +42,8 @@ Renders the ruler, filmstrip, track stack, and spring-animated playhead.
 
 **Audio tracks.** `<AudioTrack>` for system + mic waveforms, below the editable tracks.
 
+**Trim overlay.** `<TrimOverlay trim={doc.trim} dur={dur} trackRef={track} onApply={onApply} />` renders last (highest paint order) inside `.e-tlbody`: dims the head/tail outside `doc.trim`'s resolved range (`resolveTrim`) and provides two draggable edge handles that commit `SetTrim` on release. See `TrimOverlay.md`.
+
 **Playhead.** A `motion.div.e-ph` at `left: pct%` inside `.e-tlbody` (so it shares the track body's width/origin and stays aligned with ticks + pills), animated with a fast spring (`stiffness 700, damping 42`), `initial={false}`.
 
 ### Notes

@@ -173,21 +173,24 @@ export interface CursorSettings {
   motion_blur: number;
   click_bounce: boolean;
   bounce_intensity: number;
+  pack: string;
 }
 ```
 
-Cursor rendering and animation parameters.
+Cursor rendering and animation parameters. Mirrors the Rust `CursorSettings` (`src-tauri/src/settings/model.rs`) byte-for-byte.
 
 - `style: CursorStyle` - rendering mode.
 - `size: number` - scale multiplier for the cursor sprite.
 - `motion_blur: number` - strength of the motion-blur trail (0 = off).
 - `click_bounce: boolean` - whether a spring-bounce animation plays on click.
 - `bounce_intensity: number` - magnitude of the bounce when `click_bounce` is true.
+- `pack: string` - selected cursor sprite pack id. `"default"` is the built-in set (byte-identical to before this field existed); any other value is an imported pack's id (`CursorPackInfo.id` from `listCursorPacks`/`importCursorPack` in `src/lib/ipc.ts`).
 
 ### Used by
 
 - `src/hud/settings/settings.ts` - `Settings.cursor`
-- `src/hud/settings/SettingsCursor.tsx` - renders all cursor controls
+- `src/hud/settings/SettingsCursor.tsx` - renders style/size/blur/bounce controls (not `pack` - pack selection is editor-only, see `CursorPanel`)
+- `src/editor/panels/CursorPanel.tsx` - renders the pack picker + import button, in addition to the same style/size/blur/bounce controls
 
 ## ClickFxStyle
 

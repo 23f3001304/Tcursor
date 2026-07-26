@@ -14,6 +14,7 @@ pub enum EditOp {
     /// convention cannot express "clear back to inherit" without an `Option<Option<_>>`.
     SetZoomCamAction { id: String, action: Option<crate::settings::model::CamZoomAction> },
     SetTrim { in_ms: u32, out_ms: u32 },
+    SetAspect { aspect: crate::export::types::Aspect },
     AddCut { start_ms: u32, end_ms: u32 },
     SetSpeed { start_ms: u32, end_ms: u32, factor: f32 },
     AddLayoutSeg { at_ms: u32, dur_ms: u32, layout: String },
@@ -109,6 +110,9 @@ pub fn apply(doc: &mut EditDoc, op: EditOp) {
         }
         EditOp::SetTrim { in_ms, out_ms } => {
             doc.trim = Trim { in_ms, out_ms };
+        }
+        EditOp::SetAspect { aspect } => {
+            doc.aspect = aspect;
         }
         EditOp::AddCut { start_ms, end_ms } => {
             doc.cuts.push(Cut { start_ms, end_ms });

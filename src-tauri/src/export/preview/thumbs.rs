@@ -16,7 +16,9 @@ pub fn ensure_thumbs(folder: String, count: u32) -> Result<Vec<String>, String> 
     let dir = paths.folder.join(format!("thumbs_{n}_64"));
     crate::win::sys::proc::generate_once(&dir.join("thumb_0001.jpg"), || {
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        let dur = (crate::edit::seed::load_or_seed(&paths).trim.out_ms as f64 / 1000.0).max(0.1);
+        // TRUE full duration, not `trim.out_ms` (a sub-range once a user actually trims) - the
+        // filmstrip spans the whole scrubbable timeline, trimmed or not.
+        let dur = (crate::edit::seed::true_duration_ms(&paths) as f64 / 1000.0).max(0.1);
         let proxy = paths.folder.join("preview_720_rt.mp4");
         let src = if proxy.exists() { proxy } else { paths.video() };
         let status = ffcmd_bg("ffmpeg")
@@ -91,20 +93,4 @@ pub fn ensure_preview_audio(folder: String) -> Result<String, String> {
         Ok(())
     })?;
     Ok(out.to_string_lossy().to_string())
-}
-
-/// Eagerly generate the editor's heavy media right after recording stops, on a background
-/// thread, so opening the editor is instant instead of transcoding on open. Runs ONLY after the
-/// capture threads have joined (called from the tail of `stop_recording`), so it never competes
-/// with the live capture for GPU/CPU. Best-effort: each step's error is ignored (the editor's
-/// lazy `ensure_*` re-attempts on open). Proxy first, so the thumbnail pass reads the small
-/// proxy rather than the raw capture. The thumbnail dir is written in place (a partial dir just
-/// yields fewer thumbnails for one open, then self-heals); the single-file media write
-/// atomically (see `tmp_sibling`) so a mid-pre-warm editor never loads a half-written file.
-pub fn prewarm(folder: String) {
-    let _ = crate::export::preview::preview_track::ensure_proxy(folder.clone(), 720);
-    let _ = ensure_thumbs(folder.clone(), 16);
-    let _ = ensure_waveform(folder.clone(), "system".into());
-    let _ = ensure_waveform(folder.clone(), "mic".into());
-    let _ = ensure_preview_audio(folder);
 }

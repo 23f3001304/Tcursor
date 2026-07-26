@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { getEdit, setCapturable, cameraTrack, previewLayout, previewLayouts, clickTrack, previewBg, cursorSprites, cursorKinds, ensureThumbs, ensureWaveform, ensurePreviewAudio, ensureProxy, fileSrc } from "../../lib/ipc";
+import { getEdit, setCapturable, cameraTrack, previewLayout, previewLayouts, clickTrack, previewBg, cursorSprites, cursorKinds, ensureThumbs, ensureWaveform, ensurePreviewAudio, ensureProxy, fileSrc, getProjectManifest, DEFAULT_PROXY_HEIGHT } from "../../lib/ipc";
 import type { EditDoc } from "../../lib/edit";
 import type { CamSample, ClickSample, CursorSpriteDto, CursorKindSample, PreviewLayout, LayoutPresets } from "../../lib/ipc";
 
@@ -23,8 +23,17 @@ export function useEditorData(folder: string, rev: number, quality: number) {
   const [playing, setPlaying] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [pct, setPct] = useState(0);
+  const [exportDone, setExportDone] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   useEffect(() => { getEdit(folder).then(setDoc).catch(() => {}); void setCapturable(true); }, [folder]);
+  // Was this project already preprocessed at save time (see `preprocess_project`)? If so, the
+  // proxy fetch below can point straight at the known path instead of round-tripping through
+  // `ensureProxy` - `preprocessed` only ever flips true on the Rust side after that exact call
+  // already succeeded once. Defaults to false (the pre-existing lazy path) until the manifest
+  // read resolves, so a legacy project with no manifest at all is unaffected.
+  const [preprocessed, setPreprocessed] = useState(false);
+  useEffect(() => { getProjectManifest(folder).then((m) => setPreprocessed(m.preprocessed)).catch(() => setPreprocessed(false)); }, [folder]);
   // The exact zoom curve, refetched whenever the doc changes (instant: pure math, cached).
   useEffect(() => { cameraTrack(folder).then(setTrack).catch(() => {}); }, [folder, rev]);
   // The exact screen/webcam framing (pad, radius, PiP rect) so the canvas matches the export.
@@ -32,12 +41,24 @@ export function useEditorData(folder: string, rev: number, quality: number) {
   // All 5 layout presets' panel rects, so the preview can cross-fade across layout segments
   // itself (layoutAt) instead of only ever showing the single static layout above.
   useEffect(() => { previewLayouts(folder).then(setLayoutPresets).catch(() => {}); }, [folder, rev]);
-  // Click ripples + the exact export background - neither changes with edits, so fetch once
-  // per folder (refetching on every edit was part of the add-effect lag).
+  // Click ripples never change with edits, so fetch once per folder (refetching on every edit
+  // was part of the add-effect lag).
   useEffect(() => { clickTrack(folder).then(setClicks).catch(() => {}); }, [folder]);
-  useEffect(() => { previewBg(folder).then(setBgUrl).catch(() => {}); }, [folder]);
-  // Cursor sprite pack + type track (don't change with edits) so the preview cursor matches export.
-  useEffect(() => { cursorSprites(folder).then(setCursorSpr).catch(() => {}); cursorKinds(folder).then(setCursorKnd).catch(() => {}); }, [folder]);
+  // The export background: refetch only when the doc's OWN background settings change (same
+  // "don't refetch on every unrelated edit" reasoning as cursorSprites below) - a background
+  // panel edit is the only kind of change that can actually alter what `preview_bg` returns.
+  useEffect(() => {
+    previewBg(folder).then(setBgUrl).catch(() => {});
+  }, [folder, JSON.stringify(doc?.settings.background)]);
+  // Cursor type track never changes with edits, so fetch once per folder.
+  useEffect(() => { cursorKinds(folder).then(setCursorKnd).catch(() => {}); }, [folder]);
+  // Cursor sprite pack: refetch when the doc's selected pack changes (picking a different pack,
+  // or importing one, in CursorPanel) - NOT on generic `rev` bumps, so unrelated edits don't
+  // re-decode sprites (same "don't refetch on every edit" reasoning as clickTrack/previewBg above).
+  useEffect(() => {
+    if (!doc) return;
+    cursorSprites(folder).then(setCursorSpr).catch(() => {});
+  }, [folder, doc?.settings.cursor.pack]);
   // Timeline media: filmstrip thumbnails, the system/mic waveform images, and the mixed audio.
   useEffect(() => {
     ensureThumbs(folder, 16).then((p) => setThumbs(p.map(fileSrc))).catch(() => {});
@@ -59,14 +80,23 @@ export function useEditorData(folder: string, rev: number, quality: number) {
     // video.mp4 - the raw is re-timed differently, so flashing it briefly changed the duration and
     // frame, jumping the playhead ("changing quality changes preview time").
     if (!proxyReadyRef.current) setSrcUrl(fileSrc(`${folder}\\video.mp4`));
+    // Skip the lazy transcode entirely at the DEFAULT quality on an already-preprocessed project -
+    // that exact proxy is guaranteed to already be on disk (see `preprocessed` above), so there is
+    // nothing to generate. Any OTHER quality (the in-editor quality toggle) still needs its own
+    // transcode and falls through to `ensureProxy` below, same as a legacy/un-preprocessed project.
+    if (preprocessed && quality === DEFAULT_PROXY_HEIGHT) {
+      setSrcUrl(fileSrc(`${folder}\\preview_${quality}_rt.mp4`));
+      proxyReadyRef.current = true;
+      return;
+    }
     ensureProxy(folder, quality).then((p) => { setSrcUrl(fileSrc(p)); proxyReadyRef.current = true; }).catch(() => {});
-  }, [folder, quality]);
+  }, [folder, quality, preprocessed]);
 
   useEffect(() => {
     const subs = [
       listen<number>("export-progress", (e) => setPct(e.payload)),
-      listen("export-done", () => { setExporting(false); setPct(0); }),
-      listen("export-error", () => { setExporting(false); setPct(0); }),
+      listen("export-done", () => { setExporting(false); setExportDone(true); }),
+      listen<string>("export-error", (e) => { setExporting(false); setExportError(e.payload); }),
     ];
     return () => { subs.forEach((s) => s.then((f) => f())); };
   }, []);
@@ -74,5 +104,6 @@ export function useEditorData(folder: string, rev: number, quality: number) {
   return {
     doc, setDoc, track, layout, layoutPresets, clicks, bgUrl, cursorSpr, cursorKnd,
     thumbs, waves, audioUrl, srcUrl, playing, setPlaying, exporting, setExporting, pct, setPct,
+    exportDone, setExportDone, exportError, setExportError,
   };
 }

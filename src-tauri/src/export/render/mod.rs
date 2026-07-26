@@ -1,6 +1,5 @@
-// Reusable per-frame renderer: owns all per-export setup except decoders and
-// the encoder sink, so a single frame can be composited at an arbitrary time T.
-// The exporter calls new() once, then step_camera()+composite_at() per frame.
+// Reusable per-frame renderer: owns all per-export setup except decoders and the encoder sink, so
+// a single frame composites at an arbitrary time T. The exporter calls new() once, then step_camera()+composite_at() per frame.
 use anyhow::{Context, Result};
 use crate::actions::model::{ActionEvent, LayoutId};
 use crate::events::model::EventLog;
@@ -9,13 +8,13 @@ use crate::export::camera::{moves::CameraMoveTrack, static_cam_pose, CameraSim};
 use crate::export::gpu::compositor::{select_compositor, Compositor};
 use crate::export::coordmap::{inset_rect, to_panel};
 use crate::export::cursor::Cursor;
-use crate::export::pipeline::ffio::{decode_image, probe_dims};
+use crate::export::pipeline::ffio::probe_dims;
 use crate::export::fx::fx_state::{self, FxRenderer};
 use crate::export::scene::layout::LayoutTrack;
 use crate::export::render::render_edit::EditState;
 use crate::export::scene::Scene;
 use crate::export::pipeline::timeline::{build_timeline, Timeline};
-use crate::export::types::{Background, Camera, FramePoint, Layout, ZoomConfig, ZoomRegion};
+use crate::export::{settings::Resolution, types::{Camera, FramePoint, Layout, ZoomConfig, ZoomRegion}};
 use crate::session::paths::ProjectPaths;
 use crate::settings::model::Settings;
 
@@ -28,13 +27,14 @@ pub const OUT_FPS: u64 = 60;
 pub struct RenderMeta {
     pub tl: Timeline, pub video_start: u64, pub video_end: u64, pub out_w: u32, pub out_h: u32,
     pub sw: u32, pub sh: u32, pub screen_bytes: usize, pub webcam_size: u32, pub audio_offset_ms: i32,
+    pub trim: crate::edit::model::Trim, // unresolved (`Trim::resolve`); avoids a 2nd doc load in `exporter::export`
+    pub mic_volume: f32, pub sys_volume: f32, // 0..1.5 gain per track at mux (`audio_mux::mux`)
 }
 
 /// Camera + scene resolved for one output frame; returned by `step_camera`.
 pub struct FramePose { pub ev_t: u32, pub scene: Scene, pub cur: FramePoint, pub cam: Camera }
 
-/// Owns all per-export setup except decoders and the encoder sink. `step_camera` is cheap
-/// (math only); `composite_at` runs the full compositor + FX + cursor stack and returns BGRA.
+/// Owns all per-export setup except decoders and the encoder sink. `step_camera` is cheap (math only); `composite_at` runs the full compositor + FX + cursor stack and returns BGRA.
 pub struct FrameRenderer {
     settings: Settings,
     cfg: ZoomConfig,
@@ -58,13 +58,15 @@ pub struct FrameRenderer {
 }
 
 impl FrameRenderer {
-    /// Load doc/settings/regions/compositor/sim from `paths`; return a `RenderMeta` the exporter
-    /// uses to spawn decoders and drive the frame loop. `fps` is the capture-rate fallback.
-    pub fn new(paths: &ProjectPaths, layout: Layout, fps: u32) -> Result<(Self, RenderMeta)> {
+    /// Load doc/settings/regions/compositor/sim from `paths`; return a `RenderMeta` the exporter uses to
+    /// spawn decoders and drive the frame loop. `fps` is the capture-rate fallback; `preview_cap` (`Some(long_edge)`) downscales the resolved aspect frame for a cheap preview (`Layout::resolve`).
+    pub fn new(paths: &ProjectPaths, layout: Layout, fps: u32, resolution: Resolution, preview_cap: Option<u32>) -> Result<(Self, RenderMeta)> {
         let log = EventLog::load(&paths.events()).context("load events.json")?;
         let (sw, sh) = probe_dims(&paths.video())?;
-        let actions = crate::actions::model::ActionLog::load(&paths.actions())
-            .map(|a| a.actions).unwrap_or_default();
+        let seed = crate::edit::seed::load_or_seed(paths);
+        let mut layout = layout;
+        layout.resolve(seed.aspect, resolution, sw, sh, preview_cap);
+        let actions = crate::actions::model::ActionLog::load(&paths.actions()).map(|a| a.actions).unwrap_or_default();
         // Edit-derived state (zoom/layout/regions/effects) - the slice reload_edit refreshes.
         let es = EditState::load(paths, &actions, &layout, sw, sh);
         let tl = build_timeline(paths, &log, fps);
@@ -77,30 +79,32 @@ impl FrameRenderer {
                 es.settings.appearance.for_id(id), layout.out_w, layout.out_h, true).size_px)
             .max().unwrap_or(420);
         let webcam_size = max_cam.min(1440).max(1);
-        let bg = decode_image(BG_MESH, layout.out_w, layout.out_h)
-            .unwrap_or_else(|_| background::render(&Background::default(), layout.out_w, layout.out_h));
+        let bg = background::build(&es.settings.background, BG_MESH, layout.out_w, layout.out_h);
         let compositor = select_compositor(&layout);
         let fx = fx_state::select_fx(layout.out_w, layout.out_h);
         let (sim, spot_sim) = (CameraSim::new(layout.out_w, layout.out_h), fx_state::SpotlightSim::new());
         let events_ms = tl.events_ms;
         let audio_offset_ms = es.settings.audio_offset_ms;
         let (out_w, out_h) = (layout.out_w, layout.out_h);
-        // Cursor prep is edit-independent for the warm preview (only composite_at uses it) but
-        // dominates a build, so it lives here - NOT in EditState/reload_edit.
+        // Cursor prep is edit-independent for the warm preview (only composite_at uses it) but dominates a build, so it lives here - NOT in EditState/reload_edit.
         let dark = crate::win::theme::resolve_dark(es.settings.ui.theme);
         let cursor_track = crate::events::track::cursortype::CursorTrack::load(&paths.cursor());
         let cprep = crate::export::cursor::cursorset::prep(&es.settings.cursor, &log.events, cursor_track, dark);
         let cursor = Cursor::new(log.events, log.screen); // moves the log in after cprep borrowed it
-        let meta = RenderMeta { tl, video_start, video_end, out_w, out_h, sw, sh, screen_bytes, webcam_size, audio_offset_ms };
+        let meta = RenderMeta { tl, video_start, video_end, out_w, out_h, sw, sh, screen_bytes, webcam_size, audio_offset_ms,
+            trim: seed.trim, mic_volume: es.settings.audio_mic_volume, sys_volume: es.settings.audio_sys_volume };
         Ok((Self { settings: es.settings, cfg: es.cfg, layout, track: es.track, cam_moves: es.cam_moves, regions: es.regions,
             bg, compositor, fx, sim, spot_sim, cursor, cprep, actions, effects: es.effects, sw, sh, events_ms, video_start }, meta))
     }
 
-    /// Refresh only the `edit.json`-derived state in place (zoom/layout/regions/effects/cam_moves),
-    /// WITHOUT recreating the GPU compositor, FX, background, or re-probing dims (all edit-
-    /// independent). `with_warm` calls this instead of a full `new()` so edits stay snappy.
+    /// Refresh the `edit.json`-derived state in place (zoom/layout/regions/effects/cam_moves), WITHOUT
+    /// recreating the GPU compositor or re-probing dims. Also rebuilds `bg`, but ONLY when background
+    /// settings changed (the `Mesh` decode shells out to ffmpeg - every OTHER edit must stay cheap).
     pub fn reload_edit(&mut self, paths: &ProjectPaths) {
         let es = EditState::load(paths, &self.actions, &self.layout, self.sw, self.sh);
+        if es.settings.background != self.settings.background {
+            self.bg = background::build(&es.settings.background, BG_MESH, self.layout.out_w, self.layout.out_h);
+        }
         self.settings = es.settings; self.cfg = es.cfg; self.track = es.track;
         self.regions = es.regions; self.effects = es.effects; self.cam_moves = es.cam_moves;
     }
@@ -112,9 +116,8 @@ impl FrameRenderer {
         self.cursor.reset();
     }
 
-    /// Advance the camera sim to output time `t` (ms) and return the full pose. Cheap: math
-    /// only, no decode. `t` MUST be non-decreasing across calls - the cursor sample index and
-    /// the camera low-pass only move forward; use a fresh renderer to preview an arbitrary T.
+    /// Advance the camera sim to output time `t` (ms) and return the full pose. Cheap: math only, no
+    /// decode. `t` MUST be non-decreasing across calls - cursor sample index + camera low-pass only move forward; use a fresh renderer to preview an arbitrary T.
     pub fn step_camera(&mut self, t: u64) -> FramePose {
         let ev_t = (t.saturating_sub(self.events_ms)) as u32;
         let smooth = self.cursor.at(ev_t);
@@ -149,6 +152,7 @@ impl FrameRenderer {
     pub fn composite_at(&mut self, pose: &FramePose, screen: &[u8],
                         webcam: Option<(&[u8], u32, u32)>, out: &mut Vec<u8>) {
         let (ow, oh) = (self.layout.out_w, self.layout.out_h);
+
         self.compositor.composite_into(screen, self.sw, self.sh, webcam,
             pose.cam, &self.bg, &self.layout, &pose.scene, out);
         fx_state::render(&*self.fx, out, ow, oh, &self.settings.clickfx,

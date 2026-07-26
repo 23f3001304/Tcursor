@@ -62,6 +62,10 @@ Collection of inline SVG icon components used throughout the HUD bar, dropdowns,
 
 18x18 viewport; a circle outline with three filled dot "paint spots" and a thumb-hole arc at the bottom. *Rendered by:* `Hud` on the Preferences window-control button in the titlebar.
 
+## FolderOpen
+
+18x18 viewport; a single folder-body path (Feather-style outline). *Rendered by:* `Hud` on the Open Project window-control button in the titlebar.
+
 ## Gamepad
 
 18x18 viewport; a game controller body path with D-pad cross lines and two face-button dot strokes. *Rendered by:* `Hud` on the game-mode toggle button.

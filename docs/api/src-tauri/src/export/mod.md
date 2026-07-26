@@ -6,6 +6,10 @@ The `export` module is the render pipeline that turns a raw recording plus an `e
 
 Shared pure-data types for the entire pipeline with no methods beyond `Default`. Key items: `Rgb` (24-bit color), `FramePoint` (signed integer pixel coordinate), `RectF` (float axis-aligned rectangle), `Camera` (zoom center + scale), `Easing` (interpolation curve variant), `ZoomConfig` (all click-zoom tunables), `ZoomRegion` (one resolved zoom event), `Background` (gradient/solid/image enum), `Layout` (output canvas and screen panel geometry), `OverlayShape`, `OverlayPos`, `OverlayLayout` (webcam overlay parameters).
 
+## settings
+
+Export output settings the user chooses in `ExportDialog` (frontend), independent of `edit.json`. Key items: `Resolution` (output SIZE preset - short-edge px, or `Source`), `Fps` (output frame rate, `F30`/`F60`/`Source`), `Format` (container/codec - `Mp4`/`WebM`/`Gif`), `ExportSettings` (the four fields together; `Default` reproduces today's export), `Layout::rescale_to_resolution` (extends `types::Layout`, called from `Layout::resolve`).
+
 ## easing
 
 Single stateless function mapping a normalized time value through a curve. Key items: `ease(e, t)` - clamps `t` to 0..1 and applies the curve selected by `Easing` (Linear, Smooth cubic, Spring).
@@ -28,7 +32,7 @@ Stateful cursor position tracker that interpolates between mouse samples and app
 
 ## render
 
-Reusable per-frame renderer extracted from `exporter.rs`; owns all compositing state except raw decoders and the encoder sink. Key items: `OUT_FPS` constant (60); `RenderMeta` struct (decoder setup info returned by `new`); `FramePose` struct (resolved camera + scene for one frame); `FrameRenderer` struct, `FrameRenderer::new(paths, layout, fps) -> Result<(Self, RenderMeta)>`, `FrameRenderer::step_camera(t) -> FramePose`, `FrameRenderer::composite_at(pose, screen, webcam, out: &mut Vec<u8>)`; `select_compositor(layout) -> Box<dyn Compositor>`.
+Reusable per-frame renderer extracted from `exporter.rs`; owns all compositing state except raw decoders and the encoder sink. Key items: `OUT_FPS` constant (60, the preview/test default - export's own output rate comes from `ExportSettings.fps` instead); `RenderMeta` struct (decoder setup info returned by `new`); `FramePose` struct (resolved camera + scene for one frame); `FrameRenderer` struct, `FrameRenderer::new(paths, layout, fps, resolution, preview_cap) -> Result<(Self, RenderMeta)>`, `FrameRenderer::step_camera(t) -> FramePose`, `FrameRenderer::composite_at(pose, screen, webcam, out: &mut Vec<u8>)`; `select_compositor(layout) -> Box<dyn Compositor>`.
 
 ## scene
 
@@ -36,4 +40,4 @@ Defines two-panel scene geometry, resolves `LayoutId` presets into output-pixel 
 
 ## preview
 
-Single-frame preview engine: renders one composited frame at an arbitrary scrub position from `edit.json`, reusing `FrameRenderer` so the preview is byte-faithful to the export. Key items: `render_preview(paths, time_ms, out_w, out_h) -> Result<Vec<u8>>` (fast-forwards step_camera, seek-decodes screen + webcam, composites, PNG-encodes via ffmpeg); `preview_frame(folder, time_ms) -> Result<String, String>` (Tauri command wrapping render_preview at 1280x720, returns PNG data URL).
+Single-frame preview engine: renders one composited frame at an arbitrary scrub position from `edit.json`, reusing `FrameRenderer` so the preview is byte-faithful to the export. Key items: `render_preview(paths, time_ms) -> Result<Vec<u8>>` (fast-forwards step_camera, seek-decodes screen + webcam, composites, PNG-encodes via ffmpeg); `preview_frame(folder, time_ms) -> Result<String, String>` (Tauri command wrapping render_preview at the doc's resolved aspect, downscaled to `PREVIEW_LONG_EDGE`, returns PNG data URL).

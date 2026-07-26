@@ -1,9 +1,23 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 #[serde(default)]
 pub struct Trim { pub in_ms: u32, pub out_ms: u32 }
 impl Default for Trim { fn default() -> Self { Self { in_ms: 0, out_ms: 0 } } }
+impl Trim {
+    /// The effective `[in_ms, out_ms)` export/preview range against a clip of `total_dur_ms`.
+    /// `out_ms == 0` (the doc-level default, "not yet set") means "no trim / whole clip"; both
+    /// bounds are clamped into `[0, total_dur_ms]` and `in_ms` never exceeds the resolved
+    /// `out_ms`, so a degenerate/inverted range safely collapses to zero-length instead of
+    /// underflowing at the call site. Export (`exporter::export`) and preview
+    /// (`preview_track::camera_track`'s trim clamp, the frontend's `resolveTrim`) all read the
+    /// trim through this one function, so they always agree on the effective range.
+    pub fn resolve(&self, total_dur_ms: u32) -> (u32, u32) {
+        let out = if self.out_ms == 0 { total_dur_ms } else { self.out_ms.min(total_dur_ms) };
+        let inp = self.in_ms.min(out);
+        (inp, out)
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Cut { pub start_ms: u32, pub end_ms: u32 }
@@ -86,11 +100,16 @@ pub struct EditDoc {
     pub effects: Vec<EffectRegion>,
     #[serde(default)]
     pub camera_moves: Vec<CameraMove>,
+    /// Output frame aspect ratio; `Aspect::Source` (the default) matches today's behavior
+    /// exactly, so a doc saved before this field existed loads unchanged. See `Layout::apply_aspect`.
+    #[serde(default)]
+    pub aspect: crate::export::types::Aspect,
     pub settings: crate::settings::model::Settings,
 }
 impl Default for EditDoc {
     fn default() -> Self {
-        Self { version: 1, trim: Trim::default(), cuts: vec![], zooms: vec![], speed: vec![], layout: vec![], effects: vec![], camera_moves: vec![], settings: crate::settings::model::Settings::default() }
+        Self { version: 1, trim: Trim::default(), cuts: vec![], zooms: vec![], speed: vec![], layout: vec![], effects: vec![], camera_moves: vec![],
+            aspect: crate::export::types::Aspect::default(), settings: crate::settings::model::Settings::default() }
     }
 }
 

@@ -25,6 +25,22 @@ export interface Cut { start_ms: number; end_ms: number }
 export interface Speed { id: string; start_ms: number; end_ms: number; factor: number }
 export interface LayoutSeg { id: string; start_ms: number; end_ms: number; layout: string; transition_ms: number; easing: string }
 export interface Trim { in_ms: number; out_ms: number }
+
+/** Output frame aspect ratio - mirrors Rust `export::types::Aspect`. `"source"` (the default)
+ *  matches today's behavior (the frame adapts to the recording's own dimensions); the 4 fixed
+ *  presets pin a base resolution at that ratio. Never crops: the screen aspect-fits inside the
+ *  (possibly resized) frame and the background fills the rest. */
+export type Aspect = "source" | "wide_16x9" | "vertical_9x16" | "square_1x1" | "classic_4x3";
+
+/** Effective trim range against the clip's real duration - mirrors Rust `Trim::resolve` exactly,
+ *  so the preview (playhead clamp, timeline dimming) always agrees with what export will cut.
+ *  `trim.out_ms === 0` (unset) reads as "no trim yet": the whole clip. */
+export function resolveTrim(trim: Trim, durMs: number): { inMs: number; outMs: number } {
+  const outMs = trim.out_ms === 0 ? durMs : Math.min(trim.out_ms, durMs);
+  const inMs = Math.min(trim.in_ms, outMs);
+  return { inMs, outMs };
+}
+
 export type EffectKind = "spotlight";
 export interface EffectRegion { id: string; kind: EffectKind; start_ms: number; end_ms: number; fade_in_ms: number; fade_out_ms: number; mode?: string; dim?: number; radius?: number; feather?: number; layer: number }
 export interface CameraMove { id: string; t_ms: number; x: number; y: number; size: number; easing: string }
@@ -38,6 +54,7 @@ export interface EditDoc {
   layout: LayoutSeg[];
   effects: EffectRegion[];
   camera_moves: CameraMove[];
+  aspect: Aspect;
   settings: Settings;
 }
 
@@ -48,6 +65,7 @@ export type EditOp =
   | { op: "remove_zoom"; id: string }
   | { op: "set_zoom_cam_action"; id: string; action: CamZoomAction | null }
   | { op: "set_trim"; in_ms: number; out_ms: number }
+  | { op: "set_aspect"; aspect: Aspect }
   | { op: "add_cut"; start_ms: number; end_ms: number }
   | { op: "set_speed"; start_ms: number; end_ms: number; factor: number }
   | { op: "add_layout_seg"; at_ms: number; dur_ms: number; layout: string }

@@ -1,6 +1,6 @@
 # src-tauri/src/encode/ffmpeg_encoder.rs
 
-Implements `FrameSink` by piping raw BGRA frames to a child `ffmpeg` process that encodes them as H.264 MP4. The key property is hardware-first encoder selection: a one-time probe at startup picks `h264_nvenc`, `h264_qsv`, `h264_amf`, or `h264_mf` (in that order) before falling back to software `libx264`. The probe result is cached in a `OnceLock` so every subsequent recording pays zero probe latency.
+Implements `FrameSink` by piping raw BGRA frames to a child `ffmpeg` process. Recording (`new`/`new_vfr`) and high-quality export (`new_hq`) always encode H.264 MP4 with hardware-first encoder selection: a one-time probe at startup picks `h264_nvenc`, `h264_qsv`, `h264_amf`, or `h264_mf` (in that order) before falling back to software `libx264`. The probe result is cached in a `OnceLock` so every subsequent recording pays zero probe latency. Offline export (`new_medium`, `exporter::export`'s only caller) additionally supports WebM/VP9 and GIF via `encode::ffmpeg_args::export_args`, dispatching on the user's chosen `export::settings::Format`.
 
 ## FfmpegFrameSink
 
@@ -95,6 +95,36 @@ Spawns ffmpeg for high-quality offline export.
 ### Returns
 
 `std::io::Result<Self>` - same as `new`.
+
+## FfmpegFrameSink::new_medium
+
+```rust
+pub fn new_medium(out_path: &str, width: u32, height: u32, fps: f64, format: Format, crf: u8) -> std::io::Result<Self>
+```
+
+Spawns ffmpeg for offline export (`exporter::export`'s only caller). Unlike `new`/`new_vfr`/`new_hq` (H.264-only, via the shared `spawn` helper below), this constructs its own ffmpeg args via `ffmpeg_args::export_args` so it can produce MP4/H.264, WebM/VP9, or GIF depending on `format`.
+
+### Inputs
+
+- `out_path: &str`, `width: u32`, `height: u32` - Same roles as in `new`.
+- `fps: f64` - Same role as in `new_hq`.
+- `format: Format` (`export::settings::Format`) - the export container/codec choice. *Why:* selects the whole ffmpeg arg shape (`ffmpeg_args::export_args`'s `match`), not just a flag - MP4/WebM/GIF need entirely different encoder + filter arguments.*
+- `crf: u8` - the user's quality slider (18..28, `settings::DEFAULT_CRF` = 24). *Why threaded here rather than baked into `export_args` alone:* kept as an explicit, independently-testable input so `new_medium` never hardcodes a quality value itself.*
+
+### Returns
+
+`std::io::Result<Self>` - fails if ffmpeg cannot be spawned.
+
+### Implementation
+
+1. Resolve the H.264 hardware encoder name via `h264_encoder()` ONLY when `format == Format::Mp4` (empty string otherwise, since `ffmpeg_args::export_args` ignores it for non-MP4 formats).
+2. Build the complete argument vector via `crate::encode::ffmpeg_args::export_args(format, encoder, width, height, fps, crf, out_path)` - pure, unit-tested without spawning ffmpeg (see `ffmpeg_args.rs`).
+3. Spawn `ffmpeg` with those args directly (bypassing the `hq`/`vfr`-flavored `spawn` helper, which stays H.264-only and is unchanged for `new`/`new_vfr`/`new_hq`).
+
+### Behaviors worth knowing
+
+- Default settings (`format: Mp4`, `crf: 24`) reproduce today's pre-`ExportSettings` export byte-for-byte at the argument level: see `ffmpeg_args::tests::mp4_libx264_default_crf_matches_todays_hardcoded_args` and `mp4_nvenc_default_crf_matches_todays_hardcoded_args`.
+- `h264_qsv`/`h264_amf`/`h264_mf` ignore `crf` entirely (fixed 12 Mbps bitrate, as before this feature) - only `libx264` and `h264_nvenc` have a real quality knob today.
 
 ## FfmpegFrameSink::push
 

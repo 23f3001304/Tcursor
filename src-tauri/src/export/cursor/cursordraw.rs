@@ -103,14 +103,18 @@ pub fn draw_cursor(out: &mut [u8], ow: u32, oh: u32, spr: &CursorSprite,
     let hy = spr.hot.1 * th;
     let top_left = (pos.0 - hx, pos.1 - hy);
 
-    // Draw trail (older positions = more faded)
+    // Draw trail (older positions = more faded) - only for points moving at least 1.5px
     let n = recent.len();
     if n > 0 && blur > 0.0 {
+        let mut last_draw = pos;
         for (i, rp) in recent.iter().enumerate() {
+            let dist = (rp.0 - last_draw.0).hypot(rp.1 - last_draw.1);
+            if dist < 1.5 { continue; }
             let fade = 1.0 - i as f32 / n as f32;
             let alpha = (blur * fade * 0.5).clamp(0.0, 1.0);
             let rtl = (rp.0 - hx, rp.1 - hy);
             blit(out, ow, oh, spr, rtl, scale, alpha, clip);
+            last_draw = *rp;
         }
     }
 

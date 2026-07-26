@@ -88,3 +88,16 @@ Returns the existing `EditDoc` for a project, or builds and persists a default o
 
 - `src-tauri/src/edit/commands.rs` - `get_edit` and `apply_edit_op` both call this as their first step
 - `src-tauri/src/ai/commands.rs` - loads the doc before applying an AI plan
+
+## true_duration_ms
+
+```rust
+pub fn true_duration_ms(paths: &ProjectPaths) -> u32
+```
+
+The recording's TRUE full duration (ms) - `video_end - video_start` from the real capture timeline (`build_timeline`), independent of any user `trim.out_ms` selection. Preview helpers that need "how long is the whole clip" call this rather than reading `trim.out_ms`, which - once a user actually trims - no longer means the recording's length (it means the trim-out point). Returns `0` if `events.json` cannot be loaded.
+
+### Used by
+
+- `src-tauri/src/export/preview/preview_track.rs` - `ensure_proxy`'s re-time stretch factor
+- `src-tauri/src/export/preview/thumbs.rs` - `ensure_thumbs`'s filmstrip spacing

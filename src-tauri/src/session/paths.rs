@@ -17,6 +17,10 @@ impl ProjectPaths {
     pub fn typing(&self) -> PathBuf { self.folder.join("typing.json") }
     pub fn cursor(&self) -> PathBuf { self.folder.join("cursor.json") }
     pub fn edit(&self) -> PathBuf { self.folder.join("edit.json") }
+    /// `folder/project.tcursor` - the `ProjectManifest` written at record-stop and read by
+    /// `open_project` / the file-association cold-start path. The one place that filename is
+    /// spelled, so both writer and readers can never disagree on it.
+    pub fn manifest(&self) -> PathBuf { self.folder.join("project.tcursor") }
     pub fn ensure(&self) -> std::io::Result<()> { std::fs::create_dir_all(&self.folder) }
 }
 
@@ -62,5 +66,10 @@ mod tests {
     fn builds_edit_path() {
         let p = ProjectPaths::new(std::path::Path::new("C:/base"), "rec1");
         assert!(p.edit().ends_with("edit.json"));
+    }
+    #[test]
+    fn builds_manifest_path() {
+        let p = ProjectPaths::new(std::path::Path::new("C:/base"), "rec1");
+        assert!(p.manifest().ends_with("project.tcursor"));
     }
 }

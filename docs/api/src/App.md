@@ -34,6 +34,9 @@ Each step runs through `safe()` so one failure cannot abort the rest. It makes t
 **`closeEditor()`.**
 Reverses the changes through `safe()`: `setCapturable(false)`, restore always-on-top and non-resizable, clear the minimum size with `setMinSize(null)` (*why:* the `880x560` editor floor would otherwise block shrinking back), `setSize` to the 980x132 HUD bar and `center()` it, then switch `view` back to `{ v: "hud" }`.
 
+**Cold-start file association (`useEffect` on `[]`, runs once).**
+Calls `getLaunchProject()`; a non-null folder means this process was launched by double-clicking a `.tcursor` file, and calls `openEditor(folder)` to route straight to the editor instead of the HUD. A normal launch resolves `null` and nothing happens - the effect runs after the initial render, so the HUD still mounts first and is briefly visible before the switch on a `.tcursor` launch. Failures (rejected promise) are swallowed; there is nothing useful to show if this fails. *Warm-launch is not covered:* if TCursor is already running when another `.tcursor` is opened, the OS starts a second process rather than notifying this one - see the Rust `LaunchProject` doc comment.
+
 **Render.**
 A ternary -- no `AnimatePresence` here. `Editor` receives `folder` and `onClose`. `Hud` receives `onEdit`, which is `openEditor`. When `view.v` is `"hud"` the `Editor` is fully unmounted; its local state (playback position, selection, doc) is discarded when the user goes back to the HUD.
 
@@ -41,3 +44,4 @@ A ternary -- no `AnimatePresence` here. `Editor` receives `folder` and `onClose`
 
 - `getCurrentWindow()` is called once per render inside the component; for a single-window Tauri app this is cheap and avoids a hook.
 - The window ops (`setSize`/`center`/`setCapturable`) are async but the `setView` call does not await their completion -- the resize is cosmetic and the new view must be immediately interactive. Each is wrapped in `safe()` so one failing op cannot block the view switch.
+- `Hud`'s own "Open Project" button reaches `openEditor` through the identical `onEdit` prop, not through `getLaunchProject` - the two entry points (double-click vs. in-app button) converge on the same `openEditor(folder)` call.

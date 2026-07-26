@@ -16,6 +16,7 @@ fn sample_doc() -> EditDoc {
         layout: vec![LayoutSeg { id: "l1".into(), start_ms: 0, end_ms: 5000, layout: "screen".into(), transition_ms: 350, easing: "smooth".into() }],
         effects: vec![],
         camera_moves: vec![],
+        aspect: crate::export::types::Aspect::default(),
         settings: crate::settings::model::Settings::default(),
     }
 }
@@ -123,4 +124,39 @@ fn zoom_cam_action_round_trips_when_set() {
 fn camera_move_missing_field_defaults_to_empty_vec() {
     let doc: EditDoc = serde_json::from_str(r#"{"zooms":[]}"#).unwrap();
     assert_eq!(doc.camera_moves.len(), 0);
+}
+
+/// Back-compat: an `edit.json` saved before `aspect` existed loads as `Source` - today's
+/// behavior (`Layout::adapt_to_source`) - so an old doc renders identically after this upgrade.
+#[test]
+fn aspect_missing_field_defaults_to_source() {
+    use crate::export::types::Aspect;
+    let doc: EditDoc = serde_json::from_str(r#"{"zooms":[]}"#).unwrap();
+    assert_eq!(doc.aspect, Aspect::Source);
+    assert_eq!(EditDoc::default().aspect, Aspect::Source);
+}
+
+#[test]
+fn aspect_round_trips_through_json() {
+    use crate::export::types::Aspect;
+    let mut doc = EditDoc::default();
+    doc.aspect = Aspect::Square1x1;
+    let back: EditDoc = serde_json::from_str(&serde_json::to_string(&doc).unwrap()).unwrap();
+    assert_eq!(back.aspect, Aspect::Square1x1);
+}
+
+/// Back-compat: the doc-level `Trim::default()` (`{0,0}`, "not yet set") resolves to the WHOLE
+/// clip, matching "out_ms == 0 means no trim" - so a doc that never had `SetTrim` applied exports
+/// unchanged.
+#[test]
+fn default_trim_resolves_to_the_whole_clip() {
+    assert_eq!(Trim::default().resolve(12_345), (0, 12_345));
+}
+
+#[test]
+fn trim_resolve_clamps_in_to_out_and_both_to_the_clip() {
+    // out_ms beyond the real duration clamps down; in_ms beyond the resolved out clamps to it,
+    // so a degenerate/inverted range never yields a negative-length span at the call site.
+    assert_eq!(Trim { in_ms: 2_000, out_ms: 999_999 }.resolve(10_000), (2_000, 10_000));
+    assert_eq!(Trim { in_ms: 9_000, out_ms: 5_000 }.resolve(10_000), (5_000, 5_000));
 }

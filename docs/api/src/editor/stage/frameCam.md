@@ -24,7 +24,7 @@ Returns `base` with its `cam` panel replaced by whatever governs this frame.
 - `moves: CameraMove[]` - `doc.camera_moves`.
 - `drag: CamPose | null` - the live Move-mode pointer pose, or null. *Why it outranks the sampled track:* the PiP must follow the cursor without writing to the backend every frame; the drag only commits a keyframe on release.
 - `zooms: Zoom[]` / `zoom: ZoomSettings` - resolve the smart action (per-zoom override, then global default).
-- `ow` / `oh` - the preview canvas's pixel dims (its fixed 1280x720 backing store), the basis `PreviewLayout` fractions use.
+- `ow` / `oh` - the preview canvas's pixel dims (its backing store, sized from `PreviewLayout.canvas`), the basis `PreviewLayout` fractions use.
 
 ### Returns
 

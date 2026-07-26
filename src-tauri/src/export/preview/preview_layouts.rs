@@ -30,7 +30,7 @@ fn panel_dto(p: &Panel, ow: f32, oh: f32) -> PanelRectDto {
 #[tauri::command]
 pub fn preview_layouts(folder: String, session: tauri::State<'_, PreviewSession>) -> Result<LayoutPresets, String> {
     with_warm(&session, &folder, |c, _paths| {
-        let (ow, oh) = (c.out_w as f32, c.out_h as f32);
+        let (ow, oh) = (c.meta.out_w as f32, c.meta.out_h as f32);
         let one = |id: LayoutId| -> LayoutPresetDto {
             let s = c.renderer.resolve_layout(id);
             LayoutPresetDto { screen: panel_dto(&s.screen, ow, oh), cam: panel_dto(&s.camera, ow, oh) }

@@ -3,6 +3,7 @@ use crate::encode::frame_sink::FrameSink;
 use std::io::Write;
 use std::process::{Child, Stdio};
 use crate::win::sys::proc::ffcmd;
+use crate::export::settings::Format;
 use std::sync::OnceLock;
 
 /// Pipes BGRA frames to a system ffmpeg process that writes an H.264 MP4,
@@ -71,6 +72,24 @@ impl FfmpegFrameSink {
         Self::spawn(out_path, width, height, 0.0, false, true)
     }
 
+    /// Encode for offline export (`exporter::export`'s only caller): `format` picks the
+    /// container + codec (MP4/H.264 - today's only path, hardware-first via `h264_encoder()` -
+    /// WebM/VP9, or GIF via a palettegen/paletteuse filter chain) and `crf` (18..28,
+    /// `settings::DEFAULT_CRF` = 24) drives quality where a knob exists. Arg construction is
+    /// pure (`ffmpeg_args::export_args`, unit-tested without spawning ffmpeg); this function only
+    /// resolves the H.264 hardware encoder (when relevant) and spawns the process.
+    pub fn new_medium(out_path: &str, width: u32, height: u32, fps: f64, format: Format, crf: u8) -> std::io::Result<Self> {
+        let encoder = if matches!(format, Format::Mp4) { h264_encoder() } else { "" };
+        let args = crate::encode::ffmpeg_args::export_args(format, encoder, width, height, fps, crf, out_path);
+        let child = ffcmd("ffmpeg")
+            .args(&args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()?;
+        Ok(Self { child, width, height })
+    }
+
     /// High-quality CFR encode for offline export (slower preset, near-lossless).
     /// `fps` is f64 so the exporter can reinterpret a mislabeled source rate.
     pub fn new_hq(out_path: &str, width: u32, height: u32, fps: f64) -> std::io::Result<Self> {
@@ -90,10 +109,18 @@ impl FfmpegFrameSink {
         cmd.args(["-i", "pipe:0", "-c:v", encoder, "-pix_fmt", "yuv420p"]);
         if vfr { cmd.args(["-fps_mode", "passthrough"]); }
         match (encoder, hq) {
-            ("libx264", true) => cmd.args(["-preset", "slow", "-crf", "16"]),
-            ("libx264", false) => cmd.args(["-preset", "ultrafast", "-crf", "26"]),
-            (_, true) => cmd.args(["-preset", "p5", "-rc", "vbr", "-cq", "20", "-b:v", "0"]),
-            (_, false) => cmd.args(["-b:v", "16M"]),
+            ("libx264", true) => cmd.args(["-preset", "medium", "-crf", "18"]),
+            ("libx264", false) => cmd.args(["-preset", "veryfast", "-crf", "24"]),
+            ("h264_nvenc", true) => cmd.args(["-preset", "p3", "-rc", "vbr", "-cq", "18", "-b:v", "0", "-bf", "0"]),
+            ("h264_nvenc", false) => cmd.args(["-preset", "p2", "-rc", "vbr", "-cq", "24", "-b:v", "12M", "-bf", "0"]),
+            ("h264_qsv", true) => cmd.args(["-preset", "faster", "-global_quality", "20"]),
+            ("h264_qsv", false) => cmd.args(["-preset", "veryfast", "-b:v", "12M"]),
+            ("h264_amf", true) => cmd.args(["-quality", "speed", "-rc", "cqp", "-qp_p", "20", "-qp_i", "20"]),
+            ("h264_amf", false) => cmd.args(["-quality", "speed", "-b:v", "12M"]),
+            ("h264_mf", true) => cmd.args(["-b:v", "20M"]),
+            ("h264_mf", false) => cmd.args(["-b:v", "12M"]),
+            (_, true) => cmd.args(["-crf", "20"]),
+            (_, false) => cmd.args(["-b:v", "12M"]),
         };
         let child = cmd
             .arg(out_path)

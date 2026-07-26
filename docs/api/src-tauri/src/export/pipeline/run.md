@@ -5,7 +5,7 @@ Thin Tauri command adapter that launches the export on a background thread and b
 ## run_export
 
 ```rust
-pub fn run_export(app: AppHandle, folder: String)
+pub fn run_export(app: AppHandle, folder: String, settings: ExportSettings)
 ```
 
 Spawns a background thread that runs the full export and emits progress/completion/error events to the Tauri frontend.
@@ -14,6 +14,7 @@ Spawns a background thread that runs the full export and emits progress/completi
 
 - `app: AppHandle` - Tauri app handle used to emit events. *Why:* cloned once so both the progress closure and the final outcome can emit independently without a move conflict.
 - `folder: String` - absolute path to the project folder. *Why:* `ProjectPaths` is constructed from this string inside the thread so the path is owned by the thread with no lifetime issues.
+- `settings: ExportSettings` (`export::settings::ExportSettings`) - the user's chosen resolution/fps/quality/format, collected by `ExportDialog` and passed straight through from the `export_project` command. *Why passed through rather than resolved here:* `exporter::export` is the single place that turns `ExportSettings` into `Layout`/encoder args, so `run_export` stays a thin event-bridging adapter.
 
 ### Returns
 
@@ -21,13 +22,12 @@ Spawns a background thread that runs the full export and emits progress/completi
 
 ### Implementation
 
-1. Query `win::display::primary_refresh_hz()` and cap to 60; this is the capture fps passed to `exporter::export`.
-2. Spawn a detached thread: construct `ProjectPaths` from `folder`; clone `app` for the progress callback.
-3. Call `exporter::export` with a closure that emits `"export-progress"` (payload `u8` 0..=100) on each percentage advance.
-4. On `Ok(())`: emit `"export-done"` with the folder string.
-5. On `Err(e)`: emit `"export-error"` with the error's `to_string()`.
+1. Spawn a detached thread: construct `ProjectPaths` from `folder`; clone `app` for the progress callback; move `settings` in.
+2. Call `exporter::export(&paths, settings, ...)` with a closure that emits `"export-progress"` (payload `u8` 0..=100) on each percentage advance.
+3. On `Ok(())`: emit `"export-done"` with the folder string.
+4. On `Err(e)`: emit `"export-error"` with the error's `to_string()`.
 
 ### Behaviors worth knowing
 
 - The thread is detached; if the Tauri window closes while exporting, the thread runs to completion and the emit calls silently fail (`.emit()` returns a dropped `Result`).
-- The fps cap of 60 matches `OUT_FPS` in `exporter.rs`, so timeline synthesis never overshoots the encoder's target rate.
+- The display-refresh query (capped at 60) that used to live here now lives inside `exporter::export` itself (as `capture_fps`), since it also feeds `Fps::Source`'s fallback - `run_export` no longer needs to know about it at all.

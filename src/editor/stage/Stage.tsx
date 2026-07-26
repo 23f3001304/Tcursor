@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import type { CamSample, ClickSample, CursorSpriteDto, CursorKindSample, PreviewLayout, LayoutPresets } from "../../lib/ipc";
 import type { CursorSettings, ClickFxSettings, ZoomSettings } from "../../hud/settings/settings";
 import type { CameraMove, EffectRegion, LayoutSeg, Zoom } from "../../lib/edit";
@@ -12,11 +12,14 @@ import { useMediaPlayback } from "../hooks/useMediaPlayback";
 import { useSyncRefs } from "../hooks/useSyncRefs";
 import { mapCanvasClickToZoomTarget } from "./zoomTargetMapper";
 import { StageToolbar } from "./StageToolbar";
+import { StageMedia } from "./StageMedia";
 import { Spin } from "../controls/Spin";
 
 const MEDIA_ERR = ["", "aborted", "network", "decode", "src not supported (asset protocol blocked?)"];
-const HIDDEN: CSSProperties = { position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" };
-const CANVAS_W = 1280, CANVAS_H = 720; // fixed output backing store - same basis every fraction here uses
+// Fallback backing-store size before `layout.canvas` loads (matches the old hardcoded default,
+// so the very first paint is unchanged); once loaded, `layout.canvas` (from `PreviewLayout`,
+// resolved server-side via `Layout::resolve` from `EditDoc.aspect`) drives the real size.
+const DEFAULT_CANVAS: [number, number] = [1280, 720];
 
 /** Smooth, full-composite preview: the screen (a low-res proxy) and webcam play in hidden
  *  native <video>s, and each animation frame is composited onto a 2D canvas (background +
@@ -42,6 +45,10 @@ export function Stage({ src, webcamSrc, track, layout, layoutPresets, layoutSegs
   const [err, setErr] = useState<string | null>(null);
   const bgImg = useRef<HTMLImageElement | null>(null);
   const dirtyRef = useRef(true); // paused: recomposite once per change, not 60fps over a static frame
+  // The backing-store size (canvas width/height + .e-stage's aspect-ratio) follows the resolved
+  // aspect from the backend (`layout.canvas`) - every fraction in this file (camera rects, click
+  // positions, drag mapping) is relative to this same basis, so it must stay a single source.
+  const [canvasW, canvasH] = layout?.canvas ?? DEFAULT_CANVAS;
 
   // Decode the export background (a data URL) once per change into an <img> the canvas draws.
   useEffect(() => {
@@ -121,10 +128,10 @@ export function Stage({ src, webcamSrc, track, layout, layoutPresets, layoutSegs
   // The PiP rect (fractions of the canvas) at the current time, for positioning the drag handle -
   // same computation the composite loop makes for `frameLayout.cam` (layoutAt -> camMoveAt ->
   // rectFromCenter), so the handle sits in exact parity with what's actually drawn. `.e-stage`'s
-  // box is the canvas's own displayed rect (the stage is a 16:9 aspect-ratio box the canvas fills
-  // exactly, no letterbox gap), so these fractions convert straight to CSS percentages of
-  // `.e-stage` with no separate client-rect math needed.
-  const baseLayout = layoutAt(layoutSegs, layoutPresets, timeMs) ?? layout;
+  // box is the canvas's own displayed rect (the stage is sized to the resolved aspect-ratio, a box
+  // the canvas fills exactly, no letterbox gap), so these fractions convert straight to CSS
+  // percentages of `.e-stage` with no separate client-rect math needed.
+  const baseLayout = layoutAt(layoutSegs, layoutPresets, timeMs, [canvasW, canvasH]) ?? layout;
   // The un-overridden static PiP pose (implicit t=0 keyframe a lone camera_moves keyframe eases
   // in from) - same derivation useCompositeLoop.ts makes, so the handle matches the drawn frame.
   const staticPose = baseLayout?.cam
@@ -133,7 +140,7 @@ export function Stage({ src, webcamSrc, track, layout, layoutPresets, layoutSegs
   const sampledPose = camMoveAt(cameraMoves, timeMs, staticPose);
   const activePose = dragPose ?? sampledPose;
   const pipRect: [number, number, number, number] | null = !baseLayout?.cam ? null
-    : activePose ? rectFromCenter(activePose, CANVAS_W, CANVAS_H)
+    : activePose ? rectFromCenter(activePose, canvasW, canvasH)
     : [baseLayout.cam[0], baseLayout.cam[1], baseLayout.cam[2], baseLayout.cam[3]];
   // Match the handle's rounding to the webcam shape (radius/width ratio: ~50% circle, frac rounded,
   // 0 rect) so it hugs the PiP instead of a boxy border sticking out past a round webcam.
@@ -169,9 +176,9 @@ export function Stage({ src, webcamSrc, track, layout, layoutPresets, layoutSegs
   return (
     <div className="e-stagewrap">
       <StageToolbar />
-      <div className="e-stage">
+      <div className="e-stage" style={{ aspectRatio: `${canvasW} / ${canvasH}` }}>
         {!src && !err && <div className="e-stage-empty"><Spin size={20} /><span>Preparing preview</span></div>}
-        <canvas ref={canvas} className="e-canvas" width={1280} height={720} onClick={onCanvasClick}
+        <canvas ref={canvas} className="e-canvas" width={canvasW} height={canvasH} onClick={onCanvasClick}
           title="Click to add a zoom here" style={{ display: src ? "block" : "none", cursor: "zoom-in" }} />
         {moveMode && pipRect && (
           <div className={`e-camdrag${dragPose ? " drag" : ""}`}
@@ -179,23 +186,13 @@ export function Stage({ src, webcamSrc, track, layout, layoutPresets, layoutSegs
             title="Drag to reposition the webcam"
             onPointerDown={onHandlePointerDown} />
         )}
-        {src && (
-          <video ref={screen} src={src} muted playsInline preload="auto" style={HIDDEN}
-            onLoadedData={() => { setErr(null); dirtyRef.current = true; }}
-            onSeeked={() => { dirtyRef.current = true; }}
-            onEnded={() => { const v = screen.current; if (v && isFinite(v.duration)) onTimeRef.current(Math.round(v.duration * 1000)); }}
-            onLoadedMetadata={(e) => {
-              const v = e.currentTarget; const d = v.duration;
-              if (isFinite(d) && d > 0) onDuration(Math.round(d * 1000));
-              v.currentTime = Math.max(0, timeRef.current / 1000); // restore position across the raw->proxy swap
-              if (playRef.current) v.play().catch(() => {});
-            }}
-            onError={(e) => setErr(MEDIA_ERR[e.currentTarget.error?.code ?? 0] || "load failed")} />
-        )}
-        {webcamSrc && <video ref={webcam} src={webcamSrc} muted playsInline preload="auto" style={HIDDEN}
-          onLoadedData={() => { dirtyRef.current = true; }} onSeeked={() => { dirtyRef.current = true; }} />}
-        {audioSrc && <audio ref={audio} src={audioSrc} preload="auto" />}
-        {err && <div className="e-stage-empty" style={{ position: "absolute", inset: 0 }}>Preview unavailable - {err}</div>}
+        <StageMedia screenRef={screen} webcamRef={webcam} audioRef={audio} src={src} webcamSrc={webcamSrc} audioSrc={audioSrc} err={err}
+          onScreenLoadedData={() => { setErr(null); dirtyRef.current = true; }} onScreenSeeked={() => { dirtyRef.current = true; }}
+          onScreenEnded={() => { const v = screen.current; if (v && isFinite(v.duration)) onTimeRef.current(Math.round(v.duration * 1000)); }}
+          onScreenLoadedMetadata={(e) => { const v = e.currentTarget; const d = v.duration; if (isFinite(d) && d > 0) onDuration(Math.round(d * 1000));
+            v.currentTime = Math.max(0, timeRef.current / 1000); /* restore position across the raw->proxy swap */ if (playRef.current) v.play().catch(() => {}); }}
+          onScreenError={(e) => setErr(MEDIA_ERR[e.currentTarget.error?.code ?? 0] || "load failed")}
+          onWebcamLoadedData={() => { dirtyRef.current = true; }} onWebcamSeeked={() => { dirtyRef.current = true; }} />
       </div>
     </div>
   );

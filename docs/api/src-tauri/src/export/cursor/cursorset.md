@@ -1,6 +1,6 @@
 # src-tauri/src/export/cursor/cursorset.rs
 
-Manages the per-type cursor sprite set for Enhanced export: decodes each cursor shape once at prep time from compile-time embedded PNGs, looks up the active type per frame via the cursor type track, inverts RGB channels for dark themes so a single asset set serves both light and dark backgrounds, and drives the per-frame draw call. The drawing primitives live in `cursordraw`; this file is the sprite-management and call-site seam.
+Manages the per-type cursor sprite set for Enhanced export: decodes each cursor shape once at prep time (from the compile-time embedded built-in PNGs, or an imported pack's files via `pack::sprite_sources` - see `export/cursor/pack.rs`), looks up the active type per frame via the cursor type track, inverts RGB channels for dark themes so a single asset set serves both light and dark backgrounds, and drives the per-frame draw call. The drawing primitives live in `cursordraw`; this file is the sprite-management and call-site seam.
 
 ## SPRITES
 
@@ -8,10 +8,11 @@ Manages the per-type cursor sprite set for Enhanced export: decodes each cursor 
 const SPRITES: &[(CursorType, &[u8], (f32, f32))]
 ```
 
-Compile-time table mapping each supported `CursorType` to its embedded PNG bytes and canvas-fraction hotspot `(x, y)`. Each row is `(type, include_bytes!(...), (hx, hy))`. Currently includes Arrow, Hand, IBeam, ResizeNs, ResizeEw, ResizeNwse, ResizeNesw, Move, and Busy. Adding a new cursor shape requires one new row here and a PNG asset in `assets/cursors/`.
+Compile-time table mapping each supported `CursorType` to its embedded PNG bytes and canvas-fraction hotspot `(x, y)`. Each row is `(type, include_bytes!(...), (hx, hy))`. Currently includes Arrow, Hand, IBeam, ResizeNs, ResizeEw, ResizeNwse, ResizeNesw, Move, and Busy. Adding a new cursor shape requires one new row here and a PNG asset in `assets/cursors/`. This is the built-in pack (`pack::DEFAULT_PACK_ID`) and also the per-kind fallback `pack::sprite_sources` uses for any kind an imported pack doesn't provide.
 
-- *Why `include_bytes!`:* embeds all cursor PNGs in the compiled binary so the export path has no runtime file I/O dependency for sprites.
+- *Why `include_bytes!`:* embeds all cursor PNGs in the compiled binary so the export path has no runtime file I/O dependency for the built-in sprites.
 - *Why hotspot as canvas fraction:* authors define hotspots relative to the full canvas (before content-cropping); `ffio::decode_cursor` converts these to content-region fractions.
+- *Why `pub(crate)` rather than private:* `pack.rs` (`sprite_sources`) and `pack_import.rs` (`collect_valid_sprites`) both iterate it - for the built-in fallback rows and to know every recognized cursor kind + its expected filename.
 
 ## CursorPrep
 
@@ -41,11 +42,11 @@ All per-export Enhanced cursor state, created once by `prep` and mutated each fr
 pub fn prep(cursor: &CursorSettings, events: &[MouseEvent], track: CursorTrack, dark: bool) -> Option<CursorPrep>
 ```
 
-Decodes all cursor sprites and assembles the `CursorPrep` for an export run.
+Decodes all cursor sprites and assembles the `CursorPrep` for an export run. Sprite bytes come from `cursor.pack` via `pack::sprite_sources` (see `export/cursor/pack.rs`) - the built-in set for `pack == "default"`, or an imported pack folder falling back to the built-in sprite for any kind it doesn't provide.
 
 ### Inputs
 
-- `cursor: &CursorSettings` - the user's cursor settings; `cursor.style` is checked first. *Why:* only `CursorStyle::Enhanced` requires the sprite set; `System` and `Hidden` return `None` immediately, skipping all decode work.
+- `cursor: &CursorSettings` - the user's cursor settings; `cursor.style` is checked first, then `cursor.pack` selects the sprite source. *Why:* only `CursorStyle::Enhanced` requires the sprite set; `System` and `Hidden` return `None` immediately, skipping all decode work.
 - `events: &[MouseEvent]` - the full mouse event log. *Why:* used only to extract `Down` timestamps into `click_ms` for the bounce animation.
 - `track: CursorTrack` - the per-frame cursor type sequence from the recorder. *Why:* stored in `CursorPrep` for per-frame sprite lookup.
 - `dark: bool` - whether the user's theme is dark. *Why:* cursor sprites are authored for a light background; on a dark background `invert_rgb` is applied to each decoded sprite so the cursor remains visible.
@@ -57,7 +58,7 @@ Decodes all cursor sprites and assembles the `CursorPrep` for an export run.
 ### Implementation
 
 1. Return `None` immediately if `cursor.style != CursorStyle::Enhanced`.
-2. For each row in `SPRITES`, call `decode_sprite(png, hot)`. On success, if `dark`, call `invert_rgb` on `spr.bgra` in place, then insert into `set`.
+2. For each `(kind, png, hot)` row in `pack::sprite_sources(&cursor.pack)`, call `decode_sprite(&png, hot)`. On success, if `dark`, call `invert_rgb` on `spr.bgra` in place, then insert into `set`.
 3. Verify `set.get(&CursorType::Arrow)` is `Some`; if not, return `None` (the universal fallback is required).
 4. Extract `click_ms` from `events` filtered to `EventKind::Down`.
 5. Return `Some(CursorPrep { set, track, click_ms, recent: VecDeque::new() })`.

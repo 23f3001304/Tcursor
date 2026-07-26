@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use crate::export::types::ZoomConfig;
 use crate::settings::appearance::AppearanceSettings;
+use crate::settings::background::BackgroundSettings;
 
 /// What the webcam PiP does while a zoom is active. `Shrink` is today's behavior (the panel
 /// scales toward `to` as the zoom deepens), `Hide` fades it out on the same curve, `Stay`
@@ -111,7 +112,7 @@ impl CursorStyle {
     pub fn captures_os_cursor(self) -> bool { matches!(self, CursorStyle::System) }
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct CursorSettings {
     pub style: CursorStyle,
@@ -119,12 +120,13 @@ pub struct CursorSettings {
     pub motion_blur: f32,      // 0..1 trail strength (0 = off)
     pub click_bounce: bool,
     pub bounce_intensity: f32, // 0..1 dip depth (0.5 = ~0.18 dip, 1.0 = 0.36 dip)
+    pub pack: String,          // "default" (built-in) or an imported id; see export/cursor/pack.rs
 }
 impl Default for CursorSettings {
-    fn default() -> Self { Self { style: CursorStyle::System, size: 1.0, motion_blur: 0.35, click_bounce: true, bounce_intensity: 0.5 } }
+    fn default() -> Self { Self { style: CursorStyle::System, size: 1.0, motion_blur: 0.35, click_bounce: true, bounce_intensity: 0.5, pack: "default".to_string() } }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Settings {
     pub zoom: ZoomSettings,
@@ -136,63 +138,30 @@ pub struct Settings {
     /// Manual mic-vs-video sync nudge in ms (negative pulls the mic earlier, to
     /// cancel the mic's device input latency). 0 = off. Applied to the mic at mux.
     pub audio_offset_ms: i32,
+    pub background: BackgroundSettings,
+    /// Volume multiplier applied to the mic track at mux (0 = muted, 1 = unchanged, up to 1.5).
+    /// Explicit field default (belt-and-suspenders alongside the manual `impl Default` below,
+    /// matching `spotlight_dim_camera`'s pattern) so a config saved without this key loads 1.0,
+    /// not `f32::default() == 0.0` (silently muted audio).
+    #[serde(default = "default_volume")] pub audio_mic_volume: f32,
+    /// Volume multiplier applied to the system-audio track at mux. Same range as `audio_mic_volume`.
+    #[serde(default = "default_volume")] pub audio_sys_volume: f32,
+    /// Ollama model name for `ai_autoedit`. Empty = let the backend pick its own default
+    /// (`"llama3.2"`), so configs saved before this field existed behave identically.
+    pub ai_model: String,
+}
+fn default_volume() -> f32 { 1.0 }
+impl Default for Settings {
+    // NOT #[derive(Default)]: audio_mic_volume/audio_sys_volume need 1.0 (unity gain), which
+    // bare field-type defaults (f32::default() == 0.0, silently muted audio) would get wrong.
+    fn default() -> Self {
+        Self { zoom: ZoomSettings::default(), clickfx: ClickFxSettings::default(), hotkeys: HotkeySettings::default(),
+            appearance: AppearanceSettings::default(), cursor: CursorSettings::default(), ui: InterfaceSettings::default(),
+            audio_offset_ms: 0, background: BackgroundSettings::default(),
+            audio_mic_volume: 1.0, audio_sys_volume: 1.0, ai_model: String::new() }
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn defaults_match_tuned_zoom_and_round_trip() {
-        let s = Settings::default();
-        assert!(s.zoom.enabled);
-        assert_eq!(s.zoom.target_scale, 2.2);
-        assert_eq!(s.zoom.hold_ms, 2200);
-        assert!(s.zoom.camera_shrink);
-        assert_eq!(s.zoom.camera_shrink_min, 0.62);
-        assert!(s.zoom.smart_hold);
-        let cfg = s.zoom.to_zoom_config();
-        assert_eq!(cfg.target_scale, 2.2);
-        assert_eq!(cfg.idle_release_ms, 2200);
-        assert_eq!(cfg.follow_damping, 0.10);
-        assert_eq!(cfg.zoom_in_ms, 350); // untouched ZoomConfig default
-        assert_eq!(s.zoom.clicks, 1);
-        assert_eq!(cfg.clicks_to_trigger, 1);
-        let json = serde_json::to_string(&s).unwrap();
-        let back: Settings = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, s);
-    }
-    #[test]
-    fn partial_json_fills_defaults() {
-        let back: Settings = serde_json::from_str("{\"zoom\":{\"enabled\":false}}").unwrap_or_default();
-        // missing fields fall back to defaults
-        assert!(!back.zoom.enabled);
-        assert_eq!(back.zoom.target_scale, 2.2);
-        assert_eq!(back.clickfx.enabled, ClickFxSettings::default().enabled);
-        // old JSON without spotlight_dim/radius/feather loads with defaults
-        assert_eq!(back.clickfx.spotlight_dim, 0.60);
-        assert_eq!(back.clickfx.spotlight_radius, 0.13);
-        assert_eq!(back.clickfx.spotlight_feather, 0.10);
-        assert_eq!(back.clickfx.spotlight_mode, SpotlightMode::Classic);
-        assert_eq!(back.clickfx.spotlight_tint, [130, 90, 255]);
-        // old JSON without spotlight_dim_camera loads with default true (today's dim-everything look)
-        assert!(back.clickfx.spotlight_dim_camera);
-        // old JSON without camera_shrink/camera_shrink_min loads with defaults
-        assert!(back.zoom.camera_shrink);
-        assert_eq!(back.zoom.camera_shrink_min, 0.62);
-        // old JSON without smart_hold loads with default
-        assert!(back.zoom.smart_hold);
-        // old JSON without appearance loads the per-mode defaults
-        assert_eq!(back.appearance, crate::settings::appearance::AppearanceSettings::default());
-        // old JSON without cursor loads the System default (cursor stays baked-in)
-        assert_eq!(back.cursor, crate::settings::model::CursorSettings::default());
-        assert_eq!(back.cursor.style, CursorStyle::System);
-        assert_eq!(CursorSettings::default().bounce_intensity, 0.5);
-        assert!(CursorStyle::System.captures_os_cursor());
-        assert!(!CursorStyle::Enhanced.captures_os_cursor());
-        assert!(!CursorStyle::Hidden.captures_os_cursor());
-        // old JSON without ui loads the Light theme + red accent defaults
-        assert_eq!(back.ui, crate::settings::model::InterfaceSettings::default());
-        assert_eq!(back.ui.theme, ThemeMode::Light);
-        assert_eq!(back.ui.accent, [239, 68, 68]);
-    }
-}
+#[path = "model_tests.rs"]
+mod tests;

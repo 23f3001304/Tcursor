@@ -24,6 +24,7 @@ pub enum EditOp {
     RemoveZoom { id: String },
     SetZoomCamAction { id: String, action: Option<CamZoomAction> },
     SetTrim { in_ms: u32, out_ms: u32 },
+    SetAspect { aspect: Aspect },
     AddCut { start_ms: u32, end_ms: u32 },
     SetSpeed { start_ms: u32, end_ms: u32, factor: f32 },
     AddLayoutSeg { at_ms: u32, dur_ms: u32, layout: String },
@@ -46,6 +47,7 @@ Discriminated-union command type serialized to/from the Tauri IPC channel and th
 - `RemoveZoom` - *drop a zoom by string id; triggered by the delete key and AI-plan rollback.*
 - `SetZoomCamAction` - *set (`Some`) or clear (`None`) one zoom's webcam-on-zoom override. **Why a dedicated op rather than a field on `UpdateZoom`:** that op's "field is `None` => leave unchanged" convention cannot express "clear back to inherit the global default" without an `Option<Option<_>>`, which serializes ambiguously over IPC.*
 - `SetTrim` - *replace the clip trim window atomically; in/out always travel together so no partial-update variant is needed.*
+- `SetAspect` - *replace the output frame aspect ratio (`EditDoc.aspect`); `FrameRenderer::new` re-resolves `Layout` from it on the next build (export or preview).*
 - `AddCut` - *append a cut segment; cut order and overlap resolution are rendering concerns, not enforced here.*
 - `SetSpeed` - *append a speed segment with the given `factor`; the id is auto-assigned and the caller controls ordering via the plan.*
 - `AddLayoutSeg` / `UpdateLayoutSeg` / `RemoveLayoutSeg` - *add/patch/remove a named-layout segment (`"screen"`, `"camera"`, `"presenter"`, ...), auto-id `l{n}`, clamped to the clip duration.*
@@ -117,6 +119,7 @@ Mutates `doc` in place by dispatching on `op`. The single write point for all `E
 - `update_zoom_unknown_id_is_noop` - an unknown id produces no panic and no mutation.
 - `remove_zoom_drops_by_id` - only the targeted zoom is removed; others survive.
 - `set_trim_replaces_trim` - both `in_ms` and `out_ms` update atomically.
+- `set_aspect_replaces_aspect` - `doc.aspect` starts at `Source` and updates to the given variant.
 - `add_zoom_full_uses_given_scale` - scale is preserved, not overridden to 2.0.
 - `set_layout_seg_noop_unknown` - unknown segment id is silently ignored.
 

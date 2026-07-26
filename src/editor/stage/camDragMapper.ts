@@ -3,7 +3,8 @@
  *  (which targets the screen layer, so it must invert the current zoom crop to find the
  *  pre-zoom point), the webcam PiP is the FIXED TOP layer in OUTPUT space (see the Rust
  *  `Scene.camera` - it's composited after the screen crop, never zoomed/cropped itself), so
- *  the PiP center is always just the pointer's fraction of the whole displayed 1280x720 frame.
+ *  the PiP center is always just the pointer's fraction of the whole displayed frame (whatever
+ *  aspect the canvas is currently sized to).
  *  Reuses only the canvas-display-rect (letterbox) math from `zoomTargetMapper`. */
 export function mapPointerToCamFraction({
   clientX,

@@ -5,8 +5,8 @@ Editor top bar rendered at the top of the editor view. The bar is a window drag 
 ## TopBar
 
 ```tsx
-export function TopBar({ proj, exporting, pct, onExport, onClose }: {
-  proj: string; exporting: boolean; pct: number; onExport: () => void; onClose: () => void;
+export function TopBar({ proj, exporting, pct, onOpenExport, onClose }: {
+  proj: string; exporting: boolean; pct: number; onOpenExport: () => void; onClose: () => void;
 }): JSX.Element
 ```
 
@@ -15,9 +15,9 @@ Renders the editor top bar with navigation, branding, and export controls.
 ### Props
 
 - `proj: string` - the project folder's basename (last path segment). *Why:* gives the user context about which recording is open without showing the full path.
-- `exporting: boolean` - whether an export pipeline is running. *Why:* disables the Export button and switches it to a spinner + percentage display to prevent double-submission.
+- `exporting: boolean` - whether an export pipeline is running. *Why:* disables the Export button and switches it to a spinner + percentage display to prevent double-submission. Reflects an export started from `ExportDialog`, so this mini bar still tracks progress even after the dialog itself has been closed.
 - `pct: number` - export progress percentage (0-100). *Why:* shown inline in the Export button while `exporting` is true.
-- `onExport: () => void` - called when the Export button is clicked. *Why:* export state is owned by `Editor`.
+- `onOpenExport: () => void` - called when the Export button is clicked. *Why:* opens `ExportDialog` (owned by `Editor`) rather than exporting immediately - the dialog collects `ExportSettings` and calls `exportProject` itself once the user confirms.
 - `onClose: () => void` - called when the **back-arrow** button is clicked. *Why:* "back to recorder" is owned by `App` (via `Editor`'s `onClose`), which switches the view back to the HUD. The close (X) button does not use this - it quits the app.
 
 ### Behavior
@@ -26,7 +26,7 @@ Renders the editor top bar with navigation, branding, and export controls.
 Calls `onClose`. No confirmation -- unsaved edits and ongoing exports are the caller's responsibility to handle.
 
 **Export button.**
-When `exporting` is false: renders `IconDownload` + "Export" text and calls `onExport` on click.
+When `exporting` is false: renders `IconDownload` + "Export" text and calls `onOpenExport` on click.
 When `exporting` is true: renders `<Spin size={15}>` + `{pct}%` and is `disabled`. *Why disabled during export:* `exportProject` is a one-at-a-time pipeline; a second concurrent call is not supported.
 
 **Stub buttons.**

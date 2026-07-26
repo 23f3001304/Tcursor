@@ -23,11 +23,12 @@ None. All configuration is sourced from `tauri::generate_context!()` (the `tauri
 1. `tauri::Builder::default()` - start the builder.
 2. `.plugin(tauri_plugin_opener::init())` - register the opener plugin for OS-level file and URL opening.
 3. `.manage(session::recorder::Recorder::default())` - register the shared `Recorder` state. *Why a single managed instance:* the recorder is stateful (tracks recording lifecycle) and must be accessible from any IPC command handler without passing it explicitly.
-4. `.invoke_handler(tauri::generate_handler![...])` - register all IPC command handlers: `list_displays`, `list_audio_inputs`, `start_recording`, `pause_recording`, `resume_recording`, `stop_recording`, `save_webcam`, `export_project`, `get_settings`, `set_settings`, `get_edit`, `apply_edit_op`, `save_edit`, `ai_autoedit`, `preview_frame`, `set_capturable`.
+4. `.invoke_handler(tauri::generate_handler![...])` - register all IPC command handlers, including (among many others) `start_recording`/`stop_recording`, `export_project`, `get_settings`/`set_settings`, the `edit`/`ai`/`export::preview`/`export::cursor` command groups, and `session::project::commands::open_project` / `list_recent_projects` / `get_launch_project`.
 5. `.setup(|app| { ... Ok(()) })` - run startup side effects:
-   a. Call `win::proc::init_ffmpeg(app.path().resource_dir().ok())` to locate the bundled ffmpeg/ffprobe and store the directory in `FFMPEG_DIR`. Write the diagnostic log to `%TEMP%/tcursor-ffmpeg.log`. *Why write a log:* any "ffmpeg not available" failure on a user machine is explainable without attaching a debugger.
-   b. `std::thread::spawn(encode::ffmpeg_encoder::prewarm)` - warm up the encoder off the main thread. *Why at startup:* audio capture must not stall behind the latency of the first ffmpeg process launch; prewarming ensures the encoder is ready before the user starts recording.
-   c. (Windows only, when `CAPTURE_EXCLUDE = true`) Retrieve the main webview window's HWND and call `win::capture_exclusion::set_capture_exclusion(hwnd, true)`. Logs `"capture exclusion applied"` to stdout on success, or a warning to stderr on failure. The compile-time constant `CAPTURE_EXCLUDE` can be set to `false` during design work to allow screenshotting the HUD.
+   a. `app.manage(session::project::commands::LaunchProject(session::project::commands::launch_project_from_argv(std::env::args())))` - resolve the cold-start file-association argv (a `.tcursor` path from a Windows double-click) into a project folder, if any, and register it as managed state read once by the frontend via `get_launch_project`. *Why here, first:* cheap and side-effect-free; must run before the frontend's first invoke.
+   b. Call `win::proc::init_ffmpeg(app.path().resource_dir().ok())` to locate the bundled ffmpeg/ffprobe and store the directory in `FFMPEG_DIR`. Write the diagnostic log to `%TEMP%/tcursor-ffmpeg.log`. *Why write a log:* any "ffmpeg not available" failure on a user machine is explainable without attaching a debugger.
+   c. `std::thread::spawn(encode::ffmpeg_encoder::prewarm)` - warm up the encoder off the main thread. *Why at startup:* audio capture must not stall behind the latency of the first ffmpeg process launch; prewarming ensures the encoder is ready before the user starts recording.
+   d. (Windows only, when `CAPTURE_EXCLUDE = true`) Retrieve the main webview window's HWND and call `win::capture_exclusion::set_capture_exclusion(hwnd, true)`. Logs `"capture exclusion applied"` to stdout on success, or a warning to stderr on failure. The compile-time constant `CAPTURE_EXCLUDE` can be set to `false` during design work to allow screenshotting the HUD.
 6. `.run(tauri::generate_context!()).expect(...)` - start the event loop.
 
 ## ai
@@ -64,7 +65,7 @@ Key items: `audio_source::AudioSource`, `cpal_mic::CpalMic` (`open`, `default_in
 
 Recording orchestration and lifecycle: the Tauri `Recorder` state, the start/pause/resume/stop commands, the per-frame capture loop, project paths, and the A/V sync log. This is the heart of "record".
 
-Key items: `recorder::Recorder` with `start_recording` / `pause_recording` / `resume_recording` / `stop_recording`, `recording_session::RecordingSession` (`run`, `run_paced`), `paths::ProjectPaths`, `sync::SyncLog`, `pacing` (CFR game mode), `recorder_threads::save_inputs`.
+Key items: `recorder::Recorder` with `start_recording` / `pause_recording` / `resume_recording` / `stop_recording`, `recording_session::RecordingSession` (`run`, `run_paced`), `paths::ProjectPaths`, `sync::SyncLog`, `pacing` (CFR game mode), `recorder_threads::save_inputs`, `project` (the `.tcursor` manifest, recents list, and `open_project`/file-association commands).
 
 ## win
 

@@ -4,6 +4,33 @@ The 3-stage export pipeline that overlaps decode, composite, and encode. The scr
 
 The frame-selection logic is factored into the pure `advance_index` function so it can be unit-tested in isolation; the threads only move bytes between stages and never change them, keeping output byte-identical to the old sequential loop. Decode-thread errors are stored in a shared `Arc<Mutex<Option<Error>>>` and surfaced on the main side (via the pipe's `next_*` calls or `join`), which distinguishes a real decode failure from a clean EOF (channel closed with no stored error).
 
+## trim_frame_bounds
+
+```rust
+pub fn trim_frame_bounds(trim_in_ms: u32, trim_out_ms: u32, out_fps: u64) -> (u64, u64)
+```
+
+Converts a resolved trim range (ms, from `Trim::resolve`) to INCLUSIVE output-frame index bounds `[k_in, k_last]` at `out_fps`, using the same `(ms * out_fps) / 1000` formula the exporter's own untrimmed loop bound always used - so an untrimmed clip (`trim_out_ms == full_dur_ms`) yields `k_last` identical to the old bound and composites the exact same frame count (back-compat).
+
+### Inputs
+
+- `trim_in_ms: u32`, `trim_out_ms: u32` - the resolved (not raw) trim range from `Trim::resolve`.
+- `out_fps: u64` - the export frame rate.
+
+### Returns
+
+`(u64, u64)` - `(k_in, k_last)`, both inclusive. `k_last` is always `>= k_in`, so a degenerate (zero-length) trim still emits at least one frame rather than producing an empty export.
+
+### Used by
+
+- `src-tauri/src/export/pipeline/exporter.rs` - gates which frames the composite loop actually renders/encodes.
+
+### Behaviors
+
+- `trim_frame_bounds_converts_ms_to_inclusive_frame_indices` - a `[2000, 8000]`ms trim at 60fps yields `(120, 480)`.
+- `trim_frame_bounds_never_collapses_to_empty` - an equal in/out still yields `k_last >= k_in`.
+- `untrimmed_last_index_matches_the_old_total_out_formula` - `trim_frame_bounds(0, full_dur_ms, fps)` reproduces the pre-trim `total_out = dur*fps/1000` bound exactly.
+
 ## advance_index
 
 ```rust
@@ -79,15 +106,15 @@ Joins the decode thread and surfaces any stored decode error (even one the loop 
 pub struct WebcamPipe
 ```
 
-The webcam decode thread's receiving end. The webcam decoder runs at `OUT_FPS` (1:1 with output frames, no superseding), so this is simpler than `ScreenPipe`: one frame per output tick, recycled by the caller after compositing.
+The webcam decode thread's receiving end. The webcam decoder runs at the export's resolved output frame rate (`out_fps`, from `ExportSettings.fps` via `Fps::resolve_hz` - 1:1 with output frames, no superseding), so this is simpler than `ScreenPipe`: one frame per output tick, recycled by the caller after compositing.
 
 ## WebcamPipe::spawn
 
 ```rust
-pub fn spawn(webcam: &Path, video_start: u64, size: u32, wc_bytes: usize, depth: usize) -> Result<WebcamPipe>
+pub fn spawn(webcam: &Path, video_start: u64, size: u32, wc_bytes: usize, depth: usize, out_fps: u64) -> Result<WebcamPipe>
 ```
 
-Spawns the webcam `RawDecoder` (at `OUT_FPS`, seeked to `video_start`, cover-cropped to a `size` square) and its decode thread. Like `ScreenPipe::spawn`, spawn errors surface immediately.
+Spawns the webcam `RawDecoder` (at `out_fps`, seeked to `video_start`, cover-cropped to a `size` square) and its decode thread. Like `ScreenPipe::spawn`, spawn errors surface immediately.
 
 ### Inputs
 
@@ -96,6 +123,7 @@ Spawns the webcam `RawDecoder` (at `OUT_FPS`, seeked to `video_start`, cover-cro
 - `size: u32` - square side length the webcam is cover-cropped to. *Why:* the compositor expects a square camera panel.*
 - `wc_bytes: usize` - bytes per webcam frame (`size * size * 4`). *Why:* sizes the pooled buffers and the decoder assertion.*
 - `depth: usize` - channel + pool depth, as for `ScreenPipe`.
+- `out_fps: u64` - the export's resolved output frame rate (`exporter::export`'s own `out_fps`, from `ExportSettings.fps`). *Why threaded in rather than using the `OUT_FPS` constant:* the webcam decode cadence must match whatever rate the composite loop and encoder actually run at, not always exactly 60 - previously this was hardcoded to the `OUT_FPS` constant regardless of the (formerly fixed) export rate.
 
 ### Returns
 
@@ -131,11 +159,11 @@ Joins the decode thread and surfaces any stored decode error, dropping the recei
 
 ## exporter
 
-Top-level export orchestrator: calls `FrameRenderer::new`, spawns the screen/webcam decode threads (`ScreenPipe`/`WebcamPipe`) and the encoder thread, then drives the per-frame composite loop via `step_camera` + `composite_at` and muxes audio. Key items: `export(paths, fps, on_progress) -> Result<()>` - single public entry point.
+Top-level export orchestrator: calls `FrameRenderer::new`, spawns the screen/webcam decode threads (`ScreenPipe`/`WebcamPipe`) and the encoder thread, then drives the per-frame composite loop via `step_camera` + `composite_at` and muxes audio. Key items: `export(paths, settings, on_progress) -> Result<()>` - single public entry point; `settings: ExportSettings` resolves output resolution/fps/quality/format.
 
 ## run
 
-Thin Tauri command adapter that launches the export on a background thread and bridges results to the frontend as events. Key items: `run_export(app, folder)` - fire-and-forget; emits `export-progress`, `export-done`, and `export-error`.
+Thin Tauri command adapter that launches the export on a background thread and bridges results to the frontend as events. Key items: `run_export(app, folder, settings)` - fire-and-forget; emits `export-progress`, `export-done`, and `export-error`.
 
 ## ffio
 
@@ -143,7 +171,7 @@ FFmpeg and ffprobe spawn helpers, raw BGRA frame reader, and bundled-image decod
 
 ## audio_mux
 
-Muxes the encoded silent video with microphone and/or system audio into `final.mp4`, handling all four audio combinations and applying per-track A/V sync offsets. Key items: `mux(tmp, paths, mic_shift_ms, sys_shift_ms) -> Result<()>`.
+Muxes the encoded silent video with microphone and/or system audio into `final.<ext>` (`<ext>` from the export's `Format`), handling all four audio combinations and applying per-track A/V sync offsets and volume gain. Key items: `mux(tmp, paths, format, mic_shift_ms, sys_shift_ms, mic_vol, sys_vol) -> Result<()>`.
 
 ## timeline
 

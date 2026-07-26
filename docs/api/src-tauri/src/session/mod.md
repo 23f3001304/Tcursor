@@ -13,3 +13,7 @@ Single source of truth for all per-project file paths. All callers derive artifa
 ## sync
 
 Per-recording timing log that anchors every captured track to the shared capture clock. Written once at `stop_recording` and read by the exporter to reconstruct the real frame timeline and compute audio offsets. Key items: `SyncLog` (fields: `frames` per-frame timestamps, `events_ms` mouse-clock origin, `mic_ms` and `system_ms` audio start times), `SyncLog::save`, `SyncLog::load`.
+
+## project
+
+The `.tcursor` project format: `project.tcursor`, a small JSON manifest written into the project folder (never a zip/copy of the multi-GB video), plus the "recently opened" list and the `open_project`/file-association command surface. Key items: `manifest::ProjectManifest` (`save`/`load`/`new`/`load_or_default`), `recents::RecentProject` (`list`/`touch`), `commands::open_project`/`list_recent_projects`/`get_launch_project`, `commands::LaunchProject` (cold-start managed state), `commands::folder_from_manifest_path` / `launch_project_from_argv`.

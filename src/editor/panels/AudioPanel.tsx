@@ -4,10 +4,18 @@ import { Slider } from "../controls/Controls";
 export function AudioPanel({
   offsetMs,
   onChangeOffset,
+  micVol,
+  onChangeMicVol,
+  sysVol,
+  onChangeSysVol,
   onClose,
 }: {
   offsetMs: number;
   onChangeOffset: (v: number) => void;
+  micVol: number;
+  onChangeMicVol: (v: number) => void;
+  sysVol: number;
+  onChangeSysVol: (v: number) => void;
   onClose: () => void;
 }) {
   return (
@@ -33,36 +41,27 @@ export function AudioPanel({
       </div>
 
       <div className="e-field" style={{ marginTop: 14 }}>
-        <span className="e-fl">System Audio Volume <b>{100}%</b> (Mocked)</span>
+        <span className="e-fl">System Audio Volume <b>{Math.round(sysVol * 100)}%</b></span>
         <Slider
           min={0}
           max={150}
           step={5}
-          value={100}
-          onChange={() => {}}
+          value={Math.round(sysVol * 100)}
+          onChange={(v) => onChangeSysVol(v / 100)}
           accentColor="var(--e-fg)"
         />
       </div>
 
       <div className="e-field">
-        <span className="e-fl">Microphone Volume <b>{100}%</b> (Mocked)</span>
+        <span className="e-fl">Microphone Volume <b>{Math.round(micVol * 100)}%</b></span>
         <Slider
           min={0}
           max={150}
           step={5}
-          value={100}
-          onChange={() => {}}
+          value={Math.round(micVol * 100)}
+          onChange={(v) => onChangeMicVol(v / 100)}
           accentColor="var(--e-fg)"
         />
-      </div>
-
-      <div className="e-field" style={{ marginTop: 8 }}>
-        <span className="e-fl">Noise Suppression (Mocked)</span>
-        <div className="e-seg">
-          <button className="on">Off</button>
-          <button>Low</button>
-          <button>High</button>
-        </div>
       </div>
     </div>
   );

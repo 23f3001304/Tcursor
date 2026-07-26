@@ -25,7 +25,7 @@ Composites one preview frame onto `ctx` (a `w`x`h` canvas).
 
 ### Inputs
 
-- `ctx`, `w`, `h` - the 2D context and canvas size. *Why:* the backing store is fixed (1280x720) and CSS scales it.
+- `ctx`, `w`, `h` - the 2D context and canvas size. *Why:* the backing store follows the resolved aspect (`PreviewLayout.canvas`, `Stage.tsx`) and CSS scales that to fit.
 - `screen` - the screen proxy `<video>`. *Why:* its current frame is drawn full-size into the (unzoomed) screen panel; the zoom crop is applied afterward to the whole buffer, not to this source.
 - `webcam` - the webcam `<video>` or `null`. *Why:* drawn as the PiP panel (cover-fit, rounded) on top of the zoomed result when present and non-empty.
 - `cam: DrawCam` - the interpolated camera pose. *Why:* defines the whole-frame crop rectangle (`cw = w/scale`, centred on the panel-local `cx`/`cy`, clamped into the frame) that both the base image and the cursor project through.

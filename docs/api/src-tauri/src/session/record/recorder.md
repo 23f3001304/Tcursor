@@ -166,7 +166,7 @@ Clears the shared `paused` flag, resuming all capture threads.
 pub fn stop_recording(recorder: tauri::State<'_, Recorder>) -> Result<RecordingResult, String>
 ```
 
-Signals all threads to stop, joins them in dependency order, persists input data and `sync.json`, and returns the `RecordingResult`.
+Signals all threads to stop, joins them in dependency order, persists input data, `sync.json`, and `project.tcursor`, and returns the `RecordingResult`.
 
 ### Inputs
 
@@ -184,5 +184,5 @@ Signals all threads to stop, joins them in dependency order, persists input data
 4. Call `save_inputs`. *Why before the video stop:* if finalizing the video errors, the `?` would skip `save_inputs` and lose the events/actions; saving first guarantees they persist.
 5. `running.video.stop_and_collect()` - stop + finalize the video pipeline (GPU: end capture + `encoder.finish()`; ffmpeg: set halt + WM_QUIT to unblock the WGC thread + join), returning `(frames, frame_ts)`. Propagate errors as `Err(String)`.
 6. Build `SyncLog` from `frame_ts`, `events_ms`, and the atomic audio start times (0 treated as absent). Save to `folder/sync.json`. *Why after the video stop:* `frame_ts` is only complete once the pipeline has finalized.
-7. Spawn a detached background thread calling `export::thumbs::prewarm(folder)` to eagerly generate the editor's proxy/thumbnails/waveforms/preview-audio. *Why here, off-thread:* capture has fully stopped, so this heavy ffmpeg work cannot compete with the live capture; doing it now makes opening the editor instant. Fire-and-forget - `stop_recording` returns immediately.
+7. Build a `project::manifest::ProjectManifest` from `running.screen.w/h` (`preprocessed: false`) and save it to `paths.manifest()` (`folder/project.tcursor`), then call `project::recents::touch(&running.folder)`. Both best-effort (`eprintln!`/silently swallowed on failure) - a write failure here must never fail the recording, since the folder is already a fully valid project without them. `preprocessed` starts `false` here regardless - the frontend calls `export::preview::preprocess::preprocess_project` right after this command resolves (shown as the HUD's "Saving..." progress via `useRecordingFlow`) and that flips it once its pass finishes. This is NOT done as a detached background thread from `stop_recording` itself anymore (that used to race the editor's mount - the proxy/thumbs/waveform transcode could still be running when the editor opened, which was exactly the "preview still takes a while to load" lag); awaiting it with progress in the caller fixes that.
 8. Return `RecordingResult { folder, frames }`.

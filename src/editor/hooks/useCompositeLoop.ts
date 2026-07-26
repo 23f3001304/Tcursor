@@ -58,6 +58,7 @@ export function useCompositeLoop({
   bgImgRef: RefObject<HTMLImageElement | null>;
 }) {
   const lastReportRef = useRef(0);
+  const lastFrameTRef = useRef(0);
   const fxOverlayImgRef = useRef<HTMLImageElement | null>(null);
   const fxInflightRef = useRef(false);
   const fxLastTRef = useRef("");
@@ -73,6 +74,10 @@ export function useCompositeLoop({
       if (sv && c && (play || dirtyRef.current)) {
         dirtyRef.current = false;
         const t = play ? sv.currentTime * 1000 : timeRef.current;
+        if (Math.abs(t - lastFrameTRef.current) > 200 || t < lastFrameTRef.current) {
+          trailRef.current.length = 0;
+        }
+        lastFrameTRef.current = t;
         if (play) {
           // Throttle the React state update to ~16fps - it re-renders the whole editor tree. The
           // canvas itself stays 60fps because it reads sv.currentTime directly, not this state.
@@ -91,7 +96,7 @@ export function useCompositeLoop({
             // The active layout at this exact frame time (cross-faded across a layout-segment
             // boundary); falls back to the static layout when presets haven't loaded or there
             // are no segments. Used for both the base draw below and the FX screen-rect math.
-            const baseLayout = layoutAt(layoutSegsRef.current, layoutPresetsRef.current, t) ?? layoutRef.current;
+            const baseLayout = layoutAt(layoutSegsRef.current, layoutPresetsRef.current, t, [c.width, c.height]) ?? layoutRef.current;
             // What drives the webcam PiP this frame (keyframe/drag override, else the smart
             // zoom action) - see frameCamLayout, which mirrors step_camera's ordering.
             const frameLayout = frameCamLayout(baseLayout, t, cam.scale, cameraMovesRef.current,

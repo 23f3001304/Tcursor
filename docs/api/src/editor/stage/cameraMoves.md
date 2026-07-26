@@ -74,7 +74,7 @@ TS mirror of `rect_from_center` (`src-tauri/src/export/scene/mod.rs`) - converts
 ### Inputs
 
 - `p: CamPose` - the sampled pose (`camMoveAt`'s result).
-- `ow` / `oh: number` - the output frame's pixel dimensions. In the preview, this is the canvas's fixed 1280x720 backing store (the same basis `PreviewLayout`'s fractions use); in the export, the render's actual output size.
+- `ow` / `oh: number` - the output frame's pixel dimensions. In the preview, this is the canvas's backing store, sized from `PreviewLayout.canvas` (the same basis `PreviewLayout`'s fractions use, following the doc's chosen aspect); in the export, the render's actual output size.
 
 ### Returns
 

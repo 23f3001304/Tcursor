@@ -1,6 +1,38 @@
 # src-tauri/src/export/scene/background.rs
 
-Rasterizes the export background layer (solid colour, linear gradient at any angle, or image stub) into a raw BGRA pixel buffer. This is the only file that touches `Background` at draw time; callers receive a flat buffer and never inspect which variant was used. Pure and deterministic - identical inputs always produce identical output.
+Rasterizes the export background layer (solid colour, linear gradient at any angle, or image stub) into a raw BGRA pixel buffer. This is the only file that touches `Background` at draw time; callers receive a flat buffer and never inspect which variant was used. `render` is pure and deterministic - identical inputs always produce identical output. `build` is the user-facing entry point: it turns the persisted `BackgroundSettings` (`settings::background`) into that same buffer, optionally softened by a one-time blur pass.
+
+## build
+
+```rust
+pub fn build(settings: &BackgroundSettings, mesh_jpg: &[u8], w: u32, h: u32) -> Vec<u8>
+```
+
+Builds the static background buffer `FrameRenderer` composites under the screen every frame. Called once per export/preview build (`FrameRenderer::new`) and again from `reload_edit` ONLY when background settings changed - never per output frame - so the ffmpeg-backed `Mesh` decode and the blur pass are both cheap in practice despite not being optimized for repeated calls.
+
+### Inputs
+
+- `settings: &BackgroundSettings` - the user's background choice (`kind` + solid/gradient colors + `blur`). *Why a settings struct rather than `Background` directly:* `Background` (this file's render-time enum) has no `Mesh` variant - it's a separate concept unique to this entry point, so `build` maps `BackgroundKind` to whichever `Background` variant (or ffmpeg decode) actually produces it.
+- `mesh_jpg: &[u8]` - the bundled default background image bytes (`render::BG_MESH`), used only when `settings.kind == Mesh`. *Why passed in rather than included here:* keeps this file free of an `include_bytes!` dependent on the caller's asset layout; `render/mod.rs` already owns that constant for the fallback path.
+- `w: u32`, `h: u32` - output frame dimensions in pixels.
+
+### Returns
+
+`Vec<u8>` of length `w * h * 4`, BGRA byte order - same contract as `render`.
+
+### Implementation
+
+1. Dispatch on `settings.kind`: `Mesh` calls `pipeline::ffio::decode_image(mesh_jpg, w, h)` (spawns ffmpeg), falling back to `render(&Background::default(), w, h)` on decode failure (today's exact fallback behavior, unchanged). `Solid`/`Gradient` build the matching `Background` variant from the settings' RGB fields and call `render` directly - no subprocess.
+2. If `settings.blur > 0.0`, run the two-pass box blur (`blur`) over the buffer in place.
+
+### Behaviors
+
+- `build_solid_matches_direct_render` - `Solid` output is byte-identical to calling `render` directly with the same color; `mesh_jpg` is irrelevant (passed as `&[]`) since `Solid` never reads it.
+- `build_zero_blur_is_a_no_op` - `blur: 0.0` produces output identical to `render` with no blur step, confirming zero is a true no-op (back-compat: a doc/config saved before `blur` existed renders unchanged).
+
+### Used by
+
+- `src-tauri/src/export/render/mod.rs` (`FrameRenderer::new`, `FrameRenderer::reload_edit`) - the only caller; `reload_edit` gates the call behind a `BackgroundSettings` equality check so unrelated edits never re-decode the mesh.
 
 ## render
 

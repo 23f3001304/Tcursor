@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use cursor_zoom_lib::export::pipeline::exporter::export;
+use cursor_zoom_lib::export::settings::ExportSettings;
 use cursor_zoom_lib::session::paths::ProjectPaths;
 
 #[test]
@@ -24,7 +25,7 @@ fn exports_latest_recording_to_final_mp4() {
     eprintln!("exporting recording: {name}");
 
     let paths = ProjectPaths::new(&videos, &name);
-    export(&paths, 30, |p| eprintln!("progress {p}")).expect("export failed");
+    export(&paths, ExportSettings::default(), |p| eprintln!("progress {p}")).expect("export failed");
 
     let final_mp4 = paths.folder.join("final.mp4");
     let meta = std::fs::metadata(&final_mp4).expect("final.mp4 should exist");

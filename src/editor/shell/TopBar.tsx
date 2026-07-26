@@ -8,9 +8,12 @@ import { Spin } from "../controls/Spin";
  *  and window minimize/maximize/close. Non-button children are pointer-events:none (in
  *  CSS) so the empty bar area drags the window while the buttons stay clickable. Maximize
  *  toggles via setSize (native maximize no-ops on this transparent window); the back
- *  arrow returns to the HUD (onClose); Close (X) quits the app (closes the sole window). */
-export function TopBar({ proj, exporting, pct, onExport, onClose }: {
-  proj: string; exporting: boolean; pct: number; onExport: () => void; onClose: () => void;
+ *  arrow returns to the HUD (onClose); Close (X) quits the app (closes the sole window).
+ *  The Export button opens `ExportDialog` (`onOpenExport`) rather than exporting immediately;
+ *  `exporting`/`pct` still drive this bar's own mini progress fill once a dialog-started export
+ *  is actually running, even after the dialog itself is closed. */
+export function TopBar({ proj, exporting, pct, onOpenExport, onClose }: {
+  proj: string; exporting: boolean; pct: number; onOpenExport: () => void; onClose: () => void;
 }) {
   const win = getCurrentWindow();
   const [maxed, setMaxed] = useState(false);
@@ -36,7 +39,7 @@ export function TopBar({ proj, exporting, pct, onExport, onClose }: {
       <button className="e-gst" title="Undo" disabled><IconArrowBackUp size={18} /></button>
       <button className="e-gst" title="Redo" disabled><IconArrowForwardUp size={18} /></button>
       <button className="e-gst" title="Open source on GitHub"><IconBrandGithub size={18} /></button>
-      <button className="e-export" onClick={onExport} disabled={exporting}>
+      <button className="e-export" onClick={onOpenExport} disabled={exporting}>
         {exporting ? <><Spin size={15} />{pct}%</> : <><IconDownload size={15} />Export</>}
         {exporting && (
           <motion.div className="e-export-bar" animate={{ width: `${pct}%` }}

@@ -15,7 +15,7 @@ Shape of a single selectable item.
 
 ### Used by
 
-- `src/hud/Hud.tsx` - builds `DropOption[]` arrays from `displays`, `mics`, and `cameras` and passes them to the three `<Dropdown>` instances.
+- `src/hud/Hud.tsx` - builds `DropOption[]` arrays from `mics` and `cameras` and passes them to its two `<Dropdown>` instances (camera, mic). The display/window target selector uses `TargetPicker` instead - see `src/hud/devices/TargetPicker.md` - since a target needs richer, grouped rendering than a flat `DropOption` list supports.
 
 ## Dropdown
 

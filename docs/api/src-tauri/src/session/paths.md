@@ -20,6 +20,7 @@ pub struct ProjectPaths { pub folder: PathBuf }
 - `src-tauri/src/edit/commands.rs` - reads `edit.json` and `settings.json` paths for the editor.
 - `src-tauri/src/edit/seed.rs` - reads `events.json`, `typing.json`, `actions.json`, and `sync.json` to seed the edit plan.
 - `src-tauri/src/ai/commands.rs` - reads `edit.json` path for AI-director commands.
+- `src-tauri/src/session/project/commands.rs` (`folder_from_manifest_path`) - builds a `ProjectPaths` from a resolved folder to call `.manifest()`.
 
 ## ProjectPaths::new
 
@@ -125,6 +126,18 @@ pub fn edit(&self) -> PathBuf
 ```
 
 Returns `folder/edit.json` - the editor's `EditPlan` produced by the AI director or manual edits.
+
+## ProjectPaths::manifest
+
+```rust
+pub fn manifest(&self) -> PathBuf
+```
+
+Returns `folder/project.tcursor` - the `ProjectManifest` written at record-stop (`stop_recording`) and read by `open_project` / the file-association cold-start path (`folder_from_manifest_path`). The one place that filename is spelled, so the writer and every reader can never disagree on it.
+
+### Behaviors
+
+- `builds_manifest_path`: confirms `manifest()` ends with `project.tcursor`.
 
 ## ProjectPaths::ensure
 

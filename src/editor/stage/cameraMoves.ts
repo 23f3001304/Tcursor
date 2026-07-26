@@ -38,8 +38,9 @@ function pose(k: CameraMove): CamPose { return { x: k.x, y: k.y, size: k.size };
 
 /** TS mirror of `rect_from_center` (export/scene/mod.rs) - converts a sampled `CamPose` into a
  *  fraction-of-output `[x, y, w, h]` rect (top-left form), matching the export byte-for-byte.
- *  `ow`/`oh` are the output frame's pixel dims (the preview's fixed 1280x720 backing store,
- *  same basis `PreviewLayout` fractions use) - the square is computed in PIXEL space (`h = size*oh`
+ *  `ow`/`oh` are the output frame's pixel dims (the preview's canvas backing store, sized from
+ *  `PreviewLayout.canvas` to match the chosen aspect - same basis `PreviewLayout` fractions use) -
+ *  the square is computed in PIXEL space (`h = size*oh`
  *  reused for both sides) before dividing back to fractions, so it stays a true pixel square even
  *  though `ow != oh` would otherwise skew it. */
 export function rectFromCenter(p: CamPose, ow: number, oh: number): [number, number, number, number] {

@@ -11,7 +11,18 @@ use std::thread::JoinHandle;
 use crate::export::pipeline::pipeline_decode::{spawn_screen, spawn_webcam};
 use crate::export::gpu::pool::BufPool;
 use crate::export::pipeline::ffio::RawDecoder;
-use crate::export::render::OUT_FPS;
+
+/// INCLUSIVE frame-index bounds `[k_in, k_last]` for the trimmed export range, converting the
+/// resolved trim range (ms, from `Trim::resolve`) to output-frame indices at `out_fps` - same
+/// `(ms * out_fps) / 1000` formula the untrimmed loop already used for its own last index, so an
+/// untrimmed clip (`trim_out_ms == full_dur_ms`) yields `k_last` identical to the old bound and
+/// composites the exact same frame count. `k_last` is always `>= k_in`, so a degenerate
+/// (zero-length) trim still emits at least one frame rather than producing an empty export.
+pub fn trim_frame_bounds(trim_in_ms: u32, trim_out_ms: u32, out_fps: u64) -> (u64, u64) {
+    let k_in = (trim_in_ms as u64 * out_fps) / 1000;
+    let k_last = ((trim_out_ms as u64 * out_fps) / 1000).max(k_in);
+    (k_in, k_last)
+}
 
 /// Index of the captured frame active at output time `t`: the last `i >= cur` with
 /// `frames[i] <= t`, clamped to the last frame. Mirrors the exporter's VFR advance
@@ -48,8 +59,8 @@ pub struct ScreenPipe {
 impl ScreenPipe {
     /// Spawn the screen `RawDecoder` (spawn errors surface here) and its decode thread.
     /// `depth` sizes both the bounded channel and the recycled buffer pool.
-    pub fn spawn(video: &Path, screen_bytes: usize, frames: Vec<u64>, depth: usize) -> Result<ScreenPipe> {
-        let dec = RawDecoder::spawn(video, 0.0, false, None, None, screen_bytes)?;
+    pub fn spawn(video: &Path, screen_bytes: usize, target_dims: Option<(u32, u32)>, frames: Vec<u64>, depth: usize) -> Result<ScreenPipe> {
+        let dec = RawDecoder::spawn(video, 0.0, false, None, None, target_dims, screen_bytes)?;
         let pool = BufPool::new(depth, screen_bytes);
         let returner = pool.returner();
         let (tx, rx) = sync_channel::<(Vec<u8>, usize)>(depth);
@@ -101,10 +112,11 @@ pub struct WebcamPipe {
 }
 
 impl WebcamPipe {
-    /// Spawn the webcam `RawDecoder` (at `OUT_FPS`, seeked to `video_start`, cover-cropped
-    /// to `size`) and its decode thread. `depth` sizes the channel and the buffer pool.
-    pub fn spawn(webcam: &Path, video_start: u64, size: u32, wc_bytes: usize, depth: usize) -> Result<WebcamPipe> {
-        let dec = RawDecoder::spawn(webcam, OUT_FPS as f64, false, Some(video_start), Some(size), wc_bytes)?;
+    /// Spawn the webcam `RawDecoder` (at `out_fps` - the export's resolved output frame rate,
+    /// from `ExportSettings.fps` - seeked to `video_start`, cover-cropped to `size`) and its
+    /// decode thread. `depth` sizes the channel and the buffer pool.
+    pub fn spawn(webcam: &Path, video_start: u64, size: u32, wc_bytes: usize, depth: usize, out_fps: u64) -> Result<WebcamPipe> {
+        let dec = RawDecoder::spawn(webcam, out_fps as f64, false, Some(video_start), Some(size), None, wc_bytes)?;
         let pool = BufPool::new(depth, wc_bytes);
         let returner = pool.returner();
         let (tx, rx) = sync_channel::<(Vec<u8>, u32)>(depth);
@@ -137,7 +149,7 @@ impl WebcamPipe {
 
 #[cfg(test)]
 mod tests {
-    use super::advance_index;
+    use super::{advance_index, trim_frame_bounds};
     #[test]
     fn advance_index_matches_sequential_selection() {
         let frames = vec![0u64, 100, 250, 400];
@@ -147,6 +159,29 @@ mod tests {
         assert_eq!(advance_index(&frames, 1, 300), 2);
         assert_eq!(advance_index(&frames, 2, 10_000), 3); // clamps at last
         assert_eq!(advance_index(&frames, 0, 10_000), 3); // never goes backwards, clamps
+    }
+
+    #[test]
+    fn trim_frame_bounds_converts_ms_to_inclusive_frame_indices() {
+        assert_eq!(trim_frame_bounds(0, 10_000, 60), (0, 600));
+        assert_eq!(trim_frame_bounds(2_000, 8_000, 60), (120, 480));
+    }
+
+    #[test]
+    fn trim_frame_bounds_never_collapses_to_empty() {
+        let (k_in, k_last) = trim_frame_bounds(5_000, 5_000, 60);
+        assert!(k_last >= k_in);
+    }
+
+    /// Back-compat: an untrimmed clip (`trim_out_ms == full_dur_ms`, the seeded default) must
+    /// yield the exact same last frame index the old `total_out = dur*fps/1000` bound computed,
+    /// so the export loop's frame count is unchanged when nothing is actually trimmed.
+    #[test]
+    fn untrimmed_last_index_matches_the_old_total_out_formula() {
+        let full_dur_ms = 12_345u32;
+        let old_total_out = (full_dur_ms as u64 * 60) / 1000;
+        let (k_in, k_last) = trim_frame_bounds(0, full_dur_ms, 60);
+        assert_eq!((k_in, k_last), (0, old_total_out));
     }
 }
 

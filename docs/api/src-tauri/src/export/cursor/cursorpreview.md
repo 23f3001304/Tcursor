@@ -1,6 +1,6 @@
 # src-tauri/src/export/cursor/cursorpreview.rs
 
-Editor-preview cursor commands. Expose the export's Capitaine sprite pack and the cursor-type track to the frontend so the editor's canvas preview draws the **same** cursor the export renders (gated by cursor style), instead of a generic arrow. Sprites are decoded/cropped/dark-inverted exactly like the export.
+Editor-preview cursor commands. Expose the export's selected cursor pack and the cursor-type track to the frontend so the editor's canvas preview draws the **same** cursor the export renders (gated by cursor style), instead of a generic arrow. Sprites are decoded/cropped/dark-inverted exactly like the export.
 
 ## CursorSpriteDto
 
@@ -18,20 +18,20 @@ One cursor sprite for the canvas preview. `kind` serializes to the lowercase cur
 pub fn cursor_sprites(folder: String) -> Result<Vec<CursorSpriteDto>, String>
 ```
 
-The Capitaine cursor pack as PNG data URLs, decoded like the export.
+The recording's selected cursor pack as PNG data URLs, decoded like the export.
 
 ### Inputs (what, and why it is needed)
 
-- `folder: String` - absolute project path. *Why:* the dark-theme inversion depends on the recording's `settings.ui.theme` snapshot (`load_or_seed`), so the sprites match that recording's export.
+- `folder: String` - absolute project path. *Why:* both the dark-theme inversion (`settings.ui.theme`) and the selected pack (`settings.cursor.pack`) come from the recording's settings snapshot (`load_or_seed`), so the sprites match that recording's export exactly.
 
 ### Returns
 
-`Result<Vec<CursorSpriteDto>, String>` - one entry per pack sprite (non-arrow decode failures are skipped). Errors only if the `arrow` fallback fails to decode.
+`Result<Vec<CursorSpriteDto>, String>` - one entry per resolved sprite (non-arrow decode failures are skipped). Errors only if the `arrow` fallback fails to decode.
 
 ### Implementation
 
-1. `dark = resolve_dark(load_or_seed(folder).settings.ui.theme)`.
-2. For each `(kind, png, hot)` in `cursorset::SPRITES`: `cursordraw::decode_sprite` (ffmpeg PNG→BGRA, crop to alpha, hotspot re-based) → invert RGB if `dark` → `preview::png_encode` → base64 data URL. (~2 ffmpeg spawns per sprite; one-shot per editor open.)
+1. `settings = load_or_seed(folder).settings`; `dark = resolve_dark(settings.ui.theme)`.
+2. For each `(kind, png, hot)` in `pack::sprite_sources(&settings.cursor.pack)` (built-in bytes for `"default"`, else an imported pack falling back per-kind - see `export/cursor/pack.rs`): `cursordraw::decode_sprite` (ffmpeg PNG→BGRA, crop to alpha, hotspot re-based) → invert RGB if `dark` → `preview::png_encode` → base64 data URL. (~2 ffmpeg spawns per sprite; one-shot per pack change.)
 
 ## CursorKindSample
 

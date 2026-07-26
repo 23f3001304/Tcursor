@@ -15,7 +15,7 @@ export function mapPointerToCamFraction({
 ### Inputs
 
 - `clientX`, `clientY` - the pointer's viewport coordinates (from a `PointerEvent`/`React.PointerEvent`).
-- `canvasElement` - the preview `<canvas>`; its bounding rect converts client coords to backing-store pixels, its `width`/`height` are the projection's frame size (the fixed 1280x720 output basis).
+- `canvasElement` - the preview `<canvas>`; its bounding rect converts client coords to backing-store pixels, its `width`/`height` are the projection's frame size (sized from `PreviewLayout.canvas`, following the doc's chosen aspect - see `Stage.tsx`).
 
 ### Returns
 

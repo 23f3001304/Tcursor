@@ -27,22 +27,22 @@ Returns the exact camera curve over the whole timeline, one `CamSample` per outp
 
 ### Returns
 
-`Result<Vec<CamSample>, String>` - the per-frame samples from t=0 to the trim end. Errors (as a string) if the renderer cannot be built (missing files).
+`Result<Vec<CamSample>, String>` - the per-frame samples over the WHOLE clip (not just the trim range - see below). Errors (as a string) if the renderer cannot be built (missing files).
 
 ### Implementation
 
-1. Inside `with_warm` (the shared cache helper), read the trim duration from `load_or_seed(...).trim.out_ms`.
-2. `reset_camera`, then `step_camera(video_start + t)` for `t` stepping by `1000/OUT_FPS` up to the trim duration. This is pure math (no decode), so it is instant.
+1. Inside `with_warm` (the shared cache helper), read the duration as `meta.video_end - meta.video_start` - the recording's TRUE full length, NOT `trim.out_ms` (which, once a user actually trims, is a strict sub-range). This means scrubbing into a trimmed-out region still shows an animated camera curve instead of freezing on the last in-range sample; trim only clamps PLAYBACK (the frontend's `resolveTrim`-based pause/snap in `Editor.tsx`), not the curve data itself.
+2. `reset_camera`, then `step_camera(video_start + t)` for `t` stepping by `1000/OUT_FPS` up to that full duration. This is pure math (no decode), so it is instant.
 3. For each pose, map the zoom centre (`pose.cam.cx/cy`) and cursor (`pose.cur.x/y`) - both output coords - into `pose.scene.screen.rect` to get 0..1 screen-relative fractions, and push a `CamSample`.
 
 ## PreviewLayout
 
 ```rust
 #[derive(serde::Serialize)]
-pub struct PreviewLayout { pub screen: [f32; 4], pub radius: f32, pub cam: Option<[f32; 9]> }
+pub struct PreviewLayout { pub screen: [f32; 4], pub radius: f32, pub cam: Option<[f32; 9]>, pub canvas: [u32; 2] }
 ```
 
-The static export framing as fractions of the output: `screen` is the screen panel rect `[x, y, w, h]`, `radius` its corner radius (fraction of output *width*), and `cam` the webcam PiP rect+ring `[x, y, w, h, radius, ring_px, ring_r, ring_g, ring_b]` or `None` when the webcam is hidden. `ring_px` is a fraction of output width (0 = no ring); `ring_r/g/b` are 0..255 - mirrors `Panel.ring_px`/`ring_color` riding alongside its rect/radius (Task 9). The editor's canvas compositor uses these so the preview frames the screen, webcam, and ring exactly like the export instead of guessing.
+The static export framing as fractions of the output: `screen` is the screen panel rect `[x, y, w, h]`, `radius` its corner radius (fraction of output *width*), and `cam` the webcam PiP rect+ring `[x, y, w, h, radius, ring_px, ring_r, ring_g, ring_b]` or `None` when the webcam is hidden. `ring_px` is a fraction of output width (0 = no ring); `ring_r/g/b` are 0..255 - mirrors `Panel.ring_px`/`ring_color` riding alongside its rect/radius (Task 9). `canvas` is the resolved preview frame's pixel dimensions (`Layout::resolve`'s output, following `EditDoc.aspect`) - the editor sizes its `<canvas>` + `.e-stage` aspect-ratio from this instead of a hardcoded 16:9/1280x720. The editor's canvas compositor uses these so the preview frames the screen, webcam, and ring exactly like the export instead of guessing.
 
 ## preview_layout
 
@@ -60,12 +60,12 @@ Returns the `PreviewLayout` for the recording.
 
 ### Returns
 
-`Result<PreviewLayout, String>` - the screen/webcam framing fractions (+ ring). Errors (as a string) if the renderer cannot be built.
+`Result<PreviewLayout, String>` - the screen/webcam framing fractions (+ ring) + the resolved canvas size. Errors (as a string) if the renderer cannot be built.
 
 ### Implementation
 
 1. Inside `with_warm`, `reset_camera`, then `step_camera(video_start)` to get the scene at t=0 (the unzoomed base layout).
-2. Divide `pose.scene.screen.rect` and `pose.scene.camera.rect` (+ radii, + `ring_px`) by the output dimensions to get fractions; set `cam` to `None` when `pose.scene.camera.alpha <= 0.5`.
+2. Divide `pose.scene.screen.rect` and `pose.scene.camera.rect` (+ radii, + `ring_px`) by `c.meta.out_w`/`out_h` to get fractions; set `cam` to `None` when `pose.scene.camera.alpha <= 0.5`; set `canvas: [c.meta.out_w, c.meta.out_h]` (the warm renderer's own resolved size).
 
 ## ClickSample
 
@@ -120,5 +120,5 @@ Ensures a low-res preview proxy `preview_<height>_rt.mp4` exists (transcoded onc
 ### Implementation
 
 1. Build the proxy path `preview_<h>_rt.mp4`. If it already exists, return it.
-2. Compute the stretch factor `k = real / enc`, where `real = trim.out_ms / 1000` (the seeded clip duration = the real capture span the export uses) and `enc = probe_duration(video.mp4)` (the file's sped-up encoded length). When `|k - 1| > 0.02`, the video filter is `scale=-2:<h>,setpts=<k>*PTS` (stretch to true speed); otherwise just `scale=-2:<h>`.
-3. Run ffmpeg with that filter (`libx264 -preset veryfast -crf 27`, `yuv420p`, `+faststart`, no audio) via `ffcmd_bg` (below-normal priority, so the transcode yields to the UI instead of freezing it) inside `win::proc::generate_once` (the pass is skipped if the proxy already exists and is serialized against the other editor-media transcodes, so the `prewarm` and the editor's own `ensure_proxy` don't transcode the 4K source twice or storm the CPU as the editor opens), writing to a `win::proc::tmp_sibling` then atomically renaming onto the proxy path, so the editor opening during the post-record `prewarm` never loads a half-transcoded file. Return the path on success. *Why re-time the proxy rather than the master:* the export already corrects timing via `sync.json` frame selection (independent of `video.mp4`'s embedded PTS), so only the natively-played preview needs the fix; the `_rt` filename also invalidates any older sped-up proxy.
+2. Compute the stretch factor `k = real / enc`, where `real = edit::seed::true_duration_ms(paths) / 1000` (the recording's TRUE full duration, NOT `trim.out_ms` - which once a user actually trims is a sub-range, not the whole clip the proxy must cover) and `enc = probe_duration(video.mp4)` (the file's sped-up encoded length). When `|k - 1| > 0.02`, the video filter is `scale=-2:<h>,setpts=<k>*PTS` (stretch to true speed); otherwise just `scale=-2:<h>`.
+3. Run ffmpeg with that filter (`libx264 -preset veryfast -crf 27`, `yuv420p`, `+faststart`, no audio) via `ffcmd_bg` (below-normal priority, so the transcode yields to the UI instead of freezing it) inside `win::proc::generate_once` (the pass is skipped if the proxy already exists and is serialized against the other editor-media transcodes, so `preprocess_project`'s post-record pass and the editor's own lazy `ensure_proxy` don't transcode the 4K source twice or storm the CPU as the editor opens), writing to a `win::proc::tmp_sibling` then atomically renaming onto the proxy path, so an editor opening WHILE preprocessing is still running never loads a half-transcoded file. Return the path on success. *Why re-time the proxy rather than the master:* the export already corrects timing via `sync.json` frame selection (independent of `video.mp4`'s embedded PTS), so only the natively-played preview needs the fix; the `_rt` filename also invalidates any older sped-up proxy.

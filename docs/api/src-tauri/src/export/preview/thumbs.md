@@ -1,6 +1,6 @@
 # src-tauri/src/export/preview/thumbs.rs
 
-Editor-timeline media: cached ffmpeg helpers for the filmstrip thumbnails, the per-source audio waveform images, and a mixed preview-audio track. All mirror `ensure_proxy` (run once, cache by output existence) and wrap their ffmpeg pass in `win::proc::generate_once` (so the post-record pre-warm and the editor's lazy `ensure_*` never transcode the same file twice or storm the CPU with concurrent passes right as the editor opens) run via `ffcmd_bg` (below-normal priority, so the one serialized multi-threaded pass yields to the UI instead of freezing it). The recorder's proxy is silent; these give the editor frames to scrub, waveforms to show, and sound to play.
+Editor-timeline media: cached ffmpeg helpers for the filmstrip thumbnails, the per-source audio waveform images, and a mixed preview-audio track. All mirror `ensure_proxy` (run once, cache by output existence) and wrap their ffmpeg pass in `win::proc::generate_once` (so the post-record preprocessing pass, `export::preview::preprocess::preprocess_project`, and the editor's own lazy `ensure_*` never transcode the same file twice or storm the CPU with concurrent passes right as the editor opens) run via `ffcmd_bg` (below-normal priority, so the one serialized multi-threaded pass yields to the UI instead of freezing it). The recorder's proxy is silent; these give the editor frames to scrub, waveforms to show, and sound to play.
 
 ## ensure_thumbs
 
@@ -23,7 +23,7 @@ N evenly-spaced JPEG thumbnails (height 64) for the filmstrip, cached in `folder
 ### Implementation
 
 1. If `thumb_0001.jpg` already exists in the cache dir, return the existing files.
-2. Else one ffmpeg pass over the re-timed proxy (`preview_720_rt.mp4`, else `video.mp4`): `-vf fps=<count>/<dur_s>,scale=-2:64 -q:v 4`, where `dur_s = load_or_seed(folder).trim.out_ms / 1000`. (NOTE: the duration basis is the trim-out; correct while `trim.in_ms == 0`, which is the current default before a trim UI exists. Reading the `_rt` proxy also yields the right thumbnail count - the raw `video.mp4` is sped up, so `fps=count/dur` over it would emit fewer than `count` frames.) The `fps` filter is best-effort about the exact count; the collect loop tolerates a frame more/less.
+2. Else one ffmpeg pass over the re-timed proxy (`preview_720_rt.mp4`, else `video.mp4`): `-vf fps=<count>/<dur_s>,scale=-2:64 -q:v 4`, where `dur_s = edit::seed::true_duration_ms(paths) / 1000` - the recording's TRUE full duration, not `trim.out_ms` (a sub-range once a user actually trims): the filmstrip spans the whole scrubbable timeline regardless of trim. Reading the `_rt` proxy also yields the right thumbnail count - the raw `video.mp4` is sped up, so `fps=count/dur` over it would emit fewer than `count` frames. The `fps` filter is best-effort about the exact count; the collect loop tolerates a frame more/less.
 
 ## ensure_waveform
 
@@ -66,12 +66,6 @@ A mixed mic+system preview-audio track (`folder/preview_audio.m4a`, AAC) so the 
 
 ### Implementation
 
-ffmpeg `amix` of whichever of mic/system exist (single source is just encoded). Cached by existence; written to a `tmp_sibling` and atomically renamed so a mid-pre-warm reader never loads a partial track. **NOTE:** v1 mixes without the export's per-track `-itsoffset`/`-ss` alignment (see `export::audio_mux` + `exporter.rs` `shift()` / `settings.audio_offset_ms`), so editor playback can drift slightly vs the final render - exact-sync alignment is a tracked follow-up.
+ffmpeg `amix` of whichever of mic/system exist (single source is just encoded). Cached by existence; written to a `tmp_sibling` and atomically renamed so a mid-preprocess reader never loads a partial track. **NOTE:** v1 mixes without the export's per-track `-itsoffset`/`-ss` alignment (see `export::audio_mux` + `exporter.rs` `shift()` / `settings.audio_offset_ms`), so editor playback can drift slightly vs the final render - exact-sync alignment is a tracked follow-up.
 
-## prewarm
-
-```rust
-pub fn prewarm(folder: String)
-```
-
-Eagerly generates the editor's heavy media (proxy @720, 16 filmstrip thumbnails, system/mic waveforms, mixed preview-audio) so opening the editor is instant instead of transcoding on open. Called from the tail of `stop_recording` on a freshly spawned background thread - i.e. ONLY after the capture threads have joined, so it never competes with the live capture for GPU/CPU (the safe form of "render in parallel while recording"). Best-effort: each step's error is ignored (the editor's lazy `ensure_*` re-attempts on open). Runs the proxy first so the thumbnail pass reads the small proxy rather than the raw capture. The single-file media (proxy/waveforms/preview-audio) write atomically; the thumbnail directory is filled in place, so a rare mid-pre-warm open just shows fewer thumbnails for one frame and self-heals.
+*Formerly also home to `prewarm`, a fire-and-forget background-thread caller of these same functions spawned from the tail of `stop_recording`. `export::preview::preprocess::preprocess_project` supersedes it: the same sequence (plus the `edit.json` seed and the manifest flip), now AWAITED by the frontend with progress instead of racing the editor's mount on a detached thread.*

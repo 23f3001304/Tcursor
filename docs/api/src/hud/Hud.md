@@ -1,6 +1,6 @@
 # src/hud/Hud.tsx
 
-Root component of the floating recorder bar. Owns all top-level recording state - device selection, recording/paused/exporting flags, and the active panel - and wires together every visual region: the titlebar, device dropdowns, waveform meter, timer, and the animated overlay panels for Settings and Preferences. This is the single stateful hub; all child components are controlled.
+Root component of the floating recorder bar. Owns device selection, export flags, and the active panel directly; delegates the record/stop/preprocess lifecycle to `useRecordingFlow`. Wires together every visual region: the titlebar, device dropdowns, waveform meter, timer, and the animated overlay panels for Settings and Preferences. This is the single stateful hub; all child components are controlled.
 
 ## Hud
 
@@ -20,9 +20,8 @@ Renders the full HUD window content and manages the recording lifecycle.
 - `camOn` - whether the camera preview and recording are active. *Why separate from camId:* lets the user keep a camera selected but temporarily disabled without losing the selection.
 - `cam` - live preview handle from `useWebcamPreview(camId, camOn)`. Exposes `cam.ref` (bound to the `<video>` element), `cam.on` (whether a stream is active), and `cam.stream()` (the `MediaStream` for the recorder).
 - `cameras` - list of detected camera devices from `useCameraDevices`. Re-enumerates when `cam.on` flips (the numeric argument forces a re-query tick). *Why on `cam.on`:* browsers only expose camera labels after permission is granted, which happens the moment the preview starts.
-- `recording / paused / exporting` - the three mutually exclusive phases of a session.
-- `pct` - export progress percentage, driven by `export-progress` Tauri events.
-- `err` - last `startRecording` error string, shown inline in the titlebar.
+- `recording / paused / saving / savePct / err / toggle / togglePause` - from `useRecordingFlow` (see `docs/api/src/hud/hooks/useRecordingFlow.md`), which owns the whole record -> stop -> preprocess -> edit lifecycle. `exporting`/`pct` (below) stay local to `Hud` - they are unrelated leftover state from before export moved into the editor's `ExportDialog` (see `src/editor/Editor.tsx`); nothing in the current app flow sets `exporting` true from the HUD.
+- `exporting` / `pct` - export progress percentage, driven by `export-progress` Tauri events.
 - `panel` - which overlay panel is mounted: `"settings"`, `"preferences"`, or `null`. Drives the `AnimatePresence` overlay.
 - `barShown` - toggles the `.as-box` CSS class and gates the bar content subtree. *Why needed:* the window morphs to a smaller box for panels; while morphing the bar must be invisible so it does not flash underneath the incoming panel.
 - `lastFolder` ref - stores the project folder path returned by `stopRecording` so the export-error listener can call `revealItemInDir` even after recording state has reset.
@@ -44,12 +43,11 @@ Subscribes to three Tauri events:
 
 All three `listen` promises return unsubscribe functions called on cleanup.
 
-**`toggle()`.**
-- Start: calls `startRecording("rec-<timestamp>", micId|null, sysOn, gameMode)`. On success, starts the webcam recorder via `webcam.start(cam.stream())` if `camOn`. Sets `recording = true`.
-- Stop: calls `stopRecording()` (returns `{ folder, frames }`), then `webcam.stop()` (returns the recorded bytes as `number[]`). If bytes are present, uploads them with `saveWebcam(folder, bytes)`. Stores the folder in `lastFolder`, clears recording flags. If `onEdit` is provided, calls `onEdit(folder)` so the caller can open the editor -- the export pipeline is NOT started here. If `onEdit` is absent the recording is complete and no further action is taken automatically.
+**`toggle()` / `togglePause()`.**
+Both come straight from `useRecordingFlow(...)`, fed `micOn`/`sel.micId`/`sel.displayId`/`sysOn`/`gameMode`/`camOn`/`cam.stream`/`webcam`/`onEdit`/`lastFolder`. See `docs/api/src/hud/hooks/useRecordingFlow.md` for the full record -> stop -> preprocess -> edit sequence (`toggle`'s Stop half now awaits the post-record `preprocess_project` pass, reported here as `saving`/`savePct`, before calling `onEdit`). `lastFolder` itself stays a `Hud`-owned ref (passed into the hook by reference) purely so the unrelated export-error listener below can still read it.
 
-**`togglePause()`.**
-Calls `resumeRecording` or `pauseRecording` and flips `paused`.
+**`openExistingProject()`.**
+Calls `openProject()` (native `*.tcursor` file picker) and, on success, calls `onEdit?.(folder)` with the returned containing folder - the same prop `toggle()`'s stop path uses, so opening an existing project routes to the editor identically to finishing a fresh recording. A rejected promise (the user cancelled the dialog) is swallowed; there is nothing to surface.
 
 **Panel transition helpers.**
 - `openPanel(p)` - sets `barShown = false`, sets `panel = p`, and calls `morphWindow` to animate the window from bar dimensions to box dimensions over 200ms.
@@ -57,14 +55,13 @@ Calls `resumeRecording` or `pauseRecording` and flips `paused`.
 
 **Rendered regions.**
 - `AnimatePresence` overlay: mounts either `<Settings>` or `<Preferences>` with a scale+opacity spring (0.97->1 in, 0.98->0 out over 180ms). `key={panel}` ensures the exit animation fires when switching panels.
-- Titlebar: drag region with brand name, optional error label, and window controls. Settings and Preferences buttons are hidden while recording or exporting.
+- Titlebar: drag region with brand name, optional error label, and window controls. Open Project, Settings, and Preferences buttons are hidden while recording or exporting; Open Project is additionally disabled while `saving` (avoids a race between a just-finished recording's own `onEdit` call and one triggered by opening a different project mid-save).
 - Grip: left drag handle (`data-tauri-drag-region`).
 - Camera preview: `<video>` bound to `cam.ref`, with a camera-off icon overlay when `camOn && cam.on` is false.
-- Three conditional rows for bar content: exporting progress, device selectors (idle), waveform meter (recording).
-- Timer, Pause/Resume button, and Record/Stop button always on the right.
+- Four conditional rows for bar content, in priority order: exporting progress (`exporting`), saving/preprocessing progress (`saving` - a `Saving… {savePct}%` pill, same `.exporting` style class plus a `.saving` hook), device selectors (idle), waveform meter (recording).
+- Timer, Pause/Resume button, and Record/Stop button always on the right. The Record/Stop button label reads `Saving…` (no percent - the pill above already shows it) while `saving` is true.
 
 ### Notes
 
 - `MotionConfig reducedMotion="user"` wraps the entire tree; all Motion animations disable automatically when the OS has reduced-motion enabled.
-- Webcam bytes are passed as `number[]` to `saveWebcam` because Tauri's IPC bridge cannot transmit `Uint8Array` directly.
 - The Settings and Preferences buttons are conditionally rendered (not just disabled) during recording and exporting to avoid occupying titlebar space when those actions are not available.

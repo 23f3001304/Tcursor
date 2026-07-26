@@ -105,7 +105,7 @@ Writes a raw webcam blob (webm) sent from the frontend to disk.
 
 ```rust
 #[tauri::command]
-pub fn export_project(folder: String, app: tauri::AppHandle) -> Result<(), String>
+pub fn export_project(folder: String, settings: crate::export::settings::ExportSettings, app: tauri::AppHandle) -> Result<(), String>
 ```
 
 Kicks off the async export pipeline for a completed recording.
@@ -113,6 +113,7 @@ Kicks off the async export pipeline for a completed recording.
 ### Inputs
 
 - `folder: String` - project folder path returned by `stop_recording`. *Why String:* passed through to `run_export` which resolves it into `ProjectPaths`.
+- `settings: ExportSettings` (`export::settings::ExportSettings`) - the user's chosen resolution/fps/quality/format, collected by the frontend `ExportDialog`. *Why a full struct rather than individual args:* every field is optional-in-spirit (has a sensible default via `#[serde(default)]`), and threading one struct through `run_export` -> `exporter::export` avoids repeating four parameters at every layer.
 - `app: tauri::AppHandle` - used by `run_export` to emit progress events back to the frontend via Tauri's event system.
 
 ### Returns
@@ -121,7 +122,7 @@ Kicks off the async export pipeline for a completed recording.
 
 ### Implementation
 
-1. Call `crate::export::run::run_export(app, folder)`. *Why not await:* export is long-running (seconds to minutes); `run_export` spawns its own task and emits events asynchronously.
+1. Call `crate::export::pipeline::run::run_export(app, folder, settings)`. *Why not await:* export is long-running (seconds to minutes); `run_export` spawns its own task and emits events asynchronously.
 2. Return `Ok(())`.
 
 ## get_settings

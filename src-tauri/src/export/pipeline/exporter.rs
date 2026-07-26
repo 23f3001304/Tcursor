@@ -8,26 +8,35 @@ use crate::domain::time::Timestamp;
 use crate::encode::ffmpeg_encoder::FfmpegFrameSink;
 use crate::encode::frame_sink::FrameSink;
 use crate::export::pipeline::audio_mux::mux;
-use crate::export::pipeline::{ScreenPipe, WebcamPipe};
+use crate::export::pipeline::{trim_frame_bounds, ScreenPipe, WebcamPipe};
 use crate::export::gpu::pool::BufPool;
-use crate::export::render::{FrameRenderer, OUT_FPS};
+use crate::export::render::FrameRenderer;
+use crate::export::settings::ExportSettings;
 use crate::export::types::Layout; // needed for Layout::default()
 use crate::session::paths::ProjectPaths;
 
-/// Render a recording into `paths.folder/final.mp4`. `on_progress` receives
-/// 0..=100 as frames are encoded.
-pub fn export(paths: &ProjectPaths, fps: u32, on_progress: impl Fn(u8)) -> Result<()> {
+/// Render a recording into `paths.folder/final.<ext>` (`<ext>` from `settings.format`).
+/// `on_progress` receives 0..=100 as frames are encoded. `settings` resolves the output
+/// resolution (combined with the doc's own `Aspect`), frame rate, quality, and container -
+/// `ExportSettings::default()` reproduces today's export exactly (Source/60fps/CRF 24/MP4).
+pub fn export(paths: &ProjectPaths, settings: ExportSettings, on_progress: impl Fn(u8)) -> Result<()> {
+    // The SAME display-refresh-derived value the old unconditional formula used, both as
+    // `FrameRenderer::new`'s capture-rate fallback (`build_timeline`, unchanged meaning) and as
+    // `Fps::Source`'s own fallback (`resolve_hz`) - so `Source` reproduces the old formula
+    // exactly without a second display query.
+    let capture_fps = crate::win::sys::display::primary_refresh_hz().min(60);
+    let out_fps = settings.fps.resolve_hz(capture_fps);
     let layout = Layout::default();
-    let (mut r, meta) = FrameRenderer::new(paths, layout, fps)?;
+    let (mut r, meta) = FrameRenderer::new(paths, layout, capture_fps, settings.resolution, None)?;
 
     let screen_bytes = meta.screen_bytes;
     let size = meta.webcam_size;
     let wc_bytes = (size * size * 4) as usize;
 
-    let tmp = paths.folder.join("tmp_export.mp4");
-    let tmp_str = tmp.to_str().ok_or_else(|| anyhow!("non-utf8 tmp path"))?;
     let (out_w, out_h) = (meta.out_w, meta.out_h);
-    let sink = FfmpegFrameSink::new_hq(tmp_str, out_w, out_h, OUT_FPS as f64)
+    let tmp = paths.folder.join(format!("tmp_export.{}", settings.format.extension()));
+    let tmp_str = tmp.to_str().ok_or_else(|| anyhow!("non-utf8 tmp path"))?;
+    let sink = FfmpegFrameSink::new_medium(tmp_str, out_w, out_h, out_fps as f64, settings.format, settings.quality_crf)
         .context("create encode sink")?;
 
     let depth = 6; // covers the bounded channel (4) + in-flight buffers without allocating
@@ -46,13 +55,26 @@ pub fn export(paths: &ProjectPaths, fps: u32, on_progress: impl Fn(u8)) -> Resul
         Ok(())
     });
 
-    let mut spipe = ScreenPipe::spawn(&paths.video(), screen_bytes, meta.tl.frames.clone(), depth)?;
+    let mut spipe = ScreenPipe::spawn(&paths.video(), screen_bytes, None, meta.tl.frames.clone(), depth)?;
     let mut wpipe = if paths.webcam().exists() {
-        Some(WebcamPipe::spawn(&paths.webcam(), meta.video_start, size, wc_bytes, depth)?)
+        Some(WebcamPipe::spawn(&paths.webcam(), meta.video_start, size, wc_bytes, depth, out_fps)?)
     } else { None };
     let empty = vec![0u8; screen_bytes]; // zero-frame fallback (matches old zeroed screen_buf)
 
-    let total_out = (((meta.video_end - meta.video_start) * OUT_FPS) / 1000).max(1);
+    // Trim gates which output frames are actually composited/encoded: `[k_in, k_last]` (inclusive
+    // frame indices at `out_fps`) is the resolved trim range (`out_ms == 0` = whole clip, see
+    // `Trim::resolve`); an untrimmed clip yields the exact same `k_last` the old unconditional
+    // loop bound computed, so nothing changes when there is no trim. The loop still runs to
+    // `k_full_last` (the untrimmed clip's own last index) so the screen/webcam decode threads and
+    // the camera sim advance in the same lockstep they always have - only the expensive
+    // composite+encode step is skipped outside the trim range.
+    let full_dur_ms = ((meta.video_end - meta.video_start) as u32).max(1);
+    let (trim_in_ms, trim_out_ms) = meta.trim.resolve(full_dur_ms);
+    let (k_in, k_last) = trim_frame_bounds(trim_in_ms, trim_out_ms, out_fps);
+    let k_full_last = ((full_dur_ms as u64 * out_fps) / 1000).max(k_last);
+    let total_out = k_last - k_in + 1; // trimmed frame count - drives progress % and the log lines below
+    eprintln!("[EXPORT] Starting export for {:?} (target {}x{} @ {}FPS, total_frames={}, trim={}..{}ms of {}ms)",
+        paths.folder, out_w, out_h, out_fps, total_out, trim_in_ms, trim_out_ms, full_dur_ms);
     let mut last_pct = u8::MAX;
     let export_start = std::time::Instant::now();
     let (mut t_dec, mut t_comp, mut t_send) = (0u128, 0u128, 0u128);
@@ -61,8 +83,8 @@ pub fn export(paths: &ProjectPaths, fps: u32, on_progress: impl Fn(u8)) -> Resul
     // and the PiP would vanish early - instead we freeze it on the last decoded frame. Buffers are
     // pooled (depth 6), so keeping one held out of the pool costs nothing.
     let mut last_webcam: Option<(Vec<u8>, u32, u32)> = None;
-    for k in 0..=total_out {
-        let t = meta.video_start + k * 1000 / OUT_FPS;
+    for k in 0..=k_full_last {
+        let t = meta.video_start + k * 1000 / out_fps;
         let d0 = std::time::Instant::now();
         let screen = spipe.next_at(t)?.unwrap_or(&empty); // blocks on the screen decode channel
         if let Some(w) = &mut wpipe {
@@ -72,8 +94,10 @@ pub fn export(paths: &ProjectPaths, fps: u32, on_progress: impl Fn(u8)) -> Resul
             } // else: webcam EOF - keep last_webcam and hold it for the rest of the export
         }
         t_dec += d0.elapsed().as_micros();
+        let pose = r.step_camera(t); // always advance camera/cursor state, even outside the trim range
+        if k < k_in { continue; } // still decoded/stepped above for continuity, just not composited
+        if k > k_last { break; } // past trim-out: stop entirely (decode threads join below)
         let c0 = std::time::Instant::now();
-        let pose = r.step_camera(t);
         let mut out = out_pool.take();
         let wc_ref = last_webcam.as_ref().map(|(b, w, h)| (b.as_slice(), *w, *h));
         r.composite_at(&pose, screen, wc_ref, &mut out);
@@ -82,8 +106,19 @@ pub fn export(paths: &ProjectPaths, fps: u32, on_progress: impl Fn(u8)) -> Resul
         let sent = tx.send(Frame { width: out_w, height: out_h, bgra: out, ts: Timestamp(t) }).is_ok();
         t_send += s0.elapsed().as_micros();
         if !sent { break; }
-        let pct = ((k * 100 / total_out).min(100)) as u8;
-        if pct != last_pct { on_progress(pct); last_pct = pct; }
+        // `done` counts completed frames (1-based), so it - unlike the raw index `k - k_in` -
+        // reaches exactly `total_out` (100%) on the last frame actually sent.
+        let done = k - k_in + 1;
+        let pct = ((done * 100 / total_out).min(100)) as u8;
+        if pct != last_pct {
+            on_progress(pct);
+            if pct % 5 == 0 {
+                let elapsed = export_start.elapsed().as_secs_f64();
+                let fps_curr = done as f64 / elapsed.max(0.001);
+                eprintln!("[EXPORT] Progress: {:3}% | frame {:5}/{} | speed: {:.1} FPS | elapsed: {:.1}s", pct, done, total_out, fps_curr, elapsed);
+            }
+            last_pct = pct;
+        }
     }
     if let (Some(w), Some((buf, _, _))) = (wpipe.as_ref(), last_webcam) { w.recycle(buf); }
 
@@ -92,28 +127,27 @@ pub fn export(paths: &ProjectPaths, fps: u32, on_progress: impl Fn(u8)) -> Resul
     if let Some(w) = wpipe { w.join()?; }
     encoder.join().map_err(|_| anyhow!("encoder thread panicked"))??;
     let secs = export_start.elapsed().as_secs_f64().max(0.001);
+    eprintln!("[EXPORT] Finished render: {} frames in {:.2}s ({:.1} FPS)", total_out, secs, total_out as f64 / secs);
     let _ = std::fs::write(std::env::temp_dir().join("tcursor-export-timing.txt"), format!(
         "frames={} total={:.2}s fps={:.1} decode={}ms composite={}ms encode_wait={}ms\n",
-        total_out + 1, secs, (total_out + 1) as f64 / secs, t_dec / 1000, t_comp / 1000, t_send / 1000));
-    let shift = |a: Option<u64>| a.map(|m| m as i64 - meta.video_start as i64).unwrap_or(0);
+        total_out, secs, total_out as f64 / secs, t_dec / 1000, t_comp / 1000, t_send / 1000));
+    // Audio aligns to the video's own frame 0; once trimmed, that frame sits at `trim_in_ms`
+    // into the original capture, so both tracks shift earlier by the same amount to stay in sync.
+    let shift = |a: Option<u64>| a.map(|m| m as i64 - meta.video_start as i64).unwrap_or(0) - trim_in_ms as i64;
     let mic_shift = shift(meta.tl.mic_ms) + meta.audio_offset_ms as i64;
-    mux(&tmp, paths, mic_shift, shift(meta.tl.system_ms))?;
+    mux(&tmp, paths, settings.format, mic_shift, shift(meta.tl.system_ms), meta.mic_volume, meta.sys_volume)?;
     Ok(())
 }
 
 #[cfg(test)]
 mod bench {
-    // Headless export runner for M4 perf/correctness verification (byte-identical gate). Ignored by
-    // default; run against a real recording folder with:
-    //   TCURSOR_REC=<folder> cargo test --lib export::pipeline::exporter::bench::export_bench -- --ignored --nocapture
-    // then framemd5 the folder's final.mp4 to compare before/after a task.
     #[test]
     #[ignore]
     fn export_bench() {
         let folder = std::env::var("TCURSOR_REC").expect("set TCURSOR_REC to a recording folder");
         let paths = crate::session::paths::ProjectPaths { folder: std::path::PathBuf::from(&folder) };
         let t = std::time::Instant::now();
-        super::export(&paths, 60, |_| {}).expect("export failed");
+        super::export(&paths, crate::export::settings::ExportSettings::default(), |_| {}).expect("export failed");
         eprintln!("export_bench: exported {folder} in {:?}", t.elapsed());
     }
 }

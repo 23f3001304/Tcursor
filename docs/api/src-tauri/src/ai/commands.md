@@ -1,6 +1,23 @@
 # src-tauri/src/ai/commands.rs
 
-Single Tauri IPC command that orchestrates the full AI auto-edit pipeline: load session artifacts, build a timeline transcript, call a local Ollama model, parse the reply into safe edit operations, and write back an updated `EditDoc`. This is the only file in the `ai` module that touches the filesystem or the Tauri command bus; all other `ai::*` modules are pure functions.
+Tauri IPC commands for the AI director: `list_ollama_models` (thin passthrough for the Engine picker) and `ai_autoedit`, which orchestrates the full auto-edit pipeline - load session artifacts, build a timeline transcript, call a local Ollama model, parse the reply into safe edit operations, and write back an updated `EditDoc`. This is the only file in the `ai` module that touches the filesystem or the Tauri command bus; all other `ai::*` modules are pure functions.
+
+## list_ollama_models
+
+```rust
+#[tauri::command]
+pub fn list_ollama_models() -> Vec<String>
+```
+
+Tauri IPC command. Returns the names of Ollama models installed locally, for `AiPanel.tsx`'s Engine picker.
+
+### Implementation
+
+Delegates entirely to `ai::backend::ollama::list_models()`. No error variant: an unreachable Ollama or unparseable response both resolve to an empty `Vec`, since this is a convenience for populating a dropdown, not a precondition for `ai_autoedit` (which still works with its own default model name).
+
+### Used by
+
+- `src/editor/panels/AiPanel.tsx` - fetched once on mount to populate the Engine `Picker`; falls back to showing just the currently-selected (or default) model name when the list is empty.
 
 ## ai_autoedit
 

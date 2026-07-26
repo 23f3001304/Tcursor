@@ -49,7 +49,7 @@ export const startRecording = (projectName: string, micId: string | null, system
 
 ### Used by
 
-`Hud` (`src/hud/Hud.tsx`) - called at the start of `toggle()`.
+`useRecordingFlow` (`src/hud/hooks/useRecordingFlow.ts`) - called at the start of `toggle()`.
 
 ## pauseRecording
 
@@ -63,7 +63,7 @@ export const pauseRecording = () => invoke<void>("pause_recording")
 
 ### Used by
 
-`Hud` (`src/hud/Hud.tsx`) - called from `togglePause()`.
+`useRecordingFlow` (`src/hud/hooks/useRecordingFlow.ts`) - called from `togglePause()`.
 
 ## resumeRecording
 
@@ -77,7 +77,7 @@ export const resumeRecording = () => invoke<void>("resume_recording")
 
 ### Used by
 
-`Hud` (`src/hud/Hud.tsx`) - called from `togglePause()`.
+`useRecordingFlow` (`src/hud/hooks/useRecordingFlow.ts`) - called from `togglePause()`.
 
 ## stopRecording
 
@@ -91,7 +91,7 @@ export const stopRecording = () => invoke<{ folder: string; frames: number }>("s
 
 ### Used by
 
-`Hud` (`src/hud/Hud.tsx`) - called at the start of the stop path in `toggle()`. The returned `folder` is passed to `saveWebcam` and `exportProject`.
+`useRecordingFlow` (`src/hud/hooks/useRecordingFlow.ts`) - called at the start of the stop path in `toggle()`. The returned `folder` is passed to `preprocessProject`, then (once that finishes) to `onEdit`.
 
 ## saveWebcam
 
@@ -112,23 +112,68 @@ export const saveWebcam = (folder: string, bytes: number[]) => invoke<void>("sav
 
 `Hud` (`src/hud/Hud.tsx`) - called in the stop path when `webcam.stop()` returns bytes.
 
+## ExportResolution
+
+```ts
+export type ExportResolution = "p720" | "p1080" | "p1440" | "p2160" | "source"
+```
+
+Output frame SIZE (mirrors Rust `export::settings::Resolution`), independent of the doc's `Aspect` (the RATIO). Fixed presets name the SHORT edge in px - `"p1080"` on a landscape aspect is height=1080 (1920x1080); on a portrait aspect the short edge is the WIDTH (1080x1920). `"source"` (the default) keeps whatever the aspect alone resolves to.
+
+## ExportFps
+
+```ts
+export type ExportFps = "f30" | "f60" | "source"
+```
+
+Output frame rate (mirrors Rust `export::settings::Fps`). `"source"` matches the capture/display refresh rate (capped at 60); `"f60"` (the default) is a fixed 60 regardless of it.
+
+## ExportFormat
+
+```ts
+export type ExportFormat = "mp4" | "webm" | "gif"
+```
+
+Export container/codec (mirrors Rust `export::settings::Format`). `"gif"` cannot carry audio.
+
+## ExportSettings
+
+```ts
+export interface ExportSettings { resolution: ExportResolution; fps: ExportFps; quality_crf: number; format: ExportFormat }
+```
+
+User-chosen export settings, collected by `ExportDialog` and sent to `export_project` - mirrors Rust `export::settings::ExportSettings`.
+
+### Used by
+
+- `ExportDialog` (`src/editor/shell/ExportDialog.tsx`) - owns the local draft the user edits, initialized from `DEFAULT_EXPORT_SETTINGS`.
+
+## DEFAULT_EXPORT_SETTINGS
+
+```ts
+export const DEFAULT_EXPORT_SETTINGS: ExportSettings = { resolution: "source", fps: "f60", quality_crf: 24, format: "mp4" }
+```
+
+`ExportSettings::default()` on the Rust side: this is the exact today's-export configuration (60fps, CRF 24, MP4/H.264) - opening `ExportDialog` for the first time reproduces the pre-`ExportSettings` export if the user clicks Export without changing anything.
+
 ## exportProject
 
 ```ts
-export const exportProject = (folder: string) => invoke<void>("export_project", { folder })
+export const exportProject = (folder: string, settings: ExportSettings) => invoke<void>("export_project", { folder, settings })
 ```
 
 ### Inputs
 
 - `folder` (`string`) - absolute path to the project directory to render.
+- `settings` (`ExportSettings`) - the resolution/fps/quality/format the user chose in `ExportDialog`.
 
 ### Returns
 
-`Promise<void>` that resolves when the export pipeline has been *started*, not when it finishes. Progress and completion arrive asynchronously via three Tauri events: `export-progress` (payload `number`), `export-done` (payload `string` folder path), and `export-error`.
+`Promise<void>` that resolves when the export pipeline has been *started*, not when it finishes. Progress and completion arrive asynchronously via three Tauri events: `export-progress` (payload `number`), `export-done` (payload `string` folder path), and `export-error` (payload `string` error message).
 
 ### Used by
 
-`Hud` (`src/hud/Hud.tsx`) - called at the end of the stop path in `toggle()`.
+`Editor` (`src/editor/Editor.tsx`) - called from the `onExport` callback passed to `ExportDialog`, after resetting the lifted `exporting`/`pct`/`exportDone`/`exportError` state from `useEditorData`.
 
 ## getSettings
 
@@ -275,10 +320,10 @@ export const cameraTrack = (folder: string) => invoke<CamSample[]>("camera_track
 ## PreviewLayout
 
 ```ts
-export interface PreviewLayout { screen: [number, number, number, number]; radius: number; cam: [number, number, number, number, number, number, number, number, number] | null; screenAlpha?: number; camAlpha?: number }
+export interface PreviewLayout { screen: [number, number, number, number]; radius: number; cam: [number, number, number, number, number, number, number, number, number] | null; canvas: [number, number]; screenAlpha?: number; camAlpha?: number }
 ```
 
-The static export framing as fractions of the output (mirrors the Rust `PreviewLayout`): `screen` is the screen rect `[x, y, w, h]`, `radius` the corner radius (fraction of width), and `cam` the webcam PiP rect+ring `[x, y, w, h, radius, ringPx, ringR, ringG, ringB]` or `null` when hidden - `ringPx` is a fraction of output width (0 = no ring) and `ringR/G/B` are 0..255, mirroring the export's `Panel.ring_px`/`ring_color` riding alongside the rect/radius. The canvas compositor frames the screen and webcam from this so the preview matches the export.
+The static export framing as fractions of the output (mirrors the Rust `PreviewLayout`): `screen` is the screen rect `[x, y, w, h]`, `radius` the corner radius (fraction of width), and `cam` the webcam PiP rect+ring `[x, y, w, h, radius, ringPx, ringR, ringG, ringB]` or `null` when hidden - `ringPx` is a fraction of output width (0 = no ring) and `ringR/G/B` are 0..255, mirroring the export's `Panel.ring_px`/`ring_color` riding alongside the rect/radius. `canvas` is the resolved preview frame's pixel dimensions `[w, h]` (follows `EditDoc.aspect`, via `Layout::resolve` on the Rust side) - `Stage.tsx` sizes its `<canvas>` and `.e-stage`'s aspect-ratio from this instead of a hardcoded 16:9. The canvas compositor frames the screen and webcam from this so the preview matches the export.
 
 ## previewLayout
 
@@ -308,6 +353,19 @@ export const ensureProxy = (folder: string, height: number) => invoke<string>("e
 ### Returns
 
 `Promise<string>` - the proxy file path (transcoded once, then cached). The frontend wraps it with `fileSrc` to get an asset-protocol URL for a `<video>`.
+
+## DEFAULT_PROXY_HEIGHT
+
+```ts
+export const DEFAULT_PROXY_HEIGHT = 720
+```
+
+Proxy height `preprocess_project` transcodes ahead of time (mirrors the Rust `preprocess::DEFAULT_PROXY_HEIGHT`). Also `Editor.tsx`'s initial `quality` state, so a freshly preprocessed project's default quality always matches what preprocessing already put on disk - the one place this number is spelled, so the two sides can never drift apart.
+
+### Used by
+
+- `Editor` (`src/editor/Editor.tsx`) - initial `quality` state.
+- `useEditorData` (`src/editor/hooks/useEditorData.ts`) - the proxy-skip condition (`preprocessed && quality === DEFAULT_PROXY_HEIGHT`).
 
 ## fileSrc
 
@@ -379,7 +437,7 @@ export const cursorSprites = (folder: string) => invoke<CursorSpriteDto[]>("curs
 
 ### Returns
 
-`Promise<CursorSpriteDto[]>` - the Capitaine pack so the preview can draw the real cursor (Enhanced style) instead of an arrow.
+`Promise<CursorSpriteDto[]>` - the recording's selected cursor pack (`CursorSettings.pack`, built-in or imported) so the preview can draw the real cursor (Enhanced style) instead of an arrow.
 
 ## CursorKindSample
 
@@ -402,6 +460,50 @@ export const cursorKinds = (folder: string) => invoke<CursorKindSample[]>("curso
 ### Returns
 
 `Promise<CursorKindSample[]>` - the cursor-type track in output time.
+
+## CursorPackInfo
+
+```ts
+export interface CursorPackInfo { id: string; name: string; builtin: boolean }
+```
+
+One selectable cursor pack (mirrors the Rust `CursorPackInfo`): `id` is what persists into `CursorSettings.pack`, `name` is the display label, and `builtin` marks the embedded default (always first in the list, never stored on disk).
+
+### Used by
+
+- `src/editor/panels/CursorPanel.tsx` - renders the pack grid and drives selection/import
+
+## listCursorPacks
+
+```ts
+export const listCursorPacks = () => invoke<CursorPackInfo[]>("list_cursor_packs")
+```
+
+### Returns
+
+`Promise<CursorPackInfo[]>` - the built-in pack first, then every pack previously imported via `importCursorPack`.
+
+### Used by
+
+`CursorPanel` (`src/editor/panels/CursorPanel.tsx`) - fetched on mount to populate the pack picker.
+
+## importCursorPack
+
+```ts
+export const importCursorPack = (path: string) => invoke<CursorPackInfo>("import_cursor_pack", { path })
+```
+
+### Inputs
+
+- `path` (`string`) - absolute path to a folder the user picked via the Tauri dialog plugin's folder picker. *Why a folder path rather than file contents:* the Rust side reads and validates the PNGs directly off disk, so only the path needs to cross the IPC boundary.
+
+### Returns
+
+`Promise<CursorPackInfo>` - the newly imported pack (`builtin: false`). Rejects with a message when the folder has no recognized cursor PNGs (`arrow.png`, `hand.png`, `ibeam.png`, ...) or an invalid `hotspots.json`.
+
+### Used by
+
+`CursorPanel` (`src/editor/panels/CursorPanel.tsx`) - called from the "Import pack..." button; on success, appends the result to the local pack list and selects it.
 
 ## ensureThumbs
 
@@ -446,3 +548,97 @@ export const ensurePreviewAudio = (folder: string) => invoke<string>("ensure_pre
 ### Returns
 
 `Promise<string>` - a cached mixed (mic+system) preview-audio file path so the editor can play sound, or `""` when neither source exists.
+
+## ProjectManifest
+
+```ts
+export interface ProjectManifest { version: number; created_unix_ms: number; source_w: number; source_h: number; app_version: string; preprocessed: boolean }
+```
+
+Mirrors the Rust `ProjectManifest`: the `project.tcursor` file written into a project folder at record/save time. `preprocessed` is read by `useEditorData` (via `getProjectManifest`) to decide whether to skip its own lazy `ensure_*` regeneration for an already-warmed project.
+
+## getProjectManifest
+
+```ts
+export const getProjectManifest = (folder: string) => invoke<ProjectManifest>("get_project_manifest", { folder })
+```
+
+### Inputs
+
+- `folder` (`string`) - project directory.
+
+### Returns
+
+`Promise<ProjectManifest>` - never rejects; a missing or corrupt `project.tcursor` resolves to a synthesized "unknown source" default (mirrors the Rust `ProjectManifest::load_or_default`), with `preprocessed: false`.
+
+### Used by
+
+`useEditorData` (`src/editor/hooks/useEditorData.ts`) - fetched once per `[folder]` into `preprocessed`.
+
+## preprocessProject
+
+```ts
+export const preprocessProject = (folder: string) => invoke<void>("preprocess_project", { folder })
+```
+
+### Inputs
+
+- `folder` (`string`) - the just-finished (or reopened) project directory.
+
+### Returns
+
+`Promise<void>` that resolves as soon as the background pass has been *spawned*, not when it finishes - progress and completion arrive asynchronously via three Tauri events: `preprocess-progress` (payload `number`, 0..100), `preprocess-done` (payload the folder), and `preprocess-error` (payload a message).
+
+### Used by
+
+`useRecordingFlow` (`src/hud/hooks/useRecordingFlow.ts`) - called right after `stopRecording`/`webcam.stop()` resolve, awaited (via the events above) before `onEdit` opens the editor.
+
+## openProject
+
+```ts
+export const openProject = () => invoke<string>("open_project")
+```
+
+### Returns
+
+`Promise<string>` - the CONTAINING FOLDER of the `*.tcursor` file the user picked (the editor always opens a folder, never the manifest file itself). Rejects if the user cancels the dialog.
+
+### Used by
+
+`Hud` (`src/hud/Hud.tsx`, `openExistingProject`) - called from the "Open Project" titlebar button; the returned folder is passed to `onEdit`, the same callback `App` wires to `stopRecording`'s result.
+
+## RecentProject
+
+```ts
+export interface RecentProject { folder: string; name: string; opened_unix_ms: number }
+```
+
+Mirrors the Rust `RecentProject`: one entry in the small "recently opened" list, persisted server-side alongside settings.
+
+## listRecentProjects
+
+```ts
+export const listRecentProjects = () => invoke<RecentProject[]>("list_recent_projects")
+```
+
+### Returns
+
+`Promise<RecentProject[]>` - most-recently-opened first.
+
+### Implementation
+
+Not yet consumed by any `.tsx` file (no recents UI exists yet); defined so the backend command surface is available when one is built.
+
+## getLaunchProject
+
+```ts
+export const getLaunchProject = () => invoke<string | null>("get_launch_project")
+```
+
+### Returns
+
+`Promise<string | null>` - the project folder to open if this process was just launched by double-clicking a `.tcursor` file (Windows file association), or `null` on a normal launch.
+
+### Used by
+
+`App` (`src/App.tsx`) - called once on mount; a non-null folder routes straight to the editor instead of showing the HUD. Only covers cold start - see the Rust `LaunchProject` doc comment for the warm-launch (already-running instance) follow-up.

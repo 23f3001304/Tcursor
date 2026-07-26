@@ -1,6 +1,6 @@
 # src-tauri/src/export/pipeline/ffio.rs
 
-FFmpeg and ffprobe spawn helpers, raw BGRA frame reader, and bundled-image decode/crop utilities. All public functions here are pure I/O adapters over the bundled ffmpeg/ffprobe binary located by `win::proc::ffcmd`; they contain no export logic or state.
+FFmpeg and ffprobe spawn helpers and bundled-image decode/crop utilities. All public functions here are pure I/O adapters over the bundled ffmpeg/ffprobe binary located by `win::proc::ffcmd`; they contain no export logic or state. The continuous raw-BGRA-stream decoder (`RawDecoder`) lives in the sibling `ffio_decoder.rs` (re-exported here as `ffio::RawDecoder`, so every existing import path is unchanged) - see `ffio_decoder.md`.
 
 ## probe_dims
 
@@ -157,73 +157,3 @@ Returns the total video frame count, preferring ffprobe's `nb_frames` field and 
 1. Spawn `ffprobe -v error -select_streams v:0 -show_entries stream=nb_frames,avg_frame_rate,duration -of default=nw=1 <video>`.
 2. Parse each `key=value` line: collect `nb` (positive u64), `rate` (from `num/den` fraction), `dur` (f64).
 3. Return `nb` if non-zero. Else compute `(rate * dur).round() as u64`. Error if neither is computable.
-
-## RawDecoder
-
-```rust
-pub struct RawDecoder {
-    child: Child,
-    stdout: ChildStdout,
-    frame_bytes: usize,
-}
-```
-
-A spawned ffmpeg process emitting a continuous stream of raw BGRA frames at a fixed byte size per frame. The process is kept alive until the decoder is dropped.
-
-### Fields
-
-- `child` - *the spawned ffmpeg process; killed and waited on `Drop` to avoid zombie processes.*
-- `stdout` - *the process's stdout pipe; `read_exact` on this reads exactly one frame at a time.*
-- `frame_bytes` - *expected bytes per frame (`width * height * 4`); asserted in `read_frame` to detect size mismatches early.*
-
-### Used by
-
-- `src-tauri/src/export/pipeline/exporter.rs` - decodes source video frames during the main render loop.
-- `src-tauri/src/export/pipeline/timeline.rs` - decodes webcam/camera frames for picture-in-picture overlay.
-- `src-tauri/src/export/cursor/cursordraw.rs` - decodes cursor animation frames.
-
-## RawDecoder::spawn
-
-```rust
-pub fn spawn(video: &Path, rate: f64, input_rate: bool, seek_ms: Option<u64>, scale: Option<u32>, frame_bytes: usize) -> Result<Self>
-```
-
-Spawns the ffmpeg decoder subprocess and captures its stdout.
-
-### Inputs
-
-- `video: &Path` - video file to decode. *Why:* the primary ffmpeg input.*
-- `rate: f64` - target frame rate; `<= 0` decodes at the native rate. *Why:* the exporter controls timing and may need frames at a specific rate for sync.*
-- `input_rate: bool` - if `true`, `-r rate` is placed before `-i` (input demux rate override); if `false`, after (output filter rate). *Why:* certain container formats need the input rate set to suppress duplicate-frame detection; others need the output filter.*
-- `seek_ms: Option<u64>` - trim start offset in ms (`-ss`). *Why:* using ffmpeg's native seek is orders of magnitude faster than decoding and discarding frames.*
-- `scale: Option<u32>` - if set, cover-crops the video to a centered square of this size. *Why:* webcam feeds are 16:9; squaring avoids aspect-ratio distortion in the picture-in-picture overlay.*
-- `frame_bytes: usize` - expected bytes per frame. *Why:* stored for the `debug_assert` in `read_frame`.*
-
-### Returns
-
-`Result<Self>` - the running decoder. Errors if the spawn fails or stdout is unavailable.
-
-### Implementation
-
-1. Build ffmpeg command: `-v error`, optional `-ss seek_ms/1000.0`, optional input `-r rate`, `-i video`, `-f rawvideo -pix_fmt bgra`, optional output `-r rate`, optional `-vf scale=sz:sz:force_original_aspect_ratio=increase,crop=sz:sz`, `-` (stdout). Stderr suppressed.
-2. Take `child.stdout`; return `Self { child, stdout, frame_bytes }`.
-
-## RawDecoder::read_frame
-
-```rust
-pub fn read_frame(&mut self, buf: &mut [u8]) -> Result<bool>
-```
-
-Reads exactly one frame into `buf` from the ffmpeg stdout pipe.
-
-### Inputs
-
-- `buf: &mut [u8]` - caller-owned buffer of exactly `frame_bytes`. *Why caller-owned:* avoids a per-frame allocation in the hot render loop.*
-
-### Returns
-
-`Result<bool>` - `Ok(true)` when a full frame was read; `Ok(false)` at end-of-stream (`UnexpectedEof`); `Err` on any other I/O error.
-
-### Implementation
-
-1. `self.stdout.read_exact(buf)` -> `Ok(true)` on success, `Ok(false)` on `UnexpectedEof`, `Err` otherwise.

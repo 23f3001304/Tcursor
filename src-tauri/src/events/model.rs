@@ -37,8 +37,7 @@ pub struct EventLog {
 impl EventLog {
     pub fn save(&self, path: &Path) -> io::Result<()> {
         let file = std::fs::File::create(path)?;
-        let writer = std::io::BufWriter::new(file);
-        let mut encoder = GzEncoder::new(writer, Compression::default());
+        let mut encoder = GzEncoder::new(file, Compression::default());
         serde_json::to_writer(&mut encoder, self)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         encoder.finish()?;

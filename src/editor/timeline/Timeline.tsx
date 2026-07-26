@@ -8,6 +8,7 @@ import { layoutRegions } from "./layers";
 import { Filmstrip } from "./Filmstrip";
 import { AudioTrack } from "./AudioTrack";
 import { CameraLane } from "./CameraLane";
+import { TrimOverlay } from "./TrimOverlay";
 
 /** Multi-track timeline (Filmora-style): an adaptive ruler, a filmstrip clip, and a scrolling
  *  stack of tracks - the zoom track (pills drag/resize via useRegionDrag) plus the system + mic
@@ -174,6 +175,7 @@ export function Timeline({ doc, timeMs, dur, playing, onSeek, sel, onSel, onAppl
           <AudioTrack src={waves.system} kind="system" />
           <AudioTrack src={waves.mic} kind="mic" />
         </div>
+        <TrimOverlay trim={doc.trim} dur={dur} trackRef={track} onApply={onApply} />
         <motion.div className="e-ph" initial={false} animate={{ left: `${pct}%` }}
           transition={playing ? { duration: 0 } : { type: "tween", duration: 0.12, ease: "easeOut" }}><i /></motion.div>
       </div>

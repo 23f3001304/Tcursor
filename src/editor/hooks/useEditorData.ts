@@ -33,7 +33,18 @@ export function useEditorData(folder: string, rev: number, quality: number) {
   // already succeeded once. Defaults to false (the pre-existing lazy path) until the manifest
   // read resolves, so a legacy project with no manifest at all is unaffected.
   const [preprocessed, setPreprocessed] = useState(false);
-  useEffect(() => { getProjectManifest(folder).then((m) => setPreprocessed(m.preprocessed)).catch(() => setPreprocessed(false)); }, [folder]);
+  // `manifestReady` gates the proxy source below until we KNOW whether this project is
+  // preprocessed - otherwise the effect runs once with the default `preprocessed=false`, loads
+  // the heavy raw 4K `video.mp4`, and only swaps to the light proxy after the manifest read
+  // resolves (the "first load feels laggy" flash). The manifest read is a tiny file read, so the
+  // brief wait is imperceptible and avoids decoding a 4K frame the preprocessed project never needs.
+  const [manifestReady, setManifestReady] = useState(false);
+  useEffect(() => {
+    setManifestReady(false);
+    getProjectManifest(folder)
+      .then((m) => { setPreprocessed(m.preprocessed); setManifestReady(true); })
+      .catch(() => { setPreprocessed(false); setManifestReady(true); });
+  }, [folder]);
   // The exact zoom curve, refetched whenever the doc changes (instant: pure math, cached).
   useEffect(() => { cameraTrack(folder).then(setTrack).catch(() => {}); }, [folder, rev]);
   // The exact screen/webcam framing (pad, radius, PiP rect) so the canvas matches the export.
@@ -75,11 +86,13 @@ export function useEditorData(folder: string, rev: number, quality: number) {
   useEffect(() => {
     setPlaying(false);
     if (lastFolderRef.current !== folder) { lastFolderRef.current = folder; proxyReadyRef.current = false; }
-    // Raw fast-path ONLY before the first proxy is ready. On a quality SWITCH the current proxy is
-    // already showing, so keep it (its re-timed timeline/duration match) instead of flashing the raw
-    // video.mp4 - the raw is re-timed differently, so flashing it briefly changed the duration and
-    // frame, jumping the playhead ("changing quality changes preview time").
-    if (!proxyReadyRef.current) setSrcUrl(fileSrc(`${folder}\\video.mp4`));
+    if (!manifestReady) return; // wait until we know `preprocessed`, so a preprocessed project never loads raw 4K first
+    // Raw fast-path ONLY for a not-yet-preprocessed project with no proxy yet - show something while
+    // the proxy transcodes. A preprocessed project skips straight to its proxy below (no 4K load).
+    // On a quality SWITCH the current proxy is already showing, so keep it (its re-timed timeline/
+    // duration match) instead of flashing raw video.mp4, which re-times differently and jumps the
+    // playhead ("changing quality changes preview time").
+    if (!proxyReadyRef.current && !preprocessed) setSrcUrl(fileSrc(`${folder}\\video.mp4`));
     // Skip the lazy transcode entirely at the DEFAULT quality on an already-preprocessed project -
     // that exact proxy is guaranteed to already be on disk (see `preprocessed` above), so there is
     // nothing to generate. Any OTHER quality (the in-editor quality toggle) still needs its own

@@ -22,7 +22,7 @@ Common interface for software and hardware compositors.
 
 ### Inputs
 
-- `screen: &[u8]` - BGRA bytes of the captured screen frame, `sw * sh * 4` bytes. *Why:* the raw decoded frame is passed by slice to avoid a per-frame copy.
+- `screen: &[u8]` - the captured screen frame in **nv12** (`sw * sh * 3/2` bytes: a full-res Y plane followed by an interleaved half-res UV plane), not BGRA. *Why nv12:* ~2.6x smaller than BGRA, so far fewer bytes cross the ffmpeg -> exporter pipe (the measured export bottleneck; see `color.rs`). `GpuCompositor` uploads Y/UV as separate textures and converts to RGB in the shader (`screen_rgb` in `gpu/shader.wgsl`); `CpuCompositor` instead converts up front via `color::nv12_to_bgra` so the rest of its blend path stays unchanged BGRA math.
 - `sw: u32, sh: u32` - capture source dimensions. *Why:* needed to set up the resize crop.
 - `webcam: Option<(&[u8], u32, u32)>` - optional `(bytes, width, height)` for the webcam frame. *Why:* `None` when there is no webcam, or after EOF; the compositor skips the camera panel in that case.
 - `cam: Camera` - the virtual camera center and scale for whole-scene zoom. *Why:* drives the crop rectangle that simulates zoom on the base image.
@@ -37,7 +37,7 @@ Nothing (`()`). The impl resizes `out` to `out_w * out_h * 4` bytes and fully ov
 
 ### Used by
 
-- `src-tauri/src/export/pipeline/exporter.rs` - calls `compositor.composite_into(...)` in the frame loop.
+- `src-tauri/src/export/render/mod.rs` - `FrameRenderer::composite_at` calls `self.compositor.composite_into(...)` once per output frame.
 - `src-tauri/src/export/gpu/gpu_compositor.rs` - `GpuCompositor` implements this trait.
 
 ## CpuCompositor
@@ -50,11 +50,13 @@ Software compositor with no GPU dependency; zero interior state, trivially `Send
 
 ### Implementation of `composite_into`
 
-1. Copy `bg` into a working buffer `base` (`out_w * out_h * 4` bytes).
-2. Draw the screen panel onto `base` via `draw_panel`: resize `screen` to `panel.rect` dimensions and alpha-blend with rounded-rect SDF coverage.
-3. Compute the zoom crop via `coordmap::crop(cam, ow, oh)` and resize `base` (crop -> full output) into `resized`, simulating the camera zoom. This zooms the entire base including the screen panel but not what will be drawn on top.
-4. Clear `out` and copy `resized` into it.
-5. Draw the camera panel on top of `out` via `draw_panel`; the camera is not subject to zoom.
+1. Convert the incoming nv12 `screen` to BGRA once via `color::nv12_to_bgra`, rebinding the local `screen` to the converted buffer - every step below (including the fast-path check) then runs on packed BGRA exactly as it did before nv12 was introduced.
+2. Fast-path: when the scene is unzoomed (`cam.scale <= 1.0001`), the camera panel is invisible, the screen panel is fully opaque with no corner rounding or ring, and the converted `screen` is already exactly `out_w x out_h` BGRA, clear `out`, copy `screen` straight into it, and return - skipping steps 3-5 entirely for the common 1:1 no-PiP case.
+3. Otherwise, copy `bg` into a working buffer `base` (`out_w * out_h * 4` bytes).
+4. Draw the screen panel onto `base` via `draw_panel`: resize `screen` to `panel.rect` dimensions and alpha-blend with rounded-rect SDF coverage.
+5. Compute the zoom crop via `coordmap::crop(cam, ow, oh)` and resize `base` (crop -> full output) into `resized`, simulating the camera zoom. This zooms the entire base including the screen panel but not what will be drawn on top.
+6. Clear `out` and copy `resized` into it.
+7. Draw the camera panel on top of `out` via `draw_panel`; the camera is not subject to zoom.
 
 ### draw_panel / rrect_sd_px / blit_ring (Task 9 Part B - software ring mirror)
 
@@ -63,7 +65,7 @@ Software compositor with no GPU dependency; zero interior state, trivially `Send
 ### Behaviors worth knowing
 
 - `draw_panel` computes a safe opaque inner rectangle (the panel interior, inset by `ceil(radius) + 2` px) whenever `panel.alpha >= 1.0`, and passes it to `blit` as `opaque_inner`. Inside that rect the rounded-box SDF is provably `1.0`, so `blit` skips the sqrt-based coverage math there and forces `a = 1.0` directly - a byte-identical fast path. Pixels outside the inner rect (the antialiased corners/edges) still run the full SDF.
-- `screen_panel_composites_onto_background` (unit test): a 4x4 red screen placed at (2,2) in an 8x8 blue background leaves the corner blue and the panel interior red.
+- `screen_panel_composites_onto_background` (unit test): a 4x4 red screen (built via `bgra_to_nv12`, then converted back by `composite_into`) placed at (2,2) in an 8x8 blue background leaves the corner blue and the panel interior approximately red - within a few LSBs, since the nv12 round-trip is not bit-exact.
 - `disabled_and_degenerate_panels_do_not_panic` (unit test): a camera panel larger than the output and a disabled screen must not trigger out-of-bounds access or panic.
 - `blit_opaque_inner_skip_is_byte_identical_to_full_sdf` (unit test): blits the same rounded (r=6) opaque panel via `blit` twice - once with the computed `opaque_inner` rect, once with `None` (full SDF everywhere) - and asserts the two output buffers are byte-identical, including the antialiased corners outside the inner rect.
 - `ring_paints_a_band_just_inside_the_camera_edge_and_leaves_center_alone` (unit test): a 20x20 square camera panel with a 3px red ring over a green webcam source - the pixel row/column just inside the edge is strongly ring-tinted (antialiased, not pure - matching the SDF feathering everywhere else in this file) while the panel center stays untouched green.

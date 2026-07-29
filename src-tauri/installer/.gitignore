@@ -1,0 +1,6 @@
+# Never commit code-signing material
+*.pfx
+*.p12
+*.cer
+*.crt
+tcursor-dev.*

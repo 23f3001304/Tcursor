@@ -13,7 +13,8 @@ struct CompositorResources {
     sh: u32,
     ww: u32,
     wh: u32,
-    screen_tex: wgpu::Texture,
+    screen_y_tex: wgpu::Texture,   // nv12 Y plane (R8, sw x sh)
+    screen_uv_tex: wgpu::Texture,  // nv12 interleaved UV (Rg8, sw/2 x sh/2)
     webcam_tex: wgpu::Texture,
     bg_tex: wgpu::Texture,
     ubuf: wgpu::Buffer,
@@ -45,12 +46,8 @@ impl Compositor for GpuCompositor {
         out: &mut Vec<u8>,
     ) {
         let (ow, oh) = (self.out_w, self.out_h);
-        // Fast-path: 1:1 unzoomed full screen without camera PiP or corner rounding
-        if cam.scale <= 1.0001 && scene.camera.alpha <= 0.0 && scene.screen.alpha >= 0.999 && scene.screen.radius <= 0.1 && scene.screen.ring_px <= 0.1 && sw == ow && sh == oh && screen.len() == (ow * oh * 4) as usize {
-            out.clear();
-            out.extend_from_slice(screen);
-            return;
-        }
+        // No raw-copy fast-path here: `screen` is nv12, so it always needs the shader's color
+        // convert (a raw passthrough would emit nv12 bytes as bgra). The GPU pass is cheap anyway.
         let g = &self.gpu;
         let (wc_data, ww, wh) = webcam.unwrap_or((&[0u8; 4], 1, 1));
         let u = build_uniforms(scene, cam, layout, webcam.is_some());
@@ -66,7 +63,10 @@ impl Compositor for GpuCompositor {
         }
 
         let r = lock.as_mut().unwrap();
-        g.update_tex(&r.screen_tex, screen, sw, sh);
+        // Upload the nv12 screen: Y plane (R8, full res) then interleaved UV (Rg8, half res).
+        let y_size = (sw * sh) as usize;
+        g.update_tex_bpp(&r.screen_y_tex, &screen[..y_size], sw, sh, 1);
+        g.update_tex_bpp(&r.screen_uv_tex, &screen[y_size..], sw / 2, sh / 2, 2);
         g.update_tex(&r.webcam_tex, wc_data, ww, wh);
         if !r.bg_uploaded {
             g.update_tex(&r.bg_tex, bg, ow, oh);
@@ -116,14 +116,21 @@ impl Compositor for GpuCompositor {
         g.device.poll(wgpu::Maintain::Wait);
 
         let unpadded = (ow * 4) as usize;
+        let padded = g.padded_bpr as usize;
         out.clear();
-        out.resize(unpadded * oh as usize, 0);
         {
             let data = slice.get_mapped_range();
-            for row in 0..oh as usize {
-                let src = row * g.padded_bpr as usize;
-                let dst = row * unpadded;
-                out[dst..dst + unpadded].copy_from_slice(&data[src..src + unpadded]);
+            if padded == unpadded {
+                // No row padding (true whenever `ow*4` is 256-aligned, i.e. every standard output
+                // width) - one contiguous copy instead of `oh` bounds-checked row copies, which is
+                // a real per-frame saving in debug where each row slice is bounds-checked.
+                out.extend_from_slice(&data[..unpadded * oh as usize]);
+            } else {
+                out.resize(unpadded * oh as usize, 0);
+                for row in 0..oh as usize {
+                    out[row * unpadded..row * unpadded + unpadded]
+                        .copy_from_slice(&data[row * padded..row * padded + unpadded]);
+                }
             }
         }
         g.readback.unmap();
@@ -144,7 +151,7 @@ mod tests {
     #[test]
     fn screen_panel_composites_onto_background() {
         let c = match GpuCompositor::new(8, 8) { Some(c) => c, None => return };
-        let screen = solid(4, 4, [0, 0, 255, 255]);
+        let screen = crate::export::color::bgra_to_nv12(&solid(4, 4, [0, 0, 255, 255]), 4, 4);
         let bg = solid(8, 8, [255, 0, 0, 255]);
         let layout = Layout { out_w: 8, out_h: 8, pad_px: 1, screen_scale: 1.0, screen_radius_px: 8.0 * 0.016 };
         let scene = Scene {
@@ -157,14 +164,15 @@ mod tests {
         assert_eq!(out.len(), 8 * 8 * 4);
         assert_eq!(&out[0..4], &[255, 0, 0, 255], "corner must be bg blue");
         let i = ((3 * 8 + 3) * 4) as usize;
-        assert_eq!(&out[i..i + 4], &[0, 0, 255, 255], "panel interior must be screen red");
+        let p = &out[i..i + 4]; // screen red through the nv12 shader convert (exact to a few LSBs)
+        assert!(p[0] <= 3 && p[1] <= 3 && p[2] >= 250, "panel interior must be ~screen red, got {p:?}");
     }
 
     #[test]
     fn cpu_gpu_parity_two_panels() {
         use crate::export::gpu::compositor::{Compositor, CpuCompositor};
         let g = match GpuCompositor::new(64, 48) { Some(c) => c, None => return };
-        let screen = solid(32, 24, [10, 20, 200, 255]);   // BGRA-ish
+        let screen = crate::export::color::bgra_to_nv12(&solid(32, 24, [10, 20, 200, 255]), 32, 24);
         let webcam = solid(16, 16, [200, 30, 10, 255]);
         let bg = solid(64, 48, [40, 40, 40, 255]);
         let layout = Layout { out_w: 64, out_h: 48, pad_px: 4, screen_scale: 1.0, screen_radius_px: 48.0 * 0.016 };
@@ -182,7 +190,9 @@ mod tests {
             let i = ((y * 64 + x) * 4) as usize;
             for c in 0..4 {
                 let d = (cpu[i + c] as i32 - gpu[i + c] as i32).abs();
-                assert!(d <= 2, "CPU/GPU mismatch at ({x},{y}) ch {c}: {} vs {}", cpu[i + c], gpu[i + c]);
+                // <=3: the screen panel now goes through two independent nv12->RGB converts (CPU
+                // u8-rounded `nv12_to_bgra` vs the shader's float math), so allow one extra LSB.
+                assert!(d <= 3, "CPU/GPU mismatch at ({x},{y}) ch {c}: {} vs {}", cpu[i + c], gpu[i + c]);
             }
         }
     }

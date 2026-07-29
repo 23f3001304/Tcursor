@@ -66,23 +66,25 @@ pub fn ensure_waveform(folder: String, which: String) -> Result<String, String> 
     Ok(out.to_string_lossy().to_string())
 }
 
-/// A mixed mic+system preview-audio track (`folder/preview_audio.m4a`, AAC) so the editor can
-/// play sound (the proxy is silent). Cached. NOTE: v1 mixes without the export's per-track
-/// `-itsoffset`/`-ss` alignment (see `export::pipeline::audio_mux` + `exporter.rs` `shift()`), so it can
-/// drift slightly vs the final render; exact-sync alignment is a follow-up.
+/// A mixed mic+system preview-audio track (`folder/preview_synced.m4a`, AAC) so the editor can play
+/// sound (the proxy is silent). Cached. Each track is shifted to the video start with the SAME
+/// per-track `-itsoffset`/`-ss` alignment the final render uses (`audio_mux::add_offset`), so preview
+/// playback stays in sync with the (re-timed) proxy instead of drifting by the capture-warmup lead.
+/// The `preview_synced.` name (vs the old `preview_audio.`) invalidates stale un-aligned caches.
 #[tauri::command]
 pub fn ensure_preview_audio(folder: String) -> Result<String, String> {
     let paths = ProjectPaths { folder: PathBuf::from(&folder) };
     let (mic, sys) = (paths.mic(), paths.system());
     let (hm, hs) = (mic.exists(), sys.exists());
     if !hm && !hs { return Ok(String::new()); }
-    let out = paths.folder.join("preview_audio.m4a");
+    let out = paths.folder.join("preview_synced.m4a");
+    let (mic_shift, sys_shift) = preview_audio_shifts(&paths);
     crate::win::sys::proc::generate_once(&out, || {
         let tmp = crate::win::sys::proc::tmp_sibling(&out); // write then atomic-rename
         let mut cmd = ffcmd_bg("ffmpeg");
         cmd.args(["-v", "error", "-y"]);
-        if hm { cmd.arg("-i").arg(&mic); }
-        if hs { cmd.arg("-i").arg(&sys); }
+        if hm { crate::export::pipeline::audio_mux::add_offset(&mut cmd, mic_shift); cmd.arg("-i").arg(&mic); }
+        if hs { crate::export::pipeline::audio_mux::add_offset(&mut cmd, sys_shift); cmd.arg("-i").arg(&sys); }
         if hm && hs {
             cmd.args(["-filter_complex", "[0:a][1:a]amix=inputs=2:normalize=0[a]", "-map", "[a]"]);
         }
@@ -93,4 +95,17 @@ pub fn ensure_preview_audio(folder: String) -> Result<String, String> {
         Ok(())
     })?;
     Ok(out.to_string_lossy().to_string())
+}
+
+/// Per-track mic/system shift (ms) to align preview audio to the video's frame 0: `track_start -
+/// video_start` (+ the mic audio-offset), matching `exporter::export`'s `shift()` minus the trim (the
+/// preview plays the whole clip; trim is a playback clamp). `(0, 0)` if the timeline can't be loaded.
+fn preview_audio_shifts(paths: &ProjectPaths) -> (i64, i64) {
+    let log = match crate::events::model::EventLog::load(&paths.events()) { Ok(l) => l, Err(_) => return (0, 0) };
+    let tl = crate::export::pipeline::timeline::build_timeline(paths, &log, 60);
+    let vs = tl.frames.first().copied().unwrap_or(0) as i64;
+    let offset = crate::edit::seed::load_or_seed(paths).settings.audio_offset_ms as i64;
+    let mic = tl.mic_ms.map(|m| m as i64 - vs).unwrap_or(0) + offset;
+    let sys = tl.system_ms.map(|m| m as i64 - vs).unwrap_or(0);
+    (mic, sys)
 }

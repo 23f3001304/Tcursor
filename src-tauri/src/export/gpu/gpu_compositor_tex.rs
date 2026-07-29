@@ -13,7 +13,8 @@ use super::CompositorResources;
 pub(super) fn build_resources(
     g: &Gpu, sw: u32, sh: u32, ww: u32, wh: u32, ow: u32, oh: u32, u: &Uniforms,
 ) -> CompositorResources {
-    let screen_tex = g.create_tex("screen", sw, sh);
+    let screen_y_tex = g.create_tex_fmt("screen_y", sw, sh, wgpu::TextureFormat::R8Unorm);
+    let screen_uv_tex = g.create_tex_fmt("screen_uv", (sw / 2).max(1), (sh / 2).max(1), wgpu::TextureFormat::Rg8Unorm);
     let webcam_tex = g.create_tex("webcam", ww, wh);
     let bg_tex = g.create_tex("bg", ow, oh);
     let ubuf = g.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -21,7 +22,8 @@ pub(super) fn build_resources(
         contents: bytemuck::bytes_of(u),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
-    let sv = screen_tex.create_view(&Default::default());
+    let yv = screen_y_tex.create_view(&Default::default());
+    let uvv = screen_uv_tex.create_view(&Default::default());
     let bv = bg_tex.create_view(&Default::default());
     let wv = webcam_tex.create_view(&Default::default());
     let bind = g.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -29,11 +31,12 @@ pub(super) fn build_resources(
         layout: &g.bind_layout,
         entries: &[
             wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&bv) },
-            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&sv) },
-            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&wv) },
-            wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(&g.sampler) },
-            wgpu::BindGroupEntry { binding: 4, resource: ubuf.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&yv) },
+            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&uvv) },
+            wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&wv) },
+            wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&g.sampler) },
+            wgpu::BindGroupEntry { binding: 5, resource: ubuf.as_entire_binding() },
         ],
     });
-    CompositorResources { sw, sh, ww, wh, screen_tex, webcam_tex, bg_tex, ubuf, bind, bg_uploaded: false }
+    CompositorResources { sw, sh, ww, wh, screen_y_tex, screen_uv_tex, webcam_tex, bg_tex, ubuf, bind, bg_uploaded: false }
 }

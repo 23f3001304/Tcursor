@@ -33,23 +33,24 @@ export const listAudioInputs = () => invoke<AudioInfo[]>("list_audio_inputs")
 ## startRecording
 
 ```ts
-export const startRecording = (projectName: string, micId: string | null, systemAudio: boolean, gameMode: boolean) => invoke<void>("start_recording", { projectName, micId, systemAudio, gameMode })
+export const startRecording = (projectName: string, micId: string | null, targetId: string | null, systemAudio: boolean, gameMode: boolean) => invoke<string>("start_recording", { projectName, micId, targetId, systemAudio, gameMode })
 ```
 
 ### Inputs
 
-- `projectName` (`string`) - unique folder name for this session (e.g., `"rec-<timestamp>"`). *Why caller-provided:* the frontend generates the name so the folder path is known before the recording starts, allowing webcam bytes to be saved to the same folder immediately after stopping.
+- `projectName` (`string`) - unique folder name for this session (e.g., `"rec-<timestamp>"`). *Why caller-provided:* the frontend generates the name so it can pass the same name straight into `webcam.start()`, before the backend has resolved anything.
 - `micId` (`string | null`) - OS audio device id, or `null` to skip microphone capture. *Why nullable:* the user may have disabled the mic toggle.
+- `targetId` (`string | null`) - id of the display (or window) to capture, or `null` for the default target. *Why nullable:* mirrors `DeviceState.displayId`, which starts out `null` until `listDisplays` resolves.
 - `systemAudio` (`boolean`) - whether to capture system (loopback) audio.
 - `gameMode` (`boolean`) - when true, switches the video encoder to CFR pacing for smooth game / variable-FPS content.
 
 ### Returns
 
-`Promise<void>`. Rejects with a step-tagged error string (e.g., `"prepare folder: ..."`) so the caller can display the specific failure stage.
+`Promise<string>` - the resolved absolute project folder path. Rejects with a step-tagged error string (e.g., `"prepare folder: ..."`) so the caller can display the specific failure stage.
 
 ### Used by
 
-`useRecordingFlow` (`src/hud/hooks/useRecordingFlow.ts`) - called at the start of `toggle()`.
+`useRecordingFlow` (`src/hud/hooks/useRecordingFlow.ts`) - called at the start of `toggle()`; the resolved folder is passed to `webcam.start()` and threaded through to `stopRecording`/`preprocessProject`/`onEdit`.
 
 ## pauseRecording
 
@@ -96,13 +97,13 @@ export const stopRecording = () => invoke<{ folder: string; frames: number }>("s
 ## saveWebcam
 
 ```ts
-export const saveWebcam = (folder: string, bytes: number[]) => invoke<void>("save_webcam", { folder, bytes })
+export const saveWebcam = (folder: string, bytes: Uint8Array) => invoke<void>("save_webcam", { folder, bytes })
 ```
 
 ### Inputs
 
 - `folder` (`string`) - absolute path to the project directory. *Why needed:* the backend writes the webcam file alongside the screen capture.
-- `bytes` (`number[]`) - raw webcam recording bytes as a plain number array. *Why `number[]` rather than `Uint8Array`:* Tauri's IPC bridge cannot serialize typed arrays directly; the caller converts before passing.
+- `bytes` (`Uint8Array`) - the whole webcam recording as one blob.
 
 ### Returns
 
@@ -110,7 +111,26 @@ export const saveWebcam = (folder: string, bytes: number[]) => invoke<void>("sav
 
 ### Used by
 
-`Hud` (`src/hud/Hud.tsx`) - called in the stop path when `webcam.stop()` returns bytes.
+Not currently called from any `.tsx` file - superseded by `appendWebcam`, which streams the recording to disk in chunks *during* capture instead of holding the whole clip in memory for one write at Stop. `save_webcam` still exists on the Rust side as a simpler one-shot entry point, just unused today.
+
+## appendWebcam
+
+```ts
+export const appendWebcam = (folder: string, bytes: Uint8Array) => invoke<void>("append_webcam", { folder, bytes })
+```
+
+### Inputs
+
+- `folder` (`string`) - absolute path to the project directory.
+- `bytes` (`Uint8Array`) - one `MediaRecorder` chunk (a 1s timeslice) to append to `webcam.webm`.
+
+### Returns
+
+`Promise<void>`.
+
+### Used by
+
+`useWebcamRecorder` (`src/hud/hooks/useWebcamRecorder.ts`) - called from the recorder's `ondataavailable` handler for every chunk, chained so appends land in order; `stop()` awaits the chain so `webcam.webm` is complete before the editor opens.
 
 ## ExportResolution
 
@@ -224,9 +244,9 @@ export const getEdit = (folder: string) => invoke<EditDoc>("get_edit", { folder 
 
 `Promise<EditDoc>` - the current edit document for that session, seeded from the recording's auto-zoom output on first call (`load_or_seed` on the Rust side). The returned doc is byte-identical to the legacy export path when untouched. *Why seeded on first call rather than at stop time:* lazy seeding keeps the stop path fast; seeding is deferred until the editor is actually opened.
 
-### Implementation
+### Used by
 
-Not yet consumed by any `.tsx` file (the M3 editor UI is in progress); the function is defined here so the backend command surface is available when the editor is wired up.
+`useEditorData` (`src/editor/hooks/useEditorData.ts`) - fetched once per `[folder]` into `doc`.
 
 ## applyEditOp
 
@@ -243,9 +263,9 @@ export const applyEditOp = (folder: string, op: EditOp) => invoke<EditDoc>("appl
 
 `Promise<EditDoc>` - the updated document after the op is applied. This is the editor's primary mutation entry point.
 
-### Implementation
+### Used by
 
-Not yet consumed by any `.tsx` file; defined in anticipation of the M3 editor.
+`Editor` (`src/editor/Editor.tsx`) - wrapped by the local `applyOp`, which records undo history and bumps `rev` around every call; the wrapped version is threaded as a prop into every inspector and panel, making this the editor's primary mutation entry point.
 
 ## saveEdit
 
@@ -262,6 +282,11 @@ export const saveEdit = (folder: string, doc: EditDoc) => invoke<void>("save_edi
 
 `Promise<void>`.
 
+### Used by
+
+- `useEditHistory` (`src/editor/hooks/useEditHistory.ts`) - `undo`/`redo` persist the restored doc via a bulk `saveEdit` rather than replaying it as an `EditOp`.
+- `Editor` (`src/editor/Editor.tsx`) - `saveDocSettings` persists the whole doc after patching `settings` (theme/cursor/background/audio/etc. aren't `EditOp`s).
+
 ## aiAutoedit
 
 ```ts
@@ -271,11 +296,65 @@ export const aiAutoedit = (folder: string, model?: string) => invoke<EditDoc>("a
 ### Inputs
 
 - `folder` (`string`) - project directory.
-- `model` (`string`, optional) - Ollama model name override. *Why optional:* the backend has a compiled-in default; the frontend passes a value only when the user has chosen a different model in settings.
+- `model` (`string`, optional) - Ollama model name override. *Why optional:* `ai_autoedit`/`ai_plan` fall back to the first installed Ollama chat model when this is omitted, empty, or names a model that isn't installed - there is no hardcoded default model name (a missing model used to 404, which was the "AI returned 404" bug).
 
 ### Returns
 
 `Promise<EditDoc>` - the rewritten document after the AI director has applied zooms, trim, and speed segments. Rejects (and saves nothing) if Ollama is unreachable or the reply is unparseable. *Why return the doc rather than void:* the editor must refresh its state immediately after the AI pass without a separate `getEdit` round-trip.
+
+### Used by
+
+Not currently called from any `.tsx` file - the editor's AI Director now drives `aiPlan` (below) instead, so it can reveal each step one-at-a-time. `aiAutoedit`'s one-shot apply-the-whole-plan behavior stays available as a simpler backend entry point (mirrors `ai_autoedit` on the Rust side) for any future non-agentic caller.
+
+## AiStep
+
+```ts
+export type AiStep = { op: EditOp; label: string };
+```
+
+One labeled step of the AI director's plan: the `EditOp` to apply plus a human "what I did + why" line - mirrors the Rust `AiStep` (`src-tauri/src/ai/commands.rs`).
+
+### Used by
+
+- `src/lib/ipc.ts` - element type of `aiPlan`'s returned array.
+- `src/editor/Editor.tsx` - `onRun` applies each step's `op` via `applyEditOp` and appends its `label` to the on-screen agentic log.
+
+## aiPlan
+
+```ts
+export const aiPlan = (folder: string, model?: string) => invoke<AiStep[]>("ai_plan", { folder, model })
+```
+
+The AI director's plan as ordered, labeled steps (NOT applied) - the editor reveals them one-by-one via `applyEditOp` for the agentic feel.
+
+### Inputs
+
+- `folder` (`string`) - project directory.
+- `model` (`string`, optional) - Ollama model name override, same fallback rules as `aiAutoedit`.
+
+### Returns
+
+`Promise<AiStep[]>` - the plan as ordered, labeled steps, not yet applied to the doc. When the doc already has zooms, the first step is a `clear_zooms` op labeled "Rethinking your zooms…", so the reveal shows the mechanical seed-time zooms give way to the smart ones. Rejects if Ollama is unreachable or the reply is unparseable, same as `aiAutoedit`.
+
+### Used by
+
+`Editor` (`src/editor/Editor.tsx`) - `onRun` fetches the whole plan in one call, then reveals it by applying each step's `op` via `applyEditOp` and narrating its `label` roughly 460ms apart, so auto-edit reads like a live agent editing the panels rather than an instant bulk change. One `record(doc)` before the loop makes the whole reveal a single undo step.
+
+## listOllamaModels
+
+```ts
+export const listOllamaModels = () => invoke<string[]>("list_ollama_models")
+```
+
+Locally-installed Ollama model names, for the AI panel's Engine picker.
+
+### Returns
+
+`Promise<string[]>` - chat model names only (embedding-only models are filtered out on the Rust side). Never rejects: resolves to `[]` when Ollama isn't running, since this is a convenience for populating a dropdown, not a precondition for `aiAutoedit`/`aiPlan`.
+
+### Used by
+
+`AiPanel` (`src/editor/panels/AiPanel.tsx`) - fetched once on mount to populate the Engine picker; falls back to showing just the currently-selected (or default) model name when the list is empty.
 
 ## setCapturable
 
@@ -338,6 +417,79 @@ export const previewLayout = (folder: string) => invoke<PreviewLayout>("preview_
 ### Returns
 
 `Promise<PreviewLayout>` - the screen/webcam framing fractions for the recording.
+
+## PanelRectDto
+
+```ts
+export interface PanelRectDto { rect: [number, number, number, number]; radius: number; alpha: number; ring_px: number; ring_color: [number, number, number] }
+```
+
+One panel's rect (fraction of output, `[x, y, w, h]`) + corner radius (fraction of output width) + cross-dissolve `alpha` (0..1) + ring width (fraction of output width, 0 = no ring) + ring color (RGB 0..255) - the same basis `PreviewLayout` uses.
+
+### Used by
+
+- `src/lib/ipc.ts` - field of `LayoutPresetDto`.
+- `src/editor/timeline/layoutTrack.ts` - `lerpRect` cross-fades between two `PanelRectDto`s.
+
+## LayoutPresetDto
+
+```ts
+export interface LayoutPresetDto { screen: PanelRectDto; cam: PanelRectDto }
+```
+
+One layout preset's two panels: `screen` (the zoomed base layer) + `cam` (the fixed top layer).
+
+### Used by
+
+- `src/lib/ipc.ts` - value type of `LayoutPresets`.
+- `src/editor/timeline/layoutTrack.ts` - `presetOf`/`rawPresetAt` look up the preset for a given `layout` name.
+
+## LayoutPresetName
+
+```ts
+export type LayoutPresetName = "screen" | "camera" | "presenter" | "screen_only" | "camera_only";
+```
+
+The 5 layout preset names (matches `LayoutSeg.layout`'s known values).
+
+### Used by
+
+- `src/lib/ipc.ts` - key type of `LayoutPresets`.
+- `src/editor/timeline/layoutTrack.ts` - `KNOWN` validates a `LayoutSeg.layout` string against this set, falling back to `"screen"` for an unrecognized name.
+
+## LayoutPresets
+
+```ts
+export type LayoutPresets = Record<LayoutPresetName, LayoutPresetDto>;
+```
+
+All 5 layout presets' panel rects, keyed by name.
+
+### Used by
+
+- `src/editor/hooks/useEditorData.ts` - fetched via `previewLayouts` into state, passed down to `Stage`.
+- `src/editor/timeline/layoutTrack.ts` - `layoutAt` cross-fades between presets as the playhead crosses `LayoutSeg` boundaries.
+- `src/editor/hooks/useCompositeLoop.ts` - held in a ref so the per-frame compositing loop can resolve the current layout without waiting on React state.
+
+## previewLayouts
+
+```ts
+export const previewLayouts = (folder: string) => invoke<LayoutPresets>("preview_layouts", { folder })
+```
+
+All 5 layout presets' panel rects + alpha in one call, so the editor preview can cross-fade between layout presets itself (mirroring the export's `LayoutTrack`) instead of only ever showing the single static layout `previewLayout` returns.
+
+### Inputs
+
+- `folder` (`string`) - project directory.
+
+### Returns
+
+`Promise<LayoutPresets>` - all 5 presets, keyed by name.
+
+### Used by
+
+`useEditorData` (`src/editor/hooks/useEditorData.ts`) - fetched on `[folder, rev]` (a layout edit is one of the things `rev` bumps for).
 
 ## ensureProxy
 
@@ -416,6 +568,49 @@ export const previewBg = (folder: string) => invoke<string>("preview_bg", { fold
 ### Returns
 
 `Promise<string>` - a `data:image/png;base64,...` URL of the export background (mesh/gradient), so the canvas preview paints the exact same background the export uses. The frontend decodes it into an `<img>` the compositor draws under the screen.
+
+## FxOverlayParams
+
+```ts
+export interface FxOverlayParams {
+  ow: number; oh: number;
+  style: string; color: [number, number, number]; intensity: number;
+  hits: [number, number, number][];
+  spotCx?: number; spotCy?: number; spotDim?: number;
+  spotRadius?: number; spotFeather?: number; spotAlpha?: number;
+  spotMode?: string; spotTint?: [number, number, number]; spotT?: number;
+  videoMode?: string; videoAlpha?: number; videoT?: number;
+  camRect?: [number, number, number, number]; camRadius?: number; dimCamera?: boolean;
+}
+```
+
+Parameters for one FX-overlay render pass: click ripples (`style`/`color`/`intensity`/`hits`) plus the optional spotlight (`spot*`) and full-screen video-fx (`video*`) overlays, all in FX-render pixel space (`ow`/`oh`). The `cam*` fields are the webcam PiP's exclusion rect - mirrors the export's `Spot.cam_rect`/`cam_radius`/`dim_camera`, letting the backend undo the spotlight dim inside the webcam panel when `dimCamera` is false.
+
+### Used by
+
+- `src/lib/ipc.ts` - parameter type of `previewFxOverlay`.
+- `src/editor/stage/fxOverlay.ts` - `requestFxOverlay` builds this from the current click/spotlight/video-fx preview state before calling `previewFxOverlay`.
+
+## previewFxOverlay
+
+```ts
+export const previewFxOverlay = (p: FxOverlayParams) =>
+  invoke<string>("preview_fx_overlay", { /* p, with every optional field normalized to ?? null */ })
+```
+
+Render the FX overlay (spotlight + click effects) using the exact export shaders.
+
+### Inputs
+
+- `p: FxOverlayParams` - the render parameters. Every optional field is normalized to `?? null` before crossing the IPC boundary, since Tauri's `invoke` does not accept `undefined` in a serialized argument.
+
+### Returns
+
+`Promise<string>` - a PNG data URL of the overlay to composite on the preview canvas, rendered with the exact same GPU/CPU shader pipeline as the export.
+
+### Used by
+
+`requestFxOverlay` (`src/editor/stage/fxOverlay.ts`) - builds `FxOverlayParams` from the current preview state and calls this; in turn used by `src/editor/hooks/useCompositeLoop.ts`'s per-frame compositing.
 
 ## CursorSpriteDto
 

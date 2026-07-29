@@ -1,0 +1,86 @@
+<link rel="stylesheet" href="./app.css" />
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#6E63E8" /><stop offset="1" stop-color="#2C74F0" />
+  </linearGradient>
+</defs></svg>
+
+<div id="app">
+  <div class="titlebar" data-tauri-drag-region>
+    <span class="brand">TCursor Setup</span>
+    <button class="close-btn" data-close aria-label="Close">&#10005;</button>
+  </div>
+
+  <div class="content">
+    <section class="screen active" id="welcome">
+      <div class="art">
+        <svg viewBox="0 0 48 48" width="76" height="76" aria-hidden="true">
+          <rect x="2" y="2" width="44" height="44" rx="12" fill="url(#g)" />
+          <path d="M16 12 L16 36 L22 30 L26 38 L29 36.5 L25 29 L32 29 Z" fill="#fff" />
+        </svg>
+      </div>
+      <h1 class="title">Install TCursor</h1>
+      <p class="subtitle">Auto-zoom screen recorder &middot; v0.1.0</p>
+      <button class="btn btn-primary" id="install">Install</button>
+      <p class="fineprint">By installing you agree to the <a href="#" id="license-link">License</a></p>
+    </section>
+
+    <section class="screen" id="installing">
+      <div class="art pulse">
+        <svg viewBox="0 0 48 48" width="76" height="76" aria-hidden="true">
+          <rect x="2" y="2" width="44" height="44" rx="12" fill="url(#g)" />
+          <path d="M16 12 L16 36 L22 30 L26 38 L29 36.5 L25 29 L32 29 Z" fill="#fff" />
+        </svg>
+      </div>
+      <h1 class="title">Installing&hellip;</h1>
+      <div class="track"><div class="fill" id="fill"></div></div>
+      <p class="status" id="status">Starting&hellip;</p>
+    </section>
+
+    <section class="screen" id="done">
+      <div class="art">
+        <svg viewBox="0 0 48 48" width="76" height="76" aria-hidden="true">
+          <circle cx="24" cy="24" r="21" fill="url(#g)" />
+          <path d="M15 24 l6 6 l12 -13" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </div>
+      <h1 class="title">TCursor is ready</h1>
+      <p class="subtitle">Added to your Start menu and desktop.</p>
+      <button class="btn btn-primary" id="launch">Launch TCursor</button>
+      <button class="btn btn-ghost" data-close>Close</button>
+    </section>
+
+    <section class="screen" id="error">
+      <div class="art">
+        <svg viewBox="0 0 48 48" width="76" height="76" aria-hidden="true">
+          <circle cx="24" cy="24" r="21" fill="#3A2242" />
+          <path d="M24 13 v14" stroke="#FF9A9A" stroke-width="3.6" stroke-linecap="round" />
+          <circle cx="24" cy="34.5" r="2.3" fill="#FF9A9A" />
+        </svg>
+      </div>
+      <h1 class="title">Install failed</h1>
+      <p class="status" id="error-msg">Something went wrong.</p>
+      <button class="btn btn-primary" id="retry">Try again</button>
+      <button class="btn btn-ghost" data-close>Close</button>
+    </section>
+  </div>
+
+  <div class="overlay" id="license-overlay">
+    <div class="license-card">
+      <h2>License</h2>
+      <div class="license-text">
+        <p>TCursor is licensed, not sold, for use on devices you own or control. It records your
+        screen, cursor, and &mdash; when enabled &mdash; microphone, system audio, and webcam,
+        stored locally. You are responsible for complying with the laws that apply when recording
+        others.</p>
+        <p>The software is provided &ldquo;as is&rdquo;, without warranty of any kind. To the extent
+        permitted by law, Coehe is not liable for any damages arising from its use. It bundles
+        FFmpeg under its own LGPL/GPL terms. The full agreement is installed alongside the app.</p>
+      </div>
+      <button class="btn btn-ghost" id="license-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<script src="./app.js"></script>

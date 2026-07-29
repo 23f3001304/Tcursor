@@ -170,6 +170,8 @@ Controls how the cursor is rendered in the recording. `"system"` uses the OS cur
 export interface CursorSettings {
   style: CursorStyle;
   size: number;
+  smoothness: number;
+  path_idealize: number;
   motion_blur: number;
   click_bounce: boolean;
   bounce_intensity: number;
@@ -181,6 +183,8 @@ Cursor rendering and animation parameters. Mirrors the Rust `CursorSettings` (`s
 
 - `style: CursorStyle` - rendering mode.
 - `size: number` - scale multiplier for the cursor sprite.
+- `smoothness: number` - 0..1 strength of motion smoothing applied to the raw recorded cursor path (default `0.6`). *Why:* raw OS cursor samples can be jittery; smoothing trades a touch of positional lag for a calmer glide, independent of the stronger reshaping `path_idealize` does below.
+- `path_idealize: number` - 0..1 strength of straightening wandering paths into clean eased strokes between clicks (`0` = raw path, the default; `1` = fully idealized). Mirrors Rust `CursorSettings::path_idealize`; see `Cursor::set_idealize` (`src-tauri/src/export/cursor/mod.rs`) for the anchor-easing mechanism. *Why a separate knob from `smoothness`:* smoothing damps jitter without changing the path's shape, while idealizing reshapes the path itself into deliberate strokes - part of the broader design direction of idealizing UI motion (cursor glide, agentic AI reveals) for a more premium, intentional feel, which needs its own strength dial rather than riding on the jitter-smoothing one.
 - `motion_blur: number` - strength of the motion-blur trail (0 = off).
 - `click_bounce: boolean` - whether a spring-bounce animation plays on click.
 - `bounce_intensity: number` - magnitude of the bounce when `click_bounce` is true.
@@ -189,8 +193,8 @@ Cursor rendering and animation parameters. Mirrors the Rust `CursorSettings` (`s
 ### Used by
 
 - `src/hud/settings/settings.ts` - `Settings.cursor`
-- `src/hud/settings/SettingsCursor.tsx` - renders style/size/blur/bounce controls (not `pack` - pack selection is editor-only, see `CursorPanel`)
-- `src/editor/panels/CursorPanel.tsx` - renders the pack picker + import button, in addition to the same style/size/blur/bounce controls
+- `src/hud/settings/SettingsCursor.tsx` - renders style/size/blur/bounce controls (not `pack`, `smoothness`, or `path_idealize` - those are editor-only, see `CursorPanel`)
+- `src/editor/panels/CursorPanel.tsx` - renders the pack picker + import button, plus the `smoothness`/`path_idealize` sliders, in addition to the same style/size/blur/bounce controls
 
 ## ClickFxStyle
 
@@ -231,6 +235,24 @@ Full-screen video effect overlay applied to the recording.
 - `src/hud/settings/settings.ts` - `ClickFxSettings.video_fx_mode`
 - `src/hud/settings/SettingsClickFx.tsx` - renders the video-fx picker
 
+## CamZoomAction
+
+```ts
+export type CamZoomAction = { shrink: { to: number } } | "hide" | "stay";
+```
+
+What the webcam PiP does while a zoom is active. Wire form of Rust's `CamZoomAction` (`settings/model.rs`): serde's externally-tagged encoding gives `{ shrink: { to } }` for the struct variant and bare `"hide"`/`"stay"` for the unit ones.
+
+- `{ shrink: { to: number } }` - shrinks the webcam panel toward size `to` (a 0..1 fraction) as the zoom deepens.
+- `"hide"` - fades the webcam out entirely as the zoom deepens.
+- `"stay"` - leaves the webcam panel's geometry untouched.
+
+### Used by
+
+- `src/hud/settings/settings.ts` - `ZoomSettings.cam_zoom_default` (the global default).
+- `src/lib/edit.ts` - re-exported for `Zoom.cam_action` (the per-zoom override) and the `set_zoom_cam_action` `EditOp`.
+- `src/editor/stage/camZoomAction.ts` - `resolvedCamDefault`/`resolveCamAction` resolve which action applies at a given time; `applyCamZoomAction`/`camZoomAlpha` turn it into the geometry/alpha the preview draws.
+
 ## ZoomSettings
 
 ```ts
@@ -244,6 +266,7 @@ export interface ZoomSettings {
   camera_shrink_min: number;
   smart_hold: boolean;
   smart_follow: boolean;
+  cam_zoom_default?: CamZoomAction | null;
 }
 ```
 
@@ -258,12 +281,14 @@ Configuration for the auto-zoom feature.
 - `camera_shrink_min` - minimum camera size when shrunk (fraction).
 - `smart_hold` - whether typing keystrokes extend the zoom hold.
 - `smart_follow` - whether the zoom anchor follows the cursor during a hold.
+- `cam_zoom_default?: CamZoomAction | null` - the global default for what the webcam PiP does during a zoom (`resolvedCamDefault`), used whenever a zoom has no per-zoom `Zoom.cam_action` override. Absent/`null` falls back to the legacy `camera_shrink`/`camera_shrink_min` pair - `{shrink:{to:camera_shrink_min}}` when `camera_shrink` is on, else `"stay"` - so configs saved before this field existed resolve to exactly today's behavior.
 
 ### Used by
 
 - `src/hud/settings/settings.ts` - `Settings.zoom`
-- `src/hud/settings/SettingsZoom.tsx` - renders all zoom controls
+- `src/hud/settings/SettingsZoom.tsx` - renders all zoom controls (not `cam_zoom_default` - not yet exposed by any settings UI)
 - `src/lib/ipc.ts` - serialized into Tauri commands
+- `src/editor/stage/camZoomAction.ts` - `resolvedCamDefault` reads `cam_zoom_default` to compute the global webcam-during-zoom behavior
 
 ## ClickFxSettings
 
@@ -330,6 +355,46 @@ Maps each hotkey action to its key-binding string. Each field is the key combo s
 - `src/hud/settings/settings.ts` - `Settings.hotkeys`
 - `src/hud/settings/SettingsHotkeys.tsx` - renders the hotkey binding editor
 
+## BackgroundKind
+
+```ts
+export type BackgroundKind = "mesh" | "solid" | "gradient";
+```
+
+Which of `BackgroundSettings`' fields the renderer uses - mirrors Rust `settings::background::BackgroundKind`. `"mesh"` (the default) is today's bundled image background; `"solid"`/`"gradient"` are real user-chosen colors. Custom image/video backgrounds have no backend yet - `BackgroundPanel` flags those tabs as "coming soon" rather than wiring them to a `kind` that doesn't exist.
+
+### Used by
+
+- `src/hud/settings/settings.ts` - `BackgroundSettings.kind`
+- `src/editor/panels/BackgroundPanel.tsx` - the Background Type selector (`default`/`color`/`gradient` tabs map to `mesh`/`solid`/`gradient`)
+
+## BackgroundSettings
+
+```ts
+export interface BackgroundSettings {
+  kind: BackgroundKind;
+  solid: [number, number, number];
+  gradient_from: [number, number, number];
+  gradient_to: [number, number, number];
+  gradient_angle_deg: number;
+  blur: number;
+}
+```
+
+The recording's background, behind the screen/webcam panels. Mirrors the Rust `settings::background::BackgroundSettings` byte-for-byte.
+
+- `kind: BackgroundKind` - which of the fields below the renderer actually uses.
+- `solid: [number, number, number]` - RGB triplet used when `kind` is `"solid"`.
+- `gradient_from` / `gradient_to: [number, number, number]` - the two RGB stops used when `kind` is `"gradient"`.
+- `gradient_angle_deg: number` - gradient direction in degrees, same convention as CSS `linear-gradient()`.
+- `blur: number` - 0..1 softness applied once to the static background buffer (cheap - rebuilt once per export/preview, not per frame). `0` = off (today's behavior).
+
+### Used by
+
+- `src/hud/settings/settings.ts` - `Settings.background`
+- `src/editor/panels/BackgroundPanel.tsx` - reads and patches every field; its fixed preset swatches (`backgroundPresets.ts`) ship in the same plain-RGB shape so a swatch always renders identically to what gets applied
+- `src/editor/hooks/useEditorData.ts` - refetches `previewBg` whenever `JSON.stringify(doc?.settings.background)` changes, since a background edit is the only kind of change that alters what the backend's background render returns
+
 ## Settings
 
 ```ts
@@ -341,10 +406,14 @@ export interface Settings {
   cursor: CursorSettings;
   ui: InterfaceSettings;
   audio_offset_ms: number;
+  background: BackgroundSettings;
+  audio_mic_volume: number;
+  audio_sys_volume: number;
+  ai_model: string;
 }
 ```
 
-Top-level interface aggregating all settings groups. Serialized to/from JSON by Tauri's `load_settings` and `save_settings` commands.
+Top-level interface aggregating all settings groups. Serialized to/from JSON by Tauri's `get_settings` and `set_settings` commands.
 
 - `zoom: ZoomSettings` - auto-zoom configuration.
 - `clickfx: ClickFxSettings` - click effects and spotlight.
@@ -353,9 +422,12 @@ Top-level interface aggregating all settings groups. Serialized to/from JSON by 
 - `cursor: CursorSettings` - cursor rendering.
 - `ui: InterfaceSettings` - theme and accent.
 - `audio_offset_ms: number` - A/V sync correction in milliseconds; positive shifts audio later relative to video.
+- `background: BackgroundSettings` - the recording's background (mesh/solid/gradient) and its blur.
+- `audio_mic_volume` / `audio_sys_volume: number` - per-source playback gain (0..1) for the mixed preview/export audio, set by the editor's Audio panel.
+- `ai_model: string` - the user's chosen Ollama model override for the AI director (`""` = no explicit choice; the backend picks an installed model itself). Set by `AiPanel`'s Engine picker.
 
 ### Used by
 
 - `src/hud/Hud.tsx` - top-level settings state
-- `src/lib/ipc.ts` - `loadSettings` and `saveSettings` IPC wrappers
-- `src/lib/edit.ts` - passed to the edit pipeline
+- `src/lib/ipc.ts` - `getSettings` and `setSettings` IPC wrappers
+- `src/lib/edit.ts` - passed to the edit pipeline (`EditDoc.settings`)

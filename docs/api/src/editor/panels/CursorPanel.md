@@ -1,6 +1,6 @@
 # src/editor/panels/CursorPanel.tsx
 
-Editor panel for the "Cursor" rail tab. Toggles synthetic-cursor visibility and click-bounce, lists/selects the cursor sprite pack (built-in + any imported), offers a folder-based "Import pack..." action via the Tauri dialog plugin, and holds the size/motion-blur/bounce-intensity sliders.
+Editor panel for the "Cursor" rail tab. Picks the cursor style (System / Enhanced / Hidden); for Enhanced it also toggles click-bounce, lists/selects the cursor sprite pack (built-in + any imported), offers a folder-based "Import pack..." action via the Tauri dialog plugin, and holds the size/smoothness/path-idealization/motion-blur/bounce-intensity sliders. Every Enhanced-only control is hidden for the System and Hidden styles.
 
 ## CursorPanel
 
@@ -25,11 +25,11 @@ Renders the full Cursor settings panel.
 - On failure: shows the rejection message (or a generic fallback if it isn't a string) as inline red text below the grid.
 - While in flight, the button is disabled and its label switches to "Importing...".
 
-**Show synthetic cursor.** A `Switch` bound to `settings.style !== "hidden"`; toggling writes `"enhanced"` or `"hidden"` to `style` (there is no separate UI for the third style, `"system"`, in this panel).
+**Cursor style.** A 3-way `Picker` (`STYLE_OPTS`) over all three `CursorStyle`s - `system` (keep the recording's baked-in OS cursor), `enhanced` (redraw a synthetic pointer), `hidden` (none) - writing `style` via `set`. Exposing `system` here is what lets a clip recorded in System return to its original cursor in the editor; the old 2-way `Switch` could only reach `enhanced`/`hidden`. Everything below (click-bounce, the pack grid + import, and every slider) is gated behind `settings.style === "enhanced"`, since none of it affects the System or Hidden cursor.
 
 **Reset.** Restores every field to the app defaults, including `pack: "default"` - does *not* touch the locally fetched `packs` list (an imported pack stays visible in the grid after a reset; only the *selection* reverts to Default).
 
-**Sliders.** Cursor Size (`0.4`-`3.0`), Motion Trail Blur (`0`-`1`), Click Bounce Intensity (`0.1`-`1`) - each a direct `set(field, v)` on `Slider`'s `onChange`.
+**Sliders.** Cursor Size (`0.4`-`3.0`), Cursor Smoothness (`0.0`-`1.0`), Path Idealization (`0.0`-`1.0`), Motion Trail Blur (`0`-`1`), Click Bounce Intensity (`0.1`-`1`) - each a direct `set(field, v)` on `Slider`'s `onChange`. *Cursor Smoothness* (`settings.smoothness`, default `0.6`) drives the Rust-side follow low-pass alpha (`CursorSettings::follow_alpha`, `0.75 - 0.65 * smoothness`): `0` is snappy/raw cursor tracking, `1` is a glassy, heavily-damped glide. *Path Idealization* (`settings.path_idealize`, default `0.0`) straightens wandering mouse movement into clean strokes between clicks on the export side (`Cursor::set_idealize`); `0` leaves the recorded path untouched.
 
 ### Notes
 

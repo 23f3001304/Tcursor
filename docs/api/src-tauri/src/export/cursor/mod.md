@@ -11,6 +11,9 @@ pub struct Cursor {
     idx: usize,
     sx: f32,
     sy: f32,
+    a: f32,
+    idealize: f32,
+    anchors: Vec<(u32, f32, f32)>,
     primed: bool,
 }
 ```
@@ -21,6 +24,9 @@ Stateful cursor tracker that owns the mouse log and screen geometry.
 - `screen` - capture geometry (width, height, origin). *Why:* `raw_at` calls `to_frame`, which needs the screen rect to convert screen-space coordinates to frame-local pixels.
 - `idx` - the index of the last event at or before the most recently queried time. *Why mutable:* enables a forward-only scan rather than a binary search on every frame, amortising cost to O(1) per call when frames are queried in order.
 - `sx`, `sy` - smoothed position accumulators in frame-local float pixels. *Why floats:* the low-pass filter accumulates sub-pixel movement; rounding only happens on output.
+- `a` - the low-pass alpha (follow smoothness). *Why a field, not a constant:* it is settings-driven (`CursorSettings::follow_alpha`, from the editor's Cursor Smoothness slider) - lower `a` = a smoother, more deliberate glide. `set_a` updates it live so a settings change reflects via `FrameRenderer::reload_edit` without rebuilding the cursor.
+- `idealize` - path-idealization strength (0 = raw path, 1 = clean eased strokes between the anchors). Settings-driven (`CursorSettings::path_idealize`, the editor's Path Idealization slider); `set_idealize` updates it live.
+- `anchors` - `(t, x, y)` frame-local anchors (the first sample, every click, and the last sample) that the idealized path eases between, so a meandering real route becomes deliberate strokes to the clicks. Precomputed once in `new` by `compute_anchors`.
 - `primed` - whether `sx`/`sy` have been initialised. *Why:* the first call must seed the accumulator from the raw position rather than lerp toward it from (0, 0), which would produce an unwanted glide-in at the start of the recording.
 
 ### Used by
@@ -30,19 +36,36 @@ Stateful cursor tracker that owns the mouse log and screen geometry.
 ## Cursor::new
 
 ```rust
-pub fn new(events: Vec<MouseEvent>, screen: ScreenInfo) -> Self
+pub fn new(events: Vec<MouseEvent>, screen: ScreenInfo, a: f32) -> Self
 ```
 
-Constructs a `Cursor` that takes ownership of the log, with all smoothing state at zero.
+Constructs a `Cursor` that takes ownership of the log, with all smoothing state at zero and the given follow alpha.
 
 ### Inputs
 
 - `events: Vec<MouseEvent>` - the full mouse log, assumed sorted ascending by `t`. *Why ascending:* the forward-only `idx` scan skips unseen events; out-of-order events would cause missed samples. *Why by value:* the renderer moves its single copy of the log in here.
 - `screen: ScreenInfo` - capture geometry, owned for the tracker's lifetime so `raw_at` can convert on every frame.
+- `a: f32` - the follow low-pass alpha (`CursorSettings::follow_alpha`). *Why passed in:* the smoothness is a user setting, not a constant; the renderer derives it from `settings.cursor.smoothness`.
 
 ### Returns
 
-`Cursor` with `idx = 0`, `sx = 0.0`, `sy = 0.0`, `primed = false`.
+`Cursor` with `idx = 0`, `sx = 0.0`, `sy = 0.0`, the given `a`, and `primed = false`.
+
+## Cursor::set_a
+
+```rust
+pub fn set_a(&mut self, a: f32)
+```
+
+Updates the follow-smoothing alpha in place. *Why it exists:* `FrameRenderer::reload_edit` calls it so a Cursor Smoothness settings change takes effect on the cheap edit-reload path, without rebuilding the whole cursor (which would re-decode the log).
+
+## Cursor::set_idealize
+
+```rust
+pub fn set_idealize(&mut self, s: f32)
+```
+
+Updates the path-idealization strength (clamped 0..1) in place. Like `set_a`, `FrameRenderer::reload_edit` calls it so a Path Idealization settings change takes effect on the cheap edit-reload path. At `at` time, when `idealize > 0` the smoothed position is blended toward `anchored_at` (the eased position along the click/endpoint anchor line).
 
 ## Cursor::events
 
@@ -89,7 +112,7 @@ Returns the smoothed cursor position in frame-local pixels at event-time `t_ms`.
 1. Advance `self.idx` forward while `events[idx + 1].t <= t_ms`. *Why one event at a time:* frames are queried in ascending order; this is amortised O(1) over the full export rather than O(log n) per frame.
 2. Call `raw_at(t_ms)` to get the interpolated, un-smoothed position.
 3. If `!self.primed`, set `sx = raw.x`, `sy = raw.y`, `primed = true`. *Why seed on first call:* prevents a large artificial lerp from (0, 0) to the true starting position at the opening frame.
-4. Otherwise apply exponential low-pass: `sx += (raw.x - sx) * 0.35` (same for `y`). The constant `A = 0.35` was chosen so small jitter (< a few pixels per sample) is largely suppressed while large deliberate movements converge within 4-5 frames (~66 ms at 60 fps). *Why low-pass over raw positions:* recorded mouse data is typically throttled to 60-100 Hz and exhibits sample-to-sample jitter that would produce a visibly shaking cursor in the rendered video.
+4. Otherwise apply exponential low-pass: `sx += (raw.x - sx) * self.a` (same for `y`). `a` is the settings-driven follow alpha (`CursorSettings::follow_alpha`, default ~0.36): higher = snappier follow, lower = a smoother, more deliberate glide (the editor's Cursor Smoothness slider). *Why low-pass over raw positions:* recorded mouse data is typically throttled to 60-100 Hz and exhibits sample-to-sample jitter that would produce a visibly shaking cursor in the rendered video.
 5. Return `FramePoint { x: sx.round(), y: sy.round() }`.
 
 ### Behaviors

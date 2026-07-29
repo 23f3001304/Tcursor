@@ -116,8 +116,12 @@ pub fn ensure_proxy(folder: String, height: u32) -> Result<String, String> {
         let k = real / enc;
         let vf = if (k - 1.0).abs() > 0.02 { format!("scale=-2:{h},setpts={k:.6}*PTS") } else { format!("scale=-2:{h}") };
         let tmp = crate::win::sys::proc::tmp_sibling(&proxy); // write then atomic-rename (no partial reads)
+        // No `-hwaccel auto`: it enables HW decode whose GPU frame format is often incompatible
+        // with the CPU `-vf scale/setpts` filters here, making the whole transcode fail - which
+        // silently aborted preprocessing (blank preview + a raw-4K thumbnail fallback). CPU decode
+        // of a short proxy is plenty fast and reliable.
         let status = ffcmd_bg("ffmpeg")
-            .args(["-v", "error", "-hwaccel", "auto", "-y", "-i"]).arg(paths.video())
+            .args(["-v", "error", "-y", "-i"]).arg(paths.video())
             .args(["-vf", &vf, "-c:v", "libx264", "-preset", "veryfast",
                 "-crf", "27", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an"])
             .arg(&tmp)

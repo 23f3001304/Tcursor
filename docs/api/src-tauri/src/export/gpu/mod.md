@@ -1,6 +1,6 @@
 # src-tauri/src/export/gpu/mod.rs
 
-wgpu device/pipeline initialization, GPU availability probe, texture upload helper, and the shared `FORMAT` constant for the export GPU compositor. All allocation happens at construction time in `Gpu::new`; per-frame paths touch only `upload_tex` and the already-allocated device/queue.
+wgpu device/pipeline initialization, GPU availability probe, texture upload helper, and the shared `FORMAT` constant for the export GPU compositor. The expensive wgpu device is created ONCE per process (`shared_device`) and shared behind `Arc` by every `Gpu`/`GpuFx`; `Gpu::new` allocates only the dims-dependent pipeline + output texture + readback buffer on top of it. Per-frame paths touch only `upload_tex` and the already-allocated device/queue.
 
 ## align_up
 
@@ -23,21 +23,42 @@ The smallest multiple of `align` >= `v`. Panics if `align == 0` (unsigned wrapar
 
 - `src-tauri/src/export/gpu/mod.rs` - `Gpu::new` uses it to compute `padded_bpr`.
 
+## shared_device
+
+```rust
+pub fn shared_device() -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)>
+```
+
+The process-global device + queue as `Arc` handles all pointing at the SAME underlying wgpu device (wgpu's own `Device`/`Queue` are not `Clone`, so they are shared behind `Arc`). Created lazily on first call and cached for the process lifetime (a `None` result is cached too, so a machine with no adapter settles onto the CPU compositor once instead of retrying every frame). Blocks the calling thread via `pollster::block_on` on first init only.
+
+### Returns
+
+`Some((device, queue))` sharing the one process device; `None` if no usable adapter. Because `Arc<Device>` derefs to `Device`, callers store these in `Gpu`/`GpuFx` and use `.device`/`.queue` exactly as before.
+
+### Why
+
+`request_device` costs tens-to-hundreds of ms (driver init) and nothing about the device depends on output dims or aspect. Sharing it means an aspect change, a new export, and the first preview no longer each pay that cost - and `build_renderer` no longer spins up TWO devices (compositor + fx) every time the frame resizes. This is the fix for the aspect-change preview lag.
+
+### Used by
+
+- `src-tauri/src/export/gpu/mod.rs` - `Gpu::new` builds its pipeline/textures on the shared device.
+- `src-tauri/src/export/fx/fx_gpu.rs` - `GpuFx::new` shares the same device instead of creating a second one.
+
 ## gpu_available
 
 ```rust
 pub fn gpu_available() -> bool
 ```
 
-Returns `true` if wgpu can find at least one adapter on this machine. Blocks the calling thread via `pollster::block_on`.
+Returns `true` if a usable GPU device could be created, warming the `shared_device` cache as a side effect. Blocks the calling thread via `pollster::block_on` on first init.
 
 ### Returns
 
-`true` if a default-options adapter was found; `false` otherwise.
+`true` if the shared device initialized; `false` if this machine has no usable adapter.
 
 ### Used by
 
-- `src-tauri/src/export/pipeline/exporter.rs` - `select_compositor` calls this before attempting `GpuCompositor::new`.
+- `src-tauri/src/export/fx/fx_state.rs` - gates GPU vs CPU FX rendering on it before building a `GpuFx` (`select_compositor` in `exporter.rs` does NOT call this - it just tries `GpuCompositor::new` and falls back to CPU on `None`).
 
 ## FORMAT
 
@@ -56,8 +77,8 @@ The texture format used for all export textures (background, screen, webcam, out
 
 ```rust
 pub struct Gpu {
-    pub device: wgpu::Device,
-    pub queue: wgpu::Queue,
+    pub device: Arc<wgpu::Device>,
+    pub queue: Arc<wgpu::Queue>,
     pub sampler: wgpu::Sampler,
     pub bind_layout: wgpu::BindGroupLayout,
     pub pipeline: wgpu::RenderPipeline,
@@ -70,8 +91,8 @@ pub struct Gpu {
 
 All device-lifetime GPU state shared across every frame in one export run.
 
-- `device: wgpu::Device` - the wgpu logical device. *Why:* all resource creation (buffers, textures, bind groups) goes through this.
-- `queue: wgpu::Queue` - the command submission queue. *Why:* `submit` and texture uploads are dispatched here.
+- `device: Arc<wgpu::Device>` - the shared, process-global wgpu logical device (see `shared_device`). *Why:* all resource creation (buffers, textures, bind groups) goes through this; `Arc` so every `Gpu`/`GpuFx` reuses the one device.
+- `queue: Arc<wgpu::Queue>` - the command submission queue of the shared device. *Why:* `submit` and texture uploads are dispatched here.
 - `sampler: wgpu::Sampler` - bilinear/linear filter, clamp-to-edge on all axes. *Why:* shared sampler avoids creating one per frame; all texture lookups in the shader use the same filter settings.
 - `bind_layout: wgpu::BindGroupLayout` - five entries: bindings 0-2 are 2D float-filterable textures (bg, screen, webcam); binding 3 is the sampler; binding 4 is the uniform buffer. *Why:* the layout is fixed per export; per-frame bind groups are created from it.
 - `pipeline: wgpu::RenderPipeline` - compiled from the embedded `shader.wgsl` (vertex `vs_main`, fragment `fs_main`; no depth, no blend, no MSAA). *Why:* compiled once at startup; compilation is the expensive step.
@@ -101,14 +122,12 @@ Creates the full device-lifetime GPU state for an `out_w x out_h` output texture
 
 ### Implementation
 
-1. Create a default wgpu `Instance`; request a default adapter (synchronous via `pollster`).
-2. Raise texture size limits: start from `downlevel_defaults` and call `.using_resolution(adapter.limits())` so 4K screen textures (> 2048 px, the downlevel cap) are accepted.
-3. Request a device with the raised limits.
-4. Create a shared bilinear clamp-to-edge sampler.
-5. Call `make_bind_layout` (private): 3 texture bindings + sampler + uniform buffer.
-6. Call `make_pipeline` (private): load `shader.wgsl` from `include_str!`, create pipeline layout, build the render pipeline.
-7. Allocate the output texture (`out_tex`) and its view.
-8. Compute `padded_bpr = align_up(out_w * 4, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)` and allocate the readback buffer.
+1. Get the shared process-global device + queue via `shared_device` (created once, reused across every compositor/fx build and export; `None` if no adapter). The adapter enumeration + `request_device` cost is paid only on the very first call, process-wide.
+2. Create a bilinear clamp-to-edge sampler.
+3. Call `make_bind_layout` (private): 3 texture bindings + sampler + uniform buffer.
+4. Call `make_pipeline` (private): load `shader.wgsl` from `include_str!`, create pipeline layout, build the render pipeline.
+5. Allocate the output texture (`out_tex`) and its view - sized to `out_w x out_h`, the one per-instance dims-dependent part.
+6. Compute `padded_bpr = align_up(out_w * 4, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)` and allocate the readback buffer.
 
 ## Gpu::upload_tex
 

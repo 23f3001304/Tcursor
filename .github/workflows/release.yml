@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write # create the GitHub Release
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # ffmpeg + ffprobe ship as Tauri resources but aren't committed. Provide them here
+      # (download a pinned build and drop the two exes into src-tauri/resources/).
+      - name: Provide ffmpeg resources
+        shell: pwsh
+        run: |
+          if (-not (Test-Path src-tauri/resources/ffmpeg.exe) -or -not (Test-Path src-tauri/resources/ffprobe.exe)) {
+            throw "Add a step to fetch ffmpeg.exe + ffprobe.exe into src-tauri/resources/ (e.g. a pinned gyan.dev release)."
+          }
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build installers (app + NSIS + MSI + branded Setup)
+        shell: pwsh
+        run: ./setup/build.ps1
+
+      # --- Code signing: enable after SignPath Foundation approval (signpath.io/open-source). ---
+      # Store SIGNPATH_API_TOKEN as a secret and SIGNPATH_ORG_ID as a variable, then uncomment.
+      # - name: Sign installers with SignPath
+      #   if: ${{ vars.SIGNPATH_ORG_ID != '' }}
+      #   uses: signpath/github-action-submit-signing-request@v1
+      #   with:
+      #     api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+      #     organization-id: ${{ vars.SIGNPATH_ORG_ID }}
+      #     project-slug: tcursor
+      #     signing-policy-slug: release-signing
+      #     github-artifact-id: ${{ steps.artifacts.outputs.artifact-id }}
+      #     wait-for-completion: true
+      #     output-artifact-directory: signed
+
+      - name: Upload build artifacts
+        id: artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tcursor-installers
+          path: |
+            setup/dist/TCursorSetup.exe
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/release/bundle/msi/*.msi
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            setup/dist/TCursorSetup.exe
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/release/bundle/msi/*.msi

@@ -24,7 +24,7 @@ impl RawDecoder {
     /// `target_dims` scales output dimensions directly in FFmpeg.
     pub fn spawn(
         video: &Path, rate: f64, input_rate: bool, seek_ms: Option<u64>,
-        square_scale: Option<u32>, target_dims: Option<(u32, u32)>, frame_bytes: usize
+        square_scale: Option<u32>, target_dims: Option<(u32, u32)>, pix_fmt: &str, frame_bytes: usize
     ) -> Result<Self> {
         let r = format!("{rate:.4}");
         let mut cmd = ffcmd("ffmpeg");
@@ -37,10 +37,18 @@ impl RawDecoder {
         if let Some((w, h)) = target_dims {
             cmd.args(["-vf", &format!("scale={w}:{h}:flags=fast_bilinear")]);
         } else if let Some(sz) = square_scale {
-            // Cover-crop to a centered square so a 16:9 webcam isn't skewed.
-            cmd.args(["-vf", &format!("scale={sz}:{sz}:force_original_aspect_ratio=increase,crop={sz}:{sz}:flags=fast_bilinear")]);
+            // Cover-crop to a centered square so a 16:9 webcam isn't skewed. NOTE: `flags` is a
+            // `scale` option, NOT a `crop` option - putting it on `crop` makes newer ffmpeg reject
+            // the whole filtergraph ("Option not found"), which silently zeroed the webcam decode
+            // and dropped the camera from every export. The global `-sws_flags fast_bilinear` above
+            // already sets the scale flags, so `crop` needs none.
+            cmd.args(["-vf", &format!("scale={sz}:{sz}:force_original_aspect_ratio=increase,crop={sz}:{sz}")]);
         }
-        cmd.args(["-f", "rawvideo", "-pix_fmt", "bgra"]);
+        // `nv12` (Y + interleaved half-res UV, ~2.6x smaller than bgra) is nvdec's native output, so
+        // the screen decode skips the expensive yuv->bgra swscale AND pushes far fewer bytes through
+        // the pipe (the export bottleneck); the GPU/CPU compositor does the color convert. The webcam
+        // stays `bgra` (small, and its square cover-crop scale filter wants a packed format).
+        cmd.args(["-f", "rawvideo", "-pix_fmt", pix_fmt]);
         let mut child = cmd.arg("-")
             .stdout(Stdio::piped())
             .stderr(Stdio::null())

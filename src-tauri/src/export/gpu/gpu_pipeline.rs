@@ -16,15 +16,16 @@ pub(super) fn make_bind_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("bind"),
         entries: &[
-            tex(0), tex(1), tex(2),
+            // 0 bg, 1 screen Y (R8), 2 screen UV (Rg8), 3 webcam - all sampled as float.
+            tex(0), tex(1), tex(2), tex(3),
             wgpu::BindGroupLayoutEntry {
-                binding: 3,
+                binding: 4,
                 visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                 count: None,
             },
             wgpu::BindGroupLayoutEntry {
-                binding: 4,
+                binding: 5,
                 visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,

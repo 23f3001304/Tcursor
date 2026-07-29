@@ -1,6 +1,6 @@
 # src-tauri/src/ai/commands.rs
 
-Tauri IPC commands for the AI director: `list_ollama_models` (thin passthrough for the Engine picker) and `ai_autoedit`, which orchestrates the full auto-edit pipeline - load session artifacts, build a timeline transcript, call a local Ollama model, parse the reply into safe edit operations, and write back an updated `EditDoc`. This is the only file in the `ai` module that touches the filesystem or the Tauri command bus; all other `ai::*` modules are pure functions.
+Tauri IPC commands for the AI director: `list_ollama_models` (thin passthrough for the Engine picker), `ai_autoedit` (one-shot: run the pipeline and apply the whole plan), and `ai_plan` (agentic: return the plan as ordered labeled steps WITHOUT applying, so the editor reveals them one-by-one). Both commands share the private `build_plan` LLM pass - load session artifacts, build a timeline transcript, call a local Ollama chat model, and parse the reply into safe edit operations. This is the only file in the `ai` module that touches the filesystem or the Tauri command bus; all other `ai::*` modules are pure functions.
 
 ## list_ollama_models
 
@@ -9,7 +9,7 @@ Tauri IPC commands for the AI director: `list_ollama_models` (thin passthrough f
 pub fn list_ollama_models() -> Vec<String>
 ```
 
-Tauri IPC command. Returns the names of Ollama models installed locally, for `AiPanel.tsx`'s Engine picker.
+Tauri IPC command. Returns the names of locally-installed Ollama **chat** models (embedding-only models like `nomic-embed-text` are filtered out in `ollama::list_models`), for `AiPanel.tsx`'s Engine picker and as `build_plan`'s default-model source.
 
 ### Implementation
 
@@ -26,27 +26,45 @@ Delegates entirely to `ai::backend::ollama::list_models()`. No error variant: an
 pub fn ai_autoedit(folder: String, model: Option<String>) -> Result<EditDoc, String>
 ```
 
-Tauri IPC command. Runs the full AI director pipeline for the session at `folder` and returns the updated edit document.
+Tauri IPC command. Runs the full pipeline for the session at `folder`, applies the whole plan, and returns the updated edit document (the non-agentic, one-shot path).
 
 ### Inputs
 
-- `folder: String` - absolute path string to the project session directory. *Why `String` rather than `Path`:* Tauri IPC deserializes command arguments from JSON; `String` round-trips cleanly whereas `PathBuf` requires a custom deserializer.
-- `model: Option<String>` - Ollama model name to use; defaults to `"llama3.2"` when `None`. *Why optional:* lets the frontend pass a user-selected model without breaking older callers that omit the field.
+- `folder: String` - absolute path to the project session directory. *Why `String`:* Tauri IPC round-trips `String` cleanly; `PathBuf` would need a custom deserializer.
+- `model: Option<String>` - Ollama chat model to use. When `None`, empty, or a model that isn't installed, `build_plan` falls back to the first installed chat model; there is **no** hardcoded default (a missing model 404s, which was the "AI returned 404" bug).
 
 ### Implementation
 
-1. Construct `ProjectPaths { folder: PathBuf::from(folder) }` to get typed accessors for all session file paths.
-2. Call `edit::seed::load_or_seed(&paths)` to get (or lazily create) the `EditDoc` for this session. Read `doc.trim.out_ms` as `dur_ms` - the clip's total length in milliseconds. *Why seed rather than strict load:* the AI command may run before the user has manually opened the editor, so the doc might not exist yet.
-3. Load `EventLog` from `paths.events()` with `?` propagation. *Why mandatory:* mouse click positions are required for the timeline transcript; without them the AI has nothing to place zooms against.
-4. Load `ActionLog` from `paths.actions()` with `.unwrap_or_default()` on failure. *Why optional:* hotkey actions enrich the transcript but a session recorded without any hotkeys is still valid input.
-5. Load `CursorTrack` from `paths.cursor()`. *Why:* IBeam spans become `"text field"` lines in the transcript, helping the model identify form-filling activity.
-6. Load `TypingLog` from `paths.typing()` and extract `.ms`. *Why:* typing timestamps let the model extend zooms through typing bursts rather than only through clicks.
-7. Call `ai::timeline::serialize(&log, &actions, &cursor, &typing, dur_ms)` to build the plain-text transcript. *Why a separate module:* the serialization logic is testable and reusable independently of the HTTP call.
-8. Resolve the model name (`model.unwrap_or_else(|| "llama3.2".into())`). Call `ai::ollama::chat(&model_name, &ai::prompt::system_prompt(), &transcript)` with `?` propagation. *Why `?` here:* if Ollama is unreachable or returns an error, the existing `edit.json` must not be modified - early return guarantees this.
-9. Call `ai::plan::ops_from_json(&raw, dur_ms)` with `?` propagation. *Why `?` here too:* an unparseable or empty response must not corrupt the edit document.
-10. Only after both steps 8 and 9 succeed: clear `doc.zooms`, reset `doc.trim` to `Trim { in_ms: 0, out_ms: dur_ms }` (full clip), then apply each `EditOp` via `edit::api::apply(&mut doc, op)`. *Why clear-then-apply rather than merge:* mechanical auto-zooms generated at seed time are replaced entirely by the AI plan, not overlaid, to avoid conflicting zoom regions.
-11. Save `doc` to `paths.edit()` with `?` propagation, then return `Ok(doc)`.
+1. `build_plan(&paths, model)` (below) runs the whole LLM pass and returns `(doc, ops, log, dur_ms)`.
+2. Replace rather than merge: clear `doc.zooms`, reset `doc.trim` to `Trim { in_ms: 0, out_ms: dur_ms }` (full clip), then apply each `EditOp` via `edit::ops::api::apply`. *Why clear-then-apply:* the mechanical seed-time auto-zooms are replaced entirely by the AI plan, not overlaid.
+3. Save `doc` to `paths.edit()` and return it. On any error before the save, `edit.json` is left untouched.
 
-### Returns
+## ai_plan
 
-`Ok(EditDoc)` with all AI-directed zooms and optional trim applied, written to disk. `Err(String)` on any failure before or during step 10 (Ollama unreachable, bad JSON, no usable edits, I/O error); in all error cases the existing `edit.json` is left untouched.
+```rust
+#[tauri::command]
+pub fn ai_plan(folder: String, model: Option<String>) -> Result<Vec<AiStep>, String>
+```
+
+Tauri IPC command. Same LLM pass as `ai_autoedit`, but returns the plan as ordered, labeled `AiStep`s **without applying anything**. The editor applies them one-at-a-time (each via `apply_edit_op`) so auto-edit reads like a live agent editing the panels. When the doc already has zooms, the first step is `EditOp::ClearZooms` (labeled `"Rethinking your zooms…"`) so the reveal shows the mechanical zooms give way to the smart ones; each remaining step's `label` comes from `ai::backend::narrate::label_for`.
+
+### Used by
+
+- `src/editor/Editor.tsx` - `onRun` awaits `aiPlan`, then applies + narrates each step ~460ms apart, scrubbing the preview to each zoom. One `record(doc)` before the loop makes the whole pass a single undo.
+
+## AiStep
+
+```rust
+#[derive(serde::Serialize)]
+pub struct AiStep { pub op: EditOp, pub label: String }
+```
+
+One step of the plan: the `EditOp` to apply plus a human "what I did + why" line for the agentic reveal log.
+
+## build_plan
+
+```rust
+fn build_plan(paths: &ProjectPaths, model: Option<String>) -> Result<(EditDoc, Vec<EditOp>, EventLog, u32), String>
+```
+
+The shared LLM pass behind both commands: load-or-seed the doc; compute the TRUE clip length via `edit::seed::true_duration_ms` (NOT `doc.trim.out_ms`, which is 0 after a trim reset and would feed the AI a zero-length timeline); load the event/action/cursor/typing logs; serialize a transcript (`ai::backend::timeline::serialize`); pick an installed chat model (caller's pick if present locally, else the first from `ollama::list_models()`, else an error); call `ollama::chat`; and parse with `plan::ops_from_json`. Returns `(doc, ops, event log, clip length ms)` - the event log is threaded out so `ai_plan` can narrate each zoom against the click that triggered it. `?`-propagates every failure so a bad LLM pass never mutates `edit.json`.

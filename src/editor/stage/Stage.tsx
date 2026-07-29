@@ -25,14 +25,14 @@ const DEFAULT_CANVAS: [number, number] = [1280, 720];
  *  native <video>s, and each animation frame is composited onto a 2D canvas (background +
  *  rounded zoomed screen + webcam PiP) via drawPreview. The zoom comes from the exact
  *  camera_track curve. Native decode + Canvas2D drawImage = 60fps. */
-export function Stage({ src, webcamSrc, track, layout, layoutPresets, layoutSegs, cameraMoves, zooms, zoomSettings, clicks, bgUrl, cursorSprites, cursorKinds, cursor, effects, clickfx, audioSrc, muted, timeMs, playing, moveMode, camDraftRef, onTime, onDuration, onZoomAt }: {
+export function Stage({ src, webcamSrc, track, layout, layoutPresets, layoutSegs, cameraMoves, zooms, zoomSettings, clicks, bgUrl, cursorSprites, cursorKinds, cursor, effects, clickfx, audioSrc, muted, volume, timeMs, playing, moveMode, camDraftRef, onTime, onDuration, onZoomAt }: {
   src: string; webcamSrc: string; track: CamSample[]; layout: PreviewLayout | null;
   layoutPresets: LayoutPresets | null; layoutSegs: LayoutSeg[]; cameraMoves: CameraMove[];
   zooms: Zoom[]; zoomSettings: ZoomSettings;
   clicks: ClickSample[]; bgUrl: string;
   cursorSprites: CursorSpriteDto[]; cursorKinds: CursorKindSample[]; cursor: CursorSettings;
   effects: EffectRegion[]; clickfx: ClickFxSettings;
-  audioSrc: string; muted: boolean; timeMs: number;
+  audioSrc: string; muted: boolean; volume: number; timeMs: number;
   playing: boolean; moveMode: boolean;
   camDraftRef: RefObject<CamPose | null>;
   onTime: (ms: number) => void; onDuration: (ms: number) => void;
@@ -95,6 +95,7 @@ export function Stage({ src, webcamSrc, track, layout, layoutPresets, layoutSegs
     playing,
     src,
     muted,
+    volume,
     audioSrc,
     timeMs,
     playRef,

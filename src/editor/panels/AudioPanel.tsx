@@ -40,7 +40,7 @@ export function AudioPanel({
         />
       </div>
 
-      <div className="e-field" style={{ marginTop: 14 }}>
+      <div className="e-field" style={{ marginTop: 16 }}>
         <span className="e-fl">System Audio Volume <b>{Math.round(sysVol * 100)}%</b></span>
         <Slider
           min={0}

@@ -110,7 +110,7 @@ export function CameraPanel({
       {/* Shape / roundness / aspect / dock / ring are STATIC (non-keyframed) appearance - shown in
           BOTH modes so the webcam's look is freely editable while its position is also keyframed. */}
       {MODE_HAS_SHAPE[mode] && (
-        <div className="e-field" style={{ marginTop: 12 }}>
+        <div className="e-field" style={{ marginTop: 16 }}>
           <span className="e-fl">Webcam Shape</span>
           <div className="e-seg">
             {SHAPES.map(([shapeId, label]) => (
@@ -127,7 +127,7 @@ export function CameraPanel({
             value={ma.cam_radius} onChange={(v) => set("cam_radius", v)} />
         </div>
       )}
-      <div className="e-field" style={{ marginTop: 12 }}>
+      <div className="e-field" style={{ marginTop: 16 }}>
         <span className="e-fl">Aspect</span>
         <Picker value={ma.cam_aspect} options={ASPECTS.map(([id, label]) => ({ value: id, label }))}
           onChange={(v) => set("cam_aspect", v)} />

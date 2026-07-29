@@ -107,6 +107,16 @@
   box-shadow: var(--e-lift), var(--e-shadow-raise), 0 6px 18px rgba(124,108,240,.28); }
 .e-run:active { transform: translateY(0); }
 .e-run:disabled { opacity: .6; cursor: default; transform: none; box-shadow: none; }
+/* AI auto-edit failure (e.g. Ollama not running) - surfaced under the Auto-edit button. */
+.e-ai-err { margin: 12px 0 0; font-size: 12px; line-height: 1.5; color: #f7b4b4;
+  background: rgba(239,68,68,.09); border: 1px solid rgba(239,68,68,.3);
+  border-radius: var(--e-r-sm); padding: 10px 12px; }
+/* Agentic director narration - each applied edit streams in as a terminal-like step line. */
+.e-ai-log { margin-top: 16px; display: flex; flex-direction: column; gap: 9px; }
+.e-ai-log-line { font-size: 12px; line-height: 1.5; color: var(--e-fg); padding-left: 20px; position: relative; }
+.e-ai-log-line::before { content: "↳"; position: absolute; left: 2px; top: 0; color: var(--e-ai); }
+.e-ai-log-line.done { color: var(--e-ok); font-weight: 500; padding-left: 0; }
+.e-ai-log-line.done::before { content: none; }
 .e-sum { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .e-sum li { display: flex; align-items: center; gap: 11px; font-size: 13px; }
 .e-sum .ic { width: 28px; height: 28px; border-radius: 8px; background: var(--e-soft);
@@ -161,7 +171,7 @@
   font-size: 13px; color: var(--e-mut); }
 .e-tgroup { display: flex; align-items: center; gap: 8px; }
 .e-tdiv { width: 1px; height: 20px; background: var(--e-border2); flex: none; margin: 0 2px; }
-.e-tg { width: 32px; height: 32px; border: none; background: transparent; color: var(--e-mut);
+.e-tg { width: 32px; height: 32px; border: none; background: transparent; color: #cdced4;
   border-radius: var(--e-r-sm); display: flex; align-items: center; justify-content: center;
   transition: background .14s ease, color .14s ease; }
 .e-tg:hover { background: var(--e-soft); color: var(--e-fg); }

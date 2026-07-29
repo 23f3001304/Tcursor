@@ -25,10 +25,6 @@ export function CaptionsPanel({
           <Switch on={settings.captions} onChange={(v) => set("captions", v)} />
         </div>
       </div>
-
-      <p className="e-lede" style={{ marginTop: 12 }}>
-        Auto-generated subtitles need speech-to-text and are coming soon.
-      </p>
     </div>
   );
 }

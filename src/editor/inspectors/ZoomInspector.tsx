@@ -69,7 +69,6 @@ export function ZoomInspector({ zoom, dur, onApply, onClose }: {
               {p.name}
             </button>
           ))}
-          <button className={curPreset === "Custom" ? "on" : ""} disabled style={{ opacity: 0.5 }}>Custom</button>
         </div>
       </div>
 

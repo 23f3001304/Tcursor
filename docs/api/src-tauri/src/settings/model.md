@@ -357,6 +357,8 @@ Returns `true` only for `CursorStyle::System`.
 pub struct CursorSettings {
     pub style: CursorStyle,
     pub size: f32,
+    pub smoothness: f32,
+    pub path_idealize: f32,
     pub motion_blur: f32,
     pub click_bounce: bool,
     pub bounce_intensity: f32,
@@ -370,6 +372,8 @@ Fields:
 
 - `style: CursorStyle` - rendering mode. Default `CursorStyle::System`.
 - `size: f32` - scale factor applied to the base cursor sprite size (1.0 = default). Default `1.0`. *Why:* lets users with high-DPI recordings scale the cursor up so it remains readable on smaller playback screens.
+- `smoothness: f32` - 0..1 cursor-follow glide amount (0 = snappy/raw, tracks the real cursor closely; 1 = glassy, heavily damped). Default `0.6`. Not used directly - converted to the actual low-pass alpha via `follow_alpha()` (below), so the UI's 0..1 range maps onto a usefully-shaped alpha curve rather than a linear one. *Why default 0.6:* resolves to alpha `~0.36`, matching the old hardcoded smoothing constant, so existing recordings/configs render identically until a user touches the slider.
+- `path_idealize: f32` - 0..1 amount by which wandering cursor paths are straightened into clean strokes between clicks (0 = off, the raw path). Default `0.0` (off - byte-identical to recordings made before this field existed). *Why off by default:* straightening is a stylistic choice, not a correctness fix, so recordings shouldn't change appearance until a user opts in.
 - `motion_blur: f32` - trail strength for the motion blur effect (0 = off, 1 = maximum). Default `0.35`. *Why 0.35:* noticeable but not overwhelming on fast pans; zero would make the sprite look teleporting.
 - `click_bounce: bool` - whether the cursor sprite plays a bounce-dip animation on mouse down. Default `true`. *Why on by default:* the bounce makes click detection trivially legible without any visual effect ring.
 - `bounce_intensity: f32` - depth of the bounce dip on a 0..1 scale (0.5 gives approx 0.18 scale-dip, 1.0 gives approx 0.36 dip). Default `0.5`. *Why not 1.0:* a full dip at 1.0 looks cartoonish; 0.5 gives a subtle-but-readable response.
@@ -381,7 +385,29 @@ Fields:
 - `src-tauri/src/export/cursor/cursorset.rs` (`prep`) - reads `style` to gate, and `pack` (via `export::cursor::pack::sprite_sources`) to resolve which sprite bytes to decode, plus `motion_blur`/`click_bounce`/`bounce_intensity` to configure animation
 - `src-tauri/src/export/cursor/cursorpreview.rs` (`cursor_sprites`) - resolves `pack` the same way so the editor preview matches the export
 - `src-tauri/src/session/record/recorder.rs` - reads `style.captures_os_cursor()` and checks `style == Enhanced` to initialize the cursor type tracker
+- `src-tauri/src/export/render/mod.rs` (`FrameRenderer::new`, `FrameRenderer::reload_edit`) - reads `follow_alpha()` to set the owned `Cursor`'s low-pass alpha and `path_idealize` (via `Cursor::set_idealize`) to configure path straightening; `reload_edit` live-applies BOTH on an `edit.json` change (`Cursor::set_a`/`set_idealize`) without a full renderer rebuild
 - `src/editor/panels/CursorPanel.tsx` - lists/selects/imports packs, writing the chosen id into `pack`
+
+## CursorSettings::follow_alpha
+
+```rust
+pub fn follow_alpha(&self) -> f32
+```
+
+Converts the user-facing `smoothness` (0..1) into the actual low-pass alpha the renderer's `Cursor` uses to damp cursor motion.
+
+### Inputs
+
+- `self` - the `CursorSettings` snapshot. *Why a method:* the mapping is a fixed formula independent of any other settings, so it belongs next to the field it derives from rather than being duplicated at each call site.
+
+### Returns
+
+`0.75 - 0.65 * self.smoothness.clamp(0.0, 1.0)` - `smoothness = 0` gives alpha `0.75` (snappy, follows the raw cursor closely); `smoothness = 1` gives alpha `0.10` (glassy glide). Default `smoothness = 0.6` gives alpha `~0.36`, matching the old hardcoded smoothing constant (`0.35`), so a fresh config renders like every recording made before this field existed.
+
+### Used by
+
+- `src-tauri/src/export/render/mod.rs` (`FrameRenderer::new`) - passed to `Cursor::new` as the initial low-pass alpha
+- `src-tauri/src/export/render/mod.rs` (`FrameRenderer::reload_edit`) - passed to `Cursor::set_a` to live-apply a `smoothness` slider change without rebuilding the renderer
 
 ## Settings
 

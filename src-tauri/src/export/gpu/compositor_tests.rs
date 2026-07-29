@@ -7,6 +7,10 @@ fn solid(w: u32, h: u32, px: [u8; 4]) -> Vec<u8> {
     let mut v = vec![0u8; (w * h * 4) as usize];
     for c in v.chunks_mut(4) { c.copy_from_slice(&px); } v
 }
+/// A solid-color screen frame in the nv12 layout `composite_into` now expects (Y + half-res UV).
+fn nv12_screen(w: u32, h: u32, px: [u8; 4]) -> Vec<u8> {
+    crate::export::color::bgra_to_nv12(&solid(w, h, px), w, h)
+}
 fn panel(x: f32, y: f32, w: f32, h: f32, a: f32) -> Panel {
     Panel { rect: RectF { x, y, w, h }, radius: 0.0, alpha: a, ring_px: 0.0, ring_color: [0, 0, 0] }
 }
@@ -14,7 +18,7 @@ fn panel(x: f32, y: f32, w: f32, h: f32, a: f32) -> Panel {
 #[test]
 fn screen_panel_composites_onto_background() {
     // 4x4 red screen into a 4x4 panel at (2,2) of an 8x8 blue output, no zoom, no camera.
-    let screen = solid(4, 4, [0, 0, 255, 255]); // BGRA red
+    let screen = nv12_screen(4, 4, [0, 0, 255, 255]); // BGRA red -> nv12
     let bg = solid(8, 8, [255, 0, 0, 255]);      // BGRA blue
     let layout = Layout { out_w: 8, out_h: 8, pad_px: 1, screen_scale: 1.0, screen_radius_px: 8.0 * 0.016 };
     let scene = Scene { screen: panel(2.0, 2.0, 4.0, 4.0, 1.0), camera: panel(0.0, 0.0, 0.0, 0.0, 0.0) };
@@ -22,16 +26,17 @@ fn screen_panel_composites_onto_background() {
     let mut out = Vec::new();
     CpuCompositor.composite_into(&screen, 4, 4, None, cam, &bg, &layout, &scene, &mut out);
     assert_eq!(out.len(), 8 * 8 * 4);
-    assert_eq!(&out[0..4], &[255, 0, 0, 255]);              // corner = bg blue
+    assert_eq!(&out[0..4], &[255, 0, 0, 255]);              // corner = bg blue (unchanged)
     let i = ((3 * 8 + 3) * 4) as usize;
-    assert_eq!(&out[i..i + 4], &[0, 0, 255, 255]);          // panel interior = screen red
+    let p = &out[i..i + 4]; // panel interior ~= screen red (nv12 round-trip is exact to a few LSBs)
+    assert!(p[0] <= 3 && p[1] <= 3 && p[2] >= 250, "panel interior must be ~screen red, got {p:?}");
 }
 
 #[test]
 fn ring_paints_a_band_just_inside_the_camera_edge_and_leaves_center_alone() {
     // 20x20 square (no rounding) camera panel with a 3px ring; source is solid green.
     let webcam = solid(20, 20, [0, 255, 0, 255]); // BGRA green
-    let screen = solid(4, 4, [0, 0, 0, 255]);
+    let screen = nv12_screen(4, 4, [0, 0, 0, 255]);
     let bg = solid(24, 24, [50, 50, 50, 255]);
     let layout = Layout { out_w: 24, out_h: 24, pad_px: 1, screen_scale: 1.0, screen_radius_px: 0.0 };
     let mut cam_panel = panel(2.0, 2.0, 20.0, 20.0, 1.0);
@@ -58,7 +63,7 @@ fn ring_paints_a_band_just_inside_the_camera_edge_and_leaves_center_alone() {
 #[test]
 fn zero_ring_px_leaves_panel_byte_identical_to_no_ring_field() {
     let webcam = solid(10, 10, [10, 20, 30, 255]);
-    let screen = solid(4, 4, [0, 0, 0, 255]);
+    let screen = nv12_screen(4, 4, [0, 0, 0, 255]);
     let bg = solid(14, 14, [40, 40, 40, 255]);
     let layout = Layout { out_w: 14, out_h: 14, pad_px: 1, screen_scale: 1.0, screen_radius_px: 0.0 };
     let scene = Scene { screen: panel(0.0, 0.0, 0.0, 0.0, 0.0), camera: panel(2.0, 2.0, 10.0, 10.0, 1.0) };
@@ -76,7 +81,7 @@ fn zero_ring_px_leaves_panel_byte_identical_to_no_ring_field() {
 
 #[test]
 fn disabled_and_degenerate_panels_do_not_panic() {
-    let screen = solid(8, 8, [0, 0, 255, 255]);
+    let screen = nv12_screen(8, 8, [0, 0, 255, 255]);
     let webcam = solid(4, 4, [0, 255, 0, 255]);
     let bg = solid(8, 8, [255, 0, 0, 255]);
     let layout = Layout { out_w: 8, out_h: 8, pad_px: 1, screen_scale: 1.0, screen_radius_px: 8.0 * 0.016 };

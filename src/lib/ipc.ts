@@ -45,6 +45,12 @@ export const applyEditOp = (folder: string, op: EditOp) => invoke<EditDoc>("appl
 export const saveEdit = (folder: string, doc: EditDoc) => invoke<void>("save_edit", { folder, doc });
 export const aiAutoedit = (folder: string, model?: string) =>
   invoke<EditDoc>("ai_autoedit", { folder, model });
+/** One labeled step of the AI director's plan. */
+export type AiStep = { op: EditOp; label: string };
+/** The AI director's plan as ordered, labeled steps (NOT applied) - the editor reveals them
+ *  one-by-one via `applyEditOp` for the agentic feel. */
+export const aiPlan = (folder: string, model?: string) =>
+  invoke<AiStep[]>("ai_plan", { folder, model });
 /** Locally-installed Ollama model names, for the AI panel's Engine picker. Empty (never
  *  rejects) when Ollama isn't running. */
 export const listOllamaModels = () => invoke<string[]>("list_ollama_models");

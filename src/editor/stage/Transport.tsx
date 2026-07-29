@@ -1,7 +1,6 @@
 import { useState } from "react";
 import {
   IconZoomIn,
-  IconScissors,
   IconWand,
   IconPlayerSkipBack,
   IconPlayerPlay,
@@ -9,7 +8,9 @@ import {
   IconPlayerSkipForward,
   IconVolume,
   IconVolumeOff,
-  IconCut
+  IconArrowBarToLeft,
+  IconArrowBarToRight,
+  IconX,
 } from "@tabler/icons-react";
 import { fmt } from "../timeline/time";
 import { Slider } from "../controls/Controls";
@@ -30,8 +31,9 @@ export function Transport({
   onSeek,
   onAddZoom,
   onAutoedit,
-  onSplit,
   trimmed,
+  onTrimIn,
+  onTrimOut,
   onResetTrim,
   aspect,
   onAspect,
@@ -39,6 +41,8 @@ export function Transport({
   onQuality,
   muted,
   onMute,
+  volume,
+  onVolume,
 }: {
   timeMs: number;
   dur: number;
@@ -47,8 +51,9 @@ export function Transport({
   onSeek: (ms: number) => void;
   onAddZoom: () => void;
   onAutoedit: () => void;
-  onSplit: () => void;
   trimmed: boolean;
+  onTrimIn: () => void;
+  onTrimOut: () => void;
   onResetTrim: () => void;
   aspect: Aspect;
   onAspect: (aspect: Aspect) => void;
@@ -56,8 +61,9 @@ export function Transport({
   onQuality: () => void;
   muted: boolean;
   onMute: () => void;
+  volume: number; // 0..100 preview-audio volume (owned by Editor, applied to the <audio> element)
+  onVolume: (v: number) => void;
 }) {
-  const [volume, setVolume] = useState(100);
   const [showVolumeSlider, setShowVolumeSlider] = useState(false);
 
   const cycleAspect = () => {
@@ -67,22 +73,24 @@ export function Transport({
 
   return (
     <div className="e-transport">
-      {/* Left: Trim pill (drag the timeline's edge handles to trim; this resets it) + divider + timeline tools */}
+      {/* Left: trim start/end to the playhead (the timeline edge handles do the same), a reset that
+          appears once trimmed, then a divider + timeline tools. */}
       <div className="e-tgroup">
-        <button onClick={onResetTrim} className={`e-tbtn${trimmed ? " on" : ""}`}
-          title={trimmed ? "Reset trim range" : "Drag the timeline's edge handles to trim"} disabled={!trimmed}>
-          <IconCut size={15} />
-          <span>Trim</span>
+        <button onClick={onTrimIn} className="e-tbtn" title="Trim start to the playhead (cut everything before it)">
+          <IconArrowBarToLeft size={15} /><span>In</span>
         </button>
+        <button onClick={onTrimOut} className="e-tbtn" title="Trim end to the playhead (cut everything after it)">
+          <IconArrowBarToRight size={15} /><span>Out</span>
+        </button>
+        {trimmed && (
+          <button onClick={onResetTrim} className="e-tg on" title="Reset trim range"><IconX size={15} /></button>
+        )}
         <div className="e-tdiv" />
         <button className="e-tg" title="Add zoom region" onClick={onAddZoom}>
           <IconZoomIn size={16} />
         </button>
         <button className="e-tg" title="Run AI Auto-director" onClick={onAutoedit}>
           <IconWand size={16} />
-        </button>
-        <button className="e-tg" title="Split clip at playhead" onClick={onSplit}>
-          <IconScissors size={16} />
         </button>
       </div>
 
@@ -135,7 +143,7 @@ export function Transport({
                     step={1}
                     value={muted ? 0 : volume}
                     onChange={(v) => {
-                      setVolume(v);
+                      onVolume(v);
                       if (muted && v > 0) onMute();
                     }}
                     accentColor="var(--e-fg)"

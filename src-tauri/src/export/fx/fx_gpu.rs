@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use crate::export::fx::fx_state::{FxRenderer, FxState};
 use crate::export::fx::fx_uniforms::build_fx_u;
@@ -6,7 +7,7 @@ use crate::export::gpu::{align_up, FORMAT};
 /// GPU FX renderer: uploads the composited frame, runs fx.wgsl (spotlight + clicks),
 /// reads the result back. Selected when an adapter is available.
 pub struct GpuFx {
-    device: wgpu::Device, queue: wgpu::Queue, sampler: wgpu::Sampler,
+    device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>, sampler: wgpu::Sampler,
     bind_layout: wgpu::BindGroupLayout, pipeline: wgpu::RenderPipeline,
     out_tex: wgpu::Texture, out_view: wgpu::TextureView, readback: wgpu::Buffer, padded_bpr: u32,
 }
@@ -42,12 +43,10 @@ fn build_pipeline(device: &wgpu::Device) -> (wgpu::BindGroupLayout, wgpu::Render
 
 impl GpuFx {
     pub fn new(ow: u32, oh: u32) -> Option<GpuFx> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))?;
-        let limits = wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits());
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("tcursor-fx"), required_features: wgpu::Features::empty(),
-            required_limits: limits, memory_hints: wgpu::MemoryHints::default() }, None)).ok()?;
+        // Shares the process-global device with the compositor (see `gpu::shared_device`) instead of
+        // creating a SECOND wgpu device per renderer build - removing half the device-creation cost
+        // that made aspect changes lag.
+        let (device, queue) = crate::export::gpu::shared_device()?;
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             mag_filter: wgpu::FilterMode::Linear, min_filter: wgpu::FilterMode::Linear,
             ..Default::default() });

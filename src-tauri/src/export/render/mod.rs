@@ -72,7 +72,7 @@ impl FrameRenderer {
         let tl = build_timeline(paths, &log, fps);
         let video_start = tl.frames[0];
         let video_end = (*tl.frames.last().unwrap_or(&video_start)).max(video_start + 1);
-        let screen_bytes = (sw * sh * 4) as usize;
+        let screen_bytes = (sw as usize * sh as usize) * 3 / 2; // nv12: Y plane + half-res interleaved UV
         let max_cam = [LayoutId::Screen, LayoutId::Camera, LayoutId::Presenter,
                        LayoutId::ScreenOnly, LayoutId::CameraOnly]
             .iter().map(|&id| crate::settings::appearance::overlay_for(
@@ -90,7 +90,8 @@ impl FrameRenderer {
         let dark = crate::win::theme::resolve_dark(es.settings.ui.theme);
         let cursor_track = crate::events::track::cursortype::CursorTrack::load(&paths.cursor());
         let cprep = crate::export::cursor::cursorset::prep(&es.settings.cursor, &log.events, cursor_track, dark);
-        let cursor = Cursor::new(log.events, log.screen); // moves the log in after cprep borrowed it
+        let mut cursor = Cursor::new(log.events, log.screen, es.settings.cursor.follow_alpha()); // moves the log in after cprep borrowed it
+        cursor.set_idealize(es.settings.cursor.path_idealize);
         let meta = RenderMeta { tl, video_start, video_end, out_w, out_h, sw, sh, screen_bytes, webcam_size, audio_offset_ms,
             trim: seed.trim, mic_volume: es.settings.audio_mic_volume, sys_volume: es.settings.audio_sys_volume };
         Ok((Self { settings: es.settings, cfg: es.cfg, layout, track: es.track, cam_moves: es.cam_moves, regions: es.regions,
@@ -105,6 +106,8 @@ impl FrameRenderer {
         if es.settings.background != self.settings.background {
             self.bg = background::build(&es.settings.background, BG_MESH, self.layout.out_w, self.layout.out_h);
         }
+        self.cursor.set_a(es.settings.cursor.follow_alpha()); // live-apply a Smoothness settings change
+        self.cursor.set_idealize(es.settings.cursor.path_idealize);
         self.settings = es.settings; self.cfg = es.cfg; self.track = es.track;
         self.regions = es.regions; self.effects = es.effects; self.cam_moves = es.cam_moves;
     }

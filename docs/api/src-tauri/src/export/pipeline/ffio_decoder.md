@@ -1,6 +1,6 @@
 # src-tauri/src/export/pipeline/ffio_decoder.rs
 
-`RawDecoder`: a spawned ffmpeg process emitting a continuous stream of raw BGRA frames. Split out of `ffio.rs` (which keeps the ffprobe/decode/crop free-function helpers) purely to stay under the file line-count limit; `ffio.rs` re-exports this as `ffio::RawDecoder`, so every existing import path (`crate::export::pipeline::ffio::RawDecoder`) is unchanged.
+`RawDecoder`: a spawned ffmpeg process emitting a continuous stream of raw frames in a caller-chosen pixel format (`bgra` for the webcam, `nv12` for the screen - the latter is ~2.6x smaller through the pipe and skips ffmpeg's yuv->bgra convert, the main export-throughput win). Split out of `ffio.rs` (which keeps the ffprobe/decode/crop free-function helpers) purely to stay under the file line-count limit; `ffio.rs` re-exports this as `ffio::RawDecoder`, so every existing import path (`crate::export::pipeline::ffio::RawDecoder`) is unchanged.
 
 ## RawDecoder
 
@@ -18,7 +18,7 @@ A spawned ffmpeg process emitting a continuous stream of raw BGRA frames at a fi
 
 - `child` - *the spawned ffmpeg process; killed and waited on `Drop` to avoid zombie processes.*
 - `stdout` - *the process's stdout pipe; `read_exact` on this reads exactly one frame at a time.*
-- `frame_bytes` - *expected bytes per frame (`width * height * 4`); asserted in `read_frame` to detect size mismatches early.*
+- `frame_bytes` - *expected bytes per frame (`width * height * 4` for bgra, `width * height * 3 / 2` for nv12); asserted in `read_frame` to detect size mismatches early.*
 
 ### Used by
 
@@ -29,7 +29,7 @@ A spawned ffmpeg process emitting a continuous stream of raw BGRA frames at a fi
 ## RawDecoder::spawn
 
 ```rust
-pub fn spawn(video: &Path, rate: f64, input_rate: bool, seek_ms: Option<u64>, square_scale: Option<u32>, target_dims: Option<(u32, u32)>, frame_bytes: usize) -> Result<Self>
+pub fn spawn(video: &Path, rate: f64, input_rate: bool, seek_ms: Option<u64>, square_scale: Option<u32>, target_dims: Option<(u32, u32)>, pix_fmt: &str, frame_bytes: usize) -> Result<Self>
 ```
 
 Spawns the ffmpeg decoder subprocess and captures its stdout.
@@ -42,7 +42,8 @@ Spawns the ffmpeg decoder subprocess and captures its stdout.
 - `seek_ms: Option<u64>` - trim start offset in ms (`-ss`). *Why:* using ffmpeg's native seek is orders of magnitude faster than decoding and discarding frames.*
 - `square_scale: Option<u32>` - if set, cover-crops the video to a centered square of this size. *Why:* webcam feeds are 16:9; squaring avoids aspect-ratio distortion in the picture-in-picture overlay.*
 - `target_dims: Option<(u32, u32)>` - if set, scales output to these exact dimensions via an FFmpeg `-vf scale`. *Why:* lets the screen decoder resize directly in FFmpeg (e.g. to the adapted output resolution) instead of a separate CPU resize pass. Mutually exclusive with `square_scale` in practice - `target_dims` is checked first.*
-- `frame_bytes: usize` - expected bytes per frame. *Why:* stored for the `debug_assert` in `read_frame`.*
+- `pix_fmt: &str` - output raw pixel format (`"bgra"` or `"nv12"`). *Why:* the screen decodes as `nv12` (Y + interleaved half-res UV) so far fewer bytes cross the pipe and ffmpeg skips the yuv->bgra convert (the GPU/CPU compositor converts instead); the webcam stays `bgra`.*
+- `frame_bytes: usize` - expected bytes per frame (matches `pix_fmt`: `w*h*4` bgra, `w*h*3/2` nv12). *Why:* stored for the `debug_assert` in `read_frame`.*
 
 ### Returns
 
@@ -50,7 +51,7 @@ Spawns the ffmpeg decoder subprocess and captures its stdout.
 
 ### Implementation
 
-1. Build ffmpeg command: `-v error -hwaccel auto`, optional `-ss seek_ms/1000.0`, optional input `-r rate`, `-i video`, optional output `-r rate`, `-sws_flags fast_bilinear`, then either `-vf scale=w:h:flags=fast_bilinear` (`target_dims`) or `-vf scale=sz:sz:force_original_aspect_ratio=increase,crop=sz:sz:flags=fast_bilinear` (`square_scale`), `-f rawvideo -pix_fmt bgra`, `-` (stdout). Stderr suppressed.
+1. Build ffmpeg command: `-v error -hwaccel auto`, optional `-ss seek_ms/1000.0`, optional input `-r rate`, `-i video`, optional output `-r rate`, `-sws_flags fast_bilinear`, then either `-vf scale=w:h:flags=fast_bilinear` (`target_dims`) or `-vf scale=sz:sz:force_original_aspect_ratio=increase,crop=sz:sz:flags=fast_bilinear` (`square_scale`), `-f rawvideo -pix_fmt <pix_fmt>` (`nv12` for the screen, `bgra` for the webcam), `-` (stdout). Stderr suppressed.
 2. Take `child.stdout`; return `Self { child, stdout, frame_bytes }`.
 
 ## RawDecoder::read_frame

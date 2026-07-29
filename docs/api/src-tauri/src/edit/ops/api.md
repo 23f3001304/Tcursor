@@ -22,6 +22,7 @@ pub enum EditOp {
         layer: Option<u32>,
     },
     RemoveZoom { id: String },
+    ClearZooms,
     SetZoomCamAction { id: String, action: Option<CamZoomAction> },
     SetTrim { in_ms: u32, out_ms: u32 },
     SetAspect { aspect: Aspect },
@@ -45,6 +46,7 @@ Discriminated-union command type serialized to/from the Tauri IPC channel and th
 - `AddZoomFull` - *same as `AddZoom` but the caller supplies `scale`; used by the AI director when it picks a specific zoom level from its plan.*
 - `UpdateZoom` - *partial update by `id`; only `Some` fields are written, so the frontend can patch a single changed field without re-transmitting the full zoom.*
 - `RemoveZoom` - *drop a zoom by string id; triggered by the delete key and AI-plan rollback.*
+- `ClearZooms` - *drop every zoom in one step; the AI director's opening "rethink" move for the agentic auto-edit reveal - the frontend applies this first (when the doc already has zooms) so the reveal shows the mechanical seed-time auto-zooms clearing before the LLM's own picks land one at a time. Field-less, so it carries no payload beyond the `op` tag.*
 - `SetZoomCamAction` - *set (`Some`) or clear (`None`) one zoom's webcam-on-zoom override. **Why a dedicated op rather than a field on `UpdateZoom`:** that op's "field is `None` => leave unchanged" convention cannot express "clear back to inherit the global default" without an `Option<Option<_>>`, which serializes ambiguously over IPC.*
 - `SetTrim` - *replace the clip trim window atomically; in/out always travel together so no partial-update variant is needed.*
 - `SetAspect` - *replace the output frame aspect ratio (`EditDoc.aspect`); `FrameRenderer::new` re-resolves `Layout` from it on the next build (export or preview).*
@@ -106,10 +108,11 @@ Mutates `doc` in place by dispatching on `op`. The single write point for all `E
 1. **AddZoom / AddZoomFull** - generate id via `next_zoom_id` (finds the max numeric suffix among existing `z`-prefixed ids, increments by 1, falls back to `len`). Push `Zoom` with `target=Cursor`, `easing="smooth"`, and `scale=2.0` (`AddZoom`) or the caller-supplied scale (`AddZoomFull`). `saturating_add` guards the `end_ms` against u32 overflow.
 2. **UpdateZoom** - linear scan by `id`; write only the `Some` fields into the found entry. *Why linear scan:* zoom lists are short (typically fewer than 20 entries) so a map would cost more in bookkeeping than it saves in lookup.
 3. **RemoveZoom** - single `retain` pass; no reindexing of remaining zooms.
-4. **SetTrim** - full field replacement; `Trim` has two fields that are always logically coupled.
-5. **AddCut** - push; no overlap check here since overlap rendering is a display concern.
-6. **SetSpeed** - generate id via `next_speed_id` (same max-suffix strategy, prefix `s`), push `Speed`. The caller supplies ordering.
-7. **SetLayoutSeg** - linear scan by `id`; mutates only the `layout` string. Layout segment structure is fixed by the seed.
+4. **ClearZooms** - `doc.zooms.clear()`; drops every zoom in one call with no per-id lookup, unlike the single-target `RemoveZoom`.
+5. **SetTrim** - full field replacement; `Trim` has two fields that are always logically coupled.
+6. **AddCut** - push; no overlap check here since overlap rendering is a display concern.
+7. **SetSpeed** - generate id via `next_speed_id` (same max-suffix strategy, prefix `s`), push `Speed`. The caller supplies ordering.
+8. **SetLayoutSeg** - linear scan by `id`; mutates only the `layout` string. Layout segment structure is fixed by the seed.
 
 ### Behaviors
 

@@ -9,6 +9,9 @@ pub enum EditOp {
     AddZoomFull { at_ms: u32, dur_ms: u32, scale: f32 },
     UpdateZoom { id: String, start_ms: Option<u32>, end_ms: Option<u32>, scale: Option<f32>, target: Option<ZoomTarget>, easing: Option<String>, zoom_in_ms: Option<u32>, zoom_out_ms: Option<u32>, layer: Option<u32> },
     RemoveZoom { id: String },
+    /// Remove every zoom at once - the AI director's opening "rethink" step (the frontend reveals it
+    /// as the mechanical auto-zooms clearing before the smart ones land).
+    ClearZooms,
     /// Set (`Some`) or clear (`None`) a zoom's webcam-on-zoom override. A dedicated op rather
     /// than a field on `UpdateZoom`, because that op's "field is None => leave unchanged"
     /// convention cannot express "clear back to inherit" without an `Option<Option<_>>`.
@@ -105,6 +108,7 @@ pub fn apply(doc: &mut EditDoc, op: EditOp) {
         EditOp::RemoveZoom { id } => {
             doc.zooms.retain(|z| z.id != id);
         }
+        EditOp::ClearZooms => doc.zooms.clear(),
         EditOp::SetZoomCamAction { id, action } => {
             if let Some(z) = doc.zooms.iter_mut().find(|z| z.id == id) { z.cam_action = action; }
         }

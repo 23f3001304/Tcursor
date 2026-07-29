@@ -41,3 +41,20 @@ png = "0.17"
 version = "0.58"
 features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Registry"]
 
+
+# Dev builds default to opt-level 0, which makes the export/preview pixel paths (33MB/frame
+# readback copy, cursor blit, wgpu glue, ffmpeg buffer handling) 10-30x slower than release -
+# the reason a debug export runs ~1x realtime even on a strong GPU. O1 on our crate + O3 on all
+# deps (wgpu/image/png, compiled once and cached) restores near-release runtime; the only cost
+# is a slower first build. Release is unaffected (already O3).
+[profile.dev]
+opt-level = 1
+# Incremental + opt-level on Windows/MSVC triggers LNK2019 "unresolved external symbol .llvm.*"
+# from optimized deps (fast_image_resize, serde) once the incremental cache accumulates edits, so
+# `tauri dev` fails to LINK while `tauri build` (release: incremental off by default) builds fine.
+# Turning incremental off for dev fixes it; rebuilds here are already ~40s (monolithic crate), so
+# the lost caching costs almost nothing.
+incremental = false
+
+[profile.dev.package."*"]
+opt-level = 3

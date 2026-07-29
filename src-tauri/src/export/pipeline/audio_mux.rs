@@ -51,7 +51,9 @@ pub fn mux(tmp: &Path, paths: &ProjectPaths, format: Format, mic_shift_ms: i64, 
 
 /// Align an audio input to the video start: positive shift = delay
 /// (`-itsoffset`), negative = trim the lead (`-ss`). Emitted before its `-i`.
-fn add_offset(c: &mut Command, shift_ms: i64) {
+/// `pub(crate)` so the editor's preview-audio mux (`preview::thumbs`) applies the exact same
+/// alignment the final render does, keeping preview playback in sync.
+pub(crate) fn add_offset(c: &mut Command, shift_ms: i64) {
     if shift_ms > 0 {
         c.args(["-itsoffset", &format!("{:.3}", shift_ms as f64 / 1000.0)]);
     } else if shift_ms < 0 {

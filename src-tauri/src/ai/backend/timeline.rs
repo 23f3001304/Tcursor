@@ -2,7 +2,7 @@ use crate::actions::model::{ActionEvent, ActionKind};
 use crate::events::track::cursortype::{CursorTrack, CursorType};
 use crate::events::model::{EventKind, EventLog};
 
-fn region(x: i32, y: i32, w: u32, h: u32) -> &'static str {
+pub(crate) fn region(x: i32, y: i32, w: u32, h: u32) -> &'static str {
     let col = if x < (w / 3) as i32 { 0 } else if x < (2 * w / 3) as i32 { 1 } else { 2 };
     let row = if y < (h / 3) as i32 { 0 } else if y < (2 * h / 3) as i32 { 1 } else { 2 };
     match (row, col) {

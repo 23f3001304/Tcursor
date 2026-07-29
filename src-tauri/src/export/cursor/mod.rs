@@ -18,13 +18,25 @@ pub struct Cursor {
     idx: usize,
     sx: f32,
     sy: f32,
+    a: f32, // follow low-pass alpha (settings-driven; lower = smoother, more deliberate glide)
+    idealize: f32, // 0 = raw path, 1 = clean eased strokes between the click/endpoint anchors
+    anchors: Vec<(u32, f32, f32)>, // (t, x, y) frame-local anchors for path idealization
     primed: bool,
 }
 
 impl Cursor {
-    pub fn new(events: Vec<MouseEvent>, screen: ScreenInfo) -> Self {
-        Self { events, screen, idx: 0, sx: 0.0, sy: 0.0, primed: false }
+    pub fn new(events: Vec<MouseEvent>, screen: ScreenInfo, a: f32) -> Self {
+        let anchors = compute_anchors(&events, &screen);
+        Self { events, screen, idx: 0, sx: 0.0, sy: 0.0, a, idealize: 0.0, anchors, primed: false }
     }
+
+    /// Update the follow-smoothing alpha in place so a `smoothness` settings change reflects via
+    /// `FrameRenderer::reload_edit` without rebuilding the whole cursor.
+    pub fn set_a(&mut self, a: f32) { self.a = a; }
+
+    /// Update the path-idealization strength (0 = raw path, 1 = clean eased strokes between the
+    /// click/endpoint anchors). Settings-driven, live-applied like `set_a`.
+    pub fn set_idealize(&mut self, s: f32) { self.idealize = s.clamp(0.0, 1.0); }
 
     /// The mouse events this cursor owns. Shared with FX rendering so the renderer
     /// has a single owner of the event log rather than a second copy.
@@ -51,16 +63,35 @@ impl Cursor {
             self.idx += 1;
         }
         let raw = self.raw_at(t_ms);
-        const A: f32 = 0.35; // smoothing: lower = ignores more jitter
         if !self.primed {
             self.sx = raw.x as f32;
             self.sy = raw.y as f32;
             self.primed = true;
         } else {
-            self.sx += (raw.x as f32 - self.sx) * A;
-            self.sy += (raw.y as f32 - self.sy) * A;
+            self.sx += (raw.x as f32 - self.sx) * self.a;
+            self.sy += (raw.y as f32 - self.sy) * self.a;
+        }
+        // Path idealization: blend the smoothed position toward the eased anchor path so wandering
+        // routes become clean, deliberate strokes between the points that matter (clicks).
+        if self.idealize > 0.001 && self.anchors.len() >= 2 {
+            let (ix, iy) = self.anchored_at(t_ms);
+            let s = self.idealize;
+            return FramePoint { x: (self.sx + (ix - self.sx) * s).round() as i32,
+                                y: (self.sy + (iy - self.sy) * s).round() as i32 };
         }
         FramePoint { x: self.sx.round() as i32, y: self.sy.round() as i32 }
+    }
+
+    /// The eased position along the click/endpoint anchor path at `t_ms` (the "ideal" route).
+    fn anchored_at(&self, t_ms: u32) -> (f32, f32) {
+        let a = &self.anchors;
+        let i = a.partition_point(|p| p.0 <= t_ms); // first anchor with t > t_ms
+        if i == 0 { return (a[0].1, a[0].2); }
+        if i >= a.len() { let l = a[a.len() - 1]; return (l.1, l.2); }
+        let (t0, x0, y0) = a[i - 1];
+        let (t1, x1, y1) = a[i];
+        let f = smoothstep(((t_ms - t0) as f32 / (t1 - t0).max(1) as f32).clamp(0.0, 1.0));
+        (x0 + (x1 - x0) * f, y0 + (y1 - y0) * f)
     }
 
     /// Interpolated (un-smoothed) cursor; frame center before the first event.
@@ -80,6 +111,23 @@ impl Cursor {
     }
 }
 
+/// smoothstep 0..1 -> 0..1 (ease-in-out) so idealized strokes accelerate then settle, not move linearly.
+fn smoothstep(f: f32) -> f32 { f * f * (3.0 - 2.0 * f) }
+
+/// Path-idealization anchors: the first sample, every click, and the last sample - frame-local, in
+/// ascending time (same-time duplicates collapsed). Between consecutive anchors the idealized cursor
+/// eases straight, turning a meandering real path into deliberate strokes to the points that matter.
+fn compute_anchors(events: &[MouseEvent], screen: &ScreenInfo) -> Vec<(u32, f32, f32)> {
+    let fp = |t: u32, x: i32, y: i32| { let p = to_frame(screen, x, y); (t, p.x as f32, p.y as f32) };
+    let mut out: Vec<(u32, f32, f32)> = Vec::new();
+    if let Some(e) = events.first() { out.push(fp(e.t, e.x, e.y)); }
+    for e in events.iter().filter(|e| e.kind == EventKind::Down) { out.push(fp(e.t, e.x, e.y)); }
+    if let Some(e) = events.last() { out.push(fp(e.t, e.x, e.y)); }
+    out.sort_by_key(|p| p.0);
+    out.dedup_by_key(|p| p.0);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,7 +138,7 @@ mod tests {
     fn center_before_first_event() {
         let s = ScreenInfo { w: 1920, h: 1080, origin_x: 0, origin_y: 0 };
         let ev = vec![mv(1000, 100, 100)];
-        let mut c = Cursor::new(ev, s);
+        let mut c = Cursor::new(ev, s, 0.35);
         assert_eq!(c.at(0), FramePoint { x: 960, y: 540 }); // before the first sample -> center
     }
 
@@ -98,9 +146,23 @@ mod tests {
     fn smooths_toward_a_jump_target() {
         let s = ScreenInfo { w: 1920, h: 1080, origin_x: 0, origin_y: 0 };
         let ev = vec![mv(0, 0, 0), mv(100, 800, 400)];
-        let mut c = Cursor::new(ev, s);
+        let mut c = Cursor::new(ev, s, 0.35);
         let mut p = FramePoint { x: 0, y: 0 };
         for t in (0..2000).step_by(16) { p = c.at(t); }
         assert!((p.x - 800).abs() <= 2 && (p.y - 400).abs() <= 2); // converged to the held target
+    }
+
+    #[test]
+    fn idealize_pulls_a_detour_toward_the_click_anchor_line() {
+        let s = ScreenInfo { w: 1920, h: 1080, origin_x: 0, origin_y: 0 };
+        let click = |t: u32, x: i32, y: i32| MouseEvent { t, kind: EventKind::Down, x, y, button: None };
+        // Two clicks on the x-axis with a big detour up in y between them.
+        let ev = vec![click(0, 0, 0), mv(500, 0, 800), click(1000, 1000, 0)];
+        let mut raw = Cursor::new(ev.clone(), s, 1.0); // a=1 -> follows the raw detour
+        let mut ideal = Cursor::new(ev, s, 1.0);
+        ideal.set_idealize(1.0);
+        for t in (0..=500).step_by(16) { raw.at(t); ideal.at(t); }
+        let (r, i) = (raw.at(500), ideal.at(500));
+        assert!(i.y.abs() < r.y.abs(), "idealized y {} should hug the anchor line, not the detour {}", i.y, r.y);
     }
 }

@@ -13,7 +13,7 @@ const rgb = (c: [number, number, number]) => `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
 export function CameraRingField({ ring, onChange }: { ring: CamRing | null; onChange: (v: CamRing | null) => void }) {
   return (
     <>
-      <div className="e-field" style={{ marginTop: 12 }}>
+      <div className="e-field" style={{ marginTop: 16 }}>
         <span className="e-fl">Ring</span>
         <Switch on={ring !== null} onChange={(v) => onChange(v ? DEFAULT_RING : null)} />
       </div>

@@ -5,7 +5,7 @@ import type { BackgroundSettings } from "../../hud/settings/settings";
 import { Slider } from "../controls/Controls";
 import { COLOR_PRESETS, GRADIENT_PRESETS, ACCENTS } from "./backgroundPresets";
 
-type BgTab = "image" | "video" | "color" | "gradient";
+type BgTab = "default" | "color" | "gradient";
 const rgb = (c: [number, number, number]) => `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
 const DEFAULT_BG: BackgroundSettings = {
   kind: "mesh", solid: [24, 24, 30],
@@ -28,13 +28,13 @@ export function BackgroundPanel({
   // Which preset grid is showing. Derived from the saved kind so reopening the panel lands on
   // the right tab, but merely BROWSING the image/video tabs (no real backend) never saves -
   // only picking a color/gradient swatch below does.
-  const [tab, setTab] = useState<BgTab>(bg.kind === "solid" ? "color" : bg.kind === "gradient" ? "gradient" : "image");
+  const [tab, setTab] = useState<BgTab>(bg.kind === "solid" ? "color" : bg.kind === "gradient" ? "gradient" : "default");
 
   const setBg = (patch: Partial<BackgroundSettings>) =>
     onSaveSettings({ ...doc.settings, background: { ...bg, ...patch } });
 
   const handleReset = () => {
-    setTab("image");
+    setTab("default");
     onSaveSettings({
       ...doc.settings,
       background: DEFAULT_BG,
@@ -66,7 +66,7 @@ export function BackgroundPanel({
       <div className="e-field">
         <span className="e-sechead">Background Type</span>
         <div className="e-seg">
-          {(["image", "video", "color", "gradient"] as BgTab[]).map((t) => (
+          {(["default", "color", "gradient"] as BgTab[]).map((t) => (
             <button key={t} type="button" className={tab === t ? "on" : ""}
               onClick={() => setTab(t)} style={{ textTransform: "capitalize" }}>
               {t}
@@ -75,7 +75,7 @@ export function BackgroundPanel({
         </div>
       </div>
 
-      {tab === "image" && (
+      {tab === "default" && (
         <div className="e-field">
           <span className="e-sechead">Presets</span>
           <div className="e-preset-grid">
@@ -83,13 +83,6 @@ export function BackgroundPanel({
               title="Default" style={{ background: "linear-gradient(135deg, #242938, #58406f)" }}
               onClick={() => setBg({ kind: "mesh" })} />
           </div>
-          <p className="e-lede" style={{ marginTop: 8 }}>Custom image backgrounds are coming soon.</p>
-        </div>
-      )}
-
-      {tab === "video" && (
-        <div className="e-field">
-          <p className="e-lede">Video backgrounds are coming soon.</p>
         </div>
       )}
 

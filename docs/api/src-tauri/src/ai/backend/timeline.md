@@ -27,7 +27,7 @@ A `String` with one event per line, sorted ascending by timestamp, capped at 120
 
 ### Implementation
 
-1. Collect all `EventKind::Down` mouse events from `log.events` into timestamped `"<t>s click (<x>,<y>) <region>"` moments. Region is one of nine labels (e.g. `"top-left"`, `"center"`) produced by the private `region()` function, which divides the screen into equal horizontal and vertical thirds.
+1. Collect all `EventKind::Down` mouse events from `log.events` into timestamped `"<t>s click (<x>,<y>) <region>"` moments. Region is one of nine labels (e.g. `"top-left"`, `"center"`) produced by the `pub(crate)` `region()` function, which divides the screen into equal horizontal and vertical thirds. *Why `pub(crate)` rather than private:* `ai::backend::narrate::label_for` reuses the same classifier to name the region a zoom's triggering click landed in, so a zoom's narration always agrees with what the transcript already showed the LLM.
 2. Collect `ActionKind::SetLayout(id)` hotkey events as `"<t>s layout -> <id>"` moments (variant name lowercased via `Debug + to_lowercase`). Other `ActionKind` variants are ignored.
 3. Merge typing timestamps into contiguous bursts: consecutive timestamps within 1000 ms of each other are grouped into one span. Each span emits `"<start>-<end>s typing"`. A gap of >= 1000 ms between two timestamps starts a new span. *Why merge:* reduces token count from per-keystroke lines to per-burst ranges.
 4. Scan `cursor.samples` for runs of `CursorType::IBeam`; collapse each run into a `"<start>-<end>s text field"` moment. The span end time is taken from the sample immediately before the first non-IBeam entry, or from the last sample if `IBeam` continues to the end.
@@ -44,4 +44,4 @@ A `String` with one event per line, sorted ascending by timestamp, capped at 120
 
 ### Used by
 
-- `src-tauri/src/ai/commands.rs` - `ai_autoedit` calls `serialize` and passes the result as the user message to `ai::ollama::chat`.
+- `src-tauri/src/ai/commands.rs` - `build_plan` (the shared LLM pass behind `ai_autoedit` and `ai_plan`) calls `serialize` and passes the result as the user message to `ai::backend::ollama::chat`.

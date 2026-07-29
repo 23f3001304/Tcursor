@@ -1,8 +1,7 @@
 //! 3-stage export pipeline: screen/webcam decode threads feed the composite loop (the
 //! exporter), which feeds the encoder thread, connected by bounded channels + recycled
-//! buffer pools so decode(N+1) overlaps composite(N) overlaps encode(N-1). The pixel
-//! selection rule is the pure `advance_index`; the threads only move bytes, never change
-//! them, so output stays byte-identical to the old sequential loop.
+//! buffer pools so decode(N+1) overlaps composite(N) overlaps encode(N-1). The screen decodes 1:1
+//! with output frames (video.mp4 is already CFR-60 real-time); the threads only move bytes.
 use anyhow::{anyhow, Error, Result};
 use std::path::Path;
 use std::sync::mpsc::{sync_channel, Receiver, Sender};
@@ -24,17 +23,6 @@ pub fn trim_frame_bounds(trim_in_ms: u32, trim_out_ms: u32, out_fps: u64) -> (u6
     (k_in, k_last)
 }
 
-/// Index of the captured frame active at output time `t`: the last `i >= cur` with
-/// `frames[i] <= t`, clamped to the last frame. Mirrors the exporter's VFR advance
-/// (`while frames[i+1] <= t`). Assumes `frames` is non-decreasing (capture timestamps).
-pub fn advance_index(frames: &[u64], cur: usize, t: u64) -> usize {
-    let mut i = cur;
-    while i + 1 < frames.len() && frames[i + 1] <= t {
-        i += 1;
-    }
-    i
-}
-
 /// Take (and clear) a stored decode-thread error, or `Ok` if none. Distinguishes a real
 /// decode failure (surface it) from a clean EOF (channel closed, no error stored).
 fn take_err(err: &Mutex<Option<Error>>) -> Result<()> {
@@ -50,7 +38,6 @@ fn take_err(err: &Mutex<Option<Error>>) -> Result<()> {
 pub struct ScreenPipe {
     rx: Receiver<(Vec<u8>, usize)>,
     returner: Sender<Vec<u8>>,
-    frames: Vec<u64>,
     cur: Option<(Vec<u8>, usize)>,
     err: Arc<Mutex<Option<Error>>>,
     handle: JoinHandle<()>,
@@ -59,35 +46,25 @@ pub struct ScreenPipe {
 impl ScreenPipe {
     /// Spawn the screen `RawDecoder` (spawn errors surface here) and its decode thread.
     /// `depth` sizes both the bounded channel and the recycled buffer pool.
-    pub fn spawn(video: &Path, screen_bytes: usize, target_dims: Option<(u32, u32)>, frames: Vec<u64>, depth: usize) -> Result<ScreenPipe> {
-        let dec = RawDecoder::spawn(video, 0.0, false, None, None, target_dims, screen_bytes)?;
+    pub fn spawn(video: &Path, screen_bytes: usize, target_dims: Option<(u32, u32)>, depth: usize) -> Result<ScreenPipe> {
+        let dec = RawDecoder::spawn(video, 0.0, false, None, None, target_dims, "nv12", screen_bytes)?;
         let pool = BufPool::new(depth, screen_bytes);
         let returner = pool.returner();
         let (tx, rx) = sync_channel::<(Vec<u8>, usize)>(depth);
         let err = Arc::new(Mutex::new(None));
         let handle = spawn_screen(dec, pool, tx, err.clone());
-        Ok(ScreenPipe { rx, returner, frames, cur: None, err, handle })
+        Ok(ScreenPipe { rx, returner, cur: None, err, handle })
     }
 
-    /// The captured screen frame active at output time `t`, blocking on the decode
-    /// channel as needed. `None` only for a zero-frame video. On EOF, clamps at the last
-    /// decoded frame (the old `have == false` behavior). Recycles superseded buffers.
-    pub fn next_at(&mut self, t: u64) -> Result<Option<&[u8]>> {
-        if self.cur.is_none() {
-            match self.rx.recv() {
-                Ok(f) => self.cur = Some(f),
-                Err(_) => { take_err(&self.err)?; return Ok(None); }
-            }
-        }
-        let target = advance_index(&self.frames, self.cur.as_ref().unwrap().1, t);
-        while self.cur.as_ref().unwrap().1 < target {
-            match self.rx.recv() {
-                Ok(next) => {
-                    let old = self.cur.replace(next).unwrap().0;
-                    let _ = self.returner.send(old); // recycle the superseded buffer
-                }
-                Err(_) => { take_err(&self.err)?; break; } // EOF short of target: clamp at cur
-            }
+    /// The next decoded screen frame - 1:1 with output frames. `video.mp4` is CFR-60 real-time, so
+    /// output frame k IS decoded frame k; re-timing against `sync.json` was wrong because the CFR
+    /// encode has MORE frames than the recorded delivered-frame timestamps, skewing the video vs the
+    /// real-time audio. On EOF holds the last decoded frame (matches the old clamp). `None` only for
+    /// an empty video. Recycles the superseded buffer.
+    pub fn next(&mut self) -> Result<Option<&[u8]>> {
+        match self.rx.recv() {
+            Ok(f) => { if let Some(old) = self.cur.replace(f) { let _ = self.returner.send(old.0); } }
+            Err(_) => { take_err(&self.err)?; } // EOF: keep `cur` (hold the last frame)
         }
         Ok(self.cur.as_ref().map(|(b, _)| b.as_slice()))
     }
@@ -116,7 +93,7 @@ impl WebcamPipe {
     /// from `ExportSettings.fps` - seeked to `video_start`, cover-cropped to `size`) and its
     /// decode thread. `depth` sizes the channel and the buffer pool.
     pub fn spawn(webcam: &Path, video_start: u64, size: u32, wc_bytes: usize, depth: usize, out_fps: u64) -> Result<WebcamPipe> {
-        let dec = RawDecoder::spawn(webcam, out_fps as f64, false, Some(video_start), Some(size), None, wc_bytes)?;
+        let dec = RawDecoder::spawn(webcam, out_fps as f64, false, Some(video_start), Some(size), None, "bgra", wc_bytes)?;
         let pool = BufPool::new(depth, wc_bytes);
         let returner = pool.returner();
         let (tx, rx) = sync_channel::<(Vec<u8>, u32)>(depth);
@@ -149,18 +126,7 @@ impl WebcamPipe {
 
 #[cfg(test)]
 mod tests {
-    use super::{advance_index, trim_frame_bounds};
-    #[test]
-    fn advance_index_matches_sequential_selection() {
-        let frames = vec![0u64, 100, 250, 400];
-        assert_eq!(advance_index(&frames, 0, 0), 0);
-        assert_eq!(advance_index(&frames, 0, 99), 0);
-        assert_eq!(advance_index(&frames, 0, 100), 1);
-        assert_eq!(advance_index(&frames, 1, 300), 2);
-        assert_eq!(advance_index(&frames, 2, 10_000), 3); // clamps at last
-        assert_eq!(advance_index(&frames, 0, 10_000), 3); // never goes backwards, clamps
-    }
-
+    use super::trim_frame_bounds;
     #[test]
     fn trim_frame_bounds_converts_ms_to_inclusive_frame_indices() {
         assert_eq!(trim_frame_bounds(0, 10_000, 60), (0, 600));

@@ -36,3 +36,24 @@ Combines the temporary video file with whichever audio tracks exist and writes `
 ### Behaviors worth knowing
 
 - `no_audio_renames_tmp_to_final_with_the_format_extension`, `gif_always_takes_the_no_audio_path_even_with_recorded_audio`, `webm_final_path_uses_the_webm_extension` - unit tests covering the pure-rename path (no ffmpeg spawn needed) for each format, including the `Gif`-with-recorded-mic-audio case.
+
+## add_offset
+
+```rust
+pub(crate) fn add_offset(c: &mut Command, shift_ms: i64)
+```
+
+Appends the ffmpeg args that align one audio input to the video start. Must be called immediately BEFORE that input's `-i` (ffmpeg applies `-itsoffset`/`-ss` to whichever input follows). Positive `shift_ms` delays the track (`-itsoffset <s>`: the track started early relative to the video); negative trims its lead (`-ss <s>`: the track started late); zero emits nothing.
+
+### Inputs
+
+- `c: &mut Command` - the in-progress `ffmpeg` command being built. *Why mutate in place:* callers interleave this with their own `-i` args per input, so appending onto the shared builder matches the surrounding code better than returning a standalone arg list.
+- `shift_ms: i64` - signed offset in milliseconds, same sign convention as `mux`'s `mic_shift_ms`/`sys_shift_ms`.
+
+### Returns
+
+Nothing (`()`) - mutates `c` in place.
+
+### Why `pub(crate)`
+
+So `preview::thumbs::ensure_preview_audio` can apply the EXACT same per-track alignment the final render uses when building the editor's mixed preview track (`preview_synced.m4a`), keeping preview playback in sync with the final export instead of drifting by the capture-warmup lead.

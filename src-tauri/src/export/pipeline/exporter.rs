@@ -55,11 +55,14 @@ pub fn export(paths: &ProjectPaths, settings: ExportSettings, on_progress: impl 
         Ok(())
     });
 
-    let mut spipe = ScreenPipe::spawn(&paths.video(), screen_bytes, None, meta.tl.frames.clone(), depth)?;
+    let mut spipe = ScreenPipe::spawn(&paths.video(), screen_bytes, None, depth)?;
     let mut wpipe = if paths.webcam().exists() {
         Some(WebcamPipe::spawn(&paths.webcam(), meta.video_start, size, wc_bytes, depth, out_fps)?)
     } else { None };
-    let empty = vec![0u8; screen_bytes]; // zero-frame fallback (matches old zeroed screen_buf)
+    // Zero-frame fallback as a black nv12 frame (Y=16, U=V=128); a zeroed buffer would decode to a
+    // green tint through the color convert. Only used if the screen decode yields nothing.
+    let mut empty = vec![16u8; screen_bytes];
+    for b in &mut empty[(meta.sw as usize * meta.sh as usize)..] { *b = 128; }
 
     // Trim gates which output frames are actually composited/encoded: `[k_in, k_last]` (inclusive
     // frame indices at `out_fps`) is the resolved trim range (`out_ms == 0` = whole clip, see
@@ -86,7 +89,7 @@ pub fn export(paths: &ProjectPaths, settings: ExportSettings, on_progress: impl 
     for k in 0..=k_full_last {
         let t = meta.video_start + k * 1000 / out_fps;
         let d0 = std::time::Instant::now();
-        let screen = spipe.next_at(t)?.unwrap_or(&empty); // blocks on the screen decode channel
+        let screen = spipe.next()?.unwrap_or(&empty); // 1:1 with output frames (video.mp4 is CFR-60 real-time)
         if let Some(w) = &mut wpipe {
             if let Some(next) = w.next()? {
                 if let Some((old, _, _)) = last_webcam.take() { w.recycle(old); }

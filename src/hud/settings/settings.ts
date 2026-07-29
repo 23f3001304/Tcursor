@@ -15,7 +15,7 @@ export interface AppearanceSettings {
 export type ThemeMode = "light" | "dark" | "system";
 export interface InterfaceSettings { theme: ThemeMode; accent: [number, number, number] }
 export type CursorStyle = "system" | "enhanced" | "hidden";
-export interface CursorSettings { style: CursorStyle; size: number; motion_blur: number; click_bounce: boolean; bounce_intensity: number; pack: string }
+export interface CursorSettings { style: CursorStyle; size: number; smoothness: number; path_idealize: number; motion_blur: number; click_bounce: boolean; bounce_intensity: number; pack: string }
 export type ClickFxStyle = "none" | "ripple" | "pulse" | "glow" | "shockwave" | "particles" | "neon";
 export type SpotlightMode = "classic" | "blur" | "halo" | "breathing" | "nebula" | "vignette";
 export type VideoFxMode = "nebulawash" | "cinematicdim" | "screenfocus" | "colorpop";

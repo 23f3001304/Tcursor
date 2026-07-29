@@ -63,6 +63,7 @@ export type EditOp =
   | { op: "add_zoom_full"; at_ms: number; dur_ms: number; scale: number }
   | { op: "update_zoom"; id: string; start_ms?: number; end_ms?: number; scale?: number; target?: ZoomTarget; easing?: string; zoom_in_ms?: number; zoom_out_ms?: number; layer?: number }
   | { op: "remove_zoom"; id: string }
+  | { op: "clear_zooms" }
   | { op: "set_zoom_cam_action"; id: string; action: CamZoomAction | null }
   | { op: "set_trim"; in_ms: number; out_ms: number }
   | { op: "set_aspect"; aspect: Aspect }

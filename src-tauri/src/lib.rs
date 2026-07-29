@@ -35,6 +35,7 @@ pub fn run() {
             edit::commands::apply_edit_op,
             edit::commands::save_edit,
             ai::commands::ai_autoedit,
+            ai::commands::ai_plan,
             ai::commands::list_ollama_models,
             export::preview::preview_frame,
             export::preview::preview_bg,

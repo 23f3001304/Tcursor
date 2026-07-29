@@ -6,17 +6,17 @@ GPU-backed FX renderer that uploads a composited BGRA frame to wgpu, runs `fx.wg
 
 ```rust
 pub struct GpuFx {
-    device: wgpu::Device, queue: wgpu::Queue, sampler: wgpu::Sampler,
+    device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>, sampler: wgpu::Sampler,
     bind_layout: wgpu::BindGroupLayout, pipeline: wgpu::RenderPipeline,
     out_tex: wgpu::Texture, out_view: wgpu::TextureView, readback: wgpu::Buffer, padded_bpr: u32,
 }
 ```
 
-Holds all persistent wgpu objects for one export session. Constructed once in `GpuFx::new` and reused across every frame to avoid per-frame adapter and device overhead. All fields are private; the struct is opaque to callers.
+Holds all persistent wgpu objects for one export session. Constructed once in `GpuFx::new` and reused across every frame to avoid per-frame overhead. The device/queue are the process-global shared handles (`gpu::shared_device`), so `GpuFx` no longer stands up its own wgpu device. All fields are private; the struct is opaque to callers.
 
 ### Fields
 
-- `device` / `queue` - *logical device and its submission queue; all GPU work is submitted through these.*
+- `device` / `queue` - *the shared process-global logical device and its submission queue (`Arc`, see `gpu::shared_device`); all GPU work is submitted through these.*
 - `sampler` - *bilinear (linear mag + min) sampler bound at binding 1 so the composited frame is sampled smoothly by the full-screen triangle.*
 - `bind_layout` - *bind group layout declaring bindings 0 (texture), 1 (sampler), 2 (uniform); cached so per-frame bind groups can be created cheaply.*
 - `pipeline` - *render pipeline compiled from `fx.wgsl` (embedded via `include_str!`) once at construction; reused every frame.*
@@ -43,17 +43,15 @@ Initializes the full wgpu stack for a frame of size `ow x oh`. Returns `None` if
 
 ### Returns
 
-`Option<GpuFx>` - `Some` with a fully initialized renderer when a compatible adapter is found; `None` when `request_adapter` or `request_device` fails (headless CI, remote server, absent GPU driver).
+`Option<GpuFx>` - `Some` with a fully initialized renderer when a compatible adapter is found; `None` when `gpu::shared_device` fails (headless CI, remote server, absent GPU driver).
 
 ### Implementation
 
-1. Create a default `wgpu::Instance` and call `request_adapter` (blocking via `pollster`). Returns `None` if the system has no usable GPU.
-2. Compute limits with `downlevel_defaults().using_resolution(adapter.limits())`. *Why downlevel_defaults:* makes the device usable on integrated GPUs and older drivers without requiring high-end capabilities.*
-3. Call `request_device` with empty required features; return `None` on failure.
-4. Create a bilinear `Sampler`. *Why bilinear:* the full-screen triangle samples the composited frame at exact pixel centers, so filtering is safe and prevents aliasing at spotlight feather edges.*
-5. Call `build_pipeline` to compile `fx.wgsl` and produce the bind layout and render pipeline.
-6. Allocate `out_tex` as `RENDER_ATTACHMENT | COPY_SRC` at `ow x oh`. The shader renders into this texture; it is then copied to the readback buffer.
-7. Compute `padded_bpr = align_up(ow * 4, COPY_BYTES_PER_ROW_ALIGNMENT)` and allocate `readback` as `COPY_DST | MAP_READ` with total size `padded_bpr * oh`.
+1. Get the shared process-global device + queue via `gpu::shared_device` (blocking `pollster` init on the first call process-wide; `None` if the system has no usable GPU). This shares the compositor's device rather than creating a second one - removing half the device-creation cost behind an aspect change / frame resize.
+2. Create a bilinear `Sampler`. *Why bilinear:* the full-screen triangle samples the composited frame at exact pixel centers, so filtering is safe and prevents aliasing at spotlight feather edges.*
+3. Call `build_pipeline` to compile `fx.wgsl` and produce the bind layout and render pipeline.
+4. Allocate `out_tex` as `RENDER_ATTACHMENT | COPY_SRC` at `ow x oh`. The shader renders into this texture; it is then copied to the readback buffer.
+5. Compute `padded_bpr = align_up(ow * 4, COPY_BYTES_PER_ROW_ALIGNMENT)` and allocate `readback` as `COPY_DST | MAP_READ` with total size `padded_bpr * oh`.
 
 ## GpuFx::apply
 

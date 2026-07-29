@@ -50,15 +50,21 @@ pub fn preprocess_project(folder: String, app: AppHandle) {
 fn run(folder: &str, on_progress: impl Fn(u32)) -> Result<(), String> {
     let paths = ProjectPaths { folder: PathBuf::from(folder) };
 
+    // The proxy is the ONE essential artifact - without it the editor preview is blank. Fail the
+    // whole pass only if it fails. Everything after is best-effort (`let _ =`): a failure there
+    // just leaves that single artifact to the editor's own lazy `ensure_*` fallback, instead of
+    // aborting preprocessing entirely (leaving `preprocessed = false`) and forcing EVERYTHING -
+    // including the already-built proxy - back onto the lazy path. That all-or-nothing `?` was why
+    // one flaky step (e.g. a proxy transcode failure) blanked the whole preview.
     ensure_proxy(folder.to_string(), DEFAULT_PROXY_HEIGHT)?;
     on_progress(step_pct(1));
-    ensure_thumbs(folder.to_string(), 16)?;
+    let _ = ensure_thumbs(folder.to_string(), 16);
     on_progress(step_pct(2));
-    ensure_waveform(folder.to_string(), "system".into())?;
+    let _ = ensure_waveform(folder.to_string(), "system".into());
     on_progress(step_pct(3));
-    ensure_waveform(folder.to_string(), "mic".into())?;
+    let _ = ensure_waveform(folder.to_string(), "mic".into());
     on_progress(step_pct(4));
-    ensure_preview_audio(folder.to_string())?;
+    let _ = ensure_preview_audio(folder.to_string());
     on_progress(step_pct(5));
     crate::edit::seed::load_or_seed(&paths); // ensures edit.json exists on disk
     on_progress(step_pct(6));

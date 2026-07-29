@@ -17,16 +17,16 @@ Renders one composited frame at `time_ms` (uncached: builds a fresh renderer via
 
 ### Returns
 
-`Result<Vec<u8>>` - PNG bytes of the composited frame, sized to the resolved preview canvas (`PREVIEW_LONG_EDGE`, following the doc's aspect). Errors if `FrameRenderer::new` fails (missing files), if the screen decoder cannot be spawned, if `time_ms` is past the end of the video, or if the ffmpeg PNG encoder produces no output.
+`Result<Vec<u8>>` - PNG bytes of the composited frame, sized to the resolved preview canvas (`PREVIEW_LONG_EDGE`, following the doc's aspect). Errors if `FrameRenderer::new` fails (missing files), if the screen decoder cannot be spawned, if `time_ms` is past the end of the video, or if in-process PNG encoding (`png_encode`) fails.
 
 ### Implementation
 
-1. `build_renderer(paths)` calls `FrameRenderer::new(paths, Layout::default(), fps, Some(PREVIEW_LONG_EDGE))` - the doc's `aspect` is resolved against the true source dims then downscaled to the `PREVIEW_LONG_EDGE` (1280px) budget (`Layout::resolve`), so the preview frame always matches the export's aspect proportionally.
+1. `build_renderer(paths)` calls `FrameRenderer::new(paths, Layout::default(), fps, Resolution::Source, Some(PREVIEW_LONG_EDGE))` - the doc's `aspect` is resolved against the true source dims then downscaled to the `PREVIEW_LONG_EDGE` (1280px) budget (`Layout::resolve`), so the preview frame always matches the export's aspect proportionally. `Resolution::Source` is a no-op here (the export resolution setting only applies to the export build).
 2. Compute `k_target = time_ms as u64 * OUT_FPS / 1000`. Fast-forward the camera sim by calling `step_camera` for every `j` in `0..=k_target` at `video_start + j * 1000 / OUT_FPS`. This must ascend because `CameraSim` and the cursor index only move forward. The last returned `FramePose` is the preview pose. Cost: arithmetic only, no I/O.
 3. Spawn a `RawDecoder` on `paths.video()` seeked to `time_ms` (the screen file's frame 0 is `video_start`, so `time_ms` is the right offset), read one frame into a `screen_bytes`-sized buffer; bail if the read hits EOF (time past end of video).
 4. If `paths.webcam().exists()`, spawn a `RawDecoder` on the webcam seeked to `video_start + time_ms` (export pre-seeks the webcam by `video_start`, so its file-time is shifted) with `scale = Some(webcam_size)`, read one frame; else `webcam = None`.
 5. Call `renderer.composite_at(&pose, &screen_buf, webcam_ref, &mut bgra)` to write a BGRA buffer into `bgra`.
-6. Call `png_encode(bgra, meta.out_w, meta.out_h)` to produce PNG bytes via ffmpeg, at the renderer's resolved size.
+6. Call `png_encode(bgra, meta.out_w, meta.out_h)` to produce PNG bytes in-process via the `png` crate (no ffmpeg subprocess involved), at the renderer's resolved size.
 
 ## preview_frame
 
@@ -103,4 +103,4 @@ The preview canvas long-edge budget in pixels. 1280 matches the old hardcoded 16
 fn build_renderer(paths: &ProjectPaths) -> Result<(FrameRenderer, RenderMeta)>
 ```
 
-Builds a fresh preview renderer downscaled to `PREVIEW_LONG_EDGE`, following the doc's chosen `aspect` exactly via `FrameRenderer::new(paths, Layout::default(), fps, Some(PREVIEW_LONG_EDGE))` - the aspect is resolved against the true source dims then scaled to the long-edge budget, so the preview always matches the export's aspect proportionally.
+Builds a fresh preview renderer downscaled to `PREVIEW_LONG_EDGE`, following the doc's chosen `aspect` exactly via `FrameRenderer::new(paths, Layout::default(), fps, Resolution::Source, Some(PREVIEW_LONG_EDGE))` - the aspect is resolved against the true source dims then scaled to the long-edge budget, so the preview always matches the export's aspect proportionally. `Resolution::Source` is passed (rather than a user-chosen resolution) because the export resolution setting only applies to the export build, not the preview.

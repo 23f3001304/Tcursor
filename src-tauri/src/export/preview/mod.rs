@@ -41,7 +41,7 @@ fn render_frame(renderer: &mut FrameRenderer, meta: &RenderMeta, paths: &Project
     // Seek-decode one screen frame at time_ms (the screen file's frame 0 is video_start).
     let mut screen_buf = vec![0u8; meta.screen_bytes];
     let mut screen_dec = RawDecoder::spawn(
-        &paths.video(), 0.0, false, Some(time_ms as u64), None, None, meta.screen_bytes)?;
+        &paths.video(), 0.0, false, Some(time_ms as u64), None, None, "nv12", meta.screen_bytes)?;
     if !screen_dec.read_frame(&mut screen_buf)? {
         anyhow::bail!("no screen frame at {time_ms}ms (past end of video)");
     }
@@ -54,7 +54,7 @@ fn render_frame(renderer: &mut FrameRenderer, meta: &RenderMeta, paths: &Project
         let mut buf = vec![0u8; wc_bytes];
         let mut wc_dec = RawDecoder::spawn(
             &paths.webcam(), OUT_FPS as f64, false,
-            Some(meta.video_start + time_ms as u64), Some(wc_size), None, wc_bytes)?;
+            Some(meta.video_start + time_ms as u64), Some(wc_size), None, "bgra", wc_bytes)?;
         wc_dec.read_frame(&mut buf)?;
         drop(wc_dec);
         Some((buf, wc_size, wc_size))

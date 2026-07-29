@@ -4,6 +4,9 @@ use crate::export::scene::{Panel, Scene};
 use crate::export::types::{Camera, Layout};
 
 pub trait Compositor: Send + Sync {
+    /// Composite one frame. `screen` is **nv12** (`sw*sh*3/2` bytes: Y plane + interleaved half-res
+    /// UV) - the GPU path converts it to RGB in the shader; `CpuCompositor` converts up front via
+    /// `color::nv12_to_bgra`. `webcam`/`bg` remain BGRA. `out` is BGRA (`ow*oh*4`).
     fn composite_into(
         &self,
         screen: &[u8], sw: u32, sh: u32,
@@ -28,6 +31,10 @@ impl Compositor for CpuCompositor {
         out: &mut Vec<u8>,
     ) {
         let (ow, oh) = (layout.out_w, layout.out_h);
+        // Screen arrives as nv12; convert once to BGRA so the rest of the CPU blend path (and the
+        // fast-path) works on packed BGRA exactly as before.
+        let screen_bgra = crate::export::color::nv12_to_bgra(screen, sw, sh);
+        let screen = &screen_bgra[..];
         // Fast-path: 1:1 unzoomed full screen without camera PiP or corner rounding
         if cam.scale <= 1.0001 && scene.camera.alpha <= 0.0 && scene.screen.alpha >= 0.999 && scene.screen.radius <= 0.1 && scene.screen.ring_px <= 0.1 && sw == ow && sh == oh && screen.len() == (ow * oh * 4) as usize {
             out.clear();

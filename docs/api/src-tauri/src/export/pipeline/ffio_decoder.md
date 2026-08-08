@@ -51,8 +51,30 @@ Spawns the ffmpeg decoder subprocess and captures its stdout.
 
 ### Implementation
 
-1. Build ffmpeg command: `-v error -hwaccel auto`, optional `-ss seek_ms/1000.0`, optional input `-r rate`, `-i video`, optional output `-r rate`, `-sws_flags fast_bilinear`, then either `-vf scale=w:h:flags=fast_bilinear` (`target_dims`) or `-vf scale=sz:sz:force_original_aspect_ratio=increase,crop=sz:sz:flags=fast_bilinear` (`square_scale`), `-f rawvideo -pix_fmt <pix_fmt>` (`nv12` for the screen, `bgra` for the webcam), `-` (stdout). Stderr suppressed.
+1. Build the arg list via `decode_args` (below); stderr suppressed.
 2. Take `child.stdout`; return `Self { child, stdout, frame_bytes }`.
+
+## decode_args
+
+```rust
+fn decode_args(video: &Path, rate: f64, input_rate: bool, seek_ms: Option<u64>, square_scale: Option<u32>, target_dims: Option<(u32, u32)>, pix_fmt: &str) -> Vec<String>
+```
+
+Pure builder for `RawDecoder::spawn`'s ffmpeg arg list - no process spawn, so the `-r`/`-vf`/`-pix_fmt` selection is unit-testable directly. Mirrors the exact arg order the command used to be built inline: `-v error -hwaccel auto`, optional `-ss seek_ms/1000.0`, optional input `-r rate` (`input_rate == true`), `-i video`, optional output `-r rate` (`input_rate == false`), `-sws_flags fast_bilinear`, then either `-vf scale=w:h:flags=fast_bilinear` (`target_dims`) or `-vf scale=sz:sz:force_original_aspect_ratio=increase,crop=sz:sz` (`square_scale`), `-f rawvideo -pix_fmt <pix_fmt>`, `-` (stdout).
+
+### Inputs
+
+Same as `RawDecoder::spawn` minus `frame_bytes` (that field is stored on `RawDecoder`, not needed to build the ffmpeg args).
+
+### Returns
+
+`Vec<String>` - the full ffmpeg argument list (everything after the `ffmpeg` binary name itself).
+
+### Behaviors
+
+- `positive_output_rate_emits_r_after_i` - `rate > 0.0, input_rate = false` (the screen/webcam decode's shape) places `-r <rate>` AFTER `-i`, formatted `%.4f`.
+- `positive_input_rate_emits_r_before_i` - `input_rate = true` places `-r` BEFORE `-i` instead.
+- `non_positive_rate_omits_r_entirely` - `rate <= 0.0` (native-rate decode, e.g. the preview engine's seek-one-frame calls) emits no `-r` at all.
 
 ## RawDecoder::read_frame
 

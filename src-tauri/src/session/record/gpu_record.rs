@@ -17,6 +17,7 @@ use windows_capture::settings::{
     MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings,
 };
 use crate::domain::time::Clock;
+use super::pause_clock::PauseClock;
 
 /// Target H.264 bitrate (bits/s) for the raw recording intermediate at `w`x`h`: scaled by pixel
 /// count and clamped to a sane range. Deliberately generous (the export re-encodes this, so we
@@ -43,6 +44,7 @@ struct Cap {
     clock: Arc<dyn Clock>,
     frame_ts: FrameTimes,
     paused: Arc<AtomicBool>,
+    pause_clock: PauseClock,
 }
 
 impl GraphicsCaptureApiHandler for Cap {
@@ -51,16 +53,18 @@ impl GraphicsCaptureApiHandler for Cap {
 
     fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
         let (encoder, clock, frame_ts, paused) = ctx.flags;
-        Ok(Self { encoder: Some(encoder), clock, frame_ts, paused })
+        Ok(Self { encoder: Some(encoder), clock, frame_ts, paused, pause_clock: PauseClock::new() })
     }
 
     fn on_frame_arrived(&mut self, frame: &mut Frame, _ctl: InternalCaptureControl) -> Result<(), Self::Error> {
-        // Skip frames while paused (matches the ffmpeg path); record the capture time, then send
-        // the frame's D3D11 surface straight to the GPU encoder (send_frame blocks until the GPU
-        // drains it - natural back-pressure). The ts is pushed BEFORE send_frame: a send error
-        // aborts capture and stop() surfaces it, so the orphan ts never reaches sync.json.
-        if !self.paused.load(Ordering::SeqCst) {
-            self.frame_ts.lock().unwrap_or_else(|e| e.into_inner()).push(self.clock.now_ms());
+        // Skip frames while paused (matches the ffmpeg path), and shift the recorded ts by
+        // accumulated paused time (PauseClock) so a pause leaves no gap between sync.json and
+        // video.mp4. The ts is pushed BEFORE send_frame: a send error aborts capture and stop()
+        // surfaces it, so an orphan ts never reaches sync.json.
+        let now = self.clock.now_ms();
+        let paused = self.paused.load(Ordering::SeqCst);
+        if let Some(ts) = self.pause_clock.observe(now, paused) {
+            self.frame_ts.lock().unwrap_or_else(|e| e.into_inner()).push(ts);
             if let Some(e) = self.encoder.as_mut() { e.send_frame(frame)?; }
         }
         Ok(())

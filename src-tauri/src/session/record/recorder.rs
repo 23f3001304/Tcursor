@@ -98,8 +98,23 @@ pub fn start_recording(
     // (Media Foundation, no readback) by default; the compatibility toggle (game_mode) or a
     // GPU-encoder init failure falls back to the legacy ffmpeg path. Returns the captured (w, h).
     let video_path = paths.video().to_string_lossy().into_owned();
-    let (video, w, h, origin_x, origin_y) = start_video(game_mode, clock.clone(), stop.clone(), paused.clone(),
-        fps, snap.cursor.style.captures_os_cursor(), target_id.as_deref(), &video_path)?;
+    let (video, w, h, origin_x, origin_y) = match start_video(game_mode, clock.clone(), stop.clone(), paused.clone(),
+        fps, snap.cursor.style.captures_os_cursor(), target_id.as_deref(), &video_path) {
+        Ok(v) => v,
+        Err(e) => {
+            // start_video failed after the mic/system-audio threads were already spawned
+            // (see comment above - they intentionally run concurrently with the slow
+            // encoder init). Without this, `stop` is never set, so those threads' 50ms
+            // poll loops never exit: a leaked thread plus a mic/loopback device left open
+            // and its WAV never finalized. mouse/keyboard/cursor need no equivalent
+            // handling here - they're plain locals (never moved into `Running`), so their
+            // Drop impls already stop the underlying hooks when this function returns.
+            stop.store(true, Ordering::SeqCst);
+            if let Some(t) = mic_thread { let _ = t.join(); }
+            if let Some(t) = system_thread { let _ = t.join(); }
+            return Err(e);
+        }
+    };
     println!("recording {w}x{h} @ {fps}fps (origin {origin_x},{origin_y})");
 
     let screen = ScreenInfo { w, h, origin_x, origin_y };

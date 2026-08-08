@@ -1,5 +1,6 @@
 // Mux recorded audio tracks into the final output (copy video, encode audio per format).
 use anyhow::{anyhow, Context, Result};
+use std::ffi::OsString;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use crate::win::sys::proc::ffcmd;
@@ -10,8 +11,10 @@ use crate::session::paths::ProjectPaths;
 /// Combine `tmp` video with whichever of mic/system audio exist, writing `final.<ext>` (`<ext>`
 /// from `format.extension()`). With both tracks they are mixed; with one it is mapped; with none
 /// - or when `format` can't carry audio at all (`Format::Gif`) - the temp file is moved straight
-/// to the destination.
-pub fn mux(tmp: &Path, paths: &ProjectPaths, format: Format, mic_shift_ms: i64, sys_shift_ms: i64, mic_vol: f32, sys_vol: f32) -> Result<()> {
+/// to the destination. `out_dur_ms` caps the muxed audio to the (trimmed) video's own duration
+/// (`-t`), so a trim-out doesn't leave a longer audio tail playing past the video's last frame;
+/// unused on the no-audio path (nothing to cap).
+pub fn mux(tmp: &Path, paths: &ProjectPaths, format: Format, mic_shift_ms: i64, sys_shift_ms: i64, mic_vol: f32, sys_vol: f32, out_dur_ms: u64) -> Result<()> {
     let final_path = paths.folder.join(format!("final.{}", format.extension()));
     let mic = paths.mic();
     let system = paths.system();
@@ -20,23 +23,16 @@ pub fn mux(tmp: &Path, paths: &ProjectPaths, format: Format, mic_shift_ms: i64, 
 
     if have_mic && have_sys {
         let acodec = format.audio_codec();
-        run_ffmpeg(|c| {
-            c.arg("-i").arg(tmp);
-            add_offset(c, mic_shift_ms); c.arg("-i").arg(&mic);
-            add_offset(c, sys_shift_ms); c.arg("-i").arg(&system);
-            let filter = format!("[1:a]volume={mic_vol}[m];[2:a]volume={sys_vol}[s];[m][s]amix=inputs=2:normalize=0[a]");
-            c.args(["-filter_complex", &filter, "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", acodec])
-                .arg(&final_path);
-        })?;
+        let tracks = [
+            AudioTrack { path: &mic, shift_ms: mic_shift_ms, vol: mic_vol },
+            AudioTrack { path: &system, shift_ms: sys_shift_ms, vol: sys_vol },
+        ];
+        run_ffmpeg(&mux_args(tmp, &tracks, acodec, out_dur_ms, &final_path))?;
     } else if have_mic || have_sys {
         let acodec = format.audio_codec();
         let (audio, shift, vol) = if have_mic { (&mic, mic_shift_ms, mic_vol) } else { (&system, sys_shift_ms, sys_vol) };
-        run_ffmpeg(|c| {
-            c.arg("-i").arg(tmp);
-            add_offset(c, shift); c.arg("-i").arg(audio);
-            c.args(["-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", acodec, "-af", &format!("volume={vol}")])
-                .arg(&final_path);
-        })?;
+        let tracks = [AudioTrack { path: audio, shift_ms: shift, vol }];
+        run_ffmpeg(&mux_args(tmp, &tracks, acodec, out_dur_ms, &final_path))?;
     } else {
         // No audio (nothing recorded, or `format` can't carry it - e.g. `Gif`): move the
         // encoded video/image into place.
@@ -49,24 +45,69 @@ pub fn mux(tmp: &Path, paths: &ProjectPaths, format: Format, mic_shift_ms: i64, 
     Ok(())
 }
 
+/// One audio input to `mux_args`: its file path, signed A/V shift (`add_offset`'s sign
+/// convention), and linear volume gain.
+struct AudioTrack<'a> {
+    path: &'a Path,
+    shift_ms: i64,
+    vol: f32,
+}
+
+/// Build the `ffmpeg` args (appended after the shared `-y -v error`) that mux `tmp`'s video
+/// with 1 or 2 audio tracks into `final_path`, pure (no process spawn) so the mix-filter vs.
+/// single-map branch choice and the `-t` duration cap are unit-testable without launching
+/// ffmpeg. `tracks.len()` must be 1 or 2 - `mux`'s own branching guarantees this (the 0-track
+/// case takes the separate rename path and never reaches here). `-t <out_dur_ms>` is appended
+/// last, immediately before `final_path`, so the muxed output is capped to the (trimmed)
+/// video's own duration regardless of how long the source audio file actually is.
+fn mux_args(tmp: &Path, tracks: &[AudioTrack], acodec: &str, out_dur_ms: u64, final_path: &Path) -> Vec<OsString> {
+    let mut args: Vec<OsString> = vec!["-i".into(), tmp.as_os_str().to_os_string()];
+    for t in tracks {
+        args.extend(offset_args(t.shift_ms));
+        args.push("-i".into());
+        args.push(t.path.as_os_str().to_os_string());
+    }
+    if tracks.len() == 2 {
+        let filter = format!(
+            "[1:a]volume={}[m];[2:a]volume={}[s];[m][s]amix=inputs=2:normalize=0[a]",
+            tracks[0].vol, tracks[1].vol
+        );
+        args.extend(["-filter_complex", &filter, "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", acodec].map(OsString::from));
+    } else {
+        let af = format!("volume={}", tracks[0].vol);
+        args.extend(["-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", acodec, "-af", &af].map(OsString::from));
+    }
+    args.push("-t".into());
+    args.push(format!("{:.3}", out_dur_ms as f64 / 1000.0).into());
+    args.push(final_path.as_os_str().to_os_string());
+    args
+}
+
 /// Align an audio input to the video start: positive shift = delay
 /// (`-itsoffset`), negative = trim the lead (`-ss`). Emitted before its `-i`.
 /// `pub(crate)` so the editor's preview-audio mux (`preview::thumbs`) applies the exact same
 /// alignment the final render does, keeping preview playback in sync.
 pub(crate) fn add_offset(c: &mut Command, shift_ms: i64) {
+    c.args(offset_args(shift_ms));
+}
+
+/// Pure arg list for `add_offset`'s alignment (same sign convention) - shared with `mux_args`
+/// so both the `Command`-builder and the `Vec<OsString>`-builder emit identical args.
+fn offset_args(shift_ms: i64) -> Vec<OsString> {
     if shift_ms > 0 {
-        c.args(["-itsoffset", &format!("{:.3}", shift_ms as f64 / 1000.0)]);
+        vec!["-itsoffset".into(), format!("{:.3}", shift_ms as f64 / 1000.0).into()]
     } else if shift_ms < 0 {
-        c.args(["-ss", &format!("{:.3}", (-shift_ms) as f64 / 1000.0)]);
+        vec!["-ss".into(), format!("{:.3}", (-shift_ms) as f64 / 1000.0).into()]
+    } else {
+        vec![]
     }
 }
 
 /// Spawn `ffmpeg -y -v error <args>` (stderr/stdout silenced) and check exit.
-fn run_ffmpeg(build: impl FnOnce(&mut Command)) -> Result<()> {
-    let mut cmd = ffcmd("ffmpeg");
-    cmd.args(["-y", "-v", "error"]);
-    build(&mut cmd);
-    let status = cmd
+fn run_ffmpeg(args: &[OsString]) -> Result<()> {
+    let status = ffcmd("ffmpeg")
+        .args(["-y", "-v", "error"])
+        .args(args)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
@@ -78,52 +119,5 @@ fn run_ffmpeg(build: impl FnOnce(&mut Command)) -> Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::path::PathBuf;
-
-    /// A fresh temp folder for one test (never touches a real recording).
-    fn tmp_dir(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("tcursor-mux-test-{name}-{}", std::process::id()));
-        std::fs::create_dir_all(&d).unwrap();
-        d
-    }
-
-    #[test]
-    fn no_audio_renames_tmp_to_final_with_the_format_extension() {
-        let folder = tmp_dir("mp4");
-        let paths = ProjectPaths { folder: folder.clone() };
-        let tmp = folder.join("tmp_export.mp4");
-        std::fs::write(&tmp, b"fake video bytes").unwrap();
-        mux(&tmp, &paths, Format::Mp4, 0, 0, 1.0, 1.0).expect("mux");
-        assert!(folder.join("final.mp4").exists());
-        assert!(!tmp.exists());
-        let _ = std::fs::remove_dir_all(&folder);
-    }
-
-    /// `Gif` can never carry audio, so `mux` must take the rename-only path even when mic audio
-    /// was actually recorded for this session - back-compat for `have_mic`/`have_sys` now being
-    /// gated on `format.supports_audio()`.
-    #[test]
-    fn gif_always_takes_the_no_audio_path_even_with_recorded_audio() {
-        let folder = tmp_dir("gif");
-        let paths = ProjectPaths { folder: folder.clone() };
-        let tmp = folder.join("tmp_export.gif");
-        std::fs::write(&tmp, b"fake gif bytes").unwrap();
-        std::fs::write(paths.mic(), b"fake mic wav").unwrap();
-        mux(&tmp, &paths, Format::Gif, 0, 0, 1.0, 1.0).expect("mux");
-        assert!(folder.join("final.gif").exists());
-        let _ = std::fs::remove_dir_all(&folder);
-    }
-
-    #[test]
-    fn webm_final_path_uses_the_webm_extension() {
-        let folder = tmp_dir("webm");
-        let paths = ProjectPaths { folder: folder.clone() };
-        let tmp = folder.join("tmp_export.webm");
-        std::fs::write(&tmp, b"fake webm bytes").unwrap();
-        mux(&tmp, &paths, Format::WebM, 0, 0, 1.0, 1.0).expect("mux");
-        assert!(folder.join("final.webm").exists());
-        let _ = std::fs::remove_dir_all(&folder);
-    }
-}
+#[path = "audio_mux_tests.rs"]
+mod tests;

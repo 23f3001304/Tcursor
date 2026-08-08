@@ -87,8 +87,12 @@ pub fn spawn_system_thread(
     std::thread::Builder::new()
         .name("system-audio".into())
         .spawn(move || {
-            let handle = match SystemAudio::loopback(&system_path, paused) {
-                Ok(h) => { started.store(clock.now_ms(), Ordering::SeqCst); Some(h) }
+            // system_start is stamped inside the callback at the first non-empty packet
+            // (see SystemAudio::loopback), mirroring the mic's in-callback pattern instead
+            // of stamping here at stream-open (which lands earlier than samples actually
+            // start arriving).
+            let handle = match SystemAudio::loopback(&system_path, paused, started, clock) {
+                Ok(h) => Some(h),
                 Err(e) => { eprintln!("system-audio open failed (no loopback): {e}"); None }
             };
             while !stop.load(Ordering::SeqCst) {

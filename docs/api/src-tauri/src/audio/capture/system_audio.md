@@ -1,6 +1,6 @@
 # src-tauri/src/audio/capture/system_audio.rs
 
-Captures desktop loopback audio (what the speakers are playing) by opening the default output device as a CPAL input stream, converting samples to i16, and writing the result to a WAV file. Unlike `cpal_mic`, no latency correction or start-time stamp is applied because loopback audio is already synchronized with the OS audio engine that drives the video capture clock.
+Captures desktop loopback audio (what the speakers are playing) by opening the default output device as a CPAL input stream, converting samples to i16, and writing the result to a WAV file. `started` is stamped inside the data callback at the first non-empty packet, mirroring `cpal_mic`'s in-callback pattern - so `system_ms` reflects when samples actually began arriving rather than the (earlier) moment the stream handle was opened. Unlike `cpal_mic`, no device-latency correction is applied to that stamp: CPAL's `InputCallbackInfo` capture/callback timestamps are mic-specific and unused here.
 
 ## SystemAudioHandle
 
@@ -53,15 +53,17 @@ Stateless factory for loopback capture. All configuration is passed to `loopback
 ## SystemAudio::loopback
 
 ```rust
-pub fn loopback(wav_path: &str, paused: Arc<AtomicBool>) -> anyhow::Result<SystemAudioHandle>
+pub fn loopback(wav_path: &str, paused: Arc<AtomicBool>, started: Arc<AtomicU64>, clock: Arc<dyn Clock>) -> anyhow::Result<SystemAudioHandle>
 ```
 
-Opens the default output device as a loopback input, builds a sample callback, and starts the stream.
+Opens the default output device as a loopback input, builds a sample callback that stamps `started` at the first non-empty packet, and starts the stream.
 
 ### Inputs
 
 - `wav_path: &str` - Destination WAV file path. *Why:* system audio and microphone are captured to separate files so they can be mixed with independent volume controls at export time.*
 - `paused: Arc<AtomicBool>` - Shared pause flag. *Why:* when set the callback discards incoming loopback samples so paused time is excluded from the WAV without stopping and restarting the stream.*
+- `started: Arc<AtomicU64>` - Written once, in the data callback, on the first non-empty packet with `clock.now_ms()` (compare against `0` then store - the callback runs on one CPAL thread so no `compare_exchange` is needed, matching `CpalMic::open`'s pattern). *Why in-callback and not at open:* stream-open (config query, `WavWriter::create`, `build_input_stream`, `stream.play()`) measurably precedes the first sample; stamping in the callback removes that gap so `system_ms` lines up with when audio actually starts, the same way `cpal_mic`'s `capture_ms` removes device latency.*
+- `clock: Arc<dyn Clock>` - Provides `now_ms()` inside the callback. *Why injectable:* tests substitute a `FakeClock`/deterministic clock without needing real hardware timing; `SystemClock` is the production instance.*
 
 ### Implementation
 
@@ -70,8 +72,8 @@ Opens the default output device as a loopback input, builds a sample callback, a
 3. Create `WavWriter` at `wav_path` for the discovered format.
 4. Clone `writer` into `w2` for the callback closure.
 5. Build the callback depending on `sample_format`:
-   - `F32`: if `paused`, return early. Clamp each sample to `[-1.0, 1.0]`, scale to `i16::MAX`, write to WAV.
-   - `I16`: if `paused`, return early. Write `data` directly to WAV.
+   - `F32`: if `paused`, return early. If `data` is non-empty and `started == 0`, store `clock.now_ms()` into `started`. Clamp each sample to `[-1.0, 1.0]`, scale to `i16::MAX`, write to WAV.
+   - `I16`: if `paused`, return early. Same `started` stamp as `F32`. Write `data` directly to WAV.
    - Other formats: bail with an unsupported-format error before the stream is started.
 6. Call `stream.play()`.
 7. Return `SystemAudioHandle { stream, writer }`.
@@ -82,4 +84,4 @@ Opens the default output device as a loopback input, builds a sample callback, a
 
 ### Behaviors
 
-No start-time stamp or latency correction is applied. The `InputCallbackInfo` parameter is ignored (`_`) in the callback because loopback audio is already in time with the OS audio engine driving the video capture clock; no manual alignment is needed, unlike the microphone path in `cpal_mic`.
+The `InputCallbackInfo` parameter is still ignored (`_`) in the callback signature: unlike `cpal_mic`, there is no per-sample device-latency correction applied to the `started` stamp (loopback audio is already in time with the OS audio engine driving the video capture clock, so only the callback-vs-open gap needs correcting, not per-sample hardware latency).

@@ -55,7 +55,7 @@ pub fn export(paths: &ProjectPaths, settings: ExportSettings, on_progress: impl 
         Ok(())
     });
 
-    let mut spipe = ScreenPipe::spawn(&paths.video(), screen_bytes, None, depth)?;
+    let mut spipe = ScreenPipe::spawn(&paths.video(), screen_bytes, None, depth, out_fps)?;
     let mut wpipe = if paths.webcam().exists() {
         Some(WebcamPipe::spawn(&paths.webcam(), meta.video_start, size, wc_bytes, depth, out_fps)?)
     } else { None };
@@ -89,7 +89,7 @@ pub fn export(paths: &ProjectPaths, settings: ExportSettings, on_progress: impl 
     for k in 0..=k_full_last {
         let t = meta.video_start + k * 1000 / out_fps;
         let d0 = std::time::Instant::now();
-        let screen = spipe.next()?.unwrap_or(&empty); // 1:1 with output frames (video.mp4 is CFR-60 real-time)
+        let screen = spipe.next()?.unwrap_or(&empty); // decoded at -r out_fps, so output frame k IS decoded frame k at any export rate
         if let Some(w) = &mut wpipe {
             if let Some(next) = w.next()? {
                 if let Some((old, _, _)) = last_webcam.take() { w.recycle(old); }
@@ -138,7 +138,10 @@ pub fn export(paths: &ProjectPaths, settings: ExportSettings, on_progress: impl 
     // into the original capture, so both tracks shift earlier by the same amount to stay in sync.
     let shift = |a: Option<u64>| a.map(|m| m as i64 - meta.video_start as i64).unwrap_or(0) - trim_in_ms as i64;
     let mic_shift = shift(meta.tl.mic_ms) + meta.audio_offset_ms as i64;
-    mux(&tmp, paths, settings.format, mic_shift, shift(meta.tl.system_ms), meta.mic_volume, meta.sys_volume)?;
+    // Cap the muxed audio to the trimmed video's own duration, so a trim-out doesn't leave a
+    // longer source audio file playing past the video's frozen last frame.
+    let out_dur_ms = (total_out * 1000) / out_fps;
+    mux(&tmp, paths, settings.format, mic_shift, shift(meta.tl.system_ms), meta.mic_volume, meta.sys_volume, out_dur_ms)?;
     Ok(())
 }
 

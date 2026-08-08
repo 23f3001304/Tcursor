@@ -97,8 +97,8 @@ Spawns a dedicated thread that owns and drives a `SystemAudio` loopback handle. 
 - `system_path: String` - destination for `system.wav`. *Why String:* moved into the closure.
 - `stop: Arc<AtomicBool>` - shared shutdown flag, same semantics as in `spawn_mic_thread`.
 - `paused: Arc<AtomicBool>` - pause flag passed to `SystemAudio::loopback` so loopback samples are gated during pause.
-- `clock: Arc<dyn Clock>` - used to stamp `started` at open time (not at first sample, unlike mic). *Why at open:* the loopback callback does not expose per-sample timestamps; stamping at open is the best approximation.
-- `started: Arc<AtomicU64>` - stamped in the thread immediately after a successful `loopback` open. *Why SeqCst store:* read back on the main thread in `stop_recording`; must be globally visible before the `join` returns.
+- `clock: Arc<dyn Clock>` - forwarded into `SystemAudio::loopback`, which stamps `started` from inside the data callback at the first non-empty packet - mirroring the mic's in-callback pattern (see `spawn_mic_thread`) instead of stamping at stream-open. *Why not stamp here anymore:* stream-open (config negotiation + `stream.play()`) measurably precedes when samples actually start arriving; stamping in the callback removes that gap the same way the mic path removes its device latency.
+- `started: Arc<AtomicU64>` - passed straight into `SystemAudio::loopback`, which owns the stamping. *Why SeqCst store:* read back on the main thread in `stop_recording`; must be globally visible before the `join` returns.
 
 ### Returns
 
@@ -108,6 +108,6 @@ Spawns a dedicated thread that owns and drives a `SystemAudio` loopback handle. 
 
 1. `if !enabled { return None; }`.
 2. Spawn thread named `"system-audio"`.
-3. Inside the thread: call `SystemAudio::loopback`. On success, stamp `started.store(clock.now_ms(), SeqCst)` and store the handle. On failure, log and store `None`. *Why store `None` on error:* same as mic - non-fatal; recording continues without system audio.
+3. Inside the thread: call `SystemAudio::loopback(&system_path, paused, started, clock)`, moving `started`/`clock` in directly - `loopback` itself stamps `started` at the first non-empty callback packet. On success, store the handle. On failure, log and store `None`. *Why store `None` on error:* same as mic - non-fatal; recording continues without system audio.
 4. Loop sleeping 50ms until `stop` is set.
 5. Call `handle.stop()` to flush and close the wav file. *Why `SystemAudioHandle` is `!Send`:* cpal streams contain platform handles that must be released on the same thread they were created on; owning the handle in the thread that opened it satisfies this invariant.

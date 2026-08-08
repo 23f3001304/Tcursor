@@ -13,3 +13,7 @@ Thread-spawning helpers and input-persistence logic factored out of `recorder.rs
 ## recording_session
 
 Thin state machine wrapping one `FrameSource` and one `FrameSink`. Runs entirely on the `"video"` thread; has no threading primitives of its own. Key items: `RecordingSession` (owns source and sink, tracks frame count and timestamps), `RecordingSession::new`, `RecordingSession::pump_once` (pulls one frame and pushes to encoder), `RecordingSession::run` (variable-FPS loop with pause support), `RecordingSession::run_paced` (delegates to `pacing::run_paced` for CFR mode), `RecordingSession::stop_and_finalize` (flushes the sink and returns the frame count), `SessionState` (lifecycle enum).
+
+## pause_clock
+
+Private helper module (not re-exported beyond `record`) shared by `gpu_record::Cap` and `recording_session::RecordingSession`. Key item: `PauseClock` (accumulates paused wall-clock time from a stream of per-frame `(now, paused)` samples and shifts capture timestamps to exclude it, so a pause leaves no gap between `sync.json` and `video.mp4`).

@@ -1,11 +1,11 @@
 # src-tauri/src/export/pipeline/audio_mux.rs
 
-Muxes the encoded silent video with recorded microphone and/or system audio into `final.<ext>` (`<ext>` from the export's `Format`). Handles all four audio combinations (both tracks, one track, no tracks), applies per-track A/V sync offsets, applies per-track volume gain before muxing, and picks the right audio codec for the container.
+Muxes the encoded silent video with recorded microphone and/or system audio into `final.<ext>` (`<ext>` from the export's `Format`). Handles all four audio combinations (both tracks, one track, no tracks), applies per-track A/V sync offsets, applies per-track volume gain before muxing, caps muxed audio to the (trimmed) video's own duration, and picks the right audio codec for the container.
 
 ## mux
 
 ```rust
-pub fn mux(tmp: &Path, paths: &ProjectPaths, format: Format, mic_shift_ms: i64, sys_shift_ms: i64, mic_vol: f32, sys_vol: f32) -> Result<()>
+pub fn mux(tmp: &Path, paths: &ProjectPaths, format: Format, mic_shift_ms: i64, sys_shift_ms: i64, mic_vol: f32, sys_vol: f32, out_dur_ms: u64) -> Result<()>
 ```
 
 Combines the temporary video file with whichever audio tracks exist and writes `<project_folder>/final.<ext>`.
@@ -19,6 +19,7 @@ Combines the temporary video file with whichever audio tracks exist and writes `
 - `sys_shift_ms: i64` - signed A/V offset for the system audio track. *Why:* system audio comes from a separate capture device and may have independent drift.*
 - `mic_vol: f32` - linear gain multiplier applied to the mic track (`Settings.audio_mic_volume`; 0 = muted, 1 = unchanged, up to 1.5). *Why linear rather than dB:* matches ffmpeg's `volume` filter's default unit and the 0..150% slider in `AudioPanel`, so no conversion is needed at either end.*
 - `sys_vol: f32` - linear gain multiplier applied to the system-audio track (`Settings.audio_sys_volume`). Same range as `mic_vol`.*
+- `out_dur_ms: u64` - the exact duration of the encoded (trimmed) video in milliseconds, `(total_out * 1000) / out_fps` from the exporter's own trimmed frame count. Applied as `-t` on the audio paths only. *Why:* recorded audio files run the full capture length regardless of trim, and only trim-IN was ever applied (via `add_offset`'s `-ss`); without a `-t` cap, a 60s recording trimmed to 10s of video would mux in the full ~60s of audio, leaving the player holding on the last video frame while audio keeps playing. Ignored on the no-audio rename path (nothing to cap).*
 
 ### Returns
 
@@ -28,14 +29,59 @@ Combines the temporary video file with whichever audio tracks exist and writes `
 
 1. Compute `final_path = paths.folder / "final.<ext>"` (`<ext>` from `format.extension()`).
 2. Check `mic.exists()` and `system.exists()`, both additionally gated on `format.supports_audio()` - so `Gif` always behaves as if neither track exists, regardless of what was actually recorded.
-3. **Both tracks:** call `run_ffmpeg` with three inputs (video, mic, system). Apply `add_offset` before each audio input. Use `-filter_complex [1:a]volume={mic_vol}[m];[2:a]volume={sys_vol}[s];[m][s]amix=inputs=2:normalize=0[a]` - each track's volume filter runs BEFORE the mix, so muting one track (volume 0) silences only that track instead of the mixed output. Map video stream with `-c:v copy` and encode audio with `format.audio_codec()`. *Why `normalize=0`:* prevents automatic loudness normalization that would alter the user's recorded audio levels.*
-4. **One track:** call `run_ffmpeg` with two inputs (video + that track). Apply `add_offset`. Map with `-c:v copy -c:a {format.audio_codec()} -af volume={vol}` (that track's own gain).
-5. **No audio** (nothing recorded, or `format` can't carry it at all - `Gif`): remove any existing `final.<ext>`, rename `tmp` to `final.<ext>` via `fs::rename`. *Why rename not copy:* avoids duplicating a potentially large video file when there is nothing to mux. No volume filter applies (nothing to mux).*
+3. **Both tracks:** build an `AudioTrack` for mic and system, and call `run_ffmpeg` with `mux_args`' output (three inputs: video, mic, system).
+4. **One track:** build a single `AudioTrack` for whichever exists, and call `run_ffmpeg` with `mux_args`' output (two inputs: video + that track).
+5. **No audio** (nothing recorded, or `format` can't carry it at all - `Gif`): remove any existing `final.<ext>`, rename `tmp` to `final.<ext>` via `fs::rename`. *Why rename not copy:* avoids duplicating a potentially large video file when there is nothing to mux. No volume filter or duration cap applies (nothing to mux).*
 6. On audio paths, delete `tmp` after a successful ffmpeg mux (superseded by `final.<ext>`).
 
 ### Behaviors worth knowing
 
 - `no_audio_renames_tmp_to_final_with_the_format_extension`, `gif_always_takes_the_no_audio_path_even_with_recorded_audio`, `webm_final_path_uses_the_webm_extension` - unit tests covering the pure-rename path (no ffmpeg spawn needed) for each format, including the `Gif`-with-recorded-mic-audio case.
+- `both_tracks_args_cap_duration_with_t_immediately_before_the_output_path`, `single_track_args_cap_duration_with_t_immediately_before_the_output_path` - unit tests on `mux_args` (no ffmpeg spawn) asserting `-t <out_dur_ms as seconds, 3 decimals>` sits immediately before the output path, for both branches.
+
+## mux_args
+
+```rust
+fn mux_args(tmp: &Path, tracks: &[AudioTrack], acodec: &str, out_dur_ms: u64, final_path: &Path) -> Vec<std::ffi::OsString>
+```
+
+Builds the `ffmpeg` args (appended after the shared `-y -v error`) that mux `tmp`'s video with 1 or 2 audio tracks into `final_path`. Pure - no process spawn - so the mix-filter-vs-single-map branch choice and the `-t` duration cap are unit-testable without launching ffmpeg. Private to the module; `mux` is the only caller, `run_ffmpeg` the only consumer of its output.
+
+### Inputs
+
+- `tmp: &Path` - the silent video input.
+- `tracks: &[AudioTrack]` - 1 or 2 audio inputs (path, `add_offset` shift, linear volume). *Why a slice, not two `Option`s:* lets one function build both the both-tracks and one-track ffmpeg arg lists by branching on `tracks.len()` instead of duplicating the arg-assembly logic per branch. Must be length 1 or 2 - `mux`'s own branching guarantees this (0 tracks takes the separate rename path and never reaches here).
+- `acodec: &str` - the audio encoder for `-c:a` (`format.audio_codec()`).
+- `out_dur_ms: u64` - see `mux`'s own `out_dur_ms`. Formatted to 3 decimal seconds and appended as `-t <secs>` immediately before `final_path`.
+- `final_path: &Path` - the output file path, appended last.
+
+### Returns
+
+`Vec<OsString>` - the full arg list, in ffmpeg's expected order: `-i <tmp>` first, then per-track `offset_args` + `-i <track>` (in `tracks` order), then the mix filter (`tracks.len() == 2`) or single map (`tracks.len() == 1`), then `-t <out_dur_ms as seconds>`, then `final_path`.
+
+### Implementation
+
+1. Push `-i <tmp>`.
+2. For each track: push `offset_args(track.shift_ms)`, then `-i <track.path>`.
+3. **`tracks.len() == 2`:** push `-filter_complex [1:a]volume={vol0}[m];[2:a]volume={vol1}[s];[m][s]amix=inputs=2:normalize=0[a] -map 0:v -map [a] -c:v copy -c:a {acodec}` - each track's volume filter runs BEFORE the mix, so muting one track (volume 0) silences only that track instead of the mixed output. *Why `normalize=0`:* prevents automatic loudness normalization that would alter the user's recorded audio levels.
+4. **Else (`tracks.len() == 1`):** push `-map 0:v -map 1:a -c:v copy -c:a {acodec} -af volume={vol}`.
+5. Push `-t <out_dur_ms as seconds, 3 decimals>` then `final_path`.
+
+## AudioTrack
+
+```rust
+struct AudioTrack<'a> { path: &'a Path, shift_ms: i64, vol: f32 }
+```
+
+One audio input to `mux_args`: its file path, signed A/V shift (`add_offset`'s sign convention), and linear volume gain. Private to the module - `mux` constructs one `AudioTrack` per existing audio file and passes them to `mux_args` as a slice.
+
+## offset_args
+
+```rust
+fn offset_args(shift_ms: i64) -> Vec<std::ffi::OsString>
+```
+
+Pure arg list for the same alignment `add_offset` applies (see there for the sign convention): `["-itsoffset", "<secs>"]` if positive, `["-ss", "<secs>"]` if negative, empty if zero. Shared by `add_offset` (appends onto a `Command`) and `mux_args` (appends onto its `Vec<OsString>`) so both builders emit identical args from one implementation.
 
 ## add_offset
 

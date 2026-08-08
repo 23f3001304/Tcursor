@@ -1,7 +1,8 @@
 //! 3-stage export pipeline: screen/webcam decode threads feed the composite loop (the
 //! exporter), which feeds the encoder thread, connected by bounded channels + recycled
-//! buffer pools so decode(N+1) overlaps composite(N) overlaps encode(N-1). The screen decodes 1:1
-//! with output frames (video.mp4 is already CFR-60 real-time); the threads only move bytes.
+//! buffer pools so decode(N+1) overlaps composite(N) overlaps encode(N-1). Both the screen and
+//! webcam decode at `-r out_fps` (see `ScreenPipe`/`WebcamPipe::spawn`), so they decode 1:1
+//! with output frames at any export rate; the threads only move bytes.
 use anyhow::{anyhow, Error, Result};
 use std::path::Path;
 use std::sync::mpsc::{sync_channel, Receiver, Sender};
@@ -45,9 +46,11 @@ pub struct ScreenPipe {
 
 impl ScreenPipe {
     /// Spawn the screen `RawDecoder` (spawn errors surface here) and its decode thread.
-    /// `depth` sizes both the bounded channel and the recycled buffer pool.
-    pub fn spawn(video: &Path, screen_bytes: usize, target_dims: Option<(u32, u32)>, depth: usize) -> Result<ScreenPipe> {
-        let dec = RawDecoder::spawn(video, 0.0, false, None, None, target_dims, "nv12", screen_bytes)?;
+    /// `depth` sizes both the bounded channel and the recycled buffer pool. Decodes at
+    /// `out_fps` (like `WebcamPipe::spawn`) so the decode rate-converts to the export's
+    /// output rate instead of running at the source's native capture rate.
+    pub fn spawn(video: &Path, screen_bytes: usize, target_dims: Option<(u32, u32)>, depth: usize, out_fps: u64) -> Result<ScreenPipe> {
+        let dec = RawDecoder::spawn(video, out_fps as f64, false, None, None, target_dims, "nv12", screen_bytes)?;
         let pool = BufPool::new(depth, screen_bytes);
         let returner = pool.returner();
         let (tx, rx) = sync_channel::<(Vec<u8>, usize)>(depth);
@@ -56,11 +59,12 @@ impl ScreenPipe {
         Ok(ScreenPipe { rx, returner, cur: None, err, handle })
     }
 
-    /// The next decoded screen frame - 1:1 with output frames. `video.mp4` is CFR-60 real-time, so
-    /// output frame k IS decoded frame k; re-timing against `sync.json` was wrong because the CFR
-    /// encode has MORE frames than the recorded delivered-frame timestamps, skewing the video vs the
-    /// real-time audio. On EOF holds the last decoded frame (matches the old clamp). `None` only for
-    /// an empty video. Recycles the superseded buffer.
+    /// The next decoded screen frame - 1:1 with output frames. `video.mp4` is decoded at
+    /// `-r out_fps` (see `spawn`), so output frame k IS decoded frame k at any export rate;
+    /// re-timing against `sync.json` was wrong because the CFR encode has MORE frames than the
+    /// recorded delivered-frame timestamps, skewing the video vs the real-time audio. On EOF
+    /// holds the last decoded frame (matches the old clamp). `None` only for an empty video.
+    /// Recycles the superseded buffer.
     pub fn next(&mut self) -> Result<Option<&[u8]>> {
         match self.rx.recv() {
             Ok(f) => { if let Some(old) = self.cur.replace(f) { let _ = self.returner.send(old.0); } }

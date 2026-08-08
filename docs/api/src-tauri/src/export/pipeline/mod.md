@@ -2,7 +2,7 @@
 
 The 3-stage export pipeline that overlaps decode, composite, and encode. The screen and webcam decoders each run on their own thread (bodies in `pipeline_decode.rs`), reading frames into pooled buffers and streaming them over bounded channels; the exporter's composite loop pulls from those channels via `ScreenPipe`/`WebcamPipe` while the encoder thread drains the composited frames. The result is that decoding frame N+1 overlaps compositing frame N overlaps encoding frame N-1, so wall time trends from `sum(decode, composite)` toward `max(decode, composite)`.
 
-The screen decodes 1:1 with output frames (`ScreenPipe::next`): `video.mp4` is already CFR-60 real-time, so output frame k is decoded frame k - there is no frame-selection or re-timing step (re-timing against `sync.json` was the old A/V-drift bug, since the CFR encode has more frames than the recorded delivered-frame timestamps). The threads only move bytes between stages and never change them. Decode-thread errors are stored in a shared `Arc<Mutex<Option<Error>>>` and surfaced on the main side (via the pipe's `next` calls or `join`), which distinguishes a real decode failure from a clean EOF (channel closed with no stored error).
+The screen decodes 1:1 with output frames (`ScreenPipe::next`): the screen `RawDecoder` is spawned with `-r out_fps` (same as `WebcamPipe`), so ffmpeg itself rate-converts the decode to the export's output rate and output frame k is decoded frame k regardless of whether `out_fps` matches the source capture rate - there is no frame-selection or re-timing step (re-timing against `sync.json` was the old A/V-drift bug, since a fixed-rate re-time has more/fewer frames than the recorded delivered-frame timestamps). Before this, `ScreenPipe::spawn` passed a `0.0` rate (no `-r`, native source rate), which was only correct when `out_fps` happened to equal the capture rate - any other export fps played the decoded video at the wrong speed against real-time audio. The threads only move bytes between stages and never change them. Decode-thread errors are stored in a shared `Arc<Mutex<Option<Error>>>` and surfaced on the main side (via the pipe's `next` calls or `join`), which distinguishes a real decode failure from a clean EOF (channel closed with no stored error).
 
 ## trim_frame_bounds
 
@@ -42,10 +42,10 @@ Owns the screen decode thread's receiving end plus the last-delivered frame (`cu
 ## ScreenPipe::spawn
 
 ```rust
-pub fn spawn(video: &Path, screen_bytes: usize, target_dims: Option<(u32, u32)>, depth: usize) -> Result<ScreenPipe>
+pub fn spawn(video: &Path, screen_bytes: usize, target_dims: Option<(u32, u32)>, depth: usize, out_fps: u64) -> Result<ScreenPipe>
 ```
 
-Spawns the screen `RawDecoder` (native rate, no seek, `nv12` pixel format, optional `target_dims` scale) and its decode thread. The decoder is created here rather than inside the thread so spawn errors surface immediately to the caller.
+Spawns the screen `RawDecoder` at `out_fps` (no seek, `nv12` pixel format, optional `target_dims` scale) and its decode thread. The decoder is created here rather than inside the thread so spawn errors surface immediately to the caller. Passing `out_fps` (rather than a `0.0`/native rate, like `WebcamPipe::spawn` already did) rate-converts the decode to the export's output rate, so the composite loop's 1:1 pull stays correct even when `out_fps` differs from the capture rate.
 
 ### Inputs
 
@@ -53,6 +53,7 @@ Spawns the screen `RawDecoder` (native rate, no seek, `nv12` pixel format, optio
 - `screen_bytes: usize` - bytes per screen frame (nv12: `sw*sh` Y + `sw*sh/2` UV). *Why:* sizes both the pooled decode buffers and the decoder's `read_frame` assertion.*
 - `target_dims: Option<(u32, u32)>` - optional scale target passed to the decoder (`None` = native size). *Why:* lets a caller decode straight to a smaller working size.*
 - `depth: usize` - sizes both the bounded channel and the recycled buffer pool. *Why:* provides backpressure so the decode thread stays a bounded number of frames ahead.*
+- `out_fps: u64` - the export's resolved output frame rate, passed to the decoder as `-r out_fps`. *Why:* forces ffmpeg to rate-convert the decode to the export's output rate rather than the source capture rate, so `next`'s 1:1-with-output-frames pull stays correct at any export fps (matches `WebcamPipe::spawn`'s existing `out_fps` parameter).*
 
 ### Returns
 
@@ -64,7 +65,7 @@ Spawns the screen `RawDecoder` (native rate, no seek, `nv12` pixel format, optio
 pub fn next(&mut self) -> Result<Option<&[u8]>>
 ```
 
-Returns the next decoded screen frame - 1:1 with output frames, blocking on the decode channel as needed. `video.mp4` is CFR-60 real-time, so output frame k IS decoded frame k; there is no `sync.json` re-timing (that was the A/V-drift bug - the CFR encode has more frames than the recorded delivered-frame timestamps, which skewed the video against the real-time audio). On EOF it holds the last decoded frame (matches the old clamp). `Ok(None)` occurs only for a zero-frame video. A stored decode error is returned as `Err`; the superseded buffer is recycled.
+Returns the next decoded screen frame - 1:1 with output frames, blocking on the decode channel as needed. `video.mp4` is decoded at `-r out_fps` (see `spawn`), so output frame k IS decoded frame k at any export rate; there is no `sync.json` re-timing (that was the A/V-drift bug - a fixed-rate re-time has more/fewer frames than the recorded delivered-frame timestamps, which skewed the video against the real-time audio). On EOF it holds the last decoded frame (matches the old clamp). `Ok(None)` occurs only for a zero-frame video. A stored decode error is returned as `Err`; the superseded buffer is recycled.
 
 ### Returns
 
@@ -145,7 +146,7 @@ Thin Tauri command adapter that launches the export on a background thread and b
 
 ## ffio
 
-FFmpeg and ffprobe spawn helpers, raw BGRA frame reader, and bundled-image decode/crop utilities. Key items: `RawDecoder` (spawned ffmpeg subprocess, `spawn` + `read_frame`), `probe_dims`, `probe_duration`, `probe_frame_count`, `decode_image`, `decode_cursor`, `crop_to_alpha`, `png_dims`.
+FFmpeg and ffprobe spawn helpers, raw BGRA frame reader, and bundled-image decode/crop utilities. Key items: `RawDecoder` (spawned ffmpeg subprocess, `spawn` + `read_frame`, arg list built by the pure `decode_args`), `probe_dims`, `probe_duration`, `probe_frame_count`, `decode_image`, `decode_cursor`, `crop_to_alpha`, `png_dims`.
 
 ## audio_mux
 

@@ -37,7 +37,8 @@ Owns the capture source and encoder sink for one recording.
 - `sink: Box<dyn FrameSink>` - abstracted encoder (ffmpeg in production, `FakeFrameSink` / `FailingSink` in tests).
 - `state: SessionState` - tracks whether the session is active or stopped. *Why state field:* `stop_and_finalize` consumes `self` (by value), so reading `state` before that call is the only way to inspect whether finalization has occurred via an earlier reference.
 - `frames: u64` - count of frames for which `sink.push` returned `Ok`. *Why count only successes:* encoder errors are non-fatal; the count must reflect what is actually in the file, not what was attempted.
-- `frame_ts: Vec<u64>` - millisecond capture timestamp of each successfully encoded frame. *Why Vec:* unbounded; a 1-hour recording at 60fps produces 216000 entries (~1.7 MB), acceptable in memory.
+- `frame_ts: Vec<u64>` - millisecond capture timestamp of each successfully encoded frame, already shifted to exclude paused time. *Why Vec:* unbounded; a 1-hour recording at 60fps produces 216000 entries (~1.7 MB), acceptable in memory.
+- `pause_clock: PauseClock` - accumulates paused wall-clock time across the session's lifetime and shifts recorded timestamps to exclude it (see `pause_clock.rs`). *Why one shared instance:* both `pump_once` (unpaused pushes) and `run` (paused discards) feed the same accumulator, so a pause spanning multiple `next_frame` calls is measured correctly regardless of which method observes which tick.
 
 ### Used by
 
@@ -95,7 +96,7 @@ Pulls one frame from `source` and pushes it to `sink`. Returns `false` when the 
 
 ### Inputs
 
-`&mut self` - mutates `frames` and `frame_ts` on success.
+`&mut self` - mutates `frames`, `frame_ts`, and `pause_clock` on success.
 
 ### Returns
 
@@ -104,8 +105,9 @@ Pulls one frame from `source` and pushes it to `sink`. Returns `false` when the 
 ### Implementation
 
 1. Call `source.next_frame()`. On `None`, return `false`.
-2. Call `sink.push(&frame)`. On `Ok`, increment `frames` and push `frame.ts.0` onto `frame_ts`. On `Err`, log to stderr. *Why log but continue:* a single encoder hiccup should not abort a potentially long recording.
-3. Return `true` (the source had a frame, regardless of sink outcome).
+2. Feed `frame.ts.0` through `self.pause_clock.observe(_, false)` to get the paused-time-adjusted timestamp to record. *Why via `pause_clock` even for an always-unpaused call:* the accumulator is what makes the shift correct after a prior pause observed via `run`'s discard branch; calling it unconditionally (rather than only when a pause has occurred) keeps the bookkeeping in one place.
+3. Call `sink.push(&frame)` (the original, unshifted frame - only the recorded timestamp changes). On `Ok`, increment `frames` and push the adjusted ts onto `frame_ts`. On `Err`, log to stderr. *Why log but continue:* a single encoder hiccup should not abort a potentially long recording.
+4. Return `true` (the source had a frame, regardless of sink outcome).
 
 ### Behaviors
 
@@ -134,7 +136,7 @@ Loops calling `pump_once` until `stop` is set or the source is exhausted. No pau
 pub fn run(&mut self, stop: &AtomicBool, paused: &AtomicBool)
 ```
 
-Like `run_until_stopped`, but while `paused` is set frames are pulled and discarded instead of encoded, so paused time is excluded from the recording.
+Like `run_until_stopped`, but while `paused` is set frames are pulled and discarded instead of encoded, and their timestamps feed `pause_clock` so paused time is excluded from every timestamp recorded after resume.
 
 ### Inputs
 
@@ -144,13 +146,14 @@ Like `run_until_stopped`, but while `paused` is set frames are pulled and discar
 ### Implementation
 
 1. Loop while `!stop.load(SeqCst)`.
-2. If `paused`: call `source.next_frame()` and discard. Break if `None`. *Why discard rather than skip the call:* on a variable-FPS source, not reading frames would let the internal buffer fill indefinitely.
+2. If `paused`: call `source.next_frame()`; on `Some(f)`, feed `f.ts.0` through `self.pause_clock.observe(_, true)` (return value discarded - it is always `None`) and continue the loop; on `None`, break. *Why discard rather than skip the call:* on a variable-FPS source, not reading frames would let the internal buffer fill indefinitely. *Why still call `observe`:* a real source (WGC) keeps delivering frames at the capture interval even while software-paused, so consecutive discarded frames' timestamps are exactly the ticks `PauseClock` needs to measure the true paused span - see `pause_clock.rs`.
 3. If not paused: call `pump_once`; break on `false`.
 
 ### Behaviors
 
 - `run_encodes_when_not_paused`: two frames, both encoded; `frames_written == 2`.
 - `run_discards_frames_while_paused`: two frames available, all discarded; `frames_written == 0`.
+- `run_shifts_post_pause_timestamps_by_the_paused_span`: an unpaused push at t=1000, then a `run()` call with `paused=true` discarding frames timestamped 1000 and 3000 (marking a 2000ms pause), then a further unpaused push at t=3100, yields `frame_timestamps() == [1000, 1100]` - proves `run`'s discard branch is wired to the same `pause_clock` as `pump_once`.
 
 ## RecordingSession::run_paced
 

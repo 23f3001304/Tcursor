@@ -103,7 +103,7 @@ Creates the project folder, starts all input trackers and audio threads, spawns 
 
 ### Returns
 
-`Ok(())` on success. `Err(String)` for: already recording, folder creation failure, `WgcFrameSource` init failure, or ffmpeg encoder spawn failure.
+`Ok(())` on success. `Err(String)` for: already recording, folder creation failure, `WgcFrameSource` init failure, or ffmpeg encoder spawn failure. On any `start_video` error, the mic/system-audio threads spawned earlier in this call are stopped and joined first (see step 6), so a failed start never leaks an open audio device or a running thread.
 
 ### Implementation
 
@@ -112,7 +112,7 @@ Creates the project folder, starts all input trackers and audio threads, spawns 
 3. Snapshot settings via `settings::store::load` and write to `paths.settings()`. *Why snapshot at start:* the user might change settings mid-session; the export always uses the settings active at record time, ensuring reproducibility.
 4. Query `primary_refresh_hz`, capped to 60. *Why cap:* 60fps is the practical ceiling for current targets; higher refresh rates would waste encoder bandwidth.
 5. Start `MouseTracker`, `KeyboardTracker`, and (if Enhanced style) `CursorTypeTracker`. Start `spawn_mic_thread` and `spawn_system_thread`. *Why before the video pipeline:* building the encoder (first ffmpeg probe / Media Foundation setup) can take a moment. Starting inputs first ensures they capture from t=0 and do not miss that startup gap.
-6. Call `video_sink::start_video(game_mode, ..)` - the slow part. It builds the GPU-native `GpuRecorder` (Media Foundation, no readback) by default, or the legacy ffmpeg pipe when `game_mode` (the compatibility toggle) is set or the GPU encoder fails to init. Returns the `VideoSink` and the captured `(w, h)` (monitor dimensions). *Why after inputs:* see step 5; the slow part is intentionally last.
+6. Call `video_sink::start_video(game_mode, ..)` - the slow part - wrapped in a `match` (not `?`). It builds the GPU-native `GpuRecorder` (Media Foundation, no readback) by default, or the legacy ffmpeg pipe when `game_mode` (the compatibility toggle) is set or the GPU encoder fails to init. Returns the `VideoSink` and the captured `(w, h)` (monitor dimensions). *Why after inputs:* see step 5; the slow part is intentionally last. *Why `match` not `?`:* on `Err`, `stop` is stored `true` (`SeqCst`) and `mic_thread`/`system_thread` are joined before returning the error - otherwise those threads' 50ms poll loops would never see a stop signal (it is only ever set from `Running`, which is never constructed on this path) and would run forever, leaking the thread and leaving the mic/loopback device open with its WAV never finalized. `mouse`/`keyboard`/`cursor` need no equivalent handling: they are plain locals at this point (not yet moved into `Running`), so returning early drops them, and their `Drop` impls already stop the underlying hooks.
 7. Build `ScreenInfo` from `(w, h)`, stamp `started_unix_ms`, and store everything in `Running` (including `video: VideoSink`); assign to `*guard`.
 
 ## pause_recording

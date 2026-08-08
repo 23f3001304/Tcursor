@@ -19,7 +19,7 @@ Target H.264 bitrate (bits/s) for the raw recording intermediate at `w`x`h`: `w*
 pub struct GpuRecorder { /* CaptureControl<Cap>, frame_ts: Arc<Mutex<Vec<u64>>> */ }
 ```
 
-A live GPU-native recording. The WGC capture + MF encode run together on the crate's own thread: the private `Cap` handler owns the `VideoEncoder` and encodes each frame's surface in `on_frame_arrived` (recording `clock.now_ms()` per frame, skipping while paused). The MP4 is finalized by `GpuRecorder::stop` (the crate does not run `on_closed` on a WM_QUIT stop). This struct holds the control handle and the shared per-frame timestamps.
+A live GPU-native recording. The WGC capture + MF encode run together on the crate's own thread: the private `Cap` handler owns the `VideoEncoder` and encodes each frame's surface in `on_frame_arrived`, recording `clock.now_ms()` per frame through a `PauseClock` (see `pause_clock.rs`) that both skips frames while paused and shifts the recorded timestamp of every later frame by the accumulated paused span, so a pause leaves no gap between `sync.json` and `video.mp4`. The MP4 is finalized by `GpuRecorder::stop` (the crate does not run `on_closed` on a WM_QUIT stop). This struct holds the control handle and the shared per-frame timestamps.
 
 ## GpuRecorder::start
 

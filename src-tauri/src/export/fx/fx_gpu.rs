@@ -100,38 +100,42 @@ impl FxRenderer for GpuFx {
                 bytes_per_row: Some(g.padded_bpr), rows_per_image: Some(oh) } },
             wgpu::Extent3d { width: ow, height: oh, depth_or_array_layers: 1 });
         g.queue.submit(Some(enc.finish()));
-        let slice = g.readback.slice(..);
-        slice.map_async(wgpu::MapMode::Read, |r| r.expect("map fx readback"));
-        g.device.poll(wgpu::Maintain::Wait);
+        if !g.readback_into(out, ow, oh) {
+            // The GPU result is unreachable, but `out` still holds the composited frame we
+            // uploaded (readback failed before writing a byte), so the CPU path can just redo the
+            // effect. Warn once - a repeating device fault would otherwise spam every frame.
+            static WARNED: std::sync::Once = std::sync::Once::new();
+            WARNED.call_once(|| eprintln!("fx: GPU readback failed; falling back to the CPU renderer"));
+            crate::export::fx::fxdraw::CpuFx.apply(out, ow, oh, state);
+        }
+    }
+}
+
+impl GpuFx {
+    /// Map the readback buffer and copy the rendered frame into `out`, dropping the row padding.
+    /// `false` if the map failed. NEVER panics: this runs on the caller's thread, which for the
+    /// editor preview is a Tauri command thread (see `preview_fx::with_fx`), where a panic would
+    /// take out the overlay rather than one frame of it.
+    fn readback_into(&self, out: &mut [u8], ow: u32, oh: u32) -> bool {
+        let slice = self.readback.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| { let _ = tx.send(r.is_ok()); });
+        self.device.poll(wgpu::Maintain::Wait); // Wait -> the callback has fired by now
+        if !matches!(rx.try_recv(), Ok(true)) { return false; }
         let unpadded = (ow * 4) as usize;
         {
             let data = slice.get_mapped_range();
             for row in 0..oh as usize {
-                let src = row * g.padded_bpr as usize;
+                let src = row * self.padded_bpr as usize;
                 let dst = row * unpadded;
                 out[dst..dst + unpadded].copy_from_slice(&data[src..src + unpadded]);
             }
         }
-        g.readback.unmap();
+        self.readback.unmap();
+        true
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::export::fx::fx_state::Spot;
-    use crate::settings::model::{ClickFxStyle, SpotlightMode};
-
-    #[test]
-    fn spotlight_dims_corner_more_than_center() {
-        let g = match GpuFx::new(64, 64) { Some(g) => g, None => return }; // skip without adapter
-        let (w, h) = (64u32, 64u32);
-        let mut out = vec![200u8; (w * h * 4) as usize];
-        let st = FxState { style: ClickFxStyle::None, color: [0, 0, 0], intensity: 1.0, hits: vec![],
-            spot: Some(Spot { cx: 32.0, cy: 32.0, dim: 0.7, radius_frac: 0.13, feather_frac: 0.10, alpha: 1.0,
-                mode: SpotlightMode::Classic, tint: [0, 0, 0], t: 0.0,
-                cam_rect: [0.0; 4], cam_radius: 0.0, dim_camera: true }), video: None };
-        g.apply(&mut out, w, h, &st);
-        assert!(out[0] < out[((32 * w + 32) * 4) as usize], "GPU spotlight: corner dimmer than center");
-    }
-}
+#[path = "fx_gpu_tests.rs"]
+mod tests;

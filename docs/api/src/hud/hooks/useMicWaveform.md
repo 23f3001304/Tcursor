@@ -28,10 +28,13 @@ When `on` becomes `true`:
 5. Maps the first 14 even-indexed bins (`data[i * 2]`) to `[0, 1]` by dividing by 255. *Why even indices:* samples every other bin to spread the 14 bars across the lower half of the frequency range.
 
 Cleanup (runs when `on` becomes `false` or the component unmounts):
+- Sets a local `cancelled` flag to `true`.
 - Cancels the pending `rAF` via `cancelAnimationFrame(raf)`.
 - Stops all tracks on the `MediaStream`.
 - Closes the `AudioContext`.
 
 When `on` becomes `false`, the effect also resets state to 14 zeros immediately (before any async teardown) so the visualizer bars drop to flat.
+
+**Cancellation race (the `cancelled` flag).** `getUserMedia` is async - `on` can flip back to `false`, or the component can unmount, WHILE the permission prompt/device open is still pending. Without the flag, the cleanup above would run with `stream`/`ctx`/`raf` all still at their initial `null`/`0` (nothing to tear down yet), and then the `.then` callback would run anyway once the promise resolved - opening the mic and starting the `rAF` meter loop with nothing left to ever stop it (a permanent mic-open + `rAF` leak). The `.then` callback's first line checks `cancelled` and, if true, immediately stops the just-acquired stream's tracks and returns before creating the `AudioContext` or starting `tick()` - mirroring `useWebcamPreview`'s (`src/hud/hooks/useWebcamPreview.ts`) identical guard.
 
 Errors from `getUserMedia` are silently caught; the state remains at 14 zeros.

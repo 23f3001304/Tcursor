@@ -28,8 +28,8 @@ pub enum EditOp {
     SetAspect { aspect: Aspect },
     AddCut { start_ms: u32, end_ms: u32 },
     SetSpeed { start_ms: u32, end_ms: u32, factor: f32 },
-    AddLayoutSeg { at_ms: u32, dur_ms: u32, layout: String },
-    UpdateLayoutSeg { id: String, start_ms: Option<u32>, end_ms: Option<u32>, layout: Option<String>, transition_ms: Option<u32>, easing: Option<String> },
+    AddLayoutSeg { at_ms: u32, dur_ms: u32, layout: String, transition_out_ms: Option<u32>, easing_out: Option<String> },
+    UpdateLayoutSeg { id: String, start_ms: Option<u32>, end_ms: Option<u32>, layout: Option<String>, transition_ms: Option<u32>, easing: Option<String>, transition_out_ms: Option<u32>, easing_out: Option<String> },
     RemoveLayoutSeg { id: String },
     AddEffect { kind: EffectKind, start_ms: u32, end_ms: u32 },
     UpdateEffect { id: String, start_ms: Option<u32>, end_ms: Option<u32>, fade_in_ms: Option<u32>, fade_out_ms: Option<u32>, mode: Option<String>, dim: Option<f32>, radius: Option<f32>, feather: Option<f32>, layer: Option<u32> },
@@ -52,7 +52,7 @@ Discriminated-union command type serialized to/from the Tauri IPC channel and th
 - `SetAspect` - *replace the output frame aspect ratio (`EditDoc.aspect`); `FrameRenderer::new` re-resolves `Layout` from it on the next build (export or preview).*
 - `AddCut` - *append a cut segment; cut order and overlap resolution are rendering concerns, not enforced here.*
 - `SetSpeed` - *append a speed segment with the given `factor`; the id is auto-assigned and the caller controls ordering via the plan.*
-- `AddLayoutSeg` / `UpdateLayoutSeg` / `RemoveLayoutSeg` - *add/patch/remove a named-layout segment (`"screen"`, `"camera"`, `"presenter"`, ...), auto-id `l{n}`, clamped to the clip duration.*
+- `AddLayoutSeg` / `UpdateLayoutSeg` / `RemoveLayoutSeg` - *add/patch/remove a named-layout segment (`"screen"`, `"camera"`, `"presenter"`, ...), auto-id `l{n}`, clamped to the clip duration. Both carry the exit-transition pair as `Option`s: on `Add` they seed the segment (omitted = the `0`/hard-cut default, so every pre-existing caller is unchanged), on `Update` they follow the usual "only `Some` fields are written" rule. `easing_out` runs through `valid_easing` like every other easing setter.*
 - `AddEffect` / `UpdateEffect` / `RemoveEffect` - *add/patch/remove a Spotlight effect region; dispatched to `edit::ops::effects::apply_effect`.*
 - `AddCameraMove` - *append a webcam PiP keyframe at `t_ms` with center `(x, y)` and `size`, default easing `"smooth"`; auto-id `k{n}` (max existing `k`-suffix + 1); `t_ms` clamped to `[0, dur_bound(doc)]`, `x`/`y`/`size` clamped to `[0.0, 1.0]`. `doc.camera_moves` is kept sorted by `t_ms` after every add.*
 - `UpdateCameraMove` - *partial patch by `id`; only `Some` fields are written, same clamps as `AddCameraMove`; re-sorts `doc.camera_moves` by `t_ms` only when `t_ms` itself changed.*
@@ -105,8 +105,8 @@ Mutates `doc` in place by dispatching on `op`. The single write point for all `E
 
 ### Implementation
 
-1. **AddZoom / AddZoomFull** - generate id via `next_zoom_id` (finds the max numeric suffix among existing `z`-prefixed ids, increments by 1, falls back to `len`). Push `Zoom` with `target=Cursor`, `easing="smooth"`, and `scale=2.0` (`AddZoom`) or the caller-supplied scale (`AddZoomFull`). `saturating_add` guards the `end_ms` against u32 overflow.
-2. **UpdateZoom** - linear scan by `id`; write only the `Some` fields into the found entry. *Why linear scan:* zoom lists are short (typically fewer than 20 entries) so a map would cost more in bookkeeping than it saves in lookup.
+1. **AddZoom / AddZoomFull** - generate id via `next_zoom_id` (finds the max numeric suffix among existing `z`-prefixed ids, increments by 1, falls back to `len`). Push `Zoom` with `target=Cursor`, `easing="smooth"`, and `scale=2.0` (`AddZoom`) or the caller-supplied scale (`AddZoomFull`). `saturating_add` guards the `end_ms` against u32 overflow. Both `start_ms`/`end_ms` clamp to `region::dur_bound(doc)` - the TRUE clip length (`doc.clip_ms`) when known, not the possibly-earlier `trim.out_ms`, so adding a region past where the clip is currently trimmed to no longer collapses it to the trim point.
+2. **UpdateZoom** - linear scan by `id`; write only the `Some` fields into the found entry, with `start_ms`/`end_ms` clamped to the clip and `easing` passed through `valid_easing` (now in `edit::ops::region` - see `region.md`; an unrecognized name becomes `"smooth"`, a well-formed `cubic(x1,y1,x2,y2)` is kept in canonical form, matching `UpdateLayoutSeg` and `UpdateCameraMove` - it used to be the one easing setter that wrote the caller's string verbatim, so a typo'd or stale name reached the renderer). *Why linear scan:* zoom lists are short (typically fewer than 20 entries) so a map would cost more in bookkeeping than it saves in lookup.
 3. **RemoveZoom** - single `retain` pass; no reindexing of remaining zooms.
 4. **ClearZooms** - `doc.zooms.clear()`; drops every zoom in one call with no per-id lookup, unlike the single-target `RemoveZoom`.
 5. **SetTrim** - full field replacement; `Trim` has two fields that are always logically coupled.
@@ -120,11 +120,13 @@ Mutates `doc` in place by dispatching on `op`. The single write point for all `E
 - `add_zoom_yields_distinct_ids` - two consecutive adds produce different `z`-prefixed ids.
 - `update_zoom_changes_only_supplied_fields` - supplying only `start_ms: Some(100)` leaves `end_ms` and `scale` unchanged.
 - `update_zoom_unknown_id_is_noop` - an unknown id produces no panic and no mutation.
+- `update_zoom_sets_layer_and_validates_easing` - `layer` and a known `easing` (`"spring"`) both apply; a subsequent unknown `easing` (`"bogus"`) is coerced to `"smooth"` rather than stored verbatim.
 - `remove_zoom_drops_by_id` - only the targeted zoom is removed; others survive.
 - `set_trim_replaces_trim` - both `in_ms` and `out_ms` update atomically.
 - `set_aspect_replaces_aspect` - `doc.aspect` starts at `Source` and updates to the given variant.
 - `add_zoom_full_uses_given_scale` - scale is preserved, not overridden to 2.0.
 - `set_layout_seg_noop_unknown` - unknown segment id is silently ignored.
+- `add_zoom_bounds_to_clip_ms_not_the_trim_point` (`api_tests.rs`) - `clip_ms=60_000` with an earlier `trim.out_ms=10_000`: a zoom added at `at_ms=30_000` is NOT collapsed to the trim point.
 
 ## metrics
 

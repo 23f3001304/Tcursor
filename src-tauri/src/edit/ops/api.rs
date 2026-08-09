@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use crate::edit::model::{CameraMove, Cut, EditDoc, Speed, Trim, Zoom, ZoomTarget};
-use crate::edit::ops::region::{auto_layer, dur_bound};
+use crate::edit::ops::region::{auto_layer, dur_bound, valid_easing, valid_layout};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "snake_case", tag = "op")]
@@ -20,8 +20,8 @@ pub enum EditOp {
     SetAspect { aspect: crate::export::types::Aspect },
     AddCut { start_ms: u32, end_ms: u32 },
     SetSpeed { start_ms: u32, end_ms: u32, factor: f32 },
-    AddLayoutSeg { at_ms: u32, dur_ms: u32, layout: String },
-    UpdateLayoutSeg { id: String, start_ms: Option<u32>, end_ms: Option<u32>, layout: Option<String>, transition_ms: Option<u32>, easing: Option<String> },
+    AddLayoutSeg { at_ms: u32, dur_ms: u32, layout: String, transition_out_ms: Option<u32>, easing_out: Option<String> },
+    UpdateLayoutSeg { id: String, start_ms: Option<u32>, end_ms: Option<u32>, layout: Option<String>, transition_ms: Option<u32>, easing: Option<String>, transition_out_ms: Option<u32>, easing_out: Option<String> },
     RemoveLayoutSeg { id: String },
     AddEffect { kind: crate::edit::model::EffectKind, start_ms: u32, end_ms: u32 },
     UpdateEffect { id: String, start_ms: Option<u32>, end_ms: Option<u32>, fade_in_ms: Option<u32>, fade_out_ms: Option<u32>, mode: Option<String>, dim: Option<f32>, radius: Option<f32>, feather: Option<f32>, layer: Option<u32> },
@@ -53,13 +53,6 @@ fn next_speed_id(doc: &EditDoc) -> String {
     format!("s{}", n)
 }
 
-/// Known layout preset wire-names; anything else falls back to "screen".
-fn valid_layout(s: &str) -> String {
-    match s { "screen" | "camera" | "presenter" | "screen_only" | "camera_only" => s.to_string(), _ => "screen".into() }
-}
-fn valid_easing(s: &str) -> String {
-    match s { "linear" | "smooth" | "spring" | "ease_in" | "ease_out" | "ease_in_out" => s.to_string(), _ => "smooth".into() }
-}
 fn next_layout_id(doc: &EditDoc) -> String {
     let n = doc.layout.iter().filter_map(|s| s.id.strip_prefix('l').and_then(|d| d.parse::<u32>().ok()))
         .max().map(|m| m + 1).unwrap_or(doc.layout.len() as u32);
@@ -99,7 +92,7 @@ pub fn apply(doc: &mut EditDoc, op: EditOp) {
                 if let Some(v) = end_ms { z.end_ms = v.min(dur); }
                 if let Some(v) = scale { z.scale = v; }
                 if let Some(v) = target { z.target = v; }
-                if let Some(v) = easing { z.easing = v; }
+                if let Some(v) = easing { z.easing = valid_easing(&v); }
                 if let Some(v) = zoom_in_ms { z.zoom_in_ms = v; }
                 if let Some(v) = zoom_out_ms { z.zoom_out_ms = v; }
                 if let Some(v) = layer { z.layer = v; }
@@ -125,14 +118,16 @@ pub fn apply(doc: &mut EditDoc, op: EditOp) {
             let id = next_speed_id(doc);
             doc.speed.push(Speed { id, start_ms, end_ms, factor });
         }
-        EditOp::AddLayoutSeg { at_ms, dur_ms, layout } => {
+        EditOp::AddLayoutSeg { at_ms, dur_ms, layout, transition_out_ms, easing_out } => {
             let id = next_layout_id(doc);
             let dur = crate::edit::ops::region::dur_bound(doc);
             doc.layout.push(crate::edit::model::LayoutSeg {
                 id, start_ms: at_ms.min(dur), end_ms: at_ms.saturating_add(dur_ms).min(dur),
-                layout: valid_layout(&layout), transition_ms: 350, easing: "smooth".into() });
+                layout: valid_layout(&layout), transition_ms: 350, easing: "smooth".into(),
+                transition_out_ms: transition_out_ms.unwrap_or(0),
+                easing_out: easing_out.map_or_else(|| "smooth".into(), |v| valid_easing(&v)) });
         }
-        EditOp::UpdateLayoutSeg { id, start_ms, end_ms, layout, transition_ms, easing } => {
+        EditOp::UpdateLayoutSeg { id, start_ms, end_ms, layout, transition_ms, easing, transition_out_ms, easing_out } => {
             let dur = crate::edit::ops::region::dur_bound(doc);
             if let Some(s) = doc.layout.iter_mut().find(|s| s.id == id) {
                 if let Some(v) = start_ms { s.start_ms = v.min(dur); }
@@ -140,6 +135,8 @@ pub fn apply(doc: &mut EditDoc, op: EditOp) {
                 if let Some(v) = layout { s.layout = valid_layout(&v); }
                 if let Some(v) = transition_ms { s.transition_ms = v; }
                 if let Some(v) = easing { s.easing = valid_easing(&v); }
+                if let Some(v) = transition_out_ms { s.transition_out_ms = v; }
+                if let Some(v) = easing_out { s.easing_out = valid_easing(&v); }
             }
         }
         EditOp::RemoveLayoutSeg { id } => { doc.layout.retain(|s| s.id != id); }

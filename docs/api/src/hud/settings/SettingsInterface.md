@@ -1,6 +1,6 @@
 # src/hud/settings/SettingsInterface.tsx
 
-Settings panel for app-level interface preferences: theme mode and accent color. Also renders a stub Language field that is disabled pending i18n support.
+Settings panel for app-level interface preferences: theme mode, accent color, and (Task 39) the animated-brand feel knob. Also renders a stub Language field that is disabled pending i18n support.
 
 ## SettingsInterface
 
@@ -18,12 +18,12 @@ Edits the `ui` group of `Settings`.
 
 ### Props
 
-- `value: InterfaceSettings` - current interface settings (`theme` and `accent`). *Why:* controlled component; the parent (Preferences) owns and persists state.
+- `value: InterfaceSettings` - current interface settings (`theme`, `accent`, and `animated_brand`). *Why:* controlled component; the parent (Preferences) owns and persists state.
 - `onChange: (v: InterfaceSettings) => void` - receives a fully replaced `InterfaceSettings`. *Why:* immutable replacement keeps the parent's persistence path uniform across all panels.
 
 ### Behavior
 
-Renders `<section className="sec">` with heading "Interface". Three `Field` sections in order:
+Renders `<section className="sec">` with heading "Interface". Four `Field` sections in order:
 
 1. **App theme** - `.seg`/`.seg-btn` segmented control. Three options from `THEME_OPTS`:
    - `"light"` - Light
@@ -41,7 +41,9 @@ Renders `<section className="sec">` with heading "Interface". Three `Field` sect
 
    Writes `value.accent` (`[number, number, number]`). Selection is compared via `rgb()` string equality. *Why string comparison:* RGB arrays are value types but JS compares arrays by reference, so string conversion is the simplest correct equality check.
 
-3. **Language** - a single `.seg-btn` with label "English" that is `disabled` and has `cursor: default`. No settings field is written. *Why rendered:* it signals that i18n is planned without requiring partially implemented locale switching.
+3. **Animated brand** (Task 39) - a `Switch` bound to `value.animated_brand`, hint text "Flowing wave + REC pulse". Writes `value.animated_brand` (`boolean`). *Why here:* the fake-polish rule is every feel knob is a setting; this is the one UI control for `InterfaceSettings.animated_brand` (see `settings.md`), which gates whether `TcursorMark` flows/pulses at all in both the HUD titlebar and the editor's `TopBar`.
+
+4. **Language** - a single `.seg-btn` with label "English" that is `disabled` and has `cursor: default`. No settings field is written. *Why rendered:* it signals that i18n is planned without requiring partially implemented locale switching.
 
 ### Notes
 

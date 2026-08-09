@@ -8,9 +8,19 @@ use crate::win::sys::proc::ffcmd_bg;
 
 /// N evenly-spaced JPEG thumbnails (height 64) from the proxy (or raw video), cached in
 /// `folder/thumbs_<count>_64/`. Returns the per-file paths (the frontend wraps each with
-/// `convertFileSrc`). One ffmpeg pass: `fps=count/duration`.
+/// `convertFileSrc`). One ffmpeg pass: `fps=count/duration`. `async` + `spawn_blocking` - same
+/// freeze mechanism as `ai::commands` (Task 40): a sync `#[tauri::command] fn` runs the blocking
+/// ffmpeg `.status()` call inline on the main thread, freezing the window for the pass's
+/// duration. The blocking body is `ensure_thumbs_blocking`, called directly (no runtime hop
+/// needed) by `preprocess::run`, which already runs off the main thread on its own `std::thread`.
 #[tauri::command]
-pub fn ensure_thumbs(folder: String, count: u32) -> Result<Vec<String>, String> {
+pub async fn ensure_thumbs(folder: String, count: u32) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || ensure_thumbs_blocking(folder, count))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn ensure_thumbs_blocking(folder: String, count: u32) -> Result<Vec<String>, String> {
     let paths = ProjectPaths { folder: PathBuf::from(&folder) };
     let n = count.clamp(8, 120);
     let dir = paths.folder.join(format!("thumbs_{n}_64"));
@@ -38,9 +48,17 @@ pub fn ensure_thumbs(folder: String, count: u32) -> Result<Vec<String>, String> 
 }
 
 /// A waveform PNG for one source (`"system"` or `"mic"`), cached as `folder/wave_<which>.png`.
-/// Returns an empty string when that source wasn't recorded (the track just hides).
+/// Returns an empty string when that source wasn't recorded (the track just hides). `async` +
+/// `spawn_blocking` - see `ensure_thumbs` above; `ensure_waveform_blocking` is the direct callee
+/// for `preprocess::run`.
 #[tauri::command]
-pub fn ensure_waveform(folder: String, which: String) -> Result<String, String> {
+pub async fn ensure_waveform(folder: String, which: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || ensure_waveform_blocking(folder, which))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn ensure_waveform_blocking(folder: String, which: String) -> Result<String, String> {
     let paths = ProjectPaths { folder: PathBuf::from(&folder) };
     let wav = match which.as_str() {
         "mic" => paths.mic(),
@@ -71,8 +89,16 @@ pub fn ensure_waveform(folder: String, which: String) -> Result<String, String> 
 /// per-track `-itsoffset`/`-ss` alignment the final render uses (`audio_mux::add_offset`), so preview
 /// playback stays in sync with the (re-timed) proxy instead of drifting by the capture-warmup lead.
 /// The `preview_synced.` name (vs the old `preview_audio.`) invalidates stale un-aligned caches.
+/// `async` + `spawn_blocking` - see `ensure_thumbs` above; `ensure_preview_audio_blocking` is the
+/// direct callee for `preprocess::run`.
 #[tauri::command]
-pub fn ensure_preview_audio(folder: String) -> Result<String, String> {
+pub async fn ensure_preview_audio(folder: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || ensure_preview_audio_blocking(folder))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn ensure_preview_audio_blocking(folder: String) -> Result<String, String> {
     let paths = ProjectPaths { folder: PathBuf::from(&folder) };
     let (mic, sys) = (paths.mic(), paths.system());
     let (hm, hs) = (mic.exists(), sys.exists());

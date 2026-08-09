@@ -24,6 +24,9 @@ export function CaptionsPanel({
           <span>Show keystrokes on screen</span>
           <Switch on={settings.captions} onChange={(v) => set("captions", v)} />
         </div>
+        <span className="e-lede" style={{ marginTop: 8, marginBottom: 0 }}>
+          Spoken captions (auto-transcription) are coming later — this toggle shows typed keystrokes.
+        </span>
       </div>
     </div>
   );

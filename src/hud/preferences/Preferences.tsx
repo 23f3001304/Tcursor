@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { getSettings, setSettings } from "../../lib/ipc";
-import type { Settings as S, ThemeMode } from "../settings/settings";
+import type { Settings as S, InterfaceSettings } from "../settings/settings";
 import { Back } from "../components/icons";
 import { SettingsInterface } from "../settings/SettingsInterface";
 import { SettingsAppearance } from "../settings/SettingsAppearance";
@@ -9,9 +9,11 @@ import { SettingsAppearance } from "../settings/SettingsAppearance";
 type Tab = "interface" | "layout";
 const TABS: { id: Tab; label: string }[] = [{ id: "interface", label: "Interface" }, { id: "layout", label: "Layout" }];
 
-export function Preferences({ onClose, onThemeChange }: {
+export function Preferences({ onClose, onUiChange }: {
   onClose: () => void;
-  onThemeChange: (theme: ThemeMode, accent: [number, number, number]) => void;
+  /** Fires on every Interface-tab change (theme, accent, and Task 39's `animated_brand`) with the
+   *  full new `InterfaceSettings` - one callback instead of a growing positional-args list. */
+  onUiChange: (ui: InterfaceSettings) => void;
 }) {
   const [draft, setDraft] = useState<S | null>(null);
   const [tab, setTab] = useState<Tab>("interface");
@@ -47,7 +49,7 @@ export function Preferences({ onClose, onThemeChange }: {
                 value={draft.ui}
                 onChange={(ui) => {
                   patch({ ...draft, ui });
-                  onThemeChange(ui.theme, ui.accent);
+                  onUiChange(ui);
                 }}
               />
             )}

@@ -1,6 +1,7 @@
 pub mod types;
 pub mod settings;
 pub mod easing;
+pub mod cubic;
 pub mod coordmap;
 pub mod color;
 pub mod camera;

@@ -45,10 +45,17 @@ pub fn ops_from_json(raw: &str, dur_ms: u32) -> Result<Vec<EditOp>, String> {
         Some(EditOp::AddZoomFull { at_ms: z.at_ms, dur_ms: zdur, scale })
     }).collect();
     if let Some(t) = plan.trim {
-        let in_ms = t.in_ms.min(t.out_ms);
-        let out_ms = t.out_ms.min(clip_len);
-        if out_ms > in_ms {
-            ops.push(EditOp::SetTrim { in_ms, out_ms });
+        // 0 is the "runs to true end" sentinel (TrimOverlay/useTrimActions' convention, not "zero
+        // length") - a head-only trim {"in_ms":2000,"out_ms":0} must keep out_ms == 0, not collapse
+        // through min(in_ms, out_ms) into a same-as-in-ms, zero-length range that then gets dropped.
+        if t.out_ms == 0 && t.in_ms > 0 && t.in_ms < clip_len {
+            ops.push(EditOp::SetTrim { in_ms: t.in_ms, out_ms: 0 });
+        } else {
+            let in_ms = t.in_ms.min(t.out_ms);
+            let out_ms = t.out_ms.min(clip_len);
+            if out_ms > in_ms {
+                ops.push(EditOp::SetTrim { in_ms, out_ms });
+            }
         }
     }
     if ops.is_empty() { return Err("no usable edits".into()); }
@@ -107,5 +114,23 @@ mod tests {
         // adversarial dur_ms = u32::MAX must drop the zoom, never panic (debug overflow-check)
         let raw = r#"{"zooms":[{"at_ms":100,"dur_ms":4294967295}]}"#;
         assert!(ops_from_json(raw, CLIP).is_err());
+    }
+
+    #[test]
+    fn head_trim_with_zero_out_ms_runs_to_true_end() {
+        // The prompt's own example: {"in_ms":2000,"out_ms":0} means "trim the head, keep the
+        // rest" - 0 is the "runs to true end" sentinel (TrimOverlay/useTrimActions convention),
+        // not "collapse to zero-length".
+        let raw = r#"{"zooms":[{"at_ms":0,"dur_ms":500}],"trim":{"in_ms":2000,"out_ms":0}}"#;
+        let ops = ops_from_json(raw, CLIP).unwrap();
+        assert!(ops.iter().any(|o| matches!(o, EditOp::SetTrim { in_ms: 2000, out_ms: 0 })), "{:?}", ops);
+    }
+
+    #[test]
+    fn zero_in_and_out_ms_trim_yields_no_trim_op() {
+        // "not yet set" - the model made no trim decision at all.
+        let raw = r#"{"zooms":[{"at_ms":0,"dur_ms":500}],"trim":{"in_ms":0,"out_ms":0}}"#;
+        let ops = ops_from_json(raw, CLIP).unwrap();
+        assert!(!ops.iter().any(|o| matches!(o, EditOp::SetTrim { .. })), "{:?}", ops);
     }
 }

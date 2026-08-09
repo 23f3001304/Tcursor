@@ -1,6 +1,6 @@
 # src-tauri/src/export/fx/fx_gpu.rs
 
-GPU-backed FX renderer that uploads a composited BGRA frame to wgpu, runs `fx.wgsl` (spotlight, click effects, video FX) in a full-screen triangle pass, and reads the result back into the caller's buffer. Selected automatically by `select_fx` when a wgpu adapter is available; falls through to `CpuFx` otherwise.
+GPU-backed FX renderer that uploads a composited BGRA frame to wgpu, runs `fx.wgsl` (spotlight, click effects, video FX) in a full-screen triangle pass, and reads the result back into the caller's buffer. Selected automatically by `select_fx` when a wgpu adapter is available; falls through to `CpuFx` otherwise - and falls back to it per frame if a readback ever fails (see `GpuFx::apply`). Its tests live in the sibling `fx_gpu_tests.rs` to keep this file under the 200-line budget.
 
 ## GpuFx
 
@@ -77,6 +77,34 @@ Implements `FxRenderer::apply`. Uploads `out` as the composited source texture, 
 ### Returns
 
 `()` - processed pixels are written back into `out`; all return state is implicit.
+
+### Failure handling
+
+`apply` **never panics on a readback failure.** The map+copy step lives in `readback_into`, which reports `false` instead of unwrapping; `apply` then warns once (a `std::sync::Once`, so a repeating device fault cannot spam per frame) and re-renders that one frame with `CpuFx`.
+
+*Why a CPU fallback is correct rather than a visible glitch:* readback fails before a single byte is written, so `out` still holds exactly the composited frame that was uploaded as the shader's source - the CPU path can simply redo the effect on it. The two renderers agree on everything except the documented approximations (see `spotdraw.md`), pinned by `cpu_spotlight_dim_matches_the_shader_at_probe_points` and `cpu_click_ring_gains_match_the_shader`, so a fallback frame is at worst slightly different in Blur/Nebula/Particles, not wrong.
+
+*Why this matters beyond one frame:* `apply` used to `.expect("map fx readback")` inside the `map_async` callback. That was survivable on the export thread, but the editor preview reaches this code from a Tauri command thread via `preview_fx::with_fx`, where an unwind would have poisoned the overlay's renderer cache and disabled the FX preview for the whole session.
+
+*Why it is not unit-tested:* forcing a wgpu map failure needs either a device-loss injection point or a mock `wgpu::Buffer`, neither of which the current seam offers cheaply. The reasoning it rests on is checked instead: `out` is untouched on the failure branch (the copy loop is the only writer, and it is inside the success path), and `CpuFx` produces a comparable frame from the same input (the two parity tests above).
+
+## GpuFx::readback_into
+
+```rust
+fn readback_into(&self, out: &mut [u8], ow: u32, oh: u32) -> bool
+```
+
+Maps the readback buffer, copies the rendered frame into `out` row by row (dropping the `COPY_BYTES_PER_ROW_ALIGNMENT` padding), and unmaps. Returns `false` if the map failed, leaving `out` untouched.
+
+The map result travels back over an `mpsc::channel` from the `map_async` callback rather than being unwrapped inside it. `device.poll(Maintain::Wait)` guarantees the callback has run by the time it returns, so a `try_recv` that does not yield `Ok(true)` means a genuine failure, not a race.
+
+### Behaviors
+
+These tests skip silently on a machine with no wgpu adapter (`GpuFx::new` returns `None`); where one exists they are the CPU↔GPU parity harness, since `fx.wgsl` is the reference look for `fxdraw.rs`.
+
+- `spotlight_dims_corner_more_than_center` - the shader's own smoke test: a `Classic` spotlight leaves the centre brighter than the corner.
+- `cpu_spotlight_dim_matches_the_shader_at_probe_points` - `CpuFx` and `GpuFx` render the same `Classic` spotlight within ±3/255 at five probe points spanning the lit core, the feather band, and the fully dimmed corners. Pins the feather curve and the dim compositing formula against drift in either direction.
+- `cpu_click_ring_gains_match_the_shader` - for Neon, Shockwave, Ripple and Glow, the *total light added over the base frame* agrees between the two paths within 20%. *Why total added light rather than per-pixel equality:* ring geometry is identical but sub-pixel antialiasing is not, so a sum is tight enough to catch a wrong additive gain (it was the guard that caught Shockwave at `0.7` where the shader uses `0.5`) without being brittle about edge pixels.
 
 ### Implementation
 

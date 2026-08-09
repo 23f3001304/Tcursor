@@ -1,17 +1,21 @@
 // Pre-generate the editor's heavy preview media - proxy, filmstrip thumbnails, waveforms, mixed
 // preview audio, and the edit.json seed - right after a recording stops, instead of lazily on
-// editor open. Reuses the exact `ensure_*`/`load_or_seed` functions the editor's own lazy
-// fallback calls (all `generate_once`-cached), so nothing here duplicates or re-runs their logic
-// - the new behavior is running them eagerly, in sequence, with progress events, then marking the
-// project preprocessed so `useEditorData` can skip its own lazy calls. This supersedes the old
-// fire-and-forget `thumbs::prewarm` background spawn: the same sequence, now AWAITED by the
-// frontend (with progress) instead of racing the editor's mount on a detached thread - that race
-// was why the preview could still take a while to load right after Stop.
+// editor open. Reuses the exact `ensure_*_blocking`/`load_or_seed` functions the editor's own
+// lazy `ensure_*` IPC commands call (all `generate_once`-cached), so nothing here duplicates or
+// re-runs their logic - the new behavior is running them eagerly, in sequence, with progress
+// events, then marking the project preprocessed so `useEditorData` can skip its own lazy calls.
+// `run` calls the `_blocking` variants directly rather than the `#[tauri::command] async fn`
+// wrappers (Task 41 - the commands moved off the main thread via `spawn_blocking`): `run` already
+// executes on its own `std::thread` from `preprocess_project` below, off the Tokio runtime, so
+// there is nothing to hop off of and no `.await` context to call the async wrappers from.
+// This supersedes the old fire-and-forget `thumbs::prewarm` background spawn: the same sequence,
+// now AWAITED by the frontend (with progress) instead of racing the editor's mount on a detached
+// thread - that race was why the preview could still take a while to load right after Stop.
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter};
 
-use crate::export::preview::preview_track::ensure_proxy;
-use crate::export::preview::thumbs::{ensure_preview_audio, ensure_thumbs, ensure_waveform};
+use crate::export::preview::preview_track::ensure_proxy_blocking;
+use crate::export::preview::thumbs::{ensure_preview_audio_blocking, ensure_thumbs_blocking, ensure_waveform_blocking};
 use crate::session::paths::ProjectPaths;
 use crate::session::project::manifest::ProjectManifest;
 
@@ -56,15 +60,15 @@ fn run(folder: &str, on_progress: impl Fn(u32)) -> Result<(), String> {
     // aborting preprocessing entirely (leaving `preprocessed = false`) and forcing EVERYTHING -
     // including the already-built proxy - back onto the lazy path. That all-or-nothing `?` was why
     // one flaky step (e.g. a proxy transcode failure) blanked the whole preview.
-    ensure_proxy(folder.to_string(), DEFAULT_PROXY_HEIGHT)?;
+    ensure_proxy_blocking(folder.to_string(), DEFAULT_PROXY_HEIGHT)?;
     on_progress(step_pct(1));
-    let _ = ensure_thumbs(folder.to_string(), 16);
+    let _ = ensure_thumbs_blocking(folder.to_string(), 16);
     on_progress(step_pct(2));
-    let _ = ensure_waveform(folder.to_string(), "system".into());
+    let _ = ensure_waveform_blocking(folder.to_string(), "system".into());
     on_progress(step_pct(3));
-    let _ = ensure_waveform(folder.to_string(), "mic".into());
+    let _ = ensure_waveform_blocking(folder.to_string(), "mic".into());
     on_progress(step_pct(4));
-    let _ = ensure_preview_audio(folder.to_string());
+    let _ = ensure_preview_audio_blocking(folder.to_string());
     on_progress(step_pct(5));
     crate::edit::seed::load_or_seed(&paths); // ensures edit.json exists on disk
     on_progress(step_pct(6));

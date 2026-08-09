@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
-import { IconCheck, IconAlertTriangle } from "@tabler/icons-react";
+import { IconCheck, IconAlertTriangle, IconFolderOpen } from "@tabler/icons-react";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { Spin } from "../controls/Spin";
 import { fmt } from "../timeline/time";
 import { estimateEtaMs } from "./exportEta";
@@ -9,8 +10,8 @@ import { estimateEtaMs } from "./exportEta";
  *  then a done checkmark or an error banner. Owns the "when did this export start" clock (reset
  *  whenever `exporting` flips false -> true) so the ETA has an elapsed baseline without the
  *  caller needing to track wall-clock time itself. */
-export function ExportProgress({ exporting, pct, done, error, onReset, onClose }: {
-  exporting: boolean; pct: number; done: boolean; error: string | null;
+export function ExportProgress({ exporting, pct, done, error, exportPath, onReset, onClose }: {
+  exporting: boolean; pct: number; done: boolean; error: string | null; exportPath: string;
   onReset: () => void; onClose: () => void;
 }) {
   const startRef = useRef<number | null>(null);
@@ -47,6 +48,11 @@ export function ExportProgress({ exporting, pct, done, error, onReset, onClose }
         <p className="e-export-outcome-title">Export complete</p>
         <div className="e-modal-actions">
           <button type="button" className="e-modal-btn" onClick={onReset}>Export again</button>
+          {exportPath && (
+            <button type="button" className="e-modal-btn" onClick={() => void revealItemInDir(exportPath).catch(() => {})}>
+              <IconFolderOpen size={14} />Show in folder
+            </button>
+          )}
           <button type="button" className="e-modal-btn primary" onClick={onClose}>Done</button>
         </div>
       </div>

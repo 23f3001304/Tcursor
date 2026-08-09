@@ -1,12 +1,15 @@
 # src/editor/panels/AiPanel.tsx
 
-Left panel rendered when the "AI Director" rail tab is active. Displays a real Engine picker (Ollama models installed locally), the auto-edit run button, an inline error line, and either a staggered Motion list summarizing what the AI director does (before the first run) or a live terminal-style log of what it actually did (once `log` has lines).
+Left panel rendered when the "AI Director" rail tab is active. Displays a real Engine picker (Ollama models installed locally) with honest loading/empty/error states, the auto-edit run button, an inline error line, and either a staggered Motion list summarizing what the AI director does (before the first run) or a live terminal-style log of what it actually did (once `log` has lines).
 
 ## AiPanel
 
 ```tsx
-export function AiPanel({ running, error, log, onRun, model, onChangeModel }: {
+export function AiPanel({ running, error, log, onRun, model, onChangeModel, onAutoModel, progress, onClose }: {
   running: boolean; error: string | null; log: string[]; onRun: () => void; model: string; onChangeModel: (v: string) => void;
+  onAutoModel: (v: string) => void;
+  progress: { step: number; total: number } | null;
+  onClose: () => void;
 }): JSX.Element
 ```
 
@@ -19,21 +22,35 @@ Renders the AI Director configuration panel and run control.
 - `log: string[]` - the running director's live "what I did" narration, one line per completed step, appended to as `aiAutoedit` progresses. *Why a plain string array:* the panel only ever renders these as sequential text lines, so the caller doesn't need to hand over richer per-line metadata.
 - `onRun: () => void` - called when the Auto-edit button is clicked. *Why no model argument:* `Editor` already holds `doc.settings.ai_model` and reads it itself when calling `aiAutoedit`, so the run trigger and the model choice don't need to be threaded through the same callback.
 - `model: string` - the persisted Ollama model name (`doc.settings.ai_model`; `""` means "no explicit choice yet"). *Why persisted rather than local state:* the choice should stick across closing/reopening the editor, same as every other panel's settings.
-- `onChangeModel: (v: string) => void` - writes a new model choice back to `doc.settings.ai_model` (via `saveDocSettings` in `Editor`).
+- `onChangeModel: (v: string) => void` - writes a new model choice back to `doc.settings.ai_model` (via `saveDocSettings` in `Editor`) - the Engine picker's `onChange`, i.e. a deliberate user pick, which records an undo step.
+- `onAutoModel: (v: string) => void` - the QUIET write counterpart (via `useDocSettings`'s `onAutoModel` in `Editor`, no undo step): used ONLY by the mount-time auto-default effect below, so opening the panel and landing on a sane default model never pushes a phantom undo step or an unasked-for disk write.
+- `progress: { step: number; total: number } | null` - the choreographed reveal's live position (`Editor`'s `director.progress`, from `src/editor/director/useDirector.ts`). `null` before a run starts and while the plan is still being fetched (the fake pointer is already visible and pressing the wand at that point, but step counting only starts once the plan resolves).
+- `onClose: () => void` - (Task 26, since this panel adopted `PanelHeader`) `PanelHeader.onClose` isn't optional, but `AiPanel` renders for the `"ai"` tab - the router's own home/fallback - so there's nowhere meaningful to close TO. `EditorPanels` wires it to `() => setTab("ai")`, the same idiom every other panel uses; on this one it's a no-op (already on that tab), kept only so the header is wired consistently everywhere.
 
 ### Behavior
 
-**Engine picker.**
-On mount, fetches `listOllamaModels()` (a real IPC call hitting Ollama's `/api/tags`) into local `models` state. Falls back silently (`.catch(() => {})`) to an empty list if Ollama isn't running. Once `models` loads, a second effect defaults `model` to `models[0]` via `onChangeModel` whenever the saved choice is empty or no longer installed (`models.length && !models.includes(model)`) - so Auto-edit never sends a model name Ollama doesn't actually have pulled (which otherwise 404s). The `Picker` shown to the user is populated from `models` when non-empty, or just `[current]` when the list hasn't loaded yet or Ollama is unreachable - so the control is never empty even offline. `current = models.includes(model) ? model : (models[0] ?? model ?? FALLBACK_MODEL)`: prefer the saved model if it's actually installed, else the first installed model, else the raw (possibly empty) `model` prop, else `FALLBACK_MODEL` (`"llama3.2"`) as the absolute last resort when Ollama is unreachable/has no models installed at all - when models ARE installed, the auto-default effect above means that last-resort branch is rarely what the user actually sees.
+**Header (Task 26).** Renders via the shared `PanelHeader` (title "AI Director", the same lede as before) rather than a hand-rolled `<h2>`/`<p className="e-lede">` pair - consistent with every other panel. No `onReset` is passed (there's nothing here to reset to defaults).
+
+**Engine picker (loading/empty/error - Task 26).**
+`models: string[] | null` - `null` means the `listOllamaModels()` fetch (a real IPC call hitting Ollama's `/api/tags`) is in flight; `loadModels` (a `useCallback`, re-run on mount and by the Retry button) resets it to `null` then calls the fetch, resolving to the real list or, on rejection, `[]`. Three renders of the Engine field, keyed on `models`:
+- `null` -> a `Shimmer` skeleton (`.e-picker-shell`, sized to match the `Picker` button) instead of the control.
+- `[]` (resolved empty, or the fetch rejected - e.g. Ollama isn't running) -> `.e-errline`, `role="alert"`: "Ollama isn't running or has no models — start Ollama, then **Retry**", the Retry button re-running `loadModels`. The `Picker` is not rendered at all in this state - it never presents a hardcoded placeholder model name as if it were actually installed and selectable.
+- non-empty -> the real `Picker`, options built straight from `models` (no fallback entry).
+
+Once `models` resolves non-empty, a second effect defaults `model` to `models[0]` via `onAutoModel` (NOT `onChangeModel` - see props above) whenever the saved choice is empty or no longer installed (`models.length && !models.includes(model)`) - so Auto-edit never sends a model name Ollama doesn't actually have pulled (which otherwise 404s), and doing so from mounting doesn't register as an undoable user edit. `current = models?.includes(model) ? model : (models?.[0] ?? model)`: prefer the saved model if it's actually installed, else the first installed model, else the raw `model` prop (only reachable transiently, since the Picker isn't shown while `models` is empty/null anyway). Manually changing the `Picker` itself still calls `onChangeModel`, which DOES record an undo step.
+
+**Run button gating.** `disabled={running || !models?.length}` - besides the existing in-flight guard, the button is also disabled while there is definitively no local model to run against (loading or empty/error), since running would just fail immediately.
 
 **No "Style" control.** The prior build had a second decorative "Style" dropdown (hardcoded "Demo") with nothing behind it in the backend - there is no server-side concept of edit "style" (the Ollama prompt is fixed in `ai::prompt::system_prompt`). It was removed rather than left as a non-functional stub.
 
 **Run button.**
-When `running` is false: renders `IconSparkles` + "Auto-edit" and calls `onRun` on click.
-When `running` is true: renders `<Spin size={16}>` + "Directing…" and is `disabled`.
+When `running` is false: renders `IconSparkles` + "Auto-edit" and calls `onRun` on click. When `running` is true: renders `<Spin size={16}>` + "Directing…" (or "Directing… k of N" once `progress` resolves) and is `disabled`. Carries `data-director-anchor="wand"` - alongside the Transport wand button, this is where `src/editor/director/targets.ts`'s `anchorPoint("wand")` looks for the fake pointer's start position; when this panel is open it wins (it sits earlier in DOM order than `Transport`), so the run visibly starts from the button the user is actually looking at.
+
+**Progress track.**
+While `running` and `progress` is non-null, a 2px `.e-ai-progress` track (`--e-ai` fill, `.e-ai-progress-fill`) renders directly under the run button, its width Motion-tweened to `(progress.step / progress.total) * 100%`.
 
 **Error display.**
-When `error` is non-null, renders it as a `role="alert"` paragraph (`.e-ai-err`) directly under the run button. Shown independently of the log - a run can fail before producing any log lines at all.
+When `error` is non-null, it's passed through `friendlyAiError` (`src/editor/director/friendlyAiError.ts`) into `{title, hint}` and rendered as a `role="alert"` paragraph (`.e-ai-err`): the title, plus a dimmer `.hint` line underneath when `hint` is non-null (the two failure modes an Ollama setup actually hits - no model installed, Ollama not running - get an actionable next step; anything else falls through as the raw message with no hint line, same as before this mapping existed). Shown independently of the log - a run can fail before producing any log lines at all.
 
 **Live "what I did" log.**
 While `log` is non-empty, it replaces the feature-summary list entirely with a terminal-style `.e-ai-log` block: each line is a `motion.div` that slides/fades in (`x: -8 -> 0`, `opacity: 0 -> 1`, a `0.24s` tween), and any line starting with `"✓"` gets the `done` class (a visual "completed step" treatment). *Why replace rather than append:* the log IS the "what I did" narration for the run that's in progress or just finished, so showing the static three-bullet summary alongside it would be redundant - the panel shows one or the other, keyed on `log.length > 0`.

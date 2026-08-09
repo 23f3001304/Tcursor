@@ -35,7 +35,7 @@ Implements `FxRenderer::apply`. Applies all active effects from `state` onto `ou
 ### Implementation
 
 1. If `state.video` is `Some(v)`, call `videodraw::draw_video(out, ow, oh, &v)`. *Why first:* video effects (colour grade, vignette) are the base layer that affects the entire frame including the area the spotlight will subsequently dim.
-2. If `state.spot` is `Some(s)`, call `spotdraw::draw_spot(out, ow, oh, &s)`. *Why second:* the spotlight dims the frame after video colouring, so the lit circle reflects the graded colours rather than the original.
+2. If `state.spot` is `Some(s)`, call `spotdraw::draw_spot(out, ow, oh, &s, state.intensity)`. *Why second:* the spotlight dims the frame after video colouring, so the lit circle reflects the graded colours rather than the original. *Why `intensity` is forwarded separately:* it lives on `FxState`, not on `Spot` (the shader reads it the same way, as `u.c.z`), and Halo mode scales its ring by it.
 3. Always call `clickdraw::draw_clicks(out, ow, oh, state)`. *Why last:* click rings and particles appear on top of both the video effect and the spotlight dim so they remain bright and visible even in the darkened region.
 
 ### Behaviors

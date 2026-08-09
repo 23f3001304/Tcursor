@@ -1,6 +1,33 @@
 import { useRef } from "react";
 import { motion } from "motion/react";
 
+/** Snap a raw value to the nearest `step`, clamped to `[min, max]`, with output precision
+ *  matching `step`'s own decimal places (so e.g. `step=0.01` never produces
+ *  `0.30000000000000004`). Shared by the pointer-drag and keyboard input paths below. */
+export function snapToStep(raw: number, min: number, max: number, step: number): number {
+  const stepsCount = Math.round((raw - min) / step);
+  const stepped = Math.max(min, Math.min(max, min + stepsCount * step));
+  const stepStr = step.toString();
+  const decimalIndex = stepStr.indexOf(".");
+  const precision = decimalIndex === -1 ? 0 : stepStr.length - decimalIndex - 1;
+  return Number(stepped.toFixed(precision));
+}
+
+/** The value a key press should move a slider to, or `null` if the key isn't one of the
+ *  standard slider keys (WAI-ARIA slider pattern): arrows move by one `step`, PageUp/PageDown by
+ *  10 steps, Home/End jump to the bounds. */
+export function sliderKeyValue(key: string, value: number, min: number, max: number, step: number): number | null {
+  switch (key) {
+    case "ArrowRight": case "ArrowUp": return snapToStep(value + step, min, max, step);
+    case "ArrowLeft": case "ArrowDown": return snapToStep(value - step, min, max, step);
+    case "PageUp": return snapToStep(value + step * 10, min, max, step);
+    case "PageDown": return snapToStep(value - step * 10, min, max, step);
+    case "Home": return min;
+    case "End": return max;
+    default: return null;
+  }
+}
+
 // 4. Custom range Slider component with spring animations
 export function Slider({
   value,
@@ -9,7 +36,8 @@ export function Slider({
   step = 0.01,
   onChange,
   disabled = false,
-  accentColor = "var(--e-fg)"
+  accentColor = "var(--e-fg)",
+  ariaLabel,
 }: {
   value: number;
   min: number;
@@ -18,6 +46,7 @@ export function Slider({
   onChange: (v: number) => void;
   disabled?: boolean;
   accentColor?: string;
+  ariaLabel?: string;
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
 
@@ -42,18 +71,15 @@ export function Slider({
     if (!trackRef.current) return;
     const rect = trackRef.current.getBoundingClientRect();
     const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    const rawVal = min + pct * (max - min);
+    onChange(snapToStep(min + pct * (max - min), min, max, step));
+  };
 
-    // Calculate nearest step
-    const stepsCount = Math.round((rawVal - min) / step);
-    const steppedVal = Math.max(min, Math.min(max, min + stepsCount * step));
-
-    // Determine precision based on step
-    const stepStr = step.toString();
-    const decimalIndex = stepStr.indexOf(".");
-    const precision = decimalIndex === -1 ? 0 : stepStr.length - decimalIndex - 1;
-
-    onChange(Number(steppedVal.toFixed(precision)));
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (disabled) return;
+    const next = sliderKeyValue(e.key, value, min, max, step);
+    if (next === null) return;
+    e.preventDefault();
+    onChange(next);
   };
 
   const pct = Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100));
@@ -61,9 +87,18 @@ export function Slider({
   return (
     <div
       ref={trackRef}
+      className="e-slider-track"
+      role="slider"
+      aria-label={ariaLabel}
+      aria-valuemin={min}
+      aria-valuemax={max}
+      aria-valuenow={value}
+      aria-disabled={disabled || undefined}
+      tabIndex={disabled ? -1 : 0}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onKeyDown={handleKeyDown}
       style={{
         position: "relative",
         height: 20,

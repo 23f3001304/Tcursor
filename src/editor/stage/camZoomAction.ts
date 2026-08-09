@@ -24,15 +24,20 @@ export function resolvedCamDefault(zoom: ZoomSettings): CamZoomAction {
 }
 
 /** TS mirror of `cam_action_at` (export/scene/mod.rs) - the highest-`layer` zoom containing `tMs`
- *  supplies the action, falling back to `fallback` when it inherits or none is active. Ties go to
- *  the LAST such zoom, matching Rust's `max_by_key`. */
-export function resolveCamAction(zooms: Zoom[], tMs: number, fallback: CamZoomAction): CamZoomAction {
+ *  supplies BOTH the action and its OWN `scale` (falling back to `fallback`/`fallbackScale` when
+ *  it inherits the action or no zoom is active). Ties go to the LAST such zoom, matching Rust's
+ *  `max_by_key`. Returning the zoom's own scale (not just `fallbackScale`) matters: `scale` is a
+ *  first-class per-zoom slider (presets 1.6/2.2/2.8), and `zoomProgress`/`camZoomAlpha` divide by
+ *  it - feeding a 1.6x zoom the global 2.2x default means it can never reach full shrink/hide. */
+export function resolveCamAction(
+  zooms: Zoom[], tMs: number, fallback: CamZoomAction, fallbackScale: number,
+): [CamZoomAction, number] {
   let best: Zoom | null = null;
   for (const z of zooms) {
     if (tMs < z.start_ms || tMs > z.end_ms) continue;
     if (!best || z.layer >= best.layer) best = z;
   }
-  return best?.cam_action ?? fallback;
+  return [best?.cam_action ?? fallback, best?.scale ?? fallbackScale];
 }
 
 /** TS mirror of `apply_cam_zoom_action`'s GEOMETRY half (export/scene/mod.rs): `shrink` scales the

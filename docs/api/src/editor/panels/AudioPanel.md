@@ -28,6 +28,8 @@ Renders the three audio controls and writes straight back to `doc.settings` (via
 
 Each slider is `min={0} max={150} step={5}`, displaying `Math.round(vol * 100)` and calling back with `v / 100`. *Why round-trip through a 0..150 integer instead of storing the 0..1.5 float directly in slider state:* keeps the displayed percentage exact (no floating-point display jitter) while the value written back to settings stays the same linear-gain float the backend expects.
 
+**Task 26 cleanup.** All three `Slider`s dropped an explicit `accentColor="var(--e-fg)"` - `Slider`'s own default is already `"var(--e-fg)"`, so the prop was a no-op. The "← Mic earlier / Mic later →" caption row under the offset slider now uses the shared `.e-hintrow` class (`editor.css`) instead of a one-off inline `style={{...}}` object.
+
 ### Removed (this change)
 
 - Two "(Mocked)" volume sliders whose `onChange` was `() => {}` - replaced by the two real sliders above.

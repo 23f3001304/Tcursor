@@ -23,7 +23,11 @@ export interface Zoom {
 
 export interface Cut { start_ms: number; end_ms: number }
 export interface Speed { id: string; start_ms: number; end_ms: number; factor: number }
-export interface LayoutSeg { id: string; start_ms: number; end_ms: number; layout: string; transition_ms: number; easing: string }
+/** `transition_out_ms` is the cross-fade OUT of this layout, completing AT `end_ms` (symmetric
+ *  with the entry, which starts at `start_ms`). `0` is a hard cut - what every doc written before
+ *  exit transitions existed deserializes to. Rust always serializes both fields, so they are
+ *  required here even though they are serde-defaulted on the wire. */
+export interface LayoutSeg { id: string; start_ms: number; end_ms: number; layout: string; transition_ms: number; easing: string; transition_out_ms: number; easing_out: string }
 export interface Trim { in_ms: number; out_ms: number }
 
 /** Output frame aspect ratio - mirrors Rust `export::types::Aspect`. `"source"` (the default)
@@ -69,8 +73,8 @@ export type EditOp =
   | { op: "set_aspect"; aspect: Aspect }
   | { op: "add_cut"; start_ms: number; end_ms: number }
   | { op: "set_speed"; start_ms: number; end_ms: number; factor: number }
-  | { op: "add_layout_seg"; at_ms: number; dur_ms: number; layout: string }
-  | { op: "update_layout_seg"; id: string; start_ms?: number; end_ms?: number; layout?: string; transition_ms?: number; easing?: string }
+  | { op: "add_layout_seg"; at_ms: number; dur_ms: number; layout: string; transition_out_ms?: number; easing_out?: string }
+  | { op: "update_layout_seg"; id: string; start_ms?: number; end_ms?: number; layout?: string; transition_ms?: number; easing?: string; transition_out_ms?: number; easing_out?: string }
   | { op: "remove_layout_seg"; id: string }
   | { op: "add_effect"; kind: EffectKind; start_ms: number; end_ms: number }
   | { op: "update_effect"; id: string; start_ms?: number; end_ms?: number; fade_in_ms?: number; fade_out_ms?: number; mode?: string; dim?: number; radius?: number; feather?: number; layer?: number }

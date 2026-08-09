@@ -3,7 +3,10 @@ import { previewFxOverlay, type FxOverlayParams } from "../../lib/ipc";
 import type { ClickFxSettings } from "../../hud/settings/settings";
 import { resolveSpotlight, type SpotlightInput, type SpotlightSimState } from "./spotlightPreview";
 
-const RIPPLE_MS = 500;
+/** Click-effect lifetime. MUST equal the export's `LIFE_MS` (`fx_state.rs`): `progress` is
+ *  `elapsed / lifetime`, so a shorter one here made every ring smaller and fainter than the
+ *  export's at the same instant, and made it vanish 100ms early. */
+const RIPPLE_MS = 600;
 
 /** Camera PiP rect in FX-render px (min_x, min_y, max_x, max_y) + corner radius, or null when
  *  no camera panel is active this frame - mirrors the export's Spot.cam_rect/cam_radius. */
@@ -30,9 +33,14 @@ export async function requestFxOverlay(
   // "don't dim the webcam" setting (clickfx.spotlight_dim_camera) is off.
   camRect: FxCamRect,
 ): Promise<string | null> {
+  // `enabled` is the master switch for ALL fx, spotlight included - the export returns before
+  // drawing anything when it is off (`fx_state.rs`'s `render`). Without this the preview kept
+  // showing the spotlight for a recording the export renders with no fx at all.
+  if (!clickfx.enabled) return null;
+
   // Build active click hits in output pixels
   const hits: [number, number, number][] = [];
-  if (clickfx.style !== "none" && clickfx.enabled) {
+  if (clickfx.style !== "none") {
     for (const c of clicks) {
       const dt = now - c.t;
       if (dt < 0 || dt > RIPPLE_MS) continue;

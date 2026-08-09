@@ -4,7 +4,11 @@ Submodule overviews for the `fx` group.
 
 ## fx_state
 
-Renderer-agnostic per-frame FX data model, the `FxRenderer` trait, the renderer factory, and the per-frame render entry point. Key items: `FxHit`, `Spot`, `VideoFx`, `FxState`, `FxRenderer` trait, `fx_state_at(fx, events, actions, scene, cam, cur, sw, sh, ow, oh, et) -> Option<FxState>`, `select_fx(ow, oh) -> Box<dyn FxRenderer>`, `render(...)`.
+Renderer-agnostic per-frame FX data model, the `FxRenderer` trait, the renderer factory, and the per-frame render entry point. Key items: `FxHit`, `Spot`, `VideoFx`, `FxState`, `FxRenderer` trait, `fx_state_at(fx, events, actions, effects, scene, cam, cur, screen, sw, sh, ow, oh, region_t, ev_t, spot_sim) -> Option<FxState>`, `select_fx(ow, oh) -> Box<dyn FxRenderer>`, `render(...)`.
+
+## spotlight_sim
+
+Private submodule (`mod spotlight_sim;`, no `pub`). The stateful spotlight region resolver, split out of `fx_state.rs` (which was at the size budget) and re-exported as `fx_state::SpotlightSim`. Key items: `region_alpha(region, et) -> f32` (one region's own fade ramp), `SpotlightSim` (tracks the highest-layer active region and eases alpha across a handoff), `SpotlightSim::resolve(effects, et, settings_on) -> f32`, `SpotlightSim::style(effects, fx) -> (SpotlightMode, f32, f32, f32)`.
 
 ## fx_uniforms
 

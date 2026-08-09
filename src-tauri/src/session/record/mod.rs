@@ -4,3 +4,4 @@ pub mod recording_session;
 pub mod gpu_record;
 pub mod video_sink;
 mod pause_clock;
+pub mod pause_totals;

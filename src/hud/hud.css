@@ -25,7 +25,11 @@ body { display: flex; align-items: flex-start; justify-content: center; overflow
   display: flex; align-items: center; justify-content: space-between;
   height: 28px; padding: 0 7px 0 13px; border-bottom: 1px solid var(--line);
 }
-.brand { color: var(--muted); font-size: 11px; font-weight: 600; }
+.brand { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 11px; font-weight: 600; }
+.brand-mark {
+  display: flex; align-items: center; justify-content: center; flex: none; box-sizing: border-box;
+  width: 14px; height: 14px; border-radius: 4px; background: var(--hover); border: 1px solid var(--line); color: var(--fg);
+}
 .winctrls { display: flex; gap: 2px; }
 .winbtn {
   width: 24px; height: 24px; border: none; background: transparent; color: var(--muted);

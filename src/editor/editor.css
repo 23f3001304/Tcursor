@@ -27,7 +27,7 @@
 .e-bar { height: 52px; flex: none; display: flex; align-items: center; gap: 11px;
   padding: 0 14px; border-bottom: 1px solid var(--e-border2); }
 .e-brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 13px; }
-.e-mark { width: 20px; height: 20px; border-radius: 6px; background: var(--e-primary);
+.e-mark { width: 20px; height: 20px; box-sizing: border-box; border-radius: 6px; background: var(--e-soft); border: 1px solid var(--e-border);
   display: flex; align-items: center; justify-content: center; color: #fff; }
 .e-proj { color: var(--e-dim); font-size: 12px; font-weight: 400; }
 .e-sp { flex: 1; }
@@ -41,9 +41,8 @@
   display: flex; align-items: center; gap: 6px;
   box-shadow: 0 1px 2px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.13);
   transition: background .14s ease, transform .1s ease, box-shadow .14s ease; }
-.e-export:hover { background: var(--e-primaryh); transform: translateY(-1px);
+.e-export:hover { background: var(--e-primaryh);
   box-shadow: 0 4px 12px rgba(239,68,68,.32), var(--e-glow-primary), inset 0 1px 0 rgba(255,255,255,.13); }
-.e-export:active { transform: translateY(0.5px); }
 .e-export svg { opacity: .92; }
 .e-export:disabled { opacity: .55; cursor: default; box-shadow: none; }
 .e-export-bar { position: absolute; left: 0; bottom: 0; height: 2px; background: rgba(255,255,255,.4); }
@@ -107,10 +106,22 @@
   box-shadow: var(--e-lift), var(--e-shadow-raise), 0 6px 18px rgba(124,108,240,.28); }
 .e-run:active { transform: translateY(0); }
 .e-run:disabled { opacity: .6; cursor: default; transform: none; box-shadow: none; }
+/* Live "k of N" progress track while the director is running - sits right under the run button. */
+.e-ai-progress { height: 2px; margin: -12px 0 14px; border-radius: 999px; background: var(--e-soft); overflow: hidden; }
+.e-ai-progress-fill { height: 100%; background: var(--e-ai); }
 /* AI auto-edit failure (e.g. Ollama not running) - surfaced under the Auto-edit button. */
 .e-ai-err { margin: 12px 0 0; font-size: 12px; line-height: 1.5; color: #f7b4b4;
   background: rgba(239,68,68,.09); border: 1px solid rgba(239,68,68,.3);
   border-radius: var(--e-r-sm); padding: 10px 12px; }
+.e-ai-err .hint { display: block; margin-top: 4px; color: var(--e-dim); font-weight: 450; }
+/* Quiet single-line error (no card, unlike .e-ai-err above) - the model-list fetch failure in
+   AiPanel and the pack-import failure in CursorPanel. Same red as .e-ai-err (no new colors). */
+.e-errline { margin: 8px 0 0; font-size: 12px; line-height: 1.5; color: #f7b4b4; }
+.e-errline button { margin-left: 4px; background: none; border: none; padding: 0; color: inherit;
+  font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
+.e-errline button:hover { color: var(--e-fg); }
+/* Skeleton box matching the Picker button's own metrics, for a loading Engine picker. */
+.e-picker-shell { height: 36px; border-radius: var(--e-r); background: var(--e-soft); border: 1px solid var(--e-border); }
 /* Agentic director narration - each applied edit streams in as a terminal-like step line. */
 .e-ai-log { margin-top: 16px; display: flex; flex-direction: column; gap: 9px; }
 .e-ai-log-line { font-size: 12px; line-height: 1.5; color: var(--e-fg); padding-left: 20px; position: relative; }
@@ -162,9 +173,38 @@
   box-shadow: 0 0 0 1px rgba(0,0,0,.4), 0 6px 18px rgba(0,0,0,.45), 0 0 0 3px rgba(224,93,158,.2); }
 .e-camdrag.drag { cursor: grabbing; border-color: #ea82b6; background: rgba(224,93,158,.18);
   box-shadow: 0 0 0 1px rgba(0,0,0,.4), var(--e-shadow-pop), 0 0 0 3px rgba(224,93,158,.28); }
+/* Zoom aim reticle: a crosshair-ring on the stage marking the selected Region zoom's target.
+   Positioned in JS from the same fractions the compositor crops with (mapZoomTargetToCanvasPoint),
+   as a % of .e-stage - which is the canvas' own displayed rect. Inert until aim mode is on, so it
+   never steals the plain click-to-add-a-zoom gesture. --e-zoom is the zoom lane's accent. */
+.e-zreticle { position: absolute; z-index: 9; width: 30px; height: 30px; margin: -15px 0 0 -15px;
+  border-radius: 50%; pointer-events: none; border: 1.5px solid var(--e-zoom);
+  box-shadow: 0 0 0 1px rgba(0,0,0,.45), 0 0 12px rgba(0,0,0,.4); background: rgba(124,124,230,.10); }
+.e-zreticle i { position: absolute; inset: -8px; }
+.e-zreticle i::before, .e-zreticle i::after { content: ""; position: absolute; background: var(--e-zoom); }
+.e-zreticle i::before { left: 50%; top: 0; bottom: 0; width: 1.5px; margin-left: -.75px; }
+.e-zreticle i::after { top: 50%; left: 0; right: 0; height: 1.5px; margin-top: -.75px; }
+.e-zreticle.aim { pointer-events: auto; cursor: grab; background: rgba(124,124,230,.18);
+  box-shadow: 0 0 0 1px rgba(0,0,0,.45), 0 0 0 4px rgba(124,124,230,.22), 0 0 14px rgba(0,0,0,.45); }
+.e-zreticle.drag { cursor: grabbing; }
+/* "Aim on stage" toggle under the Target segmented control. */
+.e-aimbtn { margin-top: 7px; height: 30px; width: 100%; display: flex; align-items: center;
+  justify-content: center; gap: 6px; border: 1px solid var(--e-border); border-radius: var(--e-r);
+  background: transparent; color: var(--e-mut); font: inherit; font-size: 12.5px; cursor: pointer;
+  transition: background .14s ease, border-color .14s ease, color .14s ease; }
+.e-aimbtn:hover:not(:disabled) { background: var(--e-soft); color: var(--e-fg); }
+.e-aimbtn.on { border-color: var(--e-zoom); color: var(--e-fg); background: rgba(124,124,230,.14); }
+.e-aimbtn:disabled { opacity: .45; cursor: not-allowed; }
 .e-stage-empty { margin: auto; color: var(--e-dim); font-size: 13px; display: flex; flex-direction: column;
   align-items: center; gap: 10px; }
 .e-stage-load { position: absolute; top: 12px; right: 12px; color: var(--e-mut); display: flex; }
+/* Recoverable stage-media error card (StageMedia.tsx) - icon + reason + a Retry button that
+   clears `err` and bumps useEditorData's `reloadTick` to force the proxy effect to re-run. */
+.e-media-err { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 8px;
+  color: var(--e-dim); text-align: center; padding: 0 24px; }
+.e-media-err-title { margin: 0; font-size: 13px; font-weight: 600; color: var(--e-mut); }
+.e-media-err-reason { margin: 0; font-size: 12px; }
+.e-media-err .e-modal-btn { margin-top: 4px; height: 30px; padding: 0 12px; font-size: 12.5px; }
 
 .e-transport { height: 52px; flex: none; border-top: 1px solid var(--e-border2); display: flex;
   align-items: center; justify-content: space-between; gap: 12px; padding: 0 16px;
@@ -174,8 +214,16 @@
 .e-tg { width: 32px; height: 32px; border: none; background: transparent; color: #cdced4;
   border-radius: var(--e-r-sm); display: flex; align-items: center; justify-content: center;
   transition: background .14s ease, color .14s ease; }
-.e-tg:hover { background: var(--e-soft); color: var(--e-fg); }
+.e-tg:hover:not(:disabled) { background: var(--e-soft); color: var(--e-fg); }
 .e-tg.on { background: var(--e-soft); color: var(--e-fg); }
+.e-tg:disabled { opacity: .4; cursor: default; }
+/* Undo/redo feedback pill - bottom-center of the stage (see Toast.tsx). Editor.tsx wraps Stage in
+   this relative-positioned box so the pill anchors to the stage area, not the whole editor. */
+.e-stagetoast { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; }
+.e-toast { position: absolute; left: 0; right: 0; bottom: 22px; margin: 0 auto; width: fit-content;
+  padding: 7px 14px; border-radius: 999px; background: var(--e-card); border: 1px solid var(--e-border);
+  box-shadow: var(--e-shadow-pop); font-size: 12.5px; color: var(--e-fg); pointer-events: none; z-index: 5;
+  white-space: nowrap; }
 /* Trim: a labelled ghost pill (bordered), distinct from the bare icon tools beside it. */
 .e-tbtn { height: 32px; padding: 0 12px; border: 1px solid var(--e-border);
   background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,0));
@@ -203,14 +251,20 @@
 .e-chip:hover { background: var(--e-soft); color: var(--e-fg); border-color: var(--e-mut);
   transform: translateY(-1px); box-shadow: var(--e-lift), var(--e-shadow-raise); }
 .e-chip:active { transform: translateY(0); }
+.e-chip:disabled { opacity: .45; cursor: default; transform: none; box-shadow: var(--e-lift); }
 .e-play { width: 36px; height: 36px; border-radius: 50%; background: var(--e-fg); color: #0a0a0a; border: none;
   display: flex; align-items: center; justify-content: center; box-shadow: var(--e-shadow-raise); }
-/* Volume flyout: fixed-width track that fades in with a small x-shift (never animates width). */
-.e-volwrap { display: flex; align-items: center; gap: 6px; position: relative; }
-.e-volflyout { width: 76px; display: flex; align-items: center; overflow: hidden; }
+.e-play:disabled { opacity: .4; cursor: default; box-shadow: none; }
+/* Volume flyout: fixed-width track that fades in with a small x-shift (never animates width).
+   No `gap` between the mute button and the flyout - the 6px breathing room instead lives INSIDE
+   the flyout as `padding-left`, so the two sit flush with zero dead space between them and
+   `.e-volwrap`'s hover state (which shows/hides the flyout) never has a gap to lose the pointer
+   over while crossing from the button onto the slider. */
+.e-volwrap { display: flex; align-items: center; position: relative; }
+.e-volflyout { width: 76px; display: flex; align-items: center; overflow: hidden; padding-left: 6px; }
 
 .e-timeline { flex: none; border-top: 1px solid var(--e-border2); background: var(--e-surface);
-  padding: 8px 16px 14px; position: relative; }
+  padding: 8px 16px 14px 68px; position: relative; }
 .e-ruler { position: relative; height: 18px; font-size: 11px; color: var(--e-dim);
   font-variant-numeric: tabular-nums; margin-bottom: 7px; }
 /* Each tick = an 11px label with a 1x4px hairline bar beneath it, pinned to the tick's time. */
@@ -232,7 +286,12 @@
   background: var(--e-card); border: 1px solid var(--e-border);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.04), inset 0 -6px 12px rgba(0,0,0,.22); }
 .e-filmstrip img { height: 100%; object-fit: cover; display: block; pointer-events: none; }
-.e-filmstrip-empty { align-items: center; justify-content: center; color: var(--e-dim); font-size: 12px; }
+/* Loading skeleton (Shimmer.tsx) - reused via `className` on Filmstrip/AudioTrack's own box
+   classes so the skeleton is pixel-identical in size to the loaded content. The sweep itself is
+   Motion-animated (`x`, a repeating tween in Shimmer.tsx), not a CSS @keyframes loop. */
+.e-shimmer { position: relative; overflow: hidden; }
+.e-shimmer-sweep { position: absolute; top: 0; bottom: 0; left: 0; width: 40%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.04), transparent); }
 /* Track stack: scrolls when many effect layers appear; ruler + filmstrip stay above. */
 .e-tracks { display: flex; flex-direction: column; gap: 6px; max-height: 230px; overflow-y: auto; overflow-x: hidden; padding-bottom: 2px; }
 /* NumberField +/- steppers: proper hover/disabled affordance (the button layout is inline in NumberField.tsx). */
@@ -245,6 +304,25 @@
 .e-tracks::-webkit-scrollbar-thumb { background: var(--e-dim); border-radius: 999px;
   border: 3px solid var(--e-bg); background-clip: padding-box; min-height: 40px; }
 .e-tracks:hover::-webkit-scrollbar-thumb { background: var(--e-mut); background-clip: padding-box; }
+/* Lane label gutter (Timeline.tsx's `lanes` array, mapped once into `.e-lanegutter`'s labels and
+   once into `.e-tracks`' row bodies). `.e-lanegutter` is a SIBLING of `.e-tracks`, not nested
+   inside it - `.e-tracks`' `overflow-y: auto` forces `overflow-x` to clip too (a single element's
+   two overflow axes can't independently be "auto" and "visible" - the CSS spec computes the
+   visible one as auto whenever the other isn't visible), with no exception for a descendant that
+   tries to escape via absolute positioning: clipping is DOM-containment-based, not geometry-based.
+   As a sibling, `.e-lanegutter` sits entirely outside that clip. It doesn't scroll with `.e-tracks`
+   automatically, though (they're separate scroll contexts) - `Timeline.tsx`'s `onTracksScroll`
+   mirrors `.e-tracks`' scrollTop onto it on every scroll event, keeping the two columns locked
+   together. Crucially: `.e-lanegutter` is `position: absolute` within `.e-trackswrap`, so it takes
+   NO width away from `.e-tracks` - `.e-tracks` stays exactly 100% of `.e-tlbody`'s own width, the
+   same reference `seekAt`/`useRegionDrag` use for their ms<->px math, untouched by any of this. */
+.e-trackswrap { position: relative; }
+.e-lanegutter { position: absolute; right: 100%; margin-right: 8px; top: 0; width: 54px;
+  max-height: 230px; overflow-y: hidden; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
+.e-lanelabelrow { display: flex; align-items: center; justify-content: flex-end; flex: none; }
+.e-lanelabel { font-size: 10px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--e-dim); white-space: nowrap; text-align: right; }
+.e-lanerows { display: flex; flex-direction: column; gap: 6px; }
 .e-zoomrow { position: relative; height: 32px; border-radius: var(--e-r);
   background: var(--e-surface); box-shadow: inset 0 0 0 1px var(--e-border2); }
 /* Zoom pill: lane-colored fill with a lit top edge; hairline border, raise; white side grips (on hover) to retime. */
@@ -265,6 +343,14 @@
   transition: opacity .14s ease; }
 .e-zblk:hover .e-zh::after { opacity: 1; }
 .e-zh:hover::after { height: 16px; background: rgba(255,255,255,.9); opacity: 1; }
+/* Tiny pills: below this width the icon+text label can't fit without clipping, so it hides
+   entirely (a bare color chip still reads and stays draggable) rather than showing a sliver of
+   cut-off text. `container-type` scopes the query to the pill's OWN resolved width, not the
+   viewport, so it reacts as the SAME pill's live drag-resize crosses the threshold. `min-width`
+   keeps a short region's hit target (drag body + both edge handles) usable even at near-zero
+   duration, where the percentage width alone would shrink to a few px. */
+.e-zblk, .e-fxblk, .e-layblk { container-type: inline-size; min-width: 18px; }
+@container (max-width: 34px) { .e-zlabel { display: none; } }
 /* Audio track: quiet, low-contrast waveform with a small source icon (system vs mic). */
 .e-audiorow { position: relative; height: 22px; border-radius: var(--e-r); overflow: hidden;
   background: var(--e-surface); box-shadow: inset 0 0 0 1px var(--e-border2); }
@@ -291,6 +377,16 @@
   background: linear-gradient(180deg, rgba(255,255,255,.16), rgba(255,255,255,0) 60%), var(--e-layout);
   border: 1px solid rgba(255,255,255,.14); box-shadow: var(--e-lift), var(--e-shadow-raise);
   transition: transform .14s ease, box-shadow .14s ease; }
+/* Fade ramps: static gradients at each end, widths set inline from the segment's own in/out
+   transition durations (transitionRampPct, capped at 40% so the two can never meet). A hard cut
+   is 0% wide and therefore invisible - the pill looks exactly as it always has. */
+.e-layblk::before, .e-layblk::after { content: ""; position: absolute; top: 0; bottom: 0;
+  pointer-events: none; z-index: 0; }
+.e-layblk::before { left: 0; width: var(--fin, 0%);
+  background: linear-gradient(to right, var(--e-surface), rgba(0,0,0,0)); }
+.e-layblk::after { right: 0; width: var(--fout, 0%);
+  background: linear-gradient(to left, var(--e-surface), rgba(0,0,0,0)); }
+.e-layblk > * { position: relative; z-index: 1; }
 .e-layblk.drag { cursor: grabbing; z-index: 4; box-shadow: var(--e-shadow-pop); }
 .e-layblk.sel { opacity: 1; transform: translateY(-1px);
   outline: 1.5px solid var(--e-ring); outline-offset: -1.5px;
@@ -304,6 +400,12 @@
    below mark the spans where it actually animates, between two consecutive keyframes. */
 .e-cambase { position: absolute; top: 50%; left: 10px; right: 10px; height: 0; margin-top: -1px;
   border-top: 1.5px dashed var(--e-border2); opacity: .7; pointer-events: none; }
+/* The span the keyframes actually OWN: [first - KF_BLEND_MS, last + KF_BLEND_MS]. Outside it the
+   layout segments own the webcam panel, so the bar simply stops. The gradient (set inline, since
+   the ramp width depends on the span's own length) fades in/out across the two blend windows -
+   a STATIC fill, hence plain CSS and not Motion. Behind the diamonds and segments. */
+.e-camspan { position: absolute; top: 3px; bottom: 3px; z-index: 0; pointer-events: none;
+  border-radius: 5px; }
 /* Transition segment: click to pick the easing into the later keyframe (the e-campop popover). */
 .e-camseg { position: absolute; top: 50%; height: 8px; margin-top: -4px; border-radius: 4px; z-index: 1;
   background: linear-gradient(90deg, rgba(224,93,158,.36), rgba(224,93,158,.66)); cursor: pointer;
@@ -351,7 +453,15 @@
 .e-modal-btn.primary.danger { background: #e5484d; border-color: #e5484d; color: #fff; }
 .e-modal-btn.primary.danger:hover { background: #d93a3f; border-color: #d93a3f; }
 .e-ph { position: absolute; top: 0; bottom: 0; width: 1.5px; background: var(--e-primary); z-index: 5; pointer-events: none; }
-.e-ph i { position: absolute; top: -2px; left: -4.5px; width: 10px; height: 8px; background: var(--e-primary); border-radius: 2.5px; }
+/* The little flag at the top is the ONE interactive part of an otherwise pointer-events:none
+   playhead (`.e-ph` stays click-through so body scrubbing is unaffected) - `pointer-events: auto`
+   re-enables hit-testing for just this child, and its own pointerdown bubbles straight up to
+   `.e-tlbody`'s existing scrub handler, so grabbing the flag drags the playhead exactly like
+   scrubbing the body does, with no extra wiring. Hover just grows it to invite the grab. */
+.e-ph i { position: absolute; top: -2px; left: -4.5px; width: 10px; height: 8px; background: var(--e-primary);
+  border-radius: 2.5px; pointer-events: auto; cursor: grab; transition: transform .12s ease; }
+.e-ph i:hover { transform: scale(1.3); }
+.e-ph i:active { cursor: grabbing; }
 
 /* Export dialog (ExportDialog + ExportProgress) - reuses the modal scrim/card/actions above. */
 .e-export-modal { width: 400px; }
@@ -373,6 +483,20 @@
 .e-export-outcome-body { margin: 0 0 12px; font-size: 12.5px; color: var(--e-mut); max-width: 320px; word-break: break-word; }
 .e-export-outcome .e-modal-actions { margin-top: 10px; width: 100%; }
 
+/* Project settings dialog (EditorSettingsDialog) - reuses the modal scrim/card + .e-export-head
+   above; taller than the other modals (three sections + shortcuts row + recording note), so it
+   scrolls internally instead of overflowing the viewport on a short window. */
+.e-settings-modal { width: 420px; max-height: min(78vh, 640px); overflow-y: auto; }
+
+/* Shortcuts overlay (ShortcutsOverlay) - reuses the modal scrim/card above. */
+.e-shortcuts-modal { width: 300px; }
+.e-shortcuts-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.e-shortcuts-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  height: 32px; padding: 0 2px; }
+.e-shortcuts-label { font-size: 13px; color: var(--e-mut); }
+.e-shortcuts-key { font: inherit; font-size: 11.5px; font-weight: 600; letter-spacing: 0.01em; color: var(--e-fg);
+  padding: 3px 7px; border-radius: var(--e-r-sm); background: var(--e-soft); border: 1px solid var(--e-border); }
+
 /* Invisible resize grips for the frameless window (decorations:false → no OS border).
    Edges are 6px; corners 13px and stacked above edges so the diagonal cursor wins. */
 .e-rz { position: absolute; z-index: 200; }
@@ -390,8 +514,6 @@
 
 /* Zoom inspector (left panel while a timeline block is selected). */
 .e-insp { display: flex; flex-direction: column; }
-.e-insphdr { display: flex; align-items: center; justify-content: space-between; }
-.e-insphdr h2 { margin: 0; }
 /* Panel header: title + matched ghost icon buttons (reset/close) over a hairline. */
 .e-phead { padding-bottom: 14px; margin-bottom: 18px; border-bottom: 1px solid var(--e-border2); }
 .e-phead-top { display: flex; align-items: center; justify-content: space-between; }
@@ -405,12 +527,9 @@
 /* Section header: uppercase micro-label, distinct from control labels (.e-fl) so the panel has hierarchy. */
 .e-sechead { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
   color: var(--e-dim); margin: 0; }
-/* Header actions: an optional non-red text button (Reset/Clear) sitting left of the X close. */
-.e-hdracts { display: flex; align-items: center; gap: 6px; }
-.e-reset { height: 28px; padding: 0 8px; border: none; background: transparent; color: var(--e-mut);
-  font-size: 12.5px; font-weight: 500; border-radius: var(--e-r-sm); cursor: pointer;
-  transition: background .14s ease, color .14s ease; }
-.e-reset:hover { background: var(--e-soft); color: var(--e-fg); }
+/* Section title row (label/lede + a trailing reset icon or action button) - EditorSettingsDialog's
+   per-section reset pattern, one level down from .e-phead-top (no h2, smaller icon target). */
+.e-secrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
 /* Full-width neutral secondary action (e.g. "Reset Defaults") - never red. */
 .e-ghostbtn { width: 100%; box-sizing: border-box; padding: 14px; border: 1px solid var(--e-border); border-radius: var(--e-r);
   background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,0));
@@ -421,10 +540,14 @@
   transform: translateY(-1px); box-shadow: var(--e-lift), var(--e-shadow-raise); }
 .e-ghostbtn:active { transform: translateY(0); }
 .e-field { display: flex; flex-direction: column; gap: 7px; margin-bottom: 16px; }
+/* Slider keyboard focus ring (role="slider", Slider.tsx) - the shared --e-focus token, not a new color. */
+.e-slider-track:focus-visible { outline: 2px solid var(--e-focus); outline-offset: 3px; border-radius: 999px; }
 .e-fl { font-size: 12px; font-weight: 400; color: var(--e-mut); display: flex; justify-content: space-between; align-items: center; }
 .e-fl b { color: var(--e-fg); font-weight: 500; font-variant-numeric: tabular-nums; }
 .e-field2 { display: flex; gap: 10px; }
 .e-field2 .e-field { flex: 1; }
+/* Small dim caption row under a slider (e.g. AudioPanel's "Mic earlier/later" ends). */
+.e-hintrow { display: flex; justify-content: space-between; font-size: 11px; color: var(--e-dim); margin-bottom: 4px; }
 .e-seg { display: flex; gap: 4px; background: var(--e-soft); border-radius: var(--e-r-sm); padding: 3px; }
 .e-seg button { flex: 1; height: 30px; border: none; background: transparent; color: var(--e-mut);
   border-radius: var(--e-r-sm); font-size: 12.5px; font-weight: 500; transition: background .14s ease, color .14s ease; }
@@ -491,6 +614,19 @@
   height: 48px;
   overflow: visible;
 }
+/* The SELECTED curve card expands in place across the whole picker row and becomes the
+   interactive bezier editor (CurveEditor.tsx): its curve is drawn live from the control points,
+   and the two handles are draggable + arrow-key nudgeable. */
+.e-curve-card.wide { grid-column: 1 / -1; cursor: default; padding: 10px 12px 8px; }
+.e-curve-card.wide .e-curve-svg { height: 116px; }
+.e-curve-card.wide span { display: flex; align-items: baseline; gap: 8px; }
+.e-curve-card.wide span em { font-style: normal; font-weight: 400; font-size: 10.5px; color: var(--e-dim); }
+.e-curve-arm { stroke: var(--e-border); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.e-curve-h { fill: var(--e-card); stroke: var(--e-fg); stroke-width: 2.5; cursor: grab;
+  touch-action: none; transition: fill .14s ease, stroke .14s ease; }
+.e-curve-h:hover { fill: var(--e-soft); }
+.e-curve-h:focus-visible { outline: none; stroke: var(--e-primary); fill: var(--e-soft); }
+.e-curve-h.grab { cursor: grabbing; fill: var(--e-fg); }
 
 /* Custom visual controls for settings panels */
 .e-preset-grid {
@@ -543,6 +679,22 @@
 .e-accent-circle.on {
   box-shadow: 0 0 0 2px var(--e-bg), 0 0 0 4px var(--e-fg, #fff);
 }
+
+/* Small swatch row (Swatches.tsx `variant="small"`) - EffectsPanel's ripple color/tint,
+   CameraRingField's ring color. Border-based selection (not the preset/accent ring above) -
+   this is the pre-Task-26 inline-styled look, just promoted to a real class. */
+.e-swatch-row { display: flex; gap: 8px; margin-top: 2px; }
+.e-swatch-sm {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  padding: 0;
+  outline: none;
+  border: 1px solid var(--e-border);
+  cursor: pointer;
+}
+.e-swatch-sm.on { border: 2px solid var(--e-fg); }
+.e-swatch-sm:disabled { opacity: .4; cursor: default; }
 
 .e-pack-grid {
   display: grid;
@@ -615,60 +767,17 @@
 }
 .e-upload-dashed:active { transform: translateY(0); }
 
-.e-sublist {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 260px;
-  overflow-y: auto;
-  padding-right: 4px;
-}
-.e-subrow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--e-soft);
-  border: 1px solid var(--e-border2);
-  border-radius: 6px;
-  padding: 6px 10px;
-  transition: border-color 0.15s ease;
-}
-.e-subrow:focus-within {
-  border-color: var(--e-focus);
-}
-.e-subtime {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--e-mut);
-  background: var(--e-card);
-  padding: 3px 6px;
-  border-radius: 4px;
-  font-variant-numeric: tabular-nums;
-}
-.e-subinput {
-  flex: 1;
-  background: transparent;
-  border: none;
-  color: var(--e-fg);
-  font-size: 12.5px;
-  outline: none;
-  padding: 0;
-}
-.e-subdel {
-  border: none;
-  background: transparent;
-  color: var(--e-dim);
-  cursor: pointer;
-  padding: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 4px;
-  transition: color 0.15s, background-color 0.15s;
-}
-.e-subdel:hover {
-  background: rgba(239, 68, 68, 0.15);
-  color: #f87171;
-}
-
+/* AI director choreography (Task 25): the fake pointer that visibly performs each edit, the
+   cancel scrim, and the Stop pill - z-index sits above panels/timeline (<30) but below modals
+   (100), and the scrim (48) < the Stop pill (49) < the pointer (50). */
+.e-director-ptr { position: fixed; top: 0; left: 0; z-index: 50; pointer-events: none;
+  width: 20px; height: 22px; }
+.e-director-ring { position: absolute; left: 2px; top: 2px; transform: translate(-50%, -50%);
+  border-radius: 50%; background: var(--e-ai); pointer-events: none; }
+.e-director-glyph { position: absolute; left: 0; top: 0; filter: drop-shadow(0 1px 3px rgba(0,0,0,.5)); }
+.e-director-scrim { position: fixed; inset: 0; z-index: 48; background: transparent; pointer-events: all; cursor: default; }
+.e-director-stop { position: fixed; left: 50%; bottom: 74px; transform: translateX(-50%); z-index: 49;
+  padding: 7px 14px; border-radius: 999px; background: var(--e-card); border: 1px solid var(--e-border);
+  box-shadow: var(--e-shadow-pop); font-size: 12.5px; color: var(--e-fg); pointer-events: all;
+  cursor: pointer; white-space: nowrap; }
 

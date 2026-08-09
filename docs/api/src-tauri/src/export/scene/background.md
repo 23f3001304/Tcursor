@@ -58,10 +58,11 @@ Allocates a `w x h` BGRA buffer and fills it according to `bg`.
 2. Dispatch on `bg` variant:
    - `Solid(c)` - call `fill` with a closure returning the constant `c`. O(w*h), no conditionals inside the loop.
    - `Image(_)` - M2b stub: the image library is deferred to M4. Falls through to `fill` with a hard-coded dark colour `Rgb { r:24, g:24, b:30 }` so exports are never broken when this variant is selected.
-   - `Gradient { from, to, angle_deg }` - convert `angle_deg` to radians; derive direction `(dx, dy)` = `(cos, sin)`; compute `max` as the maximum possible signed projection across the frame (sum of absolute per-axis extents); call `fill` with `lerp(from, to, t)` where `t = |(x*dx + y*dy)| / max`. *Why normalise by `max`:* guarantees the gradient always spans the full 0..1 range regardless of angle - a 45-degree gradient runs corner to corner, not just to the midpoint.
+   - `Gradient { from, to, angle_deg }` - convert `angle_deg` to radians; derive direction `(dx, dy)` = `(cos, sin)`; project all FOUR frame corners `(0, wf*dx, hf*dy, wf*dx+hf*dy)` (where `wf = w-1`, `hf = h-1`) onto that direction and take `pmin`/`pmax` across them; `range = (pmax - pmin).max(1e-6)`; call `fill` with `lerp(from, to, t)` where `t = ((x*dx + y*dy) - pmin) / range`. *Why normalize against the true corner range rather than `.abs()` of the projection:* `.abs()` mirror-folds any angle whose projection goes negative for part of the frame - including the DEFAULT 135deg - putting a crease of the `from` color along the fold line instead of a monotonic corner-to-corner ramp. Projecting all four corners (not just one) and using the actual `[pmin, pmax]` span is correct at every angle, including ones where the extremes aren't at `(0,0)`/`(w,h)`.
 3. Return `buf`.
 
 ### Behaviors
 
 - `solid_fills_bgra` - a 2x2 solid buffer with `Rgb { r:10, g:20, b:30 }` has `[30, 20, 10, 255]` at offset 0, confirming BGRA byte order and alpha.
 - `gradient_differs_corner_to_corner` - a 0-degree (horizontal) black-to-white gradient over 4 pixels has a lighter rightmost pixel, confirming the ramp spans the whole width.
+- `gradient_at_135deg_is_a_true_monotonic_ramp_not_mirror_folded` - at the DEFAULT 135deg angle (100x100, black-to-white): walking the anti-diagonal (top-right -> center -> bottom-left) is strictly darker-to-lighter, and the two off-axis corners `(0,0)`/`(99,99)` are equal (both sit at the ramp's midpoint) - the regression case for the old `.abs()`-normalized formula, which instead put a crease of `from` along that diagonal.

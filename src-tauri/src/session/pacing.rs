@@ -26,7 +26,8 @@ pub fn emit_due(
         let ts = start + k * 1000 / fps as u64;
         let framed = Frame { width: latest.width, height: latest.height, bgra: latest.bgra.clone(), ts: Timestamp(ts) };
         match sink.push(&framed) {
-            Ok(()) => { *frames += 1; frame_ts.push(ts); }
+            Ok(true) => { *frames += 1; frame_ts.push(ts); }
+            Ok(false) => {} // dimension-mismatched frame, skipped by the sink - do not count or timestamp it
             Err(e) => eprintln!("frame sink push failed: {e}"),
         }
         k += 1;
@@ -93,5 +94,29 @@ mod tests {
         assert_eq!(n, 4);
         assert_eq!(ts, vec![1000, 1016, 1033, 1050]); // start + k*1000/60, duplicated frame
         assert_eq!(frames, 4);
+    }
+
+    /// Mimics a dimension-mismatched frame (Task 5's `write_or_skip`): always reports the
+    /// frame as skipped (`Ok(false)`) rather than erroring.
+    struct SkippingSink;
+    impl crate::encode::frame_sink::FrameSink for SkippingSink {
+        fn push(&mut self, _f: &Frame) -> std::io::Result<bool> { Ok(false) }
+        fn finish(self: Box<Self>) -> std::io::Result<()> { Ok(()) }
+    }
+
+    #[test]
+    fn emit_due_does_not_count_or_timestamp_skipped_frames() {
+        // A skipped push (Ok(false)) must still advance the emitted-index counter (so the
+        // loop doesn't retry the same due index forever) but must not touch `frames` or
+        // `frame_ts` - sync.json would otherwise gain a timestamp for a frame that was
+        // never actually written to the video.
+        let mut src = FakeFrameSource::new(vec![frame(999)]);
+        let mut sink = SkippingSink;
+        let (mut frames, mut ts) = (0u64, Vec::new());
+        let mut latest = frame(999);
+        let n = emit_due(&mut src, &mut sink, &mut frames, &mut ts, 1000, 50, 60, 0, &mut latest);
+        assert_eq!(n, 4); // still advances through the due indices
+        assert_eq!(frames, 0);
+        assert!(ts.is_empty());
     }
 }

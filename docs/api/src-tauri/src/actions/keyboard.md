@@ -36,7 +36,7 @@ Owns a background `"keyboard-poll"` thread that reads physical key state directl
 ## KeyboardTracker::start
 
 ```rust
-pub fn start(arms: Vec<Arm>) -> Self
+pub fn start(arms: Vec<Arm>, ledger: Arc<PauseTotals>) -> Self
 ```
 
 Spawns the poll thread and starts accumulating data immediately.
@@ -44,17 +44,18 @@ Spawns the poll thread and starts accumulating data immediately.
 ### Inputs
 
 - `arms: Vec<Arm>` - the armed hotkey table from `arming_from_settings`. *Why:* the thread only polls the VK codes actually in this table plus `TYPING_VKS`, so it is not a general keylogger - only the user-configured chords are inspected.
+- `ledger: Arc<PauseTotals>` - the recorder's exact-span paused-time ledger. *Why:* both stamp sites below (hotkey actions and typing) pause-adjust their raw elapsed-ms reading via `ledger.stamp` so recorded timestamps land in the same pause-compressed timeline as video/audio.
 
 ### Implementation
 
 1. Allocate shared state: `stop` (`AtomicBool::new(false)`), `events` and `typing` as `Arc<Mutex<Vec<_>>>`.
-2. Clone all three `Arc`s for the thread closure - the originals stay in `Self` for `stop`/`drop`.
+2. Clone all three `Arc`s for the thread closure - the originals stay in `Self` for `stop`/`drop`. `ledger` moves into the closure directly (no clone needed back in `Self`).
 3. Spawn `"keyboard-poll"` thread. *Why name it:* named threads appear in debuggers and panic messages, aiding diagnosis.
 4. Inside the thread: record `Instant::now()` as the epoch so all timestamps are session-relative. Initialize `active` (per-arm held-state) and `typ_prev` (per-typing-key prior state), both as `vec![false; N]`.
 5. Loop on `!s.load(SeqCst)`:
    - Read `cur_mods()` (VK_CONTROL/MENU/SHIFT via `GetAsyncKeyState`).
-   - For each arm: if `key_down(arm.chord.vk) && mods == arm.chord.mods` changed since the last poll, record an `ActionEvent`. *Why:* level-triggered polling combined with an `active` array gives edge detection (transition, not continuous state) without a kernel hook.
-   - For each TYPING_VK: if the key just went down (was up last poll), push the timestamp to `typing`. *Why fresh-down only:* suppresses auto-repeat so one held key does not flood the typing log.
+   - For each arm: if `key_down(arm.chord.vk) && mods == arm.chord.mods` changed since the last poll, compute the raw elapsed ms, pause-adjust it via `ledger.stamp`, and record an `ActionEvent`. *Why:* level-triggered polling combined with an `active` array gives edge detection (transition, not continuous state) without a kernel hook.
+   - For each TYPING_VK: if the key just went down (was up last poll), pause-adjust the raw elapsed ms via `ledger.stamp` and push it to `typing`. *Why fresh-down only:* suppresses auto-repeat so one held key does not flood the typing log.
    - Sleep 15 ms (~66 Hz). *Why:* fast enough to catch short key presses but slow enough not to waste CPU on a recording host.
 6. If `spawn` fails, `thread` is `None`; the tracker exists but records nothing. *Why tolerate this:* a recording should not abort just because the keyboard thread failed to start.
 

@@ -1,5 +1,5 @@
-use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::{Arc, atomic::AtomicBool};
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
+use std::sync::{Arc, atomic::{AtomicBool, AtomicU64, Ordering}};
 use crate::capture::frame::Frame;
 use crate::capture::frame_source::FrameSource;
 use crate::domain::time::Clock;
@@ -14,6 +14,13 @@ pub struct WgcFrameSource {
     // Calling stop() posts WM_QUIT to the WGC thread, which unblocks GetMessageW
     // → WGC thread exits → tx drops → rx.recv() returns Err → next_frame returns None.
     stopper: Option<Box<dyn FnOnce() + Send>>,
+    drops: Arc<AtomicU64>, // frames dropped (queue full, encoder behind); logged once in Drop
+}
+
+// Non-blocking hand-off: drops (and counts) `frame` instead of stalling the WGC callback
+// when the bounded queue is full. A free function so it's unit-testable without WGC.
+fn try_send_or_drop(tx: &SyncSender<Frame>, frame: Frame, drops: &AtomicU64) {
+    if tx.try_send(frame).is_err() { drops.fetch_add(1, Ordering::Relaxed); }
 }
 
 impl WgcFrameSource {
@@ -36,16 +43,17 @@ impl WgcFrameSource {
         };
 
         struct Handler {
-            tx: Sender<Frame>,
+            tx: SyncSender<Frame>,
             clock: Arc<dyn Clock>,
+            drops: Arc<AtomicU64>,
         }
 
         impl GraphicsCaptureApiHandler for Handler {
-            type Flags = (Sender<Frame>, Arc<dyn Clock>);
+            type Flags = (SyncSender<Frame>, Arc<dyn Clock>, Arc<AtomicU64>);
             type Error = anyhow::Error;
 
             fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
-                Ok(Self { tx: ctx.flags.0, clock: ctx.flags.1 })
+                Ok(Self { tx: ctx.flags.0, clock: ctx.flags.1, drops: ctx.flags.2 })
             }
 
             fn on_frame_arrived(
@@ -70,14 +78,15 @@ impl WgcFrameSource {
                     buf.as_raw_buffer().to_vec()
                 };
                 let ts = crate::domain::time::Timestamp(self.clock.now_ms());
-                let _ = self.tx.send(Frame { width: w, height: h, bgra, ts });
+                try_send_or_drop(&self.tx, Frame { width: w, height: h, bgra, ts }, &self.drops);
                 Ok(())
             }
 
             fn on_closed(&mut self) -> Result<(), Self::Error> { Ok(()) }
         }
 
-        let (tx, rx) = channel();
+        let (tx, rx) = sync_channel(8);
+        let drops = Arc::new(AtomicU64::new(0));
         let cursor_setting = if with_cursor { CursorCaptureSettings::WithCursor } else { CursorCaptureSettings::WithoutCursor };
         let interval_setting = MinimumUpdateIntervalSettings::Custom(std::time::Duration::from_micros(
             1_000_000 / fps.max(1) as u64,
@@ -102,12 +111,12 @@ impl WgcFrameSource {
                         interval_setting,
                         DirtyRegionSettings::Default,
                         ColorFormat::Bgra8,
-                        (tx, clock),
+                        (tx, clock, drops.clone()),
                     );
                     let control = Handler::start_free_threaded(settings)?;
                     let halt = control.halt_handle();
                     let stopper: Box<dyn FnOnce() + Send> = Box::new(move || { let _ = control.stop(); });
-                    return Ok(Self { rx, dims: (w, h), halt, stopper: Some(stopper) });
+                    return Ok(Self { rx, dims: (w, h), halt, stopper: Some(stopper), drops });
                 }
             } else if let Some(idx_str) = tid.strip_prefix("display:") {
                 if let Ok(idx) = idx_str.parse::<usize>() {
@@ -122,12 +131,12 @@ impl WgcFrameSource {
                             interval_setting,
                             DirtyRegionSettings::Default,
                             ColorFormat::Bgra8,
-                            (tx, clock),
+                            (tx, clock, drops.clone()),
                         );
                         let control = Handler::start_free_threaded(settings)?;
                         let halt = control.halt_handle();
                         let stopper: Box<dyn FnOnce() + Send> = Box::new(move || { let _ = control.stop(); });
-                        return Ok(Self { rx, dims: (w, h), halt, stopper: Some(stopper) });
+                        return Ok(Self { rx, dims: (w, h), halt, stopper: Some(stopper), drops });
                     }
                 }
             }
@@ -143,12 +152,12 @@ impl WgcFrameSource {
             interval_setting,
             DirtyRegionSettings::Default,
             ColorFormat::Bgra8,
-            (tx, clock),
+            (tx, clock, drops.clone()),
         );
         let control = Handler::start_free_threaded(settings)?;
         let halt = control.halt_handle();
         let stopper: Box<dyn FnOnce() + Send> = Box::new(move || { let _ = control.stop(); });
-        Ok(Self { rx, dims: (w, h), halt, stopper: Some(stopper) })
+        Ok(Self { rx, dims: (w, h), halt, stopper: Some(stopper), drops })
     }
 
     /// Returns the WGC halt handle. Store before moving source into the video thread;
@@ -177,3 +186,14 @@ impl FrameSource for WgcFrameSource {
         last
     }
 }
+
+impl Drop for WgcFrameSource {
+    fn drop(&mut self) {
+        let n = self.drops.load(Ordering::Relaxed);
+        if n > 0 { eprintln!("capture: dropped {n} frames (encoder behind)"); }
+    }
+}
+
+#[cfg(test)]
+#[path = "windows_capture_tests.rs"]
+mod tests;

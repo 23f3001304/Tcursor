@@ -1,21 +1,26 @@
 import type { CamRing } from "../../hud/settings/settings";
-import { Switch, Slider } from "../controls/Controls";
+import { Switch, Slider, Swatches, type SwatchItem } from "../controls/Controls";
 import { RING_WIDTH_SLIDER, DEFAULT_RING, pct } from "../../hud/preferences/appearanceFields";
 
-const SWATCHES: [number, number, number][] = [
-  [255, 255, 255], [239, 68, 68], [59, 130, 246], [34, 197, 94], [245, 158, 11]
+// [color, human name] - the name becomes each swatch's aria-label.
+const SWATCHES: [[number, number, number], string][] = [
+  [[255, 255, 255], "White"], [[239, 68, 68], "Red"], [[59, 130, 246], "Blue"], [[34, 197, 94], "Green"], [[245, 158, 11], "Orange"],
 ];
 const rgb = (c: [number, number, number]) => `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
+const swatchItems: SwatchItem<[number, number, number]>[] = SWATCHES.map(([c, name]) => ({ key: rgb(c), css: rgb(c), value: c, ariaLabel: name }));
 
 /** Webcam ring/border controls: on/off switch (null <-> DEFAULT_RING), then (when on) a
  *  width slider and a color swatch row - extracted from CameraPanel so that file stays
- *  under the line limit. Mirrors EffectsPanel's ripple-color swatch pattern for consistency. */
+ *  under the line limit. Uses the shared `Swatches` component (Task 26), same as
+ *  EffectsPanel's ripple-color/tint rows and BackgroundPanel's presets. */
 export function CameraRingField({ ring, onChange }: { ring: CamRing | null; onChange: (v: CamRing | null) => void }) {
   return (
     <>
       <div className="e-field" style={{ marginTop: 16 }}>
-        <span className="e-fl">Ring</span>
-        <Switch on={ring !== null} onChange={(v) => onChange(v ? DEFAULT_RING : null)} />
+        <div className="e-switchrow">
+          <span>Ring</span>
+          <Switch on={ring !== null} onChange={(v) => onChange(v ? DEFAULT_RING : null)} />
+        </div>
       </div>
       {ring && (
         <>
@@ -27,33 +32,13 @@ export function CameraRingField({ ring, onChange }: { ring: CamRing | null; onCh
               step={RING_WIDTH_SLIDER.step}
               value={ring.width}
               onChange={(v) => onChange({ ...ring, width: v })}
+              ariaLabel="Ring Width"
             />
           </div>
           <div className="e-field">
             <span className="e-fl">Ring Color</span>
-            <div style={{ display: "flex", gap: 8, marginTop: 2 }}>
-              {SWATCHES.map((c) => {
-                const colorStr = rgb(c);
-                const isSelected = rgb(ring.color) === colorStr;
-                return (
-                  <button
-                    key={colorStr}
-                    type="button"
-                    style={{
-                      background: colorStr,
-                      border: isSelected ? "2px solid var(--e-fg)" : "1px solid var(--e-border)",
-                      width: 22,
-                      height: 22,
-                      borderRadius: "50%",
-                      cursor: "pointer",
-                      padding: 0,
-                      outline: "none"
-                    }}
-                    onClick={() => onChange({ ...ring, color: c })}
-                  />
-                );
-              })}
-            </div>
+            <Swatches items={swatchItems} isSelected={(c) => rgb(c) === rgb(ring.color)}
+              onSelect={(c) => onChange({ ...ring, color: c })} />
           </div>
         </>
       )}

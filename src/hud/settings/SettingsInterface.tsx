@@ -1,5 +1,5 @@
 import type { InterfaceSettings, ThemeMode } from "./settings";
-import { Field } from "./SettingsControls";
+import { Field, Switch } from "./SettingsControls";
 
 const rgb = (c: [number, number, number]) => `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
 
@@ -52,6 +52,10 @@ export function SettingsInterface({ value, onChange }: {
             />
           ))}
         </div>
+      </Field>
+
+      <Field label="Animated brand" hint="Flowing wave + REC pulse">
+        <Switch on={value.animated_brand} onChange={(animated_brand) => onChange({ ...value, animated_brand })} />
       </Field>
 
       <Field label="Language">

@@ -292,6 +292,7 @@ Serialises as lowercase.
 pub struct InterfaceSettings {
     pub theme: ThemeMode,
     pub accent: [u8; 3],
+    pub animated_brand: bool,
 }
 ```
 
@@ -301,11 +302,14 @@ Fields:
 
 - `theme: ThemeMode` - which color theme to apply to the HUD. Default `ThemeMode::Light`.
 - `accent: [u8; 3]` - RGB accent color used for interactive elements throughout the UI. Default `[239, 68, 68]` (red). *Why red:* vivid, on-brand default that reads well against both light and dark backgrounds.
+- `animated_brand: bool` (Task 39) - the "living brand" feel knob: whether `TcursorMark` (`src/lib/TcursorMark.tsx`) flows/pulses for its recording/exporting/directing states at all, in the HUD titlebar and the editor's `TopBar`. Default `true`. *Why a settings field rather than always-on:* the fake-polish rule is every feel knob is a setting a user can turn off; `prefers-reduced-motion` disables the animation independently of this flag (accessibility isn't optional), but a user without that OS preference can still opt out here. Doesn't affect the dynamic Windows icon/taskbar progress (`win::sys::brand_icon`) - that's OS chrome, not an in-page animation, and stays purely state-driven.
 
 ### Used by
 
 - `src-tauri/src/settings/model.rs` (`Settings.ui`) - persisted in `config.json`
 - `src-tauri/src/export/pipeline/exporter.rs` - reads `ui.theme` to resolve dark mode for cursor sprite inversion
+- `src/editor/Editor.tsx` - reads `doc.settings.ui.animated_brand` (the per-recording snapshot) to gate `TopBar`'s `brandState`
+- `src/hud/Hud.tsx` - reads the global `ui.animated_brand` (via `getSettings`/`Preferences`) to gate the titlebar mark's `state`
 
 ## CursorStyle
 
@@ -403,6 +407,34 @@ Converts the user-facing `smoothness` (0..1) into the actual low-pass alpha the 
 ### Returns
 
 `0.75 - 0.65 * self.smoothness.clamp(0.0, 1.0)` - `smoothness = 0` gives alpha `0.75` (snappy, follows the raw cursor closely); `smoothness = 1` gives alpha `0.10` (glassy glide). Default `smoothness = 0.6` gives alpha `~0.36`, matching the old hardcoded smoothing constant (`0.35`), so a fresh config renders like every recording made before this field existed.
+
+## CursorSettings::plain_os
+
+```rust
+pub fn plain_os(&self, os_cursor_in_video: bool) -> bool
+```
+
+Whether the synthetic cursor must be drawn in **plain-OS mode**: the doc asks for `System`, but the recorded video has no baked OS cursor to show. True only for that combination - `Enhanced` and `Hidden` are never plain-OS, and `System` on a video that *does* have the cursor baked in stays "draw nothing" as before.
+
+*Why `os_cursor_in_video` is a parameter:* it is RECORD-time truth (see `settings::store::os_cursor_in_video`). `self.style` is the editable doc's value - the very thing the user changed - so it can never answer this question on its own.
+
+*What plain-OS mode does:* the renderer draws the Arrow sprite along the raw recorded path, with no smoothing, no path idealization, no click bounce and no motion trail - "the real cursor", re-created from the data the recording does have. `cursorset::draw` applies the sprite/bounce/trail half; the two helpers below apply the path half.
+
+## CursorSettings::follow_alpha_at
+
+```rust
+pub fn follow_alpha_at(&self, os_cursor_in_video: bool) -> f32
+```
+
+`follow_alpha()`, or `1.0` in plain-OS mode. *Why `1.0`:* `Cursor::at`'s low pass is `s += (raw - s) * a`, so `a = 1.0` returns the interpolated sample verbatim - the raw recorded path, with the glide switched off rather than merely reduced.
+
+## CursorSettings::idealize_at
+
+```rust
+pub fn idealize_at(&self, os_cursor_in_video: bool) -> f32
+```
+
+`path_idealize`, or `0.0` in plain-OS mode (no straightening toward the click anchors). Applied by `FrameRenderer::new` and, so a live style switch takes effect without a rebuild, by `reload_edit`.
 
 ### Used by
 

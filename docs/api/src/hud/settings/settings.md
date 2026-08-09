@@ -137,19 +137,22 @@ Controls the HUD color scheme. `"system"` defers to the OS `prefers-color-scheme
 ## InterfaceSettings
 
 ```ts
-export interface InterfaceSettings { theme: ThemeMode; accent: [number, number, number] }
+export interface InterfaceSettings { theme: ThemeMode; accent: [number, number, number]; animated_brand: boolean }
 ```
 
 General UI appearance settings.
 
 - `theme: ThemeMode` - color scheme selection.
 - `accent: [number, number, number]` - RGB triplet (0-255) for the accent color applied as `--accent`. *Why a tuple:* compact JSON representation; formatted to `rgb()` at display time by `applyTheme`.
+- `animated_brand: boolean` (Task 39) - the living-brand feel knob: whether `TcursorMark` (`src/lib/TcursorMark.tsx`) flows/pulses for its recording/exporting/directing states, in the HUD titlebar and the editor's `TopBar`. `false` and the OS `prefers-reduced-motion` both fall the mark back to its static idle rendering (the setting and the OS preference are independent gates - either alone is enough to disable the animation).
 
 ### Used by
 
 - `src/hud/settings/settings.ts` - `Settings.ui`
-- `src/hud/preferences/applyTheme.ts` - consumes both fields
-- `src/hud/settings/SettingsInterface.tsx` - renders theme and accent pickers
+- `src/hud/preferences/applyTheme.ts` - consumes `theme`/`accent`
+- `src/hud/settings/SettingsInterface.tsx` - renders theme, accent, and (Task 39) the animated-brand switch
+- `src/hud/Hud.tsx` - reads `animated_brand` (mirrored into its own `animatedBrand` state) to gate the titlebar mark
+- `src/editor/Editor.tsx` - reads `doc.settings.ui.animated_brand` to gate `TopBar`'s `brandState`
 
 ## CursorStyle
 

@@ -7,18 +7,18 @@ import { type CamPose } from "../stage/cameraMoves";
 import { frameCamLayout } from "../stage/frameCam";
 import { drawPreview } from "../stage/previewCanvas";
 import { requestFxOverlay, type FxCamRect } from "../stage/fxOverlay";
+import { fxCacheKey, isStaleFxResponse, timeBucket } from "./fxCacheKey";
 import { resolveSpotlight, newSpotlightSimState } from "../stage/spotlightPreview";
 import { layoutAt } from "../timeline/layoutTrack";
 import type { CursorSpritesState } from "./useCursorSprites";
 
 // The FX overlay (spotlight + click effects) is a full IPC round-trip: shader render, a per-pixel
 // alpha-reconstruct pass, PNG encode, base64, then a JS Image decode. The spotlight tracks the
-// cursor, which moves on nearly every frame during normal playback, so a request per rAF tick (the
-// old behavior) meant that round-trip 60x/sec - the actual cause of the preview stutter. Two
-// independent cuts, since they attack different parts of the cost:
-//  - cap the request cadence well under 60fps (still visually smooth for a soft spotlight/ripple)
-//  - render it at reduced resolution (the effects are soft gradients, invisible when upscaled),
-//    which shrinks the per-pixel loop, the PNG, and the decode all at once
+// cursor, which moves nearly every frame during playback, so a request per rAF tick (the old
+// behavior) meant that round-trip 60x/sec - the actual cause of the preview stutter. Two
+// independent cuts: cap the request cadence well under 60fps (FX_BUCKET_MS, still visually smooth
+// for a soft spotlight/ripple), and render at reduced resolution (FX_SCALE - soft gradients are
+// invisible when upscaled), which shrinks the per-pixel loop, the PNG, and the decode all at once.
 const FX_BUCKET_MS = 40; // ~25fps cap on backend FX-overlay requests
 const FX_SCALE = 0.5; // internal render resolution factor vs the canvas; blit upscales automatically
 
@@ -61,7 +61,8 @@ export function useCompositeLoop({
   const lastFrameTRef = useRef(0);
   const fxOverlayImgRef = useRef<HTMLImageElement | null>(null);
   const fxInflightRef = useRef(false);
-  const fxLastTRef = useRef("");
+  const fxLastTRef = useRef(""); // key of the last response actually APPLIED
+  const fxWantRef = useRef(""); // key computed on the MOST RECENT tick (fires or not)
   const offscreenRef = useRef<HTMLCanvasElement | null>(null);
   const spotSimRef = useRef(newSpotlightSimState());
 
@@ -107,9 +108,7 @@ export function useCompositeLoop({
               frameLayout, bgImgRef.current, clicksRef.current, t, cur, offscreenRef.current);
             // Blit the cached backend FX overlay on top
             const fxImg = fxOverlayImgRef.current;
-            if (fxImg && fxImg.complete && fxImg.naturalWidth > 0) {
-              ctx.drawImage(fxImg, 0, 0, c.width, c.height);
-            }
+            if (fxImg && fxImg.complete && fxImg.naturalWidth > 0) ctx.drawImage(fxImg, 0, 0, c.width, c.height);
             // Request a fresh FX overlay from the backend (async, non-blocking), rendered at
             // FX_SCALE resolution - the mapping below targets that smaller canvas directly so the
             // hit/cursor coordinates already line up with what the backend renders. This mirrors
@@ -125,7 +124,7 @@ export function useCompositeLoop({
             // screen-panel-relative spotlight (fx_state.rs). See requestFxOverlay.
             const screenScale = fxH > 0 ? dh / fxH : 1;
             const scale = Math.max(cam.scale, 0.01);
-            const cw = Math.max(1, fxW / scale), ch = Math.max(1, fxH / scale);
+            const cw = Math.max(1, Math.round(fxW / scale)), ch = Math.max(1, Math.round(fxH / scale)); // round: coordmap::crop
             const camPxX = dx + cam.cx * dw, camPxY = dy + cam.cy * dh;
             const cx0 = Math.min(Math.max(camPxX - cw / 2, 0), Math.max(0, fxW - cw));
             const cy0 = Math.min(Math.max(camPxY - ch / 2, 0), Math.max(0, fxH - ch));
@@ -140,7 +139,8 @@ export function useCompositeLoop({
             // Camera PiP rect for the spotlight's "don't dim the webcam" exclusion: the webcam is
             // a fixed, unzoomed overlay drawn on top (see drawPreview/previewCanvas.ts), so its
             // rect is the layout fraction applied directly to the FX canvas, not the zoom crop.
-            const camRect: FxCamRect = lay?.cam
+            // Hole gate mirrors the export's has_hole (alpha > 0.05), not layoutAt's draw threshold.
+            const camRect: FxCamRect = lay?.cam && (lay.camAlpha ?? 1) > 0.05
               ? { rect: [lay.cam[0] * fxW, lay.cam[1] * fxH, (lay.cam[0] + lay.cam[2]) * fxW, (lay.cam[1] + lay.cam[3]) * fxH],
                   radius: lay.cam[4] * fxW }
               : null;
@@ -158,25 +158,30 @@ export function useCompositeLoop({
             const cursorStr = cpos ? `${Math.round(cpos[0])}-${Math.round(cpos[1])}` : "none";
             const fxParamsStr = `${cf.style}-${cf.color.join(",")}-${cf.intensity}-${cf.enabled}-${cf.spotlight_dim_camera}`;
             const camStr = camRect ? camRect.rect.map(v => Math.round(v)).join(",") + `-${Math.round(camRect.radius)}` : "none";
-            // The spotlight tracks the cursor, which moves almost every frame during playback, so
-            // cursorStr alone would invalidate the cache at full 60fps regardless of anything else.
-            // Bucket time to a fixed cadence to cap how often that's allowed to trigger a backend
-            // round-trip; the last rendered overlay stays on screen between updates.
-            const tBucket = Math.round(t / FX_BUCKET_MS) * FX_BUCKET_MS;
-            const cacheKey = `${tBucket}_${cursorStr}_${spotParamsStr}_${clicksStr}_${fxParamsStr}_${camStr}`;
+            // cursorStr alone would invalidate the cache at full 60fps during playback - timeBucket
+            // caps how often that's allowed to trigger a backend round-trip (see the file banner).
+            const cacheKey = fxCacheKey(timeBucket(t, FX_BUCKET_MS), cursorStr, spotParamsStr, clicksStr, fxParamsStr, camStr);
+            fxWantRef.current = cacheKey; // every tick, fired or not - lets `.then` detect staleness below
 
             if (!fxInflightRef.current && cacheKey !== fxLastTRef.current) {
               fxInflightRef.current = true;
-              fxLastTRef.current = cacheKey;
               requestFxOverlay(fxW, fxH, clicksRef.current, t, cpos, spot, cf, mapFn, spotSimRef.current, screenScale, camRect)
                 .then(url => {
                   fxInflightRef.current = false;
+                  // Dropped if the desired key moved on while this was outstanding, so a stale
+                  // spotlight/click frame never blits - unlatched, so the very next tick reissues
+                  // a request for whatever is ACTUALLY wanted now.
+                  if (isStaleFxResponse(cacheKey, fxWantRef.current)) return;
+                  // Only latch on landing a real response (including a definite "off" -> `null`),
+                  // never before the request started - so a failed/errored request or one that
+                  // resolved null doesn't permanently mark this key "done" and block a retry.
                   if (url) {
+                    fxLastTRef.current = cacheKey;
                     const img = new Image();
                     img.onload = () => { fxOverlayImgRef.current = img; dirtyRef.current = true; };
                     img.src = url;
                   } else {
-                    fxOverlayImgRef.current = null; dirtyRef.current = true;
+                    fxOverlayImgRef.current = null; dirtyRef.current = true; // explicit clear: nothing active (or the request failed)
                   }
                 })
                 .catch(() => { fxInflightRef.current = false; });

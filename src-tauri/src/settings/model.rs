@@ -98,9 +98,19 @@ pub enum ThemeMode { Light, Dark, System }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(default)]
-pub struct InterfaceSettings { pub theme: ThemeMode, pub accent: [u8; 3] }
+pub struct InterfaceSettings {
+    pub theme: ThemeMode,
+    pub accent: [u8; 3],
+    /// The fake-polish "feel knob" (Task 39) for the living brand mark: whether `TcursorMark`
+    /// flows/pulses for its recording/exporting/directing states at all, in the HUD and the
+    /// editor's `TopBar`. `prefers-reduced-motion` disables the animation regardless of this flag
+    /// (accessibility wins over a feel setting); this flag alone lets a user opt out even without
+    /// a system-level reduced-motion preference. Doesn't affect the dynamic Windows icon/taskbar
+    /// progress (Task 39B) - those are OS chrome, not an in-page animation.
+    pub animated_brand: bool,
+}
 impl Default for InterfaceSettings {
-    fn default() -> Self { Self { theme: ThemeMode::Light, accent: [239, 68, 68] } }
+    fn default() -> Self { Self { theme: ThemeMode::Light, accent: [239, 68, 68], animated_brand: true } }
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -131,6 +141,21 @@ impl CursorSettings {
     /// Low-pass alpha for `Cursor::at` derived from `smoothness`: 0 -> snappy (0.75, follows closely),
     /// 1 -> glassy glide (0.10). Default 0.6 -> ~0.36, matching the old hardcoded 0.35.
     pub fn follow_alpha(&self) -> f32 { 0.75 - 0.65 * self.smoothness.clamp(0.0, 1.0) }
+
+    /// `System` on a recording whose video has NO baked OS cursor: draw the synthetic cursor as
+    /// plainly as possible instead of nothing. `captures_os_cursor` is a RECORD-time property, so
+    /// `os_cursor_in_video` must come from the record-time snapshot, never from this (editable) doc.
+    pub fn plain_os(&self, os_cursor_in_video: bool) -> bool {
+        self.style == CursorStyle::System && !os_cursor_in_video
+    }
+    /// `follow_alpha`, or 1.0 (the raw recorded path, no glide) in plain-OS mode.
+    pub fn follow_alpha_at(&self, os_cursor_in_video: bool) -> f32 {
+        if self.plain_os(os_cursor_in_video) { 1.0 } else { self.follow_alpha() }
+    }
+    /// `path_idealize`, or 0.0 (no straightening) in plain-OS mode.
+    pub fn idealize_at(&self, os_cursor_in_video: bool) -> f32 {
+        if self.plain_os(os_cursor_in_video) { 0.0 } else { self.path_idealize }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

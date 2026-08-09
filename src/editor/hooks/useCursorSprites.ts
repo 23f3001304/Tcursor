@@ -16,6 +16,12 @@ export function useCursorSprites(
     hots: new Map(),
     canvasH: new Map(),
   });
+  // Callers (Stage) pass an inline `() => { dirtyRef.current = true; }` that's a new function
+  // identity every render - kept in a ref (not the effect's own dep array) so the decode effect
+  // below only re-runs when `cursorSprites` itself actually changes, not on every unrelated
+  // Stage render (it used to re-decode every sprite ~16x/sec during playback).
+  const onLoadedRef = useRef(onLoaded);
+  onLoadedRef.current = onLoaded;
 
   useEffect(() => {
     const sprites = new Map<string, HTMLImageElement>();
@@ -24,7 +30,7 @@ export function useCursorSprites(
 
     for (const s of cursorSprites) {
       const img = new Image();
-      img.onload = onLoaded;
+      img.onload = () => onLoadedRef.current();
       img.src = s.url;
       sprites.set(s.kind, img);
       hots.set(s.kind, s.hot);
@@ -32,7 +38,7 @@ export function useCursorSprites(
     }
 
     spritesRef.current = { sprites, hots, canvasH };
-  }, [cursorSprites, onLoaded]);
+  }, [cursorSprites]);
 
   return spritesRef;
 }

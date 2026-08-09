@@ -4,11 +4,12 @@ import { IconZoomIn, IconBulb, IconAspectRatio } from "@tabler/icons-react";
 import type { EditDoc, EditOp } from "../../lib/edit";
 import { rulerTicks } from "./time";
 import { useRegionDrag } from "../hooks/useRegionDrag";
-import { layoutRegions } from "./layers";
+import { layoutRegions, transitionRampPct } from "./layers";
 import { Filmstrip } from "./Filmstrip";
 import { AudioTrack } from "./AudioTrack";
 import { CameraLane } from "./CameraLane";
 import { TrimOverlay } from "./TrimOverlay";
+import { RegionRows } from "./RegionRows";
 
 /** Multi-track timeline (Filmora-style): an adaptive ruler, a filmstrip clip, and a scrolling
  *  stack of tracks - the zoom track (pills drag/resize via useRegionDrag) plus the system + mic
@@ -17,13 +18,37 @@ import { TrimOverlay } from "./TrimOverlay";
  *  the ruler ticks + pills regardless of the timeline's outer padding. */
 const prettyLayout = (v: string) => v.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 
-export function Timeline({ doc, timeMs, dur, playing, onSeek, sel, onSel, onApply, thumbs, waves }: {
+// Row-height constants shared by the lane label gutter and `.e-tracks`' own natural row layout
+// (editor.css uses the same 32/22/6 numbers) - kept in one place so a lane's gutter label slot is
+// always exactly as tall as the lane's real content, never computed twice with a chance to drift.
+const ROW_H = 32, AUDIO_ROW_H = 22, GAP = 6;
+const laneHeight = (rows: number, rowH: number) => (rows > 0 ? rows * rowH + (rows - 1) * GAP : 0);
+
+export function Timeline({ doc, timeMs, dur, playing, onSeek, sel, onSel, onApply, thumbs, waves, wavesReady }: {
   doc: EditDoc; timeMs: number; dur: number; playing: boolean; onSeek: (ms: number) => void;
   sel: string | null; onSel: (id: string | null) => void;
   onApply: (op: EditOp) => Promise<EditDoc | null>;
-  thumbs: string[]; waves: { system: string; mic: string };
+  thumbs: string[]; waves: { system: string; mic: string }; wavesReady: boolean;
 }) {
   const track = useRef<HTMLDivElement>(null);
+  // Whether a SCRUB (a pointerdown that actually started on the body, not a pill/handle/keyframe
+  // bubbling up) is in progress - the only condition `onPointerMove` should chase the pointer
+  // under. Every draggable child (zoom/effect/layout pills via `useRegionDrag.beginDrag`, trim
+  // handles, camera keyframes) calls `e.stopPropagation()` on its own `pointerdown`, so this ref
+  // only ever flips true for a genuine body-originated scrub - it replaces the old `!drag` check,
+  // which only ever guarded against the ZOOM lane's own drag and let every OTHER lane's drag
+  // bubble through as a `buttons===1` pointermove, chasing the playhead during any non-zoom drag.
+  const scrubbing = useRef(false);
+  // The label gutter (`.e-lanegutter`) is a SIBLING of `.e-tracks`, not a descendant - `.e-tracks`
+  // clips its own descendants (`overflow-y: auto` forces `overflow-x` to clip too, a CSS rule with
+  // no per-descendant exception), so a label positioned INSIDE it can never escape that clip no
+  // matter how it's offset. As a sibling it isn't clipped at all, but it also doesn't scroll with
+  // `.e-tracks` for free - `onTracksScroll` below mirrors `.e-tracks`' scrollTop onto it every
+  // scroll event, keeping the two columns visually locked together.
+  const gutterRef = useRef<HTMLDivElement>(null);
+  const onTracksScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    if (gutterRef.current) gutterRef.current.scrollTop = e.currentTarget.scrollTop;
+  };
   // Zooms, laid out into layers so overlapping ones stack on separate rows instead of colliding.
   const zooms = layoutRegions(doc.zooms);
   const { drag, beginDrag } = useRegionDrag(zooms, dur, track, 32,
@@ -64,15 +89,31 @@ export function Timeline({ doc, timeMs, dur, playing, onSeek, sel, onSel, onAppl
     onSeek(Math.min(dur, Math.max(0, ((clientX - r.left) / r.width) * dur)));
   };
   const pct = dur > 0 ? (timeMs / dur) * 100 : 0;
-  const span = (z: { id: string; start_ms: number; end_ms: number }) =>
-    drag && drag.id === z.id ? { s: drag.start, e: drag.end } : { s: z.start_ms, e: z.end_ms };
 
-  // The dragged pill stays in its ORIGINAL row's DOM the whole drag (grouped by the static
-  // z.layer/f.layer, not the live snapped target) and instead visually follows the pointer via
-  // its own `y` motion value at zero-duration (instant, no spring lag) - moving it into a
-  // different row's <div> live would remount it (a different React parent), replaying its
-  // mount fade-in every time it crossed a row boundary. It only actually reflows into the new
-  // row once the drag ends and the layer commits for real.
+  // Audio row count mirrors AudioTrack's own render-or-null rule (loading -> always 2 shimmers;
+  // resolved -> one row per source that actually exists) so the gutter's Audio label slot is
+  // exactly as tall as however many rows actually render below it.
+  const audioRows = !wavesReady ? 2 : (waves.system ? 1 : 0) + (waves.mic ? 1 : 0);
+  // One entry per visible lane, in render order - mapped TWICE below (gutter label, track body)
+  // from this SAME array, so the two columns can never drift out of sync with each other.
+  const lanes: { key: string; label: string; heightPx: number; body: React.ReactNode }[] = [];
+  if (zoomRows > 0) lanes.push({ key: "zoom", label: "Zoom", heightPx: laneHeight(zoomRows, ROW_H),
+    body: <RegionRows rows={zoomRows} regions={zooms} dur={dur} sel={sel} rowClass="e-zoomrow" blkClass="e-zblk"
+      dragState={drag} beginDrag={beginDrag} renderLabel={(z) => <><IconZoomIn size={12} />{z.scale.toFixed(1)}x</>} /> });
+  if (fxRows > 0) lanes.push({ key: "fx", label: "FX", heightPx: laneHeight(fxRows, ROW_H),
+    body: <RegionRows rows={fxRows} regions={fx} dur={dur} sel={sel} rowClass="e-fxrow" blkClass="e-fxblk"
+      dragState={eff.drag} beginDrag={eff.beginDrag} renderLabel={() => <><IconBulb size={12} />Spotlight</>} /> });
+  if (layRows > 0) lanes.push({ key: "layout", label: "Layout", heightPx: laneHeight(layRows, ROW_H),
+    body: <RegionRows rows={layRows} regions={layouts} dur={dur} sel={sel} rowClass="e-layrow" blkClass="e-layblk"
+      dragState={lay.drag} beginDrag={lay.beginDrag} renderLabel={(l) => <><IconAspectRatio size={12} />{prettyLayout(l.layout)}</>}
+      // Static gradient ramps at each end, sized to the segment's own in/out transitions - the
+      // pill reads as long as its fades actually are.
+      extraStyle={(l, s, e) => ({ "--fin": `${transitionRampPct(l.transition_ms, e - s)}%`,
+        "--fout": `${transitionRampPct(l.transition_out_ms, e - s)}%` } as React.CSSProperties)} /> });
+  lanes.push({ key: "camera", label: "Camera", heightPx: ROW_H,
+    body: <CameraLane doc={doc} dur={dur} sel={sel} onSel={onSel} onApply={onApply} track={track} /> });
+  if (!wavesReady || waves.system || waves.mic) lanes.push({ key: "audio", label: "Audio", heightPx: laneHeight(audioRows, AUDIO_ROW_H),
+    body: <><AudioTrack src={waves.system} kind="system" loading={!wavesReady} /><AudioTrack src={waves.mic} kind="mic" loading={!wavesReady} /></> });
 
   return (
     <div className="e-timeline">
@@ -102,78 +143,27 @@ export function Timeline({ doc, timeMs, dur, playing, onSeek, sel, onSel, onAppl
             void onApply({ op: "add_camera_move", t_ms: dropMs, x: 0.5, y: 0.5, size: 0.25 });
           }
         }}
-        onPointerDown={(e) => { if (!drag) { e.currentTarget.setPointerCapture(e.pointerId); seekAt(e.clientX); } }}
-        onPointerMove={(e) => { if (!drag && e.buttons === 1) seekAt(e.clientX); }}>
+        onPointerDown={(e) => { scrubbing.current = true; e.currentTarget.setPointerCapture(e.pointerId); seekAt(e.clientX); }}
+        onPointerMove={(e) => { if (scrubbing.current && e.buttons === 1) seekAt(e.clientX); }}
+        onPointerUp={() => { scrubbing.current = false; }}
+        onLostPointerCapture={() => { scrubbing.current = false; }}>
         <Filmstrip thumbs={thumbs} />
-        <div className="e-tracks">
-          {Array.from({ length: zoomRows }, (_, i) => zoomRows - 1 - i).map((layer) => (
-            <div className="e-zoomrow" key={`zoom${layer}`}>
-              {zooms.filter((z) => z.layer === layer).map((z) => {
-                const { s, e } = span(z);
-                const dragging = drag?.id === z.id;
-                return (
-                  <motion.div key={z.id} className={`e-zblk${sel === z.id ? " sel" : ""}${dragging ? " drag" : ""}`}
-                    style={{ left: `${(s / dur) * 100}%`, width: `${Math.max(2.5, ((e - s) / dur) * 100)}%` }}
-                    initial={{ opacity: 0 }} whileHover={{ scale: 1.02, transition: { duration: 0.12 } }}
-                    animate={{ opacity: 1, y: dragging ? drag.dyPx : 0, scale: 1 }}
-                    transition={{ opacity: { type: "tween", duration: 0.16, ease: [0.4, 0, 0.2, 1] },
-                      y: dragging ? { duration: 0 } : { type: "tween", duration: 0.16, ease: [0.4, 0, 0.2, 1] } }}
-                    onPointerDown={(ev) => beginDrag(ev, z.id, "move", z.start_ms, z.end_ms)}>
-                    <span className="e-zh" onPointerDown={(ev) => beginDrag(ev, z.id, "l", z.start_ms, z.end_ms)} />
-                    <span className="e-zlabel"><IconZoomIn size={12} />{z.scale.toFixed(1)}x</span>
-                    <span className="e-zh" onPointerDown={(ev) => beginDrag(ev, z.id, "r", z.start_ms, z.end_ms)} />
-                  </motion.div>
-                );
-              })}
-            </div>
-          ))}
-          {Array.from({ length: fxRows }, (_, i) => fxRows - 1 - i).map((layer) => (
-            <div className="e-fxrow" key={`fx${layer}`}>
-              {fx.filter((f) => f.layer === layer).map((f) => {
-                const dragging = eff.drag?.id === f.id;
-                const s = dragging && eff.drag ? eff.drag.start : f.start_ms;
-                const e = dragging && eff.drag ? eff.drag.end : f.end_ms;
-                return (
-                  <motion.div key={f.id} className={`e-fxblk${sel === f.id ? " sel" : ""}${dragging ? " drag" : ""}`}
-                    style={{ left: `${(s / dur) * 100}%`, width: `${Math.max(2.5, ((e - s) / dur) * 100)}%` }}
-                    initial={{ opacity: 0 }} whileHover={{ scale: 1.02, transition: { duration: 0.12 } }}
-                    animate={{ opacity: 1, y: dragging && eff.drag ? eff.drag.dyPx : 0, scale: 1 }}
-                    transition={{ opacity: { type: "tween", duration: 0.16, ease: [0.4, 0, 0.2, 1] },
-                      y: dragging ? { duration: 0 } : { type: "tween", duration: 0.16, ease: [0.4, 0, 0.2, 1] } }}
-                    onPointerDown={(ev) => eff.beginDrag(ev, f.id, "move", f.start_ms, f.end_ms)}>
-                    <span className="e-zh" onPointerDown={(ev) => eff.beginDrag(ev, f.id, "l", f.start_ms, f.end_ms)} />
-                    <span className="e-zlabel"><IconBulb size={12} />Spotlight</span>
-                    <span className="e-zh" onPointerDown={(ev) => eff.beginDrag(ev, f.id, "r", f.start_ms, f.end_ms)} />
-                  </motion.div>
-                );
-              })}
-            </div>
-          ))}
-          {Array.from({ length: layRows }, (_, i) => layRows - 1 - i).map((layer) => (
-            <div className="e-layrow" key={`lay${layer}`}>
-              {layouts.filter((l) => l.layer === layer).map((l) => {
-                const dragging = lay.drag?.id === l.id;
-                const s = dragging && lay.drag ? lay.drag.start : l.start_ms;
-                const e = dragging && lay.drag ? lay.drag.end : l.end_ms;
-                return (
-                  <motion.div key={l.id} className={`e-layblk${sel === l.id ? " sel" : ""}${dragging ? " drag" : ""}`}
-                    style={{ left: `${(s / dur) * 100}%`, width: `${Math.max(2.5, ((e - s) / dur) * 100)}%` }}
-                    initial={{ opacity: 0 }} whileHover={{ scale: 1.02, transition: { duration: 0.12 } }}
-                    animate={{ opacity: 1, y: dragging && lay.drag ? lay.drag.dyPx : 0, scale: 1 }}
-                    transition={{ opacity: { type: "tween", duration: 0.16, ease: [0.4, 0, 0.2, 1] },
-                      y: dragging ? { duration: 0 } : { type: "tween", duration: 0.16, ease: [0.4, 0, 0.2, 1] } }}
-                    onPointerDown={(ev) => lay.beginDrag(ev, l.id, "move", l.start_ms, l.end_ms)}>
-                    <span className="e-zh" onPointerDown={(ev) => lay.beginDrag(ev, l.id, "l", l.start_ms, l.end_ms)} />
-                    <span className="e-zlabel"><IconAspectRatio size={12} />{prettyLayout(l.layout)}</span>
-                    <span className="e-zh" onPointerDown={(ev) => lay.beginDrag(ev, l.id, "r", l.start_ms, l.end_ms)} />
-                  </motion.div>
-                );
-              })}
-            </div>
-          ))}
-          <CameraLane doc={doc} dur={dur} sel={sel} onSel={onSel} onApply={onApply} track={track} />
-          <AudioTrack src={waves.system} kind="system" />
-          <AudioTrack src={waves.mic} kind="mic" />
+        {/* `.e-trackswrap` is `position: relative` so `.e-lanegutter` can sit `position: absolute`
+            OUTSIDE `.e-tracks` (a true sibling, not a descendant) without taking any width away
+            from it - `.e-tracks` stays exactly 100% of `.e-tlbody`'s width, so the pills' percentage
+            math and `seekAt`/`useRegionDrag`'s `.e-tlbody`-based ms<->px conversion are completely
+            untouched by the gutter's existence. */}
+        <div className="e-trackswrap">
+          <div className="e-lanegutter" ref={gutterRef}>
+            {lanes.map((l) => (
+              <div key={l.key} className="e-lanelabelrow" style={{ height: l.heightPx }}>
+                <span className="e-lanelabel">{l.label}</span>
+              </div>
+            ))}
+          </div>
+          <div className="e-tracks" onScroll={onTracksScroll}>
+            {lanes.map((l) => <div key={l.key} className="e-lanerows">{l.body}</div>)}
+          </div>
         </div>
         <TrimOverlay trim={doc.trim} dur={dur} trackRef={track} onApply={onApply} />
         <motion.div className="e-ph" initial={false} animate={{ left: `${pct}%` }}

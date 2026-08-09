@@ -1,14 +1,21 @@
 # src/editor/timeline/AudioTrack.tsx
 
-One audio track row: the source's waveform image (from `ensureWaveform`) as a quiet, low-contrast background, with a small left icon to tell system vs mic apart. Hidden when that source wasn't recorded. Non-interactive - seeks pass through.
+One audio track row: the source's waveform image (from `ensureWaveform`) as a quiet, low-contrast background, with a small left icon to tell system vs mic apart. Hidden when that source genuinely wasn't recorded; shows a `Shimmer` skeleton while the waveform fetch is still resolving. Non-interactive - seeks pass through.
 
 ## AudioTrack
 
 ```tsx
-export function AudioTrack({ src, kind }: { src: string; kind: "system" | "mic" }): JSX.Element | null
+export function AudioTrack({ src, kind, loading }: { src: string; kind: "system" | "mic"; loading: boolean }): JSX.Element | null
 ```
 
 ### Props
 
-- `src: string` - the waveform PNG asset URL; `""` returns `null` (the track hides).
+- `src: string` - the waveform PNG asset URL.
 - `kind: "system" | "mic"` - selects the left icon (volume / microphone) and tooltip.
+- `loading: boolean` - `Timeline`'s `!wavesReady` (from `useEditorData`). Distinguishes "the waveform fetch hasn't resolved yet" from "it resolved, and this project genuinely has no audio for this source" - `src` is `""` in BOTH cases, so `src` alone can't tell them apart (unlike `Filmstrip`'s `thumbs`, which is unambiguous).
+
+### Behavior
+
+- `!src && loading` - renders `<Shimmer className="e-audiorow" />` (`src/editor/timeline/Shimmer.tsx`), the same box (height/radius/background) as the loaded row.
+- `!src && !loading` - renders `null` (this source wasn't recorded; there is nothing to ever show).
+- `src` - renders the waveform image as before.

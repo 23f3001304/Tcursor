@@ -1,7 +1,7 @@
 use crate::capture::frame::Frame;
 
 pub trait FrameSink: Send {
-    fn push(&mut self, f: &Frame) -> std::io::Result<()>;
+    fn push(&mut self, f: &Frame) -> std::io::Result<bool>;
     fn finish(self: Box<Self>) -> std::io::Result<()>;
 }
 
@@ -11,9 +11,9 @@ pub struct FakeFrameSink {
 }
 
 impl FrameSink for FakeFrameSink {
-    fn push(&mut self, f: &Frame) -> std::io::Result<()> {
+    fn push(&mut self, f: &Frame) -> std::io::Result<bool> {
         self.pushed.push((f.width, f.height));
-        Ok(())
+        Ok(true)
     }
     fn finish(self: Box<Self>) -> std::io::Result<()> {
         Ok(())
@@ -30,7 +30,7 @@ mod tests {
     fn fake_sink_records_pushes_and_finish() {
         let mut sink = FakeFrameSink::default();
         let f = Frame { width: 4, height: 2, bgra: vec![0; 4*2*4], ts: Timestamp(0) };
-        sink.push(&f).unwrap();
+        assert!(sink.push(&f).unwrap());
         assert_eq!(sink.pushed, vec![(4, 2)]);
         Box::new(sink).finish().unwrap();
     }

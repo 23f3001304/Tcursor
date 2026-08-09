@@ -27,6 +27,17 @@ fn update_zoom_clamps_end_to_trim_duration() {
 }
 
 #[test]
+fn add_zoom_bounds_to_clip_ms_not_the_trim_point() {
+    // clip_ms is the TRUE clip length; trim.out_ms (10_000, from an earlier trim) is just where
+    // playback currently ends - it must not collapse a region placed later in the full clip.
+    let mut doc = empty();
+    doc.clip_ms = 60_000;
+    doc.trim.out_ms = 10_000;
+    apply(&mut doc, EditOp::AddZoom { at_ms: 30_000, dur_ms: 2_000 });
+    assert_eq!((doc.zooms[0].start_ms, doc.zooms[0].end_ms), (30_000, 32_000));
+}
+
+#[test]
 fn add_zoom_auto_assigns_a_free_layer() {
     let mut doc = empty();
     doc.trim.out_ms = 10000;
@@ -54,13 +65,17 @@ fn set_zoom_cam_action_sets_then_clears() {
 }
 
 #[test]
-fn update_zoom_sets_layer() {
+fn update_zoom_sets_layer_and_validates_easing() {
     let mut doc = empty();
     apply(&mut doc, EditOp::AddZoom { at_ms: 0, dur_ms: 500 });
     let id = doc.zooms[0].id.clone();
+    apply(&mut doc, EditOp::UpdateZoom { id: id.clone(), start_ms: None, end_ms: None, scale: None,
+        target: None, easing: Some("spring".into()), zoom_in_ms: None, zoom_out_ms: None, layer: Some(2) });
+    assert_eq!((doc.zooms[0].layer, doc.zooms[0].easing.as_str()), (2, "spring"));
+    // Unknown easing falls back to "smooth", exactly like UpdateLayoutSeg/UpdateCameraMove.
     apply(&mut doc, EditOp::UpdateZoom { id, start_ms: None, end_ms: None, scale: None,
-        target: None, easing: None, zoom_in_ms: None, zoom_out_ms: None, layer: Some(2) });
-    assert_eq!(doc.zooms[0].layer, 2);
+        target: None, easing: Some("bogus".into()), zoom_in_ms: None, zoom_out_ms: None, layer: None });
+    assert_eq!(doc.zooms[0].easing, "smooth");
 }
 
 #[test]
@@ -143,7 +158,7 @@ fn add_zoom_full_uses_given_scale() {
 fn add_layout_seg_appends_clamped_with_default_feel() {
     let mut doc = empty();
     doc.trim.out_ms = 1000;
-    apply(&mut doc, EditOp::AddLayoutSeg { at_ms: 800, dur_ms: 2000, layout: "camera".into() });
+    apply(&mut doc, EditOp::AddLayoutSeg { at_ms: 800, dur_ms: 2000, layout: "camera".into(), transition_out_ms: None, easing_out: None });
     let s = &doc.layout[doc.layout.len() - 1];
     assert_eq!((s.start_ms, s.end_ms, s.layout.as_str()), (800, 1000, "camera")); // end clamped to clip
     assert_eq!((s.transition_ms, s.easing.as_str()), (350, "smooth"));
@@ -153,17 +168,18 @@ fn add_layout_seg_appends_clamped_with_default_feel() {
 #[test]
 fn add_layout_seg_rejects_unknown_preset() {
     let mut doc = empty(); doc.trim.out_ms = 5000;
-    apply(&mut doc, EditOp::AddLayoutSeg { at_ms: 0, dur_ms: 1000, layout: "bogus".into() });
+    apply(&mut doc, EditOp::AddLayoutSeg { at_ms: 0, dur_ms: 1000, layout: "bogus".into(), transition_out_ms: None, easing_out: None });
     assert_eq!(doc.layout[doc.layout.len() - 1].layout, "screen"); // unknown -> screen
 }
 
 #[test]
 fn update_layout_seg_patches_feel_and_preset() {
     let mut doc = empty(); doc.trim.out_ms = 5000;
-    apply(&mut doc, EditOp::AddLayoutSeg { at_ms: 0, dur_ms: 1000, layout: "screen".into() });
+    apply(&mut doc, EditOp::AddLayoutSeg { at_ms: 0, dur_ms: 1000, layout: "screen".into(), transition_out_ms: None, easing_out: None });
     let id = doc.layout[doc.layout.len() - 1].id.clone();
     apply(&mut doc, EditOp::UpdateLayoutSeg { id: id.clone(), start_ms: None, end_ms: None,
-        layout: Some("presenter".into()), transition_ms: Some(120), easing: Some("spring".into()) });
+        layout: Some("presenter".into()), transition_ms: Some(120), easing: Some("spring".into()),
+        transition_out_ms: None, easing_out: None });
     let s = doc.layout.iter().find(|s| s.id == id).unwrap();
     assert_eq!((s.layout.as_str(), s.transition_ms, s.easing.as_str()), ("presenter", 120, "spring"));
 }
@@ -171,7 +187,7 @@ fn update_layout_seg_patches_feel_and_preset() {
 #[test]
 fn remove_layout_seg_drops_by_id() {
     let mut doc = empty(); doc.trim.out_ms = 5000;
-    apply(&mut doc, EditOp::AddLayoutSeg { at_ms: 0, dur_ms: 500, layout: "camera".into() });
+    apply(&mut doc, EditOp::AddLayoutSeg { at_ms: 0, dur_ms: 500, layout: "camera".into(), transition_out_ms: None, easing_out: None });
     let id = doc.layout[doc.layout.len() - 1].id.clone();
     let before = doc.layout.len();
     apply(&mut doc, EditOp::RemoveLayoutSeg { id });

@@ -10,54 +10,7 @@ pub const OUT_FPS: u64 = 60
 
 Constant output frame rate (60 fps). Defined here so both `exporter.rs` and future preview code share a single source of truth for the encode rate.
 
-## RenderMeta
-
-```rust
-pub struct RenderMeta {
-    pub tl: Timeline, pub video_start: u64, pub video_end: u64, pub out_w: u32, pub out_h: u32,
-    pub sw: u32, pub sh: u32, pub screen_bytes: usize, pub webcam_size: u32, pub audio_offset_ms: i32,
-    pub trim: crate::edit::model::Trim,
-    pub mic_volume: f32, pub sys_volume: f32,
-}
-```
-
-All information the export (or preview) loop needs to set up its raw decoders and drive the frame loop, returned by `FrameRenderer::new` so the caller never needs to re-read the project files.
-
-**Fields and why each is here:**
-
-- `tl: Timeline` - per-frame wall-clock timestamps and audio offsets from `build_timeline`. *Why:* the export loop indexes this to advance the screen decoder to the captured frame active at each output time.
-- `video_start: u64` - timestamp (ms) of the first captured frame. *Why:* the loop's time variable `t = video_start + k * 1000 / OUT_FPS`.
-- `video_end: u64` - timestamp of the last captured frame (at least `video_start + 1`). *Why:* `total_out = (video_end - video_start) * OUT_FPS / 1000` drives the loop bound.
-- `out_w: u32`, `out_h: u32` - output canvas dimensions in pixels. *Why:* `FrameRenderer` owns the layout after `new()`, so the caller gets these from meta rather than re-reading the layout struct.
-- `sw: u32`, `sh: u32` - raw screen capture dimensions (probe result). *Why:* needed to allocate the `screen_bytes`-sized decode buffer.
-- `screen_bytes: usize` - `sw * sh * 3 / 2`: exact NV12 buffer size for the screen decoder (Y plane + half-res interleaved UV - cheaper to decode/pipe than BGRA; the compositor converts to BGRA internally). *Why:* pre-computed to avoid re-doing the multiply at every `RawDecoder::spawn` call.
-- `webcam_size: u32` - square side length (pixels) for webcam decode, capped to 1440. *Why:* `RawDecoder::spawn` for the webcam takes this as the `Some(size)` resize argument; returned here so the exporter can allocate the matching buffer.
-- `audio_offset_ms: i32` - the user's manual mic-sync nudge from settings. *Why:* carried here so `exporter.rs` does not need to reload the edit doc a second time after `new()`.
-- `trim: crate::edit::model::Trim` - the doc's trim window, unresolved (see `Trim::resolve`). *Why:* `exporter::export` resolves it against its own `video_end - video_start` and gates the frame loop (`pipeline::trim_frame_bounds`), again avoiding a second doc load.
-- `mic_volume: f32`, `sys_volume: f32` - linear gain multipliers from `Settings.audio_mic_volume`/`audio_sys_volume` (0 = muted, 1 = unchanged, up to 1.5). *Why carried here rather than reloaded in `exporter.rs`:* same reasoning as `audio_offset_ms` - `FrameRenderer::new` already loaded settings once; `exporter::export` passes both straight through to `audio_mux::mux`.
-
-### Used by
-
-`exporter::export` reads every field to set up the decoders and drive `0..=total_out`.
-
-## FramePose
-
-```rust
-pub struct FramePose { pub ev_t: u32, pub scene: Scene, pub cur: FramePoint, pub cam: Camera }
-```
-
-The resolved camera and scene for one output frame, returned by `step_camera` and passed unchanged to `composite_at`. Grouping these four values as a struct avoids passing them as separate arguments and lets the preview engine inspect the pose (e.g. to know zoom scale) without compositing.
-
-**Fields and why each is here:**
-
-- `ev_t: u32` - event-relative time in ms (`t - events_ms`). *Why:* all per-frame lookups (cursor, layout, FX, cursor sprite) key on this value; pre-computing it in `step_camera` avoids re-doing the subtraction in `composite_at`.
-- `scene: Scene` - the two-panel layout (screen + camera rects/alphas) possibly modified by camera-shrink. *Why:* the compositor, FX renderer, and cursor draw all need the scene; carrying it in the pose avoids re-calling `track.scene_at`.
-- `cur: FramePoint` - cursor position mapped into the screen panel (output pixels). *Why:* needed by the compositor for the zoom setpoint, by FX for click-ring placement, and by the cursor sprite draw.
-- `cam: Camera` - zoom center + scale for this frame. *Why:* the compositor crops and resizes to this, and the FX + cursor layers project through it.
-
-### Used by
-
-`composite_at` reads all four fields. The preview engine (Task 2) will inspect `cam` and `scene` to derive the zoom level for display.
+`RenderMeta` and `FramePose` - the two small data-only types `FrameRenderer::new`/`step_camera` return - now live in the sibling `meta.rs` (split out purely for size) and are re-exported here (`pub use meta::{FramePose, RenderMeta};`) so this file's own callers are unaffected. See `docs/api/src-tauri/src/export/render/meta.md`.
 
 ## FrameRenderer
 
@@ -82,10 +35,11 @@ Private fields include:
 - `cursor: Cursor` - single owner of the mouse-event log and the cursor low-pass/idealize state (also the FX event source, via `cursor.events()`). Replaces an older split where `FrameRenderer` held the event log directly alongside inline `cur_idx`/`cur_sx`/`cur_sy`/`cur_primed` smoothing fields, because a borrowed `Cursor<'a>` couldn't self-reference the same struct's event log without unsafe; `Cursor` now owns its data outright; constructed once in `new()` via `Cursor::new(events, screen, follow_alpha)` plus `set_idealize(path_idealize)`, and `step_camera` simply calls `self.cursor.at(ev_t)`. *Why this matters for edits:* `reload_edit` can live-update the low-pass alpha and idealize amount in place (`set_a`/`set_idealize`) when only `smoothness`/`path_idealize` changed, without rebuilding the renderer.
 - `cprep: Option<CursorPrep>` - decoded cursor sprite set; `None` for non-Enhanced styles.
 - `actions: Vec<ActionEvent>` - action log; used by `fx_state::render` for spotlight/hold/caption.
-- `effects: Vec<crate::edit::model::EffectRegion>` - anchored video-FX regions (recorded hotkey holds re-timed onto the edit), refreshed by `reload_edit`; read by `fx_state::render` alongside `actions`.
+- `effects: Vec<crate::edit::model::EffectRegion>` - the doc's effect regions (OUTPUT clock, like every `EditDoc` region list), refreshed by `reload_edit`; read by `fx_state::render` at `pose.out_t` while `actions` beside it is read at `pose.ev_t`.
+- `has_webcam: bool` - whether `webcam.mp4` exists on disk, computed ONCE in `new` via `paths.webcam().exists()` (recording is already finished by render time, so this cannot change - `reload_edit` does not recompute it). Gates the spotlight's "keep camera lit" hole (`fx_state::fx_state_at`'s `has_hole` check) so a recording with no webcam, or a frame where the camera panel isn't visible, never draws an un-dimmed empty rectangle.
 - `sw, sh: u32` - screen capture dimensions.
-- `events_ms: u64` - wall-clock offset of event-time 0; used to convert `t` to the event-relative `ev_t` (cursor, layout, FX).
-- `video_start: u64` - capture timestamp of frame 0; used to convert `t` to the output-time `out_t` the zoom sim keys on. *Why separate from `events_ms`:* zoom pills live in output time (`t - video_start`, 0 = first video frame) to match the editor timeline and `click_track`, while cursor/layout stay event-time (`t - events_ms`).
+- `events_ms: u64` - wall-clock offset of event-time 0; `t - events_ms` is the EVENT clock, used for the raw streams (cursor position + sprite, click ripples, hold-driven video FX, captions).
+- `video_start: u64` - capture timestamp of frame 0; `t - video_start` is the OUTPUT clock, used for everything that came out of `edit.json` (zoom regions, layout segments, effect regions, camera moves). *Why both are kept:* they differ by ~800 ms on a real recording, so a consumer sampled on the wrong one fires visibly early or late. `EditState::load` also gets `events_ms - video_start` from these two, for the one place a recorded (event-clock) track can still reach the renderer.
 
 ### Used by
 
@@ -125,7 +79,7 @@ Loads the edit doc and event log, resolves all per-export setup, and returns bot
 
 ### Implementation
 
-Follows the same sequence as the original `exporter::export` setup block (lines ~32-107), with the encoder/sink and the `RawDecoder::spawn` calls excluded. Peeks `edit::seed::load_or_seed(paths)` once, up front, for `seed.aspect` (resolves `layout` together with the caller's `resolution`) and `seed.trim` (carried into `RenderMeta.trim` unresolved). The webcam-size calculation (`max_cam` over all layout modes, capped to 1440) is done here and returned in `RenderMeta.webcam_size` so the exporter does not need to repeat it.
+Follows the same sequence as the original `exporter::export` setup block (lines ~32-107), with the encoder/sink and the `RawDecoder::spawn` calls excluded. `build_timeline` runs BEFORE `EditState::load`, because `EditState` needs `events_ms - video_start` for its recorded-action layout fallback. Peeks `edit::seed::load_or_seed(paths)` once, up front, for `seed.aspect` (resolves `layout` together with the caller's `resolution`) and `seed.trim` (carried into `RenderMeta.trim` unresolved). The webcam decode box is computed here and returned as `RenderMeta.webcam_w`/`webcam_h` so the exporter does not need to repeat it: the LARGEST camera panel across all layout modes (`max_by_key((size_px, width_px))`, so a size tie prefers the wider one) run through `meta::webcam_dims(&ov, 1440)`, which keeps that panel's own aspect instead of forcing a square - a `CamAspect::Wide` panel is 16:9 and a square decode was being stretched 1.78x across it by the compositor. `has_webcam = paths.webcam().exists()` is also computed here (a plain filesystem check, not a probe) and stored on `self` for `composite_at` to pass to `fx_state::render`.
 
 ## FrameRenderer::step_camera
 
@@ -137,29 +91,31 @@ Advances the camera simulation to output time `t` and returns the resolved pose.
 
 ### Inputs (what, and why it is needed)
 
-- `t: u64` - output time in ms (wall-clock, same epoch as `RenderMeta.video_start`). *Why:* the pose is resolved on two clocks off this one absolute time - cursor and layout subtract `events_ms` for the event-relative `ev_t`, while the zoom sim subtracts `video_start` for the output-time `out_t` its (output-time) regions key on.
+- `t: u64` - capture wall-clock time in ms (same epoch as `RenderMeta.video_start`). *Why:* both clocks are derived from this one absolute time - `ev_t = t - events_ms` for the raw event streams, `out_t = t - video_start` for everything stored in `edit.json`.
 
 ### Returns
 
-`FramePose` with `ev_t`, `scene` (possibly camera-shrunk), `cur` (panel-mapped cursor), and `cam` (damped camera).
+`FramePose` with both clocks (`ev_t`, `out_t`), `scene` (possibly camera-shrunk), `cur` (panel-mapped cursor), and `cam` (damped camera).
 
 ### Implementation
 
-Calls `self.cursor.at(ev_t)` for the smoothed cursor position - `Cursor` now owns its event log outright (built once in `FrameRenderer::new` via `Cursor::new(events, screen, follow_alpha)`), so `step_camera` just delegates instead of replicating the index-advance + exponential low-pass inline the way an earlier version had to when `FrameRenderer` held `cur_idx`/`cur_sx`/`cur_sy`/`cur_primed` alongside a borrowed `Cursor<'a>`. The low-pass alpha is no longer a hardcoded constant: it comes from `CursorSettings::follow_alpha()` (derived from the `smoothness` setting; default `0.6` -> alpha `~0.36`, matching the old hardcoded `0.35`) and can change live via `Cursor::set_a` in `reload_edit` without rebuilding the renderer. Cursor and `LayoutTrack::scene_at` sample at the event-relative `ev_t = t - events_ms`; `CameraSim::step` is then called at the output-time `out_t = t - video_start` (zoom regions are stored in output time), followed by the CameraOnly identity override (`scene.screen.alpha < 0.5`) and then the webcam-on-zoom action (`cam_action_at` + `apply_cam_zoom_action`) when the screen panel is dominant. **Keyframes win:** the action is skipped entirely on any frame where `CameraMoveTrack::sample` returned a pose, because the override already decides the PiP there - previously the shrink ran on top of an override, silently scaling a hand-keyframed camera during zooms. The legacy `camera_shrink` bool is no longer checked here; it is folded into `ZoomSettings::resolved_cam_action` (toggle off resolves to `Stay`, the identity).
+Calls `self.cursor.at(ev_t)` for the smoothed cursor position - `Cursor` now owns its event log outright (built once in `FrameRenderer::new` via `Cursor::new(events, screen, follow_alpha)`), so `step_camera` just delegates instead of replicating the index-advance + exponential low-pass inline the way an earlier version had to when `FrameRenderer` held `cur_idx`/`cur_sx`/`cur_sy`/`cur_primed` alongside a borrowed `Cursor<'a>`. The low-pass alpha is no longer a hardcoded constant: it comes from `CursorSettings::follow_alpha()` (derived from the `smoothness` setting; default `0.6` -> alpha `~0.36`, matching the old hardcoded `0.35`) and can change live via `Cursor::set_a` in `reload_edit` without rebuilding the renderer. The cursor samples at `ev_t = t - events_ms` (it indexes the raw mouse log); `LayoutTrack::scene_at` and `CameraSim::step` both sample at `out_t = t - video_start`, because the layout segments and zoom regions they hold both come from `edit.json` and are therefore output-time. (`LayoutTrack::scene_at` was sampled at `ev_t` before the one-clock fix, which put every layout switch ~800 ms early in exports; the recorded-action fallback track is now shifted to output time when it is built, in `EditState::load`.) After the camera step come the CameraOnly identity override (`scene.screen.alpha < 0.5`) and then the webcam-on-zoom action (`cam_action_at` + `apply_cam_zoom_action`) when the screen panel is dominant. `cam_action_at` returns `(action, target_scale)` - the WINNING REGION'S OWN `target_scale`, not `self.cfg.target_scale` (the global default) - so `apply_cam_zoom_action`'s `zoom_progress` reaches 1.0 at the region's own peak zoom, not the global one. `self.cfg.target_scale` still feeds `self.sim.step` above (the camera framing itself, a separate concern from the webcam-shrink action). **Keyframes win while they own the frame:** the action is skipped entirely on any frame where `CameraMoveTrack::sample` returned a pose, because the override already decides the PiP there - previously the shrink ran on top of an override, silently scaling a hand-keyframed camera during zooms. Since Task 27 that is a per-frame question rather than a whole-clip one: outside the keyframes' span `sample` is `None`, so the smart shrink applies normally again. The legacy `camera_shrink` bool is no longer checked here; it is folded into `ZoomSettings::resolved_cam_action` (toggle off resolves to `Stay`, the identity).
 
-**`camera_moves` override (Task 4; radius/ring fix in Task 9 Part C; implicit start keyframe below):** right after `scene` is resolved and `out_t` is computed, `step_camera` derives the pre-override static pose from the just-resolved `scene.camera.rect` and samples `self.cam_moves` (a `CameraMoveTrack` built once from `doc.camera_moves` in `EditState::load`, refreshed by both `FrameRenderer::new` and `reload_edit`) with it:
+**`camera_moves` override (Task 4; radius/ring fix in Task 9 Part C; span semantics in Task 27):** right after `scene` is resolved and `out_t` is computed, `step_camera` derives the LIVE layout-resolved pose from the just-resolved `scene.camera.rect` and samples `self.cam_moves` (a `CameraMoveTrack` built once from `doc.camera_moves` in `EditState::load`, refreshed by both `FrameRenderer::new` and `reload_edit`) with it:
 
 ```rust
 let (ow, oh) = (self.layout.out_w as f32, self.layout.out_h as f32);
-let sp = Some(static_cam_pose(scene.camera.rect, ow, oh));
-if let Some(p) = self.cam_moves.sample(out_t, sp) {
-    scene.camera = crate::export::scene::override_camera(scene.camera, p, ow, oh);
+let live = Some(static_cam_pose(scene.camera.rect, ow, oh));
+let cam_aspect = scene.camera.rect.w / scene.camera.rect.h.max(0.001);
+if let Some(p) = self.cam_moves.sample(out_t, live) {
+    scene.camera = crate::export::scene::override_camera(scene.camera, p, ow, oh, cam_aspect);
 }
 ```
 
-- `static_cam_pose(rect, ow, oh) -> CamPose` (`export/camera/mod.rs`) - the inverse of `rect_from_center`: converts the RESOLVED (un-overridden) camera panel's rect into a `CamPose` (center x/y + height fraction), the "what the webcam would show with zero `camera_moves`" pose.
-- `CameraMoveTrack::sample(out_t, static_pose) -> Option<CamPose>` (`export/camera/moves.rs`) - `None` for an empty track, which is the seeded-doc default, so this block never runs and the scene's camera panel is exactly whatever `overlay_for`/`resolve` produced (byte-identical to pre-Task-4 behavior). With exactly one keyframe (or querying at/before the first of several), `sample` treats `static_pose` as an implicit keyframe at `t=0` and eases FROM it INTO the first real keyframe over `[0, first.t_ms]` using that keyframe's own easing - so a single `camera_moves` keyframe animates the webcam in from its static resting pose instead of freezing there for the whole clip.
-- `override_camera(panel: Panel, p: CamPose, ow: f32, oh: f32) -> Panel` (`export/scene/mod.rs`) - replaces `scene.camera` wholesale (not just its rect): the new rect comes from `rect_from_center` (height `h = p.size * oh`, width `w = h` - square; the PiP's `cam_aspect` only affects the STATIC `resolve` path, not a camera_moves override), and `radius`/`ring_px` are scaled by the height ratio `new_h / old_h.max(0.001)` so a circle panel (`radius == min(w,h)/2` at its static size) stays a true circle instead of distorting toward the pre-override radius - the bug this Task 9 Part C fix corrects. `alpha`/`ring_color` are carried over unchanged.
+- `static_cam_pose(rect, ow, oh) -> CamPose` (`export/camera/mod.rs`) - the inverse of `rect_from_center`: converts the RESOLVED (un-overridden) camera panel's rect into a `CamPose` (center x/y + height fraction), the "what the webcam would show with zero `camera_moves`" pose. Recomputed EVERY frame from that frame's own scene, which is what makes it a *live* pose rather than a static one: if a `LayoutTrack` cross-fade is moving the panel, this moves with it.
+- `CameraMoveTrack::sample(out_t, live) -> Option<CamPose>` (`export/camera/moves.rs`) - `None` for an empty track, which is the seeded-doc default, so this block never runs and the scene's camera panel is exactly whatever `overlay_for`/`resolve` produced (byte-identical to pre-Task-4 behavior). **Task 27:** `None` ALSO whenever `out_t` falls outside `[first - KF_BLEND_MS, last + KF_BLEND_MS]`, so keyframes override only their own span and layout segments own the panel everywhere else - before this, one keyframe anywhere made `sample` return `Some` for the entire clip and silently stomped every layout segment. Inside the span the track eases FROM `live` into the first keyframe over the entry window, interpolates keyframe-to-keyframe (unchanged math), and eases from the last keyframe BACK to `live` over the exit window - and because `live` is this frame's value, that exit blend tracks a layout transition that is still moving, the same principle as `CameraSim`'s driver handoff.
+- `cam_aspect` - the STATIC panel's own width/height, read off `scene.camera.rect` in the same breath as `live` (i.e. before the override replaces it) and passed through `override_camera` into `rect_from_center`. *Why derived from the rect rather than re-read from `appearance.cam_aspect`:* `resolve`/`bubble_rect` already turned the setting into `width_px`/`size_px` for whichever preset (or `LayoutTrack` cross-fade between presets) is live this frame, so the rect is the resolved truth and can never disagree with the panel being overridden. Without it a single `camera_moves` keyframe squared a Wide (16:9) panel for the rest of the clip, because the pose only carries height.
+- `override_camera(panel: Panel, p: CamPose, ow: f32, oh: f32, aspect: f32) -> Panel` (`export/scene/mod.rs`) - replaces `scene.camera` wholesale (not just its rect): the new rect comes from `rect_from_center` (height `h = p.size * oh`, width `w = h * aspect`), and `radius`/`ring_px` are scaled by the height ratio `new_h / old_h.max(0.001)` so a circle panel (`radius == min(w,h)/2` at its static size) stays a true circle instead of distorting toward the pre-override radius - the bug this Task 9 Part C fix corrects. `alpha`/`ring_color` are carried over unchanged.
 - The override runs before the `camera_shrink` block below it, so an in-flight zoom-shrink composes on top of the overridden panel's center/radius, same as it would on top of the static one.
 - Uses the same `ow`/`oh` (`self.layout.out_w`/`out_h`, `f32`) already in scope for the surrounding per-frame math - no separate output-dimension lookup.
 
@@ -187,32 +143,10 @@ Nothing (`()`). On return, `out` holds BGRA pixels (`out_w * out_h * 4` bytes) -
 
 Three sequential stages (identical to the original exporter loop body, lines ~138-144):
 1. `compositor.composite_into(..., out)` - places screen + webcam into `out` with zoom crop and panel rounding.
-2. `fx_state::render(...)` - applies click rings, spotlight, video FX, and captions directly on `out`.
-3. `cursorset::draw(...)` (if `cprep.is_some()`) - blits the Enhanced cursor sprite with motion trail, bounce, and panel clipping, directly on `out`.
+2. `fx_state::render(..., &self.cursor.screen(), self.has_webcam, ..., pose.out_t, pose.ev_t, ...)` - applies click rings, spotlight, video FX, and captions directly on `out`. BOTH clocks are passed: the doc's effect regions resolve at `pose.out_t` (`region_t`), while the raw click/hold/caption streams resolve at `pose.ev_t`. `self.cursor.screen()` supplies the capture origin so a click hit's raw desktop coordinates convert to screen-local the same way `Cursor`'s own `clicks`/`at` already do (`FrameRenderer` has no separate `ScreenInfo` field - it reads the one `Cursor` already owns). `self.has_webcam` gates the spotlight's camera-exclusion hole (see `FrameRenderer`'s field list above).
+3. `cursorset::draw(..., pose.ev_t, ...)` (if `cprep.is_some()`) - the cursor track is a raw event stream, so it stays on `ev_t`. Blits the Enhanced cursor sprite with motion trail, bounce, and panel clipping, directly on `out`.
 
-## FrameRenderer::bg
-
-```rust
-pub fn bg(&self) -> &[u8]
-```
-
-The export background buffer (BGRA, `out_w * out_h * 4` bytes) - the same mesh/gradient the compositor draws under the screen. Exposed so the editor preview (`preview_bg`) can paint the exact same background the export uses.
-
-## FrameRenderer::click_track
-
-```rust
-pub fn click_track(&self, video_start: u64) -> Vec<(u32, f32, f32)>
-```
-
-Click (mouse-down) events mapped to `(output_ms, x, y)` where `x`/`y` are 0..1 fractions of the screen content - so the editor preview can draw click ripples that match the export's click FX.
-
-### Inputs
-
-- `video_start: u64` - the first video frame's capture timestamp (from `RenderMeta`). *Why:* the output time inverts `step_camera`'s `ev_t = t - events_ms` offset, so a click at event time `et` shows at output `et + events_ms - video_start`.
-
-### Returns
-
-`Vec<(u32, f32, f32)>` - one tuple per mouse-down event whose output time is >= 0, in ascending time order. Positions come from `Cursor::clicks` (same basis as the smoothed cursor), so ripples land exactly where the cursor clicked.
+`FrameRenderer`'s small read-only accessors used only by preview commands outside the renderer (`bg`, `has_webcam`, `click_track`, `events_ms`, `actions`, `resolve_layout`) live in the sibling `accessors.rs` (split out purely for size) - see `accessors.md`.
 
 ## fromedit
 

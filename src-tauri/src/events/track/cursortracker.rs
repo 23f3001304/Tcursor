@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::thread::JoinHandle;
 use crate::events::track::cursortype::CursorType;
+use crate::session::record::pause_totals::PauseTotals;
 
 /// Polls the global cursor shape (~60 Hz) and logs `(t_ms, type)` on every change.
 /// Enhanced capture hides the OS cursor, so the shape must be recorded live here.
@@ -43,7 +44,7 @@ mod imp {
         table
     }
 
-    pub fn run(stop: Arc<AtomicBool>) -> Vec<(u32, CursorType)> {
+    pub fn run(stop: Arc<AtomicBool>, ledger: Arc<PauseTotals>) -> Vec<(u32, CursorType)> {
         let base = Instant::now();
         let table = classify_table();
         let mut samples: Vec<(u32, CursorType)> = Vec::new();
@@ -55,12 +56,14 @@ mod imp {
                 // app cursor; keep the last known type rather than guessing.
                 if let Some(&(_, ty)) = table.iter().find(|&&(h, _)| h == info.hCursor) {
                     if samples.last().map(|s| s.1) != Some(ty) {
-                        samples.push((base.elapsed().as_millis() as u32, ty));
+                        let raw = base.elapsed().as_millis() as u64;
+                        samples.push((ledger.stamp(raw), ty));
                     }
                     last = ty;
                 } else if samples.is_empty() {
                     // First sample is custom: seed with the last (Arrow) so type_at has a base.
-                    samples.push((base.elapsed().as_millis() as u32, last));
+                    let raw = base.elapsed().as_millis() as u64;
+                    samples.push((ledger.stamp(raw), last));
                 }
             }
             std::thread::sleep(Duration::from_millis(16));
@@ -70,16 +73,16 @@ mod imp {
 }
 
 impl CursorTypeTracker {
-    pub fn start() -> Self {
+    pub fn start(ledger: Arc<PauseTotals>) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = stop.clone();
         let thread = std::thread::Builder::new()
             .name("cursor-type".into())
             .spawn(move || {
                 #[cfg(windows)]
-                { imp::run(thread_stop) }
+                { imp::run(thread_stop, ledger) }
                 #[cfg(not(windows))]
-                { let _ = thread_stop; Vec::new() }
+                { let _ = (thread_stop, ledger); Vec::new() }
             })
             .ok();
         Self { thread, stop }

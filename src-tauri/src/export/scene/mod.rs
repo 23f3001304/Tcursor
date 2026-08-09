@@ -37,16 +37,20 @@ fn zoom_progress(scale: f32, target_scale: f32) -> f32 {
     ((scale - 1.0) / (target_scale - 1.0).max(0.001)).clamp(0.0, 1.0)
 }
 
-/// The webcam action in force at output time `out_t`: the highest-`layer` zoom region
-/// containing `out_t` supplies it (the same overlap rule `CameraSim::step` uses to pick a
-/// winner), falling back to the global default when that region inherits or none is active.
-/// Outside every region the zoom scale is 1.0, so the returned default is a no-op anyway.
-pub fn cam_action_at(regions: &[ZoomRegion], zoom: &ZoomSettings, out_t: u32) -> CamZoomAction {
-    regions.iter()
+/// The webcam action + its peak zoom scale in force at output time `out_t`: the highest-`layer`
+/// zoom region containing `out_t` supplies both (the same overlap rule `CameraSim::step` uses to
+/// pick a winner) - falling back to the global default action / `zoom.target_scale` when that
+/// region inherits the action or no region is active. `target_scale` MUST be the winning region's
+/// OWN `target_scale`, not the global one: `zoom_progress` (in `apply_cam_zoom_action`) divides by
+/// it, so a region's shrink/hide only reaches its full effect at ITS OWN peak scale, not
+/// `zoom.target_scale` - a 1.6x zoom fed the global 2.2 would only ever reach ~50% progress.
+pub fn cam_action_at(regions: &[ZoomRegion], zoom: &ZoomSettings, out_t: u32) -> (CamZoomAction, f32) {
+    let winner = regions.iter()
         .filter(|r| out_t >= r.start_ms && out_t <= r.end_ms)
-        .max_by_key(|r| r.layer)
-        .and_then(|r| r.cam_action)
-        .unwrap_or_else(|| zoom.resolved_cam_action())
+        .max_by_key(|r| r.layer);
+    let action = winner.and_then(|r| r.cam_action).unwrap_or_else(|| zoom.resolved_cam_action());
+    let target_scale = winner.map(|r| r.target_scale).unwrap_or(zoom.target_scale);
+    (action, target_scale)
 }
 
 /// Apply the resolved webcam-on-zoom action to the camera panel. `Shrink` delegates straight
@@ -77,11 +81,12 @@ pub fn shrink_camera(panel: Panel, scale: f32, target_scale: f32, min: f32) -> P
 }
 
 /// Convert a sampled `CamPose` (center x/y + height, all fractions of the output frame) into
-/// the camera panel's `RectF` (top-left form). Square for now - the mode's aspect ratio lands
-/// in Task 9 - so width is copied straight from the height-derived side.
-pub fn rect_from_center(p: CamPose, ow: f32, oh: f32) -> RectF {
+/// the camera panel's `RectF` (top-left form). `aspect` is the panel's own w/h, so a Wide
+/// (16:9) panel keeps its shape - the pose only ever carries height.
+pub fn rect_from_center(p: CamPose, ow: f32, oh: f32, aspect: f32) -> RectF {
     let h = p.size * oh;
-    RectF { x: p.x * ow - h / 2.0, y: p.y * oh - h / 2.0, w: h, h }
+    let w = h * aspect.max(0.01);
+    RectF { x: p.x * ow - w / 2.0, y: p.y * oh - h / 2.0, w, h }
 }
 
 /// Apply a `camera_moves` keyframe override to `panel`: replace its rect with the sampled
@@ -89,9 +94,9 @@ pub fn rect_from_center(p: CamPose, ow: f32, oh: f32) -> RectF {
 /// (`radius == min(w,h)/2` at the static size) stays a true circle after a keyframe
 /// grows/shrinks the panel instead of distorting toward the STATIC radius. Ring width
 /// scales the same way (matches `shrink_camera`'s treatment), for the same reason.
-pub fn override_camera(panel: Panel, p: CamPose, ow: f32, oh: f32) -> Panel {
+pub fn override_camera(panel: Panel, p: CamPose, ow: f32, oh: f32, aspect: f32) -> Panel {
     let old_h = panel.rect.h.max(0.001);
-    let rect = rect_from_center(p, ow, oh);
+    let rect = rect_from_center(p, ow, oh, aspect);
     let m = rect.h / old_h;
     Panel { rect, radius: panel.radius * m, ring_px: panel.ring_px * m, ..panel }
 }
@@ -175,6 +180,10 @@ pub fn resolve(id: LayoutId, layout: &Layout, overlay: &OverlayLayout, sw: u32, 
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cam_tests.rs"]
+mod cam_tests;
 
 #[cfg(test)]
 #[path = "action_tests.rs"]

@@ -2,6 +2,45 @@
 
 Thin persistence layer for `Settings`: computes the canonical config-file path, loads settings from disk (returning defaults on any error), and saves settings as pretty-printed JSON. The module contains no business logic; all policy lives in the `Settings` struct and its `Default` impl.
 
+It covers **two different files** that must not be confused:
+
+- `config_path()` -> `<config-dir>/TCursor/config.json`, the app's LIVE settings, rewritten every time the user changes a preference (`load`/`save`).
+- `paths.settings()` -> `<recording folder>/settings.json`, the **record-time snapshot** (`record_snapshot`), written once by `start_recording` and never again. It is the only durable record of how a given video was actually captured, which matters for any property the editor can no longer infer - see `os_cursor_in_video`.
+
+## record_snapshot
+
+```rust
+pub fn record_snapshot(paths: &ProjectPaths) -> Settings
+```
+
+The settings `start_recording` froze into the recording folder. Defaults on a missing or corrupt file, exactly like `load`.
+
+*Why it is not the same as the doc's `settings`:* `edit.json`'s copy starts as this snapshot but is then edited freely, so it describes what the user wants NOW, not how the recording was captured. Anything record-time must read this instead.
+
+*Why this is safe to rely on:* the folder's `settings.json` has exactly one writer in the codebase (`session/record/recorder.rs`, at record start) and two readers (`edit::seed::build_default` and this module). The editor never writes back to it - `settings::save` targets `config_path()`, a completely different file.
+
+### Used by
+
+- `src-tauri/src/edit/seed.rs` (`build_default`) - seeds a new `EditDoc` from the settings the recording was made with.
+- `src-tauri/src/settings/store.rs` (`os_cursor_in_video`) - below.
+
+## os_cursor_in_video
+
+```rust
+pub fn os_cursor_in_video(paths: &ProjectPaths) -> bool
+```
+
+Whether this recording's video has the OS cursor baked into its pixels: `record_snapshot(paths).cursor.style.captures_os_cursor()`.
+
+*Why it must be derived, not stored:* `captures_os_cursor` is a capture-time decision (it tells WGC whether to composite the cursor), but the editor lets the user change `cursor.style` afterwards. Picking `System` on a recording made in `Enhanced` used to turn the synthetic cursor off while there was no real one in the video either - so the cursor disappeared entirely. Deriving the answer from the snapshot recovers the truth for every existing recording, with no manifest field and no migration.
+
+*Why a missing snapshot answers `true`:* it fails closed. `true` means "draw no synthetic cursor", which is the pre-existing behavior; guessing `false` could paint a second cursor on top of a real one.
+
+### Behaviors
+
+- `os_cursor_in_video_is_derived_from_the_record_time_snapshot` - a snapshot written with `System` reports `true`; `Enhanced` and `Hidden` report `false`.
+- `a_missing_snapshot_reports_a_baked_cursor` - a folder with no `settings.json` reports `true`.
+
 ## config_path
 
 ```rust

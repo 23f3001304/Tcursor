@@ -4,7 +4,7 @@ use crate::export::types::{Easing, FramePoint, ZoomConfig, ZoomRegion};
 
 fn region() -> ZoomRegion {
     ZoomRegion { start_ms: 0, end_ms: 2000, zoom_in_ms: 300, zoom_out_ms: 300,
-        target_scale: 2.0, anchor: FramePoint { x: 400, y: 300 }, easing: Easing::Smooth, layer: 0, cam_action: None }
+        target_scale: 2.0, anchor: FramePoint { x: 400, y: 300 }, easing: Easing::Smooth, layer: 0, cam_action: None, follow_cursor: false }
 }
 
 #[test]
@@ -106,9 +106,9 @@ fn handoff_eases_from_current_camera_state_not_frame_center() {
     let cfg = ZoomConfig::default();
     let regions = vec![
         ZoomRegion { start_ms: 0, end_ms: 4000, zoom_in_ms: 300, zoom_out_ms: 300,
-            target_scale: 1.5, anchor: FramePoint { x: 700, y: 500 }, easing: Easing::Smooth, layer: 0, cam_action: None },
+            target_scale: 1.5, anchor: FramePoint { x: 700, y: 500 }, easing: Easing::Smooth, layer: 0, cam_action: None, follow_cursor: false },
         ZoomRegion { start_ms: 2000, end_ms: 3000, zoom_in_ms: 200, zoom_out_ms: 200,
-            target_scale: 2.5, anchor: FramePoint { x: 100, y: 100 }, easing: Easing::Smooth, layer: 1, cam_action: None },
+            target_scale: 2.5, anchor: FramePoint { x: 100, y: 100 }, easing: Easing::Smooth, layer: 1, cam_action: None, follow_cursor: false },
     ];
     let mut before = Camera { cx: 0.0, cy: 0.0, scale: 1.0 };
     for t in (0..2000).step_by(16) {
@@ -122,14 +122,61 @@ fn handoff_eases_from_current_camera_state_not_frame_center() {
 }
 
 #[test]
+fn identical_layer_handoff_is_invisible() {
+    // A (layer 0, 0..6000) and B (layer 1, 2000..4000) share scale AND anchor, so the
+    // t=2000 handoff must be literally invisible. The bug: the incoming region's "natural"
+    // was its own from-scratch ramp while the blend eased on the SAME clock, so the output
+    // was `s - (s-1)*e*(1-e)` - a ~14% pulse OUT (2.2 -> ~1.9) plus a center wobble.
+    let mut s = CameraSim::new(800, 600);
+    let cfg = ZoomConfig::default();
+    let a = ZoomRegion { start_ms: 0, end_ms: 6000, zoom_in_ms: 300, zoom_out_ms: 300,
+        target_scale: 2.2, anchor: FramePoint { x: 700, y: 500 }, easing: Easing::Smooth, layer: 0, cam_action: None, follow_cursor: false };
+    // B holds (zoom_out_ms 0) so the whole 2000..4000 window is a steady-state comparison.
+    let r = vec![a, ZoomRegion { start_ms: 2000, end_ms: 4000, zoom_out_ms: 0, layer: 1, ..a }];
+    let cur = FramePoint { x: 700, y: 500 };
+    let mut prev = s.step(0, cur, &r, &cfg);
+    for t in (16..2000).step_by(16) { prev = s.step(t, cur, &r, &cfg); }
+    for t in (2000..4000).step_by(16) {
+        let c = s.step(t, cur, &r, &cfg);
+        assert!((c.scale - 2.2).abs() < 0.05, "scale pulsed at t={t}: {} (want 2.2)", c.scale);
+        assert!((c.cx - prev.cx).abs() < 5.0, "center wobbled at t={t}: {} -> {}", prev.cx, c.cx);
+        prev = c;
+    }
+}
+
+#[test]
+fn a_fresh_zoom_after_an_exit_ramps_at_its_own_pace() {
+    // The Some->None exit transition must be dropped when a genuine None->Some start
+    // arrives, otherwise the new zoom's ramp is attenuated by the stale blend and reaches
+    // its target late (mushy). Compare against the same region simulated on its own.
+    let cfg = ZoomConfig::default();
+    let cur = FramePoint { x: 700, y: 500 };
+    let b = ZoomRegion { start_ms: 3050, end_ms: 6000, zoom_in_ms: 350, zoom_out_ms: 300,
+        target_scale: 2.2, anchor: FramePoint { x: 700, y: 500 }, easing: Easing::Smooth, layer: 0, cam_action: None, follow_cursor: false };
+    // A is a shallower zoom that ends at 3000, so only B ever crosses the 2.15 probe.
+    let a = ZoomRegion { start_ms: 0, end_ms: 3000, zoom_in_ms: 300, zoom_out_ms: 450, target_scale: 1.5, ..b };
+    let first = |r: &[ZoomRegion]| {
+        let mut s = CameraSim::new(800, 600);
+        (0..)
+            .map(|k| k * 16)
+            .take_while(|t| *t <= 6000)
+            .find(|t| s.step(*t, cur, r, &cfg).scale >= 2.15)
+            .unwrap_or(u32::MAX)
+    };
+    let (after_exit, alone) = (first(&[a, b]), first(&[b]));
+    assert!(after_exit.abs_diff(alone) < 32,
+        "stale exit transition slowed the new zoom: reached 2.15 at {after_exit}ms vs {alone}ms alone");
+}
+
+#[test]
 fn handoff_reaches_the_new_winners_target_once_its_transition_completes() {
     let mut s = CameraSim::new(800, 600);
     let cfg = ZoomConfig::default();
     let regions = vec![
         ZoomRegion { start_ms: 0, end_ms: 4000, zoom_in_ms: 300, zoom_out_ms: 300,
-            target_scale: 1.5, anchor: FramePoint { x: 700, y: 500 }, easing: Easing::Smooth, layer: 0, cam_action: None },
+            target_scale: 1.5, anchor: FramePoint { x: 700, y: 500 }, easing: Easing::Smooth, layer: 0, cam_action: None, follow_cursor: false },
         ZoomRegion { start_ms: 2000, end_ms: 3000, zoom_in_ms: 200, zoom_out_ms: 200,
-            target_scale: 2.5, anchor: FramePoint { x: 100, y: 100 }, easing: Easing::Smooth, layer: 1, cam_action: None },
+            target_scale: 2.5, anchor: FramePoint { x: 100, y: 100 }, easing: Easing::Smooth, layer: 1, cam_action: None, follow_cursor: false },
     ];
     let mut c = Camera { cx: 0.0, cy: 0.0, scale: 1.0 };
     for t in (0..2400).step_by(16) { c = s.step(t, FramePoint { x: 700, y: 500 }, &regions, &cfg); }

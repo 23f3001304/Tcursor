@@ -2,6 +2,10 @@
 
 Submodule overviews for the `sys` group.
 
+## brand_icon
+
+Dynamic app icon + Windows taskbar progress (Task 39). Key items: `set_recording` (swaps the main window's icon between the normal brand mark and a REC-lit variant), `set_export_progress` (drives the taskbar progress bar from an export's percent-complete). Both are graceful no-ops off-Windows or on any failure - see `brand_icon.md`.
+
 ## capture_exclusion
 
 Hides the TCursor HUD window from Windows Graphics Capture and other screen-capture APIs so the overlay never appears in the user's own recordings. Key items: `exclude_from_capture` (calls `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` on an `isize` HWND, returns a success bool).

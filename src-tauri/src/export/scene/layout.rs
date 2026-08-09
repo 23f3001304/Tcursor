@@ -10,8 +10,9 @@ use crate::export::scene::{resolve, Scene};
 use crate::export::types::{Easing, ZoomRegion};
 use crate::settings::appearance::{layout_for, overlay_for, AppearanceSettings};
 
-/// One layout segment active over `[start_ms, end_ms)`, with its own cross-fade feel.
-struct Seg { start_ms: u32, end_ms: u32, scene: Scene, transition_ms: u32, easing: Easing }
+/// One layout segment active over `[start_ms, end_ms)`, with its own cross-fade feel in AND out.
+struct Seg { start_ms: u32, end_ms: u32, scene: Scene, transition_ms: u32, easing: Easing,
+    transition_out_ms: u32, easing_out: Easing }
 
 /// Resolves the active `Scene` at any time. A segment is active only inside `[start, end)`;
 /// OUTSIDE every segment (a gap, or before the first / after the last) falls back to the base
@@ -37,7 +38,8 @@ impl LayoutTrack {
         let segs = pts.iter().enumerate().map(|(i, &(start, id))| {
             let end = pts.get(i + 1).map(|&(s, _)| s).unwrap_or(u32::MAX);
             Seg { start_ms: start, end_ms: end, scene: scene_for(id),
-                transition_ms: if i == 0 { 0 } else { transition_ms }, easing: Easing::Smooth }
+                transition_ms: if i == 0 { 0 } else { transition_ms }, easing: Easing::Smooth,
+                transition_out_ms: 0, easing_out: Easing::Smooth }
         }).collect();
         Self { segs, base: scene_for(LayoutId::Screen) }
     }
@@ -55,6 +57,8 @@ impl LayoutTrack {
             scene: scene_for(crate::export::render::fromedit::layout_id_from(&s.layout)),
             transition_ms: s.transition_ms,
             easing: crate::export::render::fromedit::easing_from(&s.easing, Easing::Smooth),
+            transition_out_ms: s.transition_out_ms,
+            easing_out: crate::export::render::fromedit::easing_from(&s.easing_out, Easing::Smooth),
         }).collect();
         segs.sort_by_key(|s| s.start_ms);
         Self { segs, base: scene_for(LayoutId::Screen) }
@@ -70,8 +74,26 @@ impl LayoutTrack {
         self.active_idx(t).map(|i| self.segs[i].scene).unwrap_or(self.base)
     }
 
+    /// What this segment hands off to at its `end_ms` - the next segment if the two are gapless,
+    /// else the base `screen` - plus whether that successor's OWN entry blend is still running at
+    /// that instant. When it is, the successor's entry WINS: only one blend may be in flight, so
+    /// the exit stands down rather than double-blending against it (which is what keeps gapless
+    /// back-to-back segments bit-identical to their pre-exit-transition behavior).
+    fn successor(&self, end_ms: u32) -> (Scene, bool) {
+        match self.active_idx(end_ms) {
+            None => (self.base, false),
+            Some(j) => {
+                let s = &self.segs[j];
+                (s.scene, s.transition_ms > 0 && end_ms.saturating_sub(s.start_ms) < s.transition_ms)
+            }
+        }
+    }
+
     /// Scene at `t_ms`: the active segment (else base `screen`), cross-faded from whatever was
-    /// active just before its start over its own transition_ms/easing.
+    /// active just before its start over its own transition_ms/easing, and - over the last
+    /// `transition_out_ms` before its end - toward whatever follows it, reaching that successor
+    /// exactly AT `end_ms`. The entry is checked first, so a segment shorter than its own two
+    /// transitions still resolves deterministically.
     pub fn scene_at(&self, t_ms: u32) -> Scene {
         match self.active_idx(t_ms) {
             None => self.base,
@@ -81,10 +103,17 @@ impl LayoutTrack {
                 if s.transition_ms > 0 && elapsed < s.transition_ms {
                     let from = self.raw_scene(s.start_ms.saturating_sub(1));
                     let f = ease(s.easing, elapsed as f32 / s.transition_ms as f32);
-                    Scene::lerp(&from, &s.scene, f)
-                } else {
-                    s.scene
+                    return Scene::lerp(&from, &s.scene, f);
                 }
+                let exit_from = s.end_ms.saturating_sub(s.transition_out_ms);
+                if s.transition_out_ms > 0 && t_ms >= exit_from {
+                    let (to, next_entry_wins) = self.successor(s.end_ms);
+                    if !next_entry_wins {
+                        let f = ease(s.easing_out, (t_ms - exit_from) as f32 / s.transition_out_ms as f32);
+                        return Scene::lerp(&s.scene, &to, f);
+                    }
+                }
+                s.scene
             }
         }
     }

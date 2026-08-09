@@ -1,6 +1,6 @@
 import { PanelHeader } from "./PanelHeader";
-import type { ClickFxSettings, ClickFxStyle, SpotlightMode } from "../../hud/settings/settings";
-import { Switch, Slider, Picker } from "../controls/Controls";
+import type { ClickFxSettings, ClickFxStyle, SpotlightMode, VideoFxMode } from "../../hud/settings/settings";
+import { Switch, Slider, Picker, Swatches, type SwatchItem } from "../controls/Controls";
 import { EffectPills } from "./EffectPills";
 
 const STYLES: { value: ClickFxStyle; label: string }[] = [
@@ -22,11 +22,27 @@ const MODES: { value: SpotlightMode; label: string }[] = [
   { value: "vignette", label: "Vignette" },
 ];
 
-const SWATCHES: [number, number, number][] = [
-  [255, 255, 255], [239, 68, 68], [59, 130, 246], [34, 197, 94], [245, 158, 11]
+// Mirrors the HUD's SettingsClickFx (src/hud/settings/SettingsClickFx.tsx) - same 4 modes, same
+// labels/order - so the hotkey-driven video effect looks the same whichever panel set it.
+const VMODES: { value: VideoFxMode; label: string }[] = [
+  { value: "nebulawash", label: "Nebula wash" },
+  { value: "cinematicdim", label: "Cinematic" },
+  { value: "screenfocus", label: "Screen focus" },
+  { value: "colorpop", label: "Color pop" },
+];
+
+// [color, human name] - the name becomes each swatch's aria-label.
+const SWATCHES: [[number, number, number], string][] = [
+  [[255, 255, 255], "White"], [[239, 68, 68], "Red"], [[59, 130, 246], "Blue"], [[34, 197, 94], "Green"], [[245, 158, 11], "Orange"],
+];
+// Mirrors the HUD's SettingsClickFx TINTS exactly (values only - the HUD's own swatches aren't named either).
+const TINTS: [[number, number, number], string][] = [
+  [[130, 90, 255], "Violet"], [[59, 130, 246], "Blue"], [[34, 197, 94], "Green"], [[239, 68, 68], "Red"], [[250, 204, 21], "Yellow"],
 ];
 
 const rgb = (c: [number, number, number]) => `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
+const swatchItems = (colors: [[number, number, number], string][]): SwatchItem<[number, number, number]>[] =>
+  colors.map(([c, name]) => ({ key: rgb(c), css: rgb(c), value: c, ariaLabel: name }));
 
 export function EffectsPanel({
   settings,
@@ -48,6 +64,10 @@ export function EffectsPanel({
   const set = <K extends keyof ClickFxSettings>(k: K, v: ClickFxSettings[K]) => {
     onChange({ ...settings, [k]: v });
   };
+  // Style/color/intensity are Style-dependent: with no ripple style there's nothing for a color
+  // or intensity to apply to, so they're disabled (not hidden) rather than vanishing the moment
+  // "None" is picked - the picker that got you there stays put either way.
+  const styleless = settings.style === "none";
 
   return (
     <div className="e-panel e-insp">
@@ -67,45 +87,19 @@ export function EffectsPanel({
         <>
           <div className="e-field">
             <span className="e-fl">Ripple Style</span>
-            <Picker value={settings.style} options={STYLES} onChange={(v) => set("style", v)} />
+            <Picker value={settings.style} options={STYLES} onChange={(v) => set("style", v)} ariaLabel="Ripple Style" />
           </div>
 
           <div className="e-field">
             <span className="e-fl">Ripple Color</span>
-            <div style={{ display: "flex", gap: 8, marginTop: 2 }}>
-              {SWATCHES.map((c) => {
-                const colorStr = rgb(c);
-                const isSelected = rgb(settings.color) === colorStr;
-                return (
-                  <button
-                    key={colorStr}
-                    type="button"
-                    style={{
-                      background: colorStr,
-                      border: isSelected ? "2px solid var(--e-fg)" : "1px solid var(--e-border)",
-                      width: 22,
-                      height: 22,
-                      borderRadius: "50%",
-                      cursor: "pointer",
-                      padding: 0,
-                      outline: "none"
-                    }}
-                    onClick={() => set("color", c)}
-                  />
-                );
-              })}
-            </div>
+            <Swatches items={swatchItems(SWATCHES)} isSelected={(c) => rgb(c) === rgb(settings.color)}
+              onSelect={(c) => set("color", c)} disabled={styleless} />
           </div>
 
           <div className="e-field">
             <span className="e-fl">Intensity <b>{Math.round(settings.intensity * 100)}%</b></span>
-            <Slider
-              min={0.2}
-              max={1.0}
-              step={0.05}
-              value={settings.intensity}
-              onChange={(v) => set("intensity", v)}
-            />
+            <Slider min={0.2} max={1.0} step={0.05} value={settings.intensity} disabled={styleless}
+              onChange={(v) => set("intensity", v)} ariaLabel="Intensity" />
           </div>
         </>
       )}
@@ -122,29 +116,31 @@ export function EffectsPanel({
         <>
           <div className="e-field">
             <span className="e-fl">Spotlight Mode</span>
-            <Picker value={settings.spotlight_mode} options={MODES} onChange={(v) => set("spotlight_mode", v)} />
+            <Picker value={settings.spotlight_mode} options={MODES} onChange={(v) => set("spotlight_mode", v)} ariaLabel="Spotlight Mode" />
+          </div>
+
+          <div className="e-field">
+            <span className="e-fl">Tint</span>
+            <Swatches items={swatchItems(TINTS)} isSelected={(c) => rgb(c) === rgb(settings.spotlight_tint)}
+              onSelect={(c) => set("spotlight_tint", c)} />
           </div>
 
           <div className="e-field">
             <span className="e-fl">Dim Override <b>{Math.round(settings.spotlight_dim * 100)}%</b></span>
-            <Slider
-              min={0.2}
-              max={0.9}
-              step={0.05}
-              value={settings.spotlight_dim}
-              onChange={(v) => set("spotlight_dim", v)}
-            />
+            <Slider min={0.2} max={0.9} step={0.05} value={settings.spotlight_dim}
+              onChange={(v) => set("spotlight_dim", v)} ariaLabel="Dim Override" />
           </div>
 
           <div className="e-field">
             <span className="e-fl">Radius Override <b>{Math.round(settings.spotlight_radius * 100)}%</b></span>
-            <Slider
-              min={0.05}
-              max={0.3}
-              step={0.01}
-              value={settings.spotlight_radius}
-              onChange={(v) => set("spotlight_radius", v)}
-            />
+            <Slider min={0.05} max={0.3} step={0.01} value={settings.spotlight_radius}
+              onChange={(v) => set("spotlight_radius", v)} ariaLabel="Radius Override" />
+          </div>
+
+          <div className="e-field">
+            <span className="e-fl">Feather <b>{Math.round(settings.spotlight_feather * 100)}%</b></span>
+            <Slider min={0.02} max={0.25} step={0.01} value={settings.spotlight_feather}
+              onChange={(v) => set("spotlight_feather", v)} ariaLabel="Feather" />
           </div>
 
           <div className="e-switchrow">
@@ -153,6 +149,14 @@ export function EffectsPanel({
           </div>
         </>
       )}
+
+      {/* Video effect - a separate, hotkey-activated overlay; independent of the spotlight toggle. */}
+      <div className="e-sec">
+        <div className="e-field" style={{ marginBottom: 0 }}>
+          <span className="e-fl">Video FX Mode</span>
+          <Picker value={settings.video_fx_mode} options={VMODES} onChange={(v) => set("video_fx_mode", v)} ariaLabel="Video FX Mode" />
+        </div>
+      </div>
     </div>
   );
 }

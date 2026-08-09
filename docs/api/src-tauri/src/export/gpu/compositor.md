@@ -58,9 +58,11 @@ Software compositor with no GPU dependency; zero interior state, trivially `Send
 6. Clear `out` and copy `resized` into it.
 7. Draw the camera panel on top of `out` via `draw_panel`; the camera is not subject to zoom.
 
-### draw_panel / rrect_sd_px / blit_ring (Task 9 Part B - software ring mirror)
+### draw_panel / rrect_sd_px / blit / blit_ring (Task 9 Part B - software ring mirror)
 
 `draw_panel` (private) resizes `src` into `panel.rect` and alpha-blends it with rounded-rect SDF coverage (same formula as the GPU shader's `rrect_sd`, factored out here as the private `rrect_sd_px(tx, ty, pw, ph, r) -> f32` helper so both the panel-coverage closure and the ring blend share one SDF implementation). When `panel.ring_px > 0.0`, it then calls the private `blit_ring` to stroke a colored band just inside the panel edge, mirroring the WGSL shader's post-camera-mix ring blend pixel-for-pixel: `band = clamp((ring_px + d) / max(ring_px, 1.0), 0, 1)` for pixels with `-ring_px <= d <= 0`, weighted by the panel's own alpha, blended into the BGRA destination bytes (ring_color is RGB; `dst[0]=B, dst[1]=G, dst[2]=R`).
+
+**`blit`/`blit_ring`'s origin (`ox`/`oy`) is SIGNED (`i32`), not `u32`.** `draw_panel` computes it as `panel.rect.x.round() as i32` (previously `.max(0.0).round() as u32`) - a panel that sits partly off the top/left edge (an off-canvas keyframed PiP, or any layout that places a panel outside the frame) must CLIP to its visible sub-rect, not snap its origin to 0 and jump the whole panel to the corner. Both functions map each panel-local pixel `(tx, ty)` to destination `(ox + tx, oy + ty)` and skip it when that lands outside `[0, dst_w) x [0, dst_h)` on EITHER edge - the near (negative) edge exactly like the far edge (`>= dst_w`/`>= dst_h`) already did. This naturally reads the correct VISIBLE sub-region of the resized/panel-local content (no separate source-offset bookkeeping needed): for a panel at `rect.x = -50` with `pw = 200`, panel-local `tx = 50` is the first column whose destination (`-50 + 50 = 0`) is on-screen, so destination column 0 shows panel-local (source) column 50 - the panel's own right-shifted visible portion, not its raw column 0.
 
 ### Behaviors worth knowing
 
@@ -70,6 +72,8 @@ Software compositor with no GPU dependency; zero interior state, trivially `Send
 - `blit_opaque_inner_skip_is_byte_identical_to_full_sdf` (unit test): blits the same rounded (r=6) opaque panel via `blit` twice - once with the computed `opaque_inner` rect, once with `None` (full SDF everywhere) - and asserts the two output buffers are byte-identical, including the antialiased corners outside the inner rect.
 - `ring_paints_a_band_just_inside_the_camera_edge_and_leaves_center_alone` (unit test): a 20x20 square camera panel with a 3px red ring over a green webcam source - the pixel row/column just inside the edge is strongly ring-tinted (antialiased, not pure - matching the SDF feathering everywhere else in this file) while the panel center stays untouched green.
 - `zero_ring_px_leaves_panel_byte_identical_to_no_ring_field` (unit test): `ring_px: 0.0` with a non-black `ring_color` set produces byte-identical output to a panel with no ring fields touched at all - proves the ring never activates on the sentinel value regardless of color.
+- `blit_clips_a_negative_origin_instead_of_snapping_to_zero` (unit test): a 200-wide source blitted at `ox = -50` onto a 400-wide destination shows the RIGHT 150 columns of the source at destination columns `[0, 150)` (column 0 == source column 50) and leaves destination columns `>= 150` untouched - the panel's true right edge, not a corner-snapped copy of the whole source.
+- `blit_ring_clips_a_negative_origin_the_same_way_as_blit` (unit test): same off-edge scenario through `blit_ring` - the visible portion paints, destination columns beyond the panel's true right edge stay untouched.
 
 ## select_compositor
 

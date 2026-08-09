@@ -48,16 +48,16 @@ fn render_frame(renderer: &mut FrameRenderer, meta: &RenderMeta, paths: &Project
     drop(screen_dec);
 
     // Seek-decode one webcam frame if present (export pre-seeks webcam by video_start).
-    let wc_size = meta.webcam_size;
-    let wc_bytes = (wc_size * wc_size * 4) as usize;
+    let wc_dims = (meta.webcam_w, meta.webcam_h); // panel-aspect decode box, matching the export
+    let wc_bytes = (wc_dims.0 * wc_dims.1 * 4) as usize;
     let webcam: Option<(Vec<u8>, u32, u32)> = if paths.webcam().exists() {
         let mut buf = vec![0u8; wc_bytes];
         let mut wc_dec = RawDecoder::spawn(
             &paths.webcam(), OUT_FPS as f64, false,
-            Some(meta.video_start + time_ms as u64), Some(wc_size), None, "bgra", wc_bytes)?;
+            Some(meta.video_start + time_ms as u64), Some(wc_dims), None, "bgra", wc_bytes)?;
         wc_dec.read_frame(&mut buf)?;
         drop(wc_dec);
-        Some((buf, wc_size, wc_size))
+        Some((buf, wc_dims.0, wc_dims.1))
     } else {
         None
     };
@@ -81,6 +81,20 @@ pub(crate) struct Cached { pub folder: String, pub mtime: Option<SystemTime>, pu
 /// Managed Tauri state: the most-recently-used warm preview renderer (one at a time).
 #[derive(Default)]
 pub struct PreviewSession(Mutex<Option<Cached>>);
+
+impl PreviewSession {
+    /// Whether the CURRENTLY-CACHED preview renderer's project has a recorded webcam - used by
+    /// `preview_fx_overlay` to gate the spotlight's camera-exclusion hole the same way the export
+    /// gates it (`has_webcam` in `fx_state.rs`/`render/mod.rs`). Reads whichever renderer is warm
+    /// right now regardless of folder, same as every other preview command implicitly relies on:
+    /// the editor keeps at most one project's renderer warm via `with_warm`, refreshed by
+    /// `camera_track`/`preview_layout`/etc. on essentially every render, so by the time an FX
+    /// overlay is requested the warm renderer already belongs to the open project. `false` (no
+    /// hole) before anything has warmed the cache yet - fails safe, never an un-dimmed rectangle.
+    pub fn has_webcam(&self) -> bool {
+        self.0.lock().unwrap().as_ref().is_some_and(|c| c.renderer.has_webcam())
+    }
+}
 
 /// Run `f` with the warm renderer for `folder`, (re)building it when the folder or the doc's
 /// aspect changes - both resize the frame, so the cached GPU compositor/background/FX (sized for
@@ -130,17 +144,33 @@ pub(crate) fn png_encode(bgra: &[u8], w: u32, h: u32) -> Result<Vec<u8>> {
 
 /// Tauri command: render one preview frame and return a PNG data URL. Reuses the warm
 /// renderer cache (`with_warm`), so scrubbing is fast and edits still take effect.
+///
+/// `async` + `spawn_blocking` (Task 41 fix-up - see `mod.md` for the full why/how): `render_frame`
+/// blocks on a real `ffmpeg` subprocess (`RawDecoder::spawn`), not in-process math. `State<'_,>`
+/// isn't `'static`, so `app: AppHandle` is taken instead and re-derives the session inside the
+/// blocking closure via `app.state::<PreviewSession>()`.
 #[tauri::command]
-pub fn preview_frame(folder: String, time_ms: u32, session: tauri::State<'_, PreviewSession>) -> Result<String, String> {
-    let png = with_warm(&session, &folder, |c, paths| {
-        render_frame(&mut c.renderer, &c.meta, paths, time_ms).map_err(|e| e.to_string())
-    })?;
-    Ok(format!("data:image/png;base64,{}", base64_encode(&png)))
+pub async fn preview_frame(folder: String, time_ms: u32, app: tauri::AppHandle) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri::Manager;
+        let session = app.state::<PreviewSession>();
+        let png = with_warm(&session, &folder, |c, paths| {
+            render_frame(&mut c.renderer, &c.meta, paths, time_ms).map_err(|e| e.to_string())
+        })?;
+        Ok(format!("data:image/png;base64,{}", base64_encode(&png)))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Tauri command: the export background (BGRA mesh/gradient) as a PNG data URL, so the
 /// editor's canvas preview paints the exact same background the export uses instead of an
 /// approximate gradient. Reuses the warm renderer cache.
+///
+/// Stays sync (verified, Task 41 sweep correction - see `mod.md`): on a warm cache, this command's
+/// own chain is a plain field read (`accessors::bg`) + in-memory PNG encode, no subprocess. The
+/// cold-build path can still shell out via `FrameRenderer::new`, but that's shared by every
+/// `PreviewSession` command and is a broader seam this fix doesn't attempt to close.
 #[tauri::command]
 pub fn preview_bg(folder: String, session: tauri::State<'_, PreviewSession>) -> Result<String, String> {
     let png = with_warm(&session, &folder, |c, _paths| {
@@ -166,8 +196,4 @@ pub(crate) fn base64_encode(input: &[u8]) -> String {
     out
 }
 
-pub mod preprocess;
-pub mod preview_fx;
-pub mod preview_layouts;
-pub mod preview_track;
-pub mod thumbs;
+pub mod preprocess; pub mod preview_fx; pub mod preview_layouts; pub mod preview_track; pub mod thumbs;

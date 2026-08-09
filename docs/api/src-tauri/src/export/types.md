@@ -74,7 +74,8 @@ The virtual camera state at one frame.
 
 ```rust
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Easing { Smooth, Linear, Spring { stiffness: f32, damping: f32 }, EaseIn, EaseOut, EaseInOut }
+pub enum Easing { Smooth, Linear, Spring { stiffness: f32, damping: f32 }, EaseIn, EaseOut, EaseInOut,
+    Cubic { x1: f32, y1: f32, x2: f32, y2: f32 } }
 ```
 
 Selects the interpolation curve for zoom, layout cross-fade, and camera-move animations.
@@ -85,6 +86,7 @@ Selects the interpolation curve for zoom, layout cross-fade, and camera-move ani
 - `EaseIn` - quadratic accelerate (`t^2`): slow start, fast finish.
 - `EaseOut` - quadratic decelerate (`t*(2-t)`): fast start, slow finish.
 - `EaseInOut` - quadratic symmetric (`2t^2` up to 0.5, then `1-2(1-t)^2`): slow-fast-slow.
+- `Cubic { x1, y1, x2, y2 }` - a user-drawn CSS-semantics cubic bezier through P0=(0,0), P1=(x1,y1), P2=(x2,y2), P3=(1,1); see `export/cubic.md`. Unlike `Spring`, it carries its WHOLE shape, so it survives the round trip through the wire string `cubic(x1,y1,x2,y2)` exactly - it is the only variant `easing_from` can fully reconstruct without falling back to the config's curve. `x1`/`x2` are guaranteed in `[0,1]` by the parser (keeps `x(t)` monotonic); `y1`/`y2` may overshoot.
 
 ### Used by
 
@@ -131,6 +133,7 @@ pub struct ZoomRegion {
     pub target_scale: f32, pub anchor: FramePoint, pub easing: Easing,
     pub layer: u32,
     pub cam_action: Option<CamZoomAction>,
+    pub follow_cursor: bool,
 }
 ```
 
@@ -141,10 +144,11 @@ A single resolved zoom event, baked from either auto-generated click detection o
 - `zoom_in_ms: u32` - ease-in duration; the zoom-in phase ends at `start_ms + zoom_in_ms`.
 - `zoom_out_ms: u32` - ease-out duration; the zoom-out phase begins at `end_ms - zoom_out_ms`.
 - `target_scale: f32` - peak zoom multiplier during the hold phase.
-- `anchor: FramePoint` - the screen-local pixel that stays centered during zoom-in. *Why:* the anchor is the first click of the trigger cluster (see `autozoom::generate`); anchoring on the first click, not the last, keeps intent stable.
+- `anchor: FramePoint` - the screen-local pixel that stays centered during zoom-in. *Why:* the anchor is the first click of the trigger cluster (see `autozoom::generate`); anchoring on the first click, not the last, keeps intent stable. Read only when `follow_cursor` is `false`.
 - `easing: Easing` - interpolation curve for this specific region.
 - `layer: u32` - priority when this region overlaps another; higher wins in `CameraSim::step`.
 - `cam_action: Option<CamZoomAction>` - per-zoom webcam-on-zoom override carried from `Zoom.cam_action`; `None` inherits the global default. *Why it rides on the region:* `FrameRenderer::step_camera` only has the resolved regions at frame time, so the action must travel with the region it belongs to. `CameraSim` ignores it entirely - it is read only by the camera-panel compositing.
+- `follow_cursor: bool` - the zoom-in ramp aims at the LIVE cursor every step instead of the stored `anchor`. *Why:* a `ZoomTarget::Cursor` zoom (every user- or AI-added zoom) has no meaningful stored point - `fromedit::anchor_for` writes screen centre - so easing toward `anchor` zoomed into the middle of the frame and only THEN panned to the cursor once the hold phase took over: a visible two-stage move. It also decouples the aim from the region's timing, so dragging a pill along the timeline re-aims at whatever the cursor is doing at the new time instead of a now-stale point. `false` for `autozoom`/`manual` regions, whose anchor is a real press point the cursor was sitting on.
 
 ### Used by
 

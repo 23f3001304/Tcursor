@@ -11,7 +11,7 @@ fn cfg_region(start: u32, end: u32, x: i32, y: i32) -> ZoomRegion {
     ZoomRegion {
         start_ms: start, end_ms: end, zoom_in_ms: cfg.zoom_in_ms, zoom_out_ms: cfg.zoom_out_ms,
         target_scale: cfg.target_scale, anchor: FramePoint { x, y }, easing: cfg.easing, layer: 0,
-        cam_action: None,
+        cam_action: None, follow_cursor: false,
     }
 }
 
@@ -19,7 +19,7 @@ fn eq_region(a: &ZoomRegion, b: &ZoomRegion) -> bool {
     a.start_ms == b.start_ms && a.end_ms == b.end_ms && a.zoom_in_ms == b.zoom_in_ms
         && a.zoom_out_ms == b.zoom_out_ms && a.target_scale == b.target_scale && a.layer == b.layer
         && a.anchor == b.anchor && format!("{:?}", a.easing) == format!("{:?}", b.easing)
-        && a.cam_action == b.cam_action
+        && a.cam_action == b.cam_action && a.follow_cursor == b.follow_cursor
 }
 
 /// THE PROOF: regions -> seed::zooms_from_regions -> EditDoc -> regions_from_doc
@@ -81,6 +81,26 @@ fn cursor_target_defaults_to_screen_center() {
     };
     let r = regions_from_doc(&doc, 1920, 1080);
     assert_eq!(r[0].anchor, FramePoint { x: 960, y: 540 });
+    // ...and `follow_cursor` is what makes that centre fallback inert: `CameraSim` aims the
+    // zoom-in ramp at the live cursor instead of reading it.
+    assert!(r[0].follow_cursor, "a Cursor target must mark the region as live-cursor-aimed");
+    let fixed = EditDoc { zooms: vec![Zoom { target: ZoomTarget::Fixed { x: 100.0, y: 200.0 },
+        ..doc.zooms[0].clone() }], ..Default::default() };
+    assert!(!regions_from_doc(&fixed, 1920, 1080)[0].follow_cursor, "a Fixed target keeps its stored anchor");
+}
+
+/// The Region target the stage reticle writes is a 0..1 screen-content FRACTION, so it must scale
+/// into screen pixels; out-of-range values are already pixels and pass through untouched.
+#[test]
+fn fixed_target_fractions_scale_to_screen_pixels() {
+    use crate::edit::model::{Zoom, ZoomTarget};
+    let base = Zoom { id: "z0".into(), start_ms: 0, end_ms: 100, target: ZoomTarget::Cursor, scale: 2.0,
+        easing: "smooth".into(), zoom_in_ms: 350, zoom_out_ms: 450, layer: 0, cam_action: None };
+    let doc_of = |t| EditDoc { zooms: vec![Zoom { target: t, ..base.clone() }], ..Default::default() };
+    let frac = regions_from_doc(&doc_of(ZoomTarget::Fixed { x: 0.25, y: 0.75 }), 1920, 1080);
+    assert_eq!(frac[0].anchor, FramePoint { x: 480, y: 810 });
+    let px = regions_from_doc(&doc_of(ZoomTarget::Fixed { x: 1300.0, y: 40.0 }), 1920, 1080);
+    assert_eq!(px[0].anchor, FramePoint { x: 1300, y: 40 });
 }
 
 #[test]

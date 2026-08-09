@@ -93,8 +93,13 @@ fn draw_panel(dst: &mut [u8], dw: u32, dh: u32, src: &[u8], sw: u32, sh: u32, pa
         let d = rrect_sd_px(tx, ty, pw, ph, r); // rounded-box SDF (== shader)
         (0.5 - d).clamp(0.0, 1.0) * a
     };
-    let ox = panel.rect.x.max(0.0).round() as u32;
-    let oy = panel.rect.y.max(0.0).round() as u32;
+    // SIGNED, not clamped: a panel that sits partly off the top/left edge (a keyframed PiP
+    // dragged there, or an off-canvas layout) must CLIP to its visible sub-rect, not snap its
+    // origin to 0 and jump the whole panel to the corner. `blit`/`blit_ring` map each panel-local
+    // pixel to `origin + local` and skip whatever lands outside `[0, dst)` on EITHER edge - the
+    // near one (negative) exactly like the far one (`>= dst_w`/`>= dst_h`) already did.
+    let ox = panel.rect.x.round() as i32;
+    let oy = panel.rect.y.round() as i32;
     blit(dst, dw, dh, &resized, pw, ph, ox, oy, inner, cov);
     if panel.ring_px > 0.0 {
         blit_ring(dst, dw, dh, pw, ph, ox, oy, r, panel.ring_px, panel.ring_color, a);
@@ -102,8 +107,9 @@ fn draw_panel(dst: &mut [u8], dw: u32, dh: u32, src: &[u8], sw: u32, sh: u32, pa
 }
 
 /// Blend `ring_color` over `dst` in a band just inside the panel edge, width `ring_px`,
-/// weighted by panel alpha `a`. Same SDF/band math as the WGSL shader's ring blend.
-fn blit_ring(dst: &mut [u8], dw: u32, dh: u32, pw: u32, ph: u32, ox: u32, oy: u32,
+/// weighted by panel alpha `a`. Same SDF/band math as the WGSL shader's ring blend. `ox`/`oy`
+/// are SIGNED (see `draw_panel`) - an off-edge panel clips instead of snapping to the corner.
+fn blit_ring(dst: &mut [u8], dw: u32, dh: u32, pw: u32, ph: u32, ox: i32, oy: i32,
              r: f32, ring_px: f32, ring_color: [u8; 3], a: f32) {
     let [rr, rg, rb] = ring_color;
     for ty in 0..ph {
@@ -112,8 +118,9 @@ fn blit_ring(dst: &mut [u8], dw: u32, dh: u32, pw: u32, ph: u32, ox: u32, oy: u3
             if d > 0.0 || d < -ring_px { continue; } // outside the panel or inside the ring band
             let band = ((ring_px + d) / ring_px.max(1.0)).clamp(0.0, 1.0) * a;
             if band <= 0.0 { continue; }
-            let (dx, dy) = (ox + tx, oy + ty);
-            if dx >= dw || dy >= dh { continue; }
+            let (dx, dy) = (ox + tx as i32, oy + ty as i32);
+            if dx < 0 || dy < 0 || dx as u32 >= dw || dy as u32 >= dh { continue; }
+            let (dx, dy) = (dx as u32, dy as u32);
             let di = ((dy * dw + dx) * 4) as usize;
             // BGRA destination bytes; ring_color is RGB.
             dst[di] = (rb as f32 * band + dst[di] as f32 * (1.0 - band)).round() as u8;
@@ -135,12 +142,14 @@ fn resize_crop(
     dst_img.into_vec()
 }
 
-// Blend `src` onto `dst` at (ox,oy); `alpha` is per-pixel coverage in [0,1].
-// Destination-bounds checked.
+// Blend `src` onto `dst` at (ox,oy); `alpha` is per-pixel coverage in [0,1]. `ox`/`oy` are SIGNED:
+// a panel-local pixel whose destination lands off either edge (negative OR `>= dst_w`/`dst_h`) is
+// skipped, so an off-canvas origin clips to the visible sub-rect instead of translating the whole
+// panel onto the destination's (0,0) corner.
 fn blit(
     dst: &mut [u8], dst_w: u32, dst_h: u32,
     src: &[u8], src_w: u32, src_h: u32,
-    ox: u32, oy: u32,
+    ox: i32, oy: i32,
     opaque_inner: Option<(u32, u32, u32, u32)>, // (x0,y0,x1,y1) where coverage is exactly 1.0
     alpha: impl Fn(u32, u32) -> f32,
 ) {
@@ -149,8 +158,9 @@ fn blit(
             let inside = matches!(opaque_inner, Some((x0, y0, x1, y1)) if tx >= x0 && tx < x1 && ty >= y0 && ty < y1);
             let a = if inside { 1.0 } else { alpha(tx, ty) }; // skip the sqrt SDF for guaranteed-opaque pixels
             if a <= 0.0 { continue; }
-            let (dx, dy) = (ox + tx, oy + ty);
-            if dx >= dst_w || dy >= dst_h { continue; }
+            let (dx, dy) = (ox + tx as i32, oy + ty as i32);
+            if dx < 0 || dy < 0 || dx as u32 >= dst_w || dy as u32 >= dst_h { continue; }
+            let (dx, dy) = (dx as u32, dy as u32);
             let si = ((ty * src_w + tx) * 4) as usize;
             let di = ((dy * dst_w + dx) * 4) as usize;
             if a >= 1.0 {

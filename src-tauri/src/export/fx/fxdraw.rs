@@ -7,7 +7,7 @@ pub struct CpuFx;
 impl FxRenderer for CpuFx {
     fn apply(&self, out: &mut [u8], ow: u32, oh: u32, state: &FxState) {
         if let Some(v) = state.video { crate::export::fx::videodraw::draw_video(out, ow, oh, &v); }
-        if let Some(s) = state.spot { crate::export::fx::spotdraw::draw_spot(out, ow, oh, &s); }
+        if let Some(s) = state.spot { crate::export::fx::spotdraw::draw_spot(out, ow, oh, &s, state.intensity); }
         crate::export::fx::clickdraw::draw_clicks(out, ow, oh, state);
     }
 }

@@ -11,7 +11,15 @@ fn scene_of(app: &AppearanceSettings, id: LayoutId) -> Scene {
 }
 
 fn seg(id: &str, start: u32, end: u32, layout: &str, transition_ms: u32) -> LayoutSeg {
-    LayoutSeg { id: id.into(), start_ms: start, end_ms: end, layout: layout.into(), transition_ms, easing: "smooth".into() }
+    LayoutSeg { id: id.into(), start_ms: start, end_ms: end, layout: layout.into(), transition_ms, easing: "smooth".into(),
+        transition_out_ms: 0, easing_out: "smooth".into() }
+}
+fn with_exit(s: LayoutSeg, transition_out_ms: u32) -> LayoutSeg { LayoutSeg { transition_out_ms, ..s } }
+/// Largest absolute difference between two scenes' screen-panel rects - the continuity yardstick.
+fn rect_delta(a: &Scene, b: &Scene) -> f32 {
+    let (p, q) = (a.screen.rect, b.screen.rect);
+    [(p.x - q.x).abs(), (p.y - q.y).abs(), (p.w - q.w).abs(), (p.h - q.h).abs()]
+        .into_iter().fold(0.0f32, f32::max)
 }
 
 #[test]
@@ -73,4 +81,71 @@ fn a_gap_between_segments_falls_back_to_screen() {
     assert_eq!(track.scene_at(1500), screen);   // GAP -> screen default
     assert_eq!(track.scene_at(3500), screen);   // after the last seg -> screen default
     assert_eq!(track.scene_at(2500), scene_of(&app, LayoutId::Presenter)); // inside presenter
+}
+
+#[test]
+fn default_zero_exit_is_the_historical_hard_cut() {
+    let app = AppearanceSettings::default();
+    // The exact fixture from `a_gap_between_segments_falls_back_to_screen`, which predates exit
+    // transitions: with `transition_out_ms` defaulting to 0 every sample must be bit-identical.
+    let segs = vec![seg("l0", 0, 1000, "camera", 0), seg("l1", 2000, 3000, "presenter", 0)];
+    let track = LayoutTrack::from_segs(&segs, &app, 3840, 2160, 1920, 1080);
+    assert_eq!(track.scene_at(999), scene_of(&app, LayoutId::Camera), "last active ms is still fully camera");
+    assert_eq!(track.scene_at(1000), scene_of(&app, LayoutId::Screen), "and it cuts to the gap default");
+}
+
+#[test]
+fn exit_blend_completes_exactly_at_end_ms() {
+    let app = AppearanceSettings::default();
+    let (camera, screen) = (scene_of(&app, LayoutId::Camera), scene_of(&app, LayoutId::Screen));
+    // camera [0,1000) with a 400ms exit, then a GAP -> it must ease back to the screen default.
+    let segs = vec![with_exit(seg("l0", 0, 1000, "camera", 0), 400)];
+    let track = LayoutTrack::from_segs(&segs, &app, 3840, 2160, 1920, 1080);
+    assert_eq!(track.scene_at(599), camera, "before the exit window nothing has moved");
+    assert_eq!(track.scene_at(600), camera, "the window opens AT f=0, i.e. still fully camera");
+    let mid = track.scene_at(800);
+    assert!(rect_delta(&mid, &camera) > 1.0 && rect_delta(&mid, &screen) > 1.0, "mid-exit is between the two");
+    // The pose the exit converges on IS what the track resolves at end_ms, to within a hair.
+    assert!(rect_delta(&track.scene_at(999), &track.scene_at(1000)) < 0.05,
+        "the exit must land on the successor's pose, not jump to it");
+    assert_eq!(track.scene_at(1000), screen);
+    // The blend fraction itself reaches exactly 1 at end_ms, so the convergence above is exact in
+    // the limit and only ms quantisation separates the last active sample from the successor.
+    assert_eq!(ease(Easing::Smooth, (1000u32 - 600) as f32 / 400.0), 1.0);
+    assert_eq!(Scene::lerp(&camera, &screen, 1.0), screen);
+}
+
+#[test]
+fn a_gapless_successors_entry_wins_the_overlap() {
+    let app = AppearanceSettings::default();
+    let camera = scene_of(&app, LayoutId::Camera);
+    // camera [0,1000) with a 400ms exit, presenter [1000,2000) with a 400ms ENTRY. Only one blend
+    // may run: the entry wins, so the exit stands down and camera holds right up to 1000 - exactly
+    // as it did before exit transitions existed (no double-blend, no backwards jump at 1000).
+    let segs = vec![with_exit(seg("l0", 0, 1000, "camera", 0), 400), seg("l1", 1000, 2000, "presenter", 400)];
+    let track = LayoutTrack::from_segs(&segs, &app, 3840, 2160, 1920, 1080);
+    for t in [600, 800, 999] { assert_eq!(track.scene_at(t), camera, "exit suppressed at {t}"); }
+    assert_eq!(track.scene_at(1000), camera, "the successor's entry starts FROM camera - seamless");
+    assert_eq!(track.scene_at(1400), scene_of(&app, LayoutId::Presenter));
+    // ...but a successor that hard-cuts in (no entry transition of its own) does NOT win, so the
+    // exit runs and smooths a switch that used to be an instant pop.
+    let hard = vec![with_exit(seg("l0", 0, 1000, "camera", 0), 400), seg("l1", 1000, 2000, "presenter", 0)];
+    let track = LayoutTrack::from_segs(&hard, &app, 3840, 2160, 1920, 1080);
+    assert_ne!(track.scene_at(800), camera, "exit runs into a hard-cutting successor");
+    assert!(rect_delta(&track.scene_at(999), &scene_of(&app, LayoutId::Presenter)) < 0.05);
+}
+
+#[test]
+fn a_segments_own_entry_beats_its_own_exit_when_they_overlap() {
+    let app = AppearanceSettings::default();
+    // A 300ms segment carrying a 300ms entry AND a 300ms exit: the windows cover each other
+    // completely. Entry is checked first, so the result is deterministic - it eases IN, never out.
+    // (It starts at 1000, not 0: `raw_scene(start - 1)` saturates for a segment at t=0, which
+    // makes its own entry a no-op - a pre-existing quirk this test must not depend on.)
+    let segs = vec![with_exit(seg("l0", 1000, 1300, "camera", 300), 300)];
+    let track = LayoutTrack::from_segs(&segs, &app, 3840, 2160, 1920, 1080);
+    let camera = scene_of(&app, LayoutId::Camera);
+    assert_eq!(track.scene_at(1000), scene_of(&app, LayoutId::Screen), "entry at f=0");
+    assert!(rect_delta(&track.scene_at(1150), &camera) < rect_delta(&track.scene_at(1000), &camera),
+        "still moving toward camera, never back out");
 }

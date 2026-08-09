@@ -1,6 +1,8 @@
 # src-tauri/src/export/fx/fx_state.rs
 
-Renderer-agnostic data model and builder for per-frame click FX, spotlight, and video FX state. Provides `fx_state_at` to compute what is visually active at a given event-time, the `FxRenderer` trait shared by both GPU and CPU backends, the `select_fx` factory, and the `render` entry point the exporter calls once per output frame.
+Renderer-agnostic data model and builder for per-frame click FX, spotlight, and video FX state. Provides `fx_state_at` to compute what is visually active at one frame, the `FxRenderer` trait shared by both GPU and CPU backends, the `select_fx` factory, and the `render` entry point the exporter calls once per output frame. The stateful spotlight region resolver (`region_alpha`, `SpotlightSim`) lives in the sibling `spotlight_sim.rs` (split out to stay under the size limit; see `docs/api/src-tauri/src/export/fx/spotlight_sim.md`) and is re-exported here as `fx_state::SpotlightSim`.
+
+Everything here takes TWO times, never one: `region_t` (output clock - `EditDoc` effect regions) and `ev_t` (event clock - the raw mouse/action streams). They are named apart in every signature so a caller cannot silently pass the wrong base; on a real recording they differ by around 800 ms.
 
 ## LIFE_MS
 
@@ -61,10 +63,10 @@ Active spotlight state in output pixels. Size fields are fractions of output hei
 - `alpha` - *overall effect strength (`0..1`); fades in on `SpotlightHoldStart` and out on `SpotlightHoldEnd` over `FADE_MS`.*
 - `mode` - *spotlight visual variant; passed as a numeric id to the shader.*
 - `tint` - *RGB tint applied to the lit zone in certain modes.*
-- `t` - *current time in seconds; drives animated modes like `Breathing` and `Nebula`.*
-- `cam_rect` - *`[min_x, min_y, max_x, max_y]`, the active camera panel's rect in OUTPUT pixels (`scene.camera.rect` converted from x/y/w/h to a min/max box). Defines the rounded-rect region the "don't dim the webcam" exclusion applies to; meaningless when `dim_camera` is `true` (still populated, just unused).*
-- `cam_radius` - *the camera panel's corner radius in output pixels (`scene.camera.radius`), used as the rounding radius for the `cam_rect` exclusion.*
-- `dim_camera` - *whether the spotlight dim also darkens the camera PiP (`ClickFxSettings::spotlight_dim_camera`). `true` = today's behavior (camera dims like everything else). `false` = the shader/CPU path undoes the dim inside `cam_rect`, keeping the webcam lit while the rest of the frame still dims normally.*
+- `t` - *`region_t` in seconds; drives animated modes like `Breathing` and `Nebula`. The region clock (not the event clock) so the TS preview, which sends its output-time `now` as `spotT` to `preview_fx_overlay`, renders the same phase as the export.*
+- `cam_rect` - *`[min_x, min_y, max_x, max_y]`, the active camera panel's rect in OUTPUT pixels (`scene.camera.rect` converted from x/y/w/h to a min/max box). Defines the rounded-rect region the "don't dim the webcam" exclusion applies to; meaningless when `dim_camera` is `true` (zeroed in that case - see below - rather than left stale, so a future reader that checks the rect instead of the flag still gets "no hole").*
+- `cam_radius` - *the camera panel's corner radius in output pixels (`scene.camera.radius`), used as the rounding radius for the `cam_rect` exclusion. Zeroed alongside `cam_rect` when there is no hole.*
+- `dim_camera` - *whether the spotlight dim also darkens the camera PiP (`ClickFxSettings::spotlight_dim_camera`). `true` = today's behavior (camera dims like everything else) AND the "no hole" representation. `false` = the shader/CPU path undoes the dim inside `cam_rect`, keeping the webcam lit while the rest of the frame still dims normally - ONLY when `fx_state_at`'s `has_webcam && scene.camera.alpha > 0.05` gate passed; otherwise `fx_state_at` forces this to `true` regardless of the user's actual setting, so a missing/invisible webcam can never leave an un-dimmed empty rectangle (in a ScreenOnly layout, after `Hide`, or in a recording with no `webcam.mp4` at all).*
 
 ### Used by
 
@@ -87,7 +89,7 @@ Active video FX triggered by a `VideoFxHoldStart` / `VideoFxHoldEnd` action pair
 
 - `mode` - *which full-frame effect to apply; passed as a numeric id to the shader.*
 - `alpha` - *fade alpha from the hold ramp (`0..1`).*
-- `t` - *time in seconds for animated effects.*
+- `t` - *`ev_t` in seconds for animated effects. Video FX is a raw hotkey hold rather than a doc region, so its phase follows the same event clock its alpha does.*
 
 ### Used by
 
@@ -130,25 +132,32 @@ Complete renderer-agnostic description of all active FX at one output frame. Bui
 
 ```rust
 pub fn fx_state_at(
-    fx: &ClickFxSettings, events: &[MouseEvent], actions: &[ActionEvent],
-    scene: &Scene, cam: Camera, cur: FramePoint,
-    sw: u32, sh: u32, ow: u32, oh: u32, et: u32,
+    fx: &ClickFxSettings, events: &[MouseEvent], actions: &[ActionEvent], effects: &[EffectRegion],
+    scene: &Scene, cam: Camera, cur: FramePoint, screen: &ScreenInfo, has_webcam: bool,
+    sw: u32, sh: u32, ow: u32, oh: u32, region_t: u32, ev_t: u32, spot_sim: &mut SpotlightSim,
 ) -> Option<FxState>
 ```
 
-Builds the FX state at event-time `et`. Returns `None` when nothing is active so the renderer can skip the frame entirely.
+Builds the FX state for one frame. Returns `None` when nothing is active so the renderer can skip the frame entirely.
+
+**Two clocks, deliberately separate parameters.** `region_t` is OUTPUT time (0 = first video frame) - the clock every `EditDoc` region list lives on, so it drives the `effects` regions. `ev_t` is EVENT time (relative to when the input trackers started) - the clock the raw streams are recorded on, so it drives click ripples and the hold-driven video FX. A real recording offsets the two by around 800 ms; before they were split, a single `et` meant doc-authored spotlights fired ~0.8 s early in exports while the TS preview (which is entirely output-time) showed them correctly.
 
 ### Inputs
 
 - `fx: &ClickFxSettings` - user FX settings (spotlight toggle, dim, radius, feather, click style, color, intensity, video FX mode). *Why:* single source of all user-tunables; no hidden globals.*
-- `events: &[MouseEvent]` - full mouse log. *Why:* `hits_at` scans this to find clicks within `LIFE_MS` of `et`.*
+- `events: &[MouseEvent]` - full mouse log. *Why:* `hits_at` scans this to find clicks within `LIFE_MS` of `ev_t`.*
 - `actions: &[ActionEvent]` - action track. *Why:* `hold_alpha` derives the video FX fade ramp from `VideoFxHoldStart`/`VideoFxHoldEnd` pairs. Spotlight is no longer hold-driven here - recorded holds are seeded as editable Spotlight regions (`edit::seed`), so the spotlight comes from the effect regions + the settings toggle.*
-- `scene: &Scene` - active layout scene at `et`. *Why:* click screen coordinates must be converted to panel-local coordinates before projection into output space.*
-- `cam: Camera` - camera transform at `et` (center + scale). *Why:* `project` maps panel-local coordinates to output pixels using this transform.*
+- `effects: &[EffectRegion]` - the doc's effect regions (output time). *Why:* the spotlight is region-driven; recorded hotkey holds are seeded into this list by `edit::seed`.*
+- `scene: &Scene` - active layout scene this frame. *Why:* click screen coordinates must be converted to panel-local coordinates before projection into output space.*
+- `cam: Camera` - camera transform this frame (center + scale). *Why:* `project` maps panel-local coordinates to output pixels using this transform.*
 - `cur: FramePoint` - cursor's pre-computed frame position. *Why:* the spotlight tracks the cursor; the exporter already computed this position so it is passed directly.*
+- `screen: &ScreenInfo` - the recording's screen origin (`origin_x`/`origin_y`, virtual-desktop coordinates). *Why:* `hits_at` returns RAW `WH_MOUSE_LL` desktop coordinates - a window capture or a secondary monitor has a nonzero origin, so each hit must be converted to screen-local via `coordmap::to_frame(screen, ...)` before `to_panel`, exactly like every other raw-mouse-point consumer (`Cursor::clicks`, `Cursor::at`). Without this the FX export drew ripples in the wrong place whenever `origin_x`/`origin_y` was nonzero, while the TS preview (which always converts) was correct.*
+- `has_webcam: bool` - whether `webcam.mp4` exists on disk for this recording (`FrameRenderer` computes it once via `paths.webcam().exists()` in `new`). *Why:* gates the spotlight's "keep camera lit" hole (see `Spot::dim_camera`) - without a real webcam there is nothing for the hole to protect, so drawing it would leave an un-dimmed empty rectangle.*
 - `sw: u32`, `sh: u32` - source screen dimensions. *Why:* `to_panel` needs these to normalize click coordinates into the panel rect.*
 - `ow: u32`, `oh: u32` - output frame dimensions. *Why:* passed to `project` to map positions to output pixels.*
-- `et: u32` - event time in ms. *Why:* all time-indexed queries (`hits_at`, `hold_alpha`) use this.*
+- `region_t: u32` - output time in ms. *Why:* `effects` are `EditDoc` regions, and every region list in the doc is output-time. Also becomes `Spot.t` (the shader's animation phase) so the TS preview - which sends its output-time `now` as `spotT` - renders the same phase.*
+- `ev_t: u32` - event time in ms. *Why:* the raw-stream queries (`hits_at` over the mouse log, `hold_alpha` over the action log, and the caption overlay in `render`) index streams recorded on the event clock.*
+- `spot_sim: &mut SpotlightSim` - the stateful spotlight resolver, carried across frames. *Why:* alpha eases across a region handoff, which needs the previous frame's driver + alpha.*
 
 ### Returns
 
@@ -156,10 +165,10 @@ Builds the FX state at event-time `et`. Returns `None` when nothing is active so
 
 ### Implementation
 
-1. Compute `s_alpha` via the stateful `spot_sim: &mut SpotlightSim` (`spot_sim.resolve(effects, et, fx.spotlight)`): the highest-`layer` active Spotlight region wins, its alpha eases across a handoff, unioned with the flat `fx.spotlight` toggle. (Recorded hotkey holds are seeded into `effects` as regions by `edit::seed`, so regions + toggle are the only sources.)
-2. If `s_alpha > 0.0`, call `project(cur.x, cur.y, cam, ow, oh)` for the center, take the winning region's style via `spot_sim.style(effects, fx)`, and build a `Spot`. **The radius/feather are pre-scaled by the screen panel's height fraction (`scene.screen.rect.h / oh`)** so the spotlight is sized to the screen the cursor is on, not the whole output frame (fixes the layout-agnostic spotlight; the preview mirrors it via `layout.screen[3]`). Also sets `cam_rect` from `scene.camera.rect` (converted to a min/max box), `cam_radius` from `scene.camera.radius`, and `dim_camera` from `fx.spotlight_dim_camera` - these carry the camera panel's current rect straight through to the renderer regardless of layout, so the "don't dim the webcam" exclusion always targets where the camera panel actually is this frame.
-3. If `fx.style` is not `None`, call `hits_at(events, et, LIFE_MS)` and for each hit convert from screen-local to panel-local via `to_panel`, then project to output pixels via `project`. *Why per-hit:* the camera transform differs per frame, so each hit must be projected individually.*
-4. Compute video FX alpha via `hold::hold_alpha` gated on `VideoFxHoldStart`/`VideoFxHoldEnd`. Build `VideoFx` only when `va > 0.0`.
+1. Compute `s_alpha` via the stateful `spot_sim: &mut SpotlightSim` (`spot_sim.resolve(effects, region_t, fx.spotlight)`): the highest-`layer` active Spotlight region wins, its alpha eases across a handoff, unioned with the flat `fx.spotlight` toggle. (Recorded hotkey holds are seeded into `effects` as regions by `edit::seed`, so regions + toggle are the only sources.)
+2. If `s_alpha > 0.0`, call `project(cur.x, cur.y, cam, ow, oh)` for the center, take the winning region's style via `spot_sim.style(effects, fx)`, and build a `Spot`. **The radius/feather are pre-scaled by the screen panel's height fraction (`scene.screen.rect.h / oh`)** so the spotlight is sized to the screen the cursor is on, not the whole output frame (fixes the layout-agnostic spotlight; the preview mirrors it via `layout.screen[3]`). `has_hole = has_webcam && scene.camera.alpha > 0.05` gates the camera-exclusion hole: when `true`, `cam_rect`/`cam_radius`/`dim_camera` come from `scene.camera.rect`/`scene.camera.radius`/`fx.spotlight_dim_camera` as before; when `false`, `cam_rect`/`cam_radius` zero out and `dim_camera` is forced to `true` REGARDLESS of the user's setting - the "no hole" representation, since `dim_camera: true` makes `draw_spot`/the GPU shader skip the un-dim branch entirely.
+3. If `fx.style` is not `None`, call `hits_at(events, ev_t, LIFE_MS)` and for each hit: convert the RAW desktop point to screen-local via `to_frame(screen, h.sx, h.sy)`, then screen-local to panel-local via `to_panel`, then project to output pixels via `project`. *Why per-hit:* the camera transform differs per frame, so each hit must be projected individually. *Why `to_frame` first:* `hits_at` hands back the exact `(sx, sy)` `hits_at`/`clickfx::Hit` stores, which come straight from the raw `WH_MOUSE_LL` event - virtual-desktop coordinates, not screen-local ones.*
+4. Compute video FX alpha via `hold::hold_alpha(actions, ev_t, ..)` gated on `VideoFxHoldStart`/`VideoFxHoldEnd`. Build `VideoFx` only when `va > 0.0`; its `t` is `ev_t` too - unlike the spotlight it is not a doc region, so both its alpha and its phase follow the clock that drives it.
 5. Return `None` when all three are empty/`None`. Otherwise return `Some(FxState)`.
 
 ### Behaviors worth knowing (unit tests)
@@ -169,7 +178,12 @@ Builds the FX state at event-time `et`. Returns `None` when nothing is active so
 - `spotlight_radius_scales_with_screen_panel_height` - a half-height screen panel halves `radius_frac`/`feather_frac` (screen-panel-relative sizing).
 - `a_click_makes_a_hit_in_output_space` - click at `t=0`, queried at `t=300` -> one hit with `progress > 0`.
 - `style_none_suppresses_click_hits` - `ClickFxStyle::None` -> `hits` is empty even when clicks exist.
-- `hold_action_ramps_spot_alpha` - `SpotlightHoldStart` at 1000ms, query at 1125ms (125ms into 250ms ramp) -> `spot.alpha ~0.5`.
+- `region_and_event_clocks_are_sampled_independently` - a region `[1000, 2000]` sampled at `region_t = 1500` and a click at `ev_t = 2300` (300 ms after a down at 2000) are BOTH active, and `spot.t == 1.5` - only possible when the two bases are threaded separately.
+- `click_hit_origin_is_converted_before_panel_mapping` - `ScreenInfo { origin_x: 500, origin_y: 300, .. }` with a Down at the RAW desktop point `(500, 300)` (i.e. the screen's own origin) and a full-frame screen panel yields a hit at the panel's top-left corner, not at `x ~= 41.6%` across (the un-converted-origin bug).
+- `spotlight_hole_disabled_without_a_real_webcam` - `has_webcam: false` (even with `camera.alpha: 1.0` and the user's `spotlight_dim_camera: false`) forces `Spot.dim_camera == true`.
+- `spotlight_hole_disabled_when_the_camera_panel_is_invisible` - `has_webcam: true` but `scene.camera.alpha <= 0.05` (the default disabled panel) also forces `dim_camera == true`.
+- `spotlight_hole_enabled_with_a_real_visible_webcam` - `has_webcam: true` AND `camera.alpha: 1.0` lets `dim_camera` follow the user's actual `spotlight_dim_camera` setting.
+- `SpotlightSim` region resolution (`spotlight_uses_per_region_fades`, `highest_layer_region_wins_style_not_first_match`, `spotlight_handoff_eases_alpha_instead_of_jump_maxing`) now lives in `spotlight_sim.rs`'s own test module - see `docs/api/src-tauri/src/export/fx/spotlight_sim.md`.
 
 ## FxRenderer
 
@@ -202,8 +216,8 @@ Factory that returns the best available renderer for output dimensions `ow x oh`
 ```rust
 pub fn render(
     r: &dyn FxRenderer, out: &mut [u8], ow: u32, oh: u32, fx: &ClickFxSettings,
-    events: &[MouseEvent], actions: &[ActionEvent], scene: &Scene, cam: Camera, cur: FramePoint,
-    sw: u32, sh: u32, et: u32, keys: &HotkeySettings,
+    events: &[MouseEvent], actions: &[ActionEvent], effects: &[EffectRegion], scene: &Scene, cam: Camera, cur: FramePoint, screen: &ScreenInfo, has_webcam: bool,
+    sw: u32, sh: u32, region_t: u32, ev_t: u32, keys: &HotkeySettings, spot_sim: &mut SpotlightSim,
 )
 ```
 
@@ -214,11 +228,11 @@ Per-frame entry point called by the exporter after compositing the base frame. B
 - `r: &dyn FxRenderer` - the renderer selected by `select_fx`. *Why trait object:* decouples the exporter from GPU/CPU choice.*
 - `out: &mut [u8]` - composited BGRA frame; modified in-place. *Why:* FX are composited on top of the already-rendered frame without a separate allocation.*
 - `fx: &ClickFxSettings` - FX settings; `fx.enabled` is checked first as a fast exit. *Why early return:* when FX is fully disabled, no state is built and no renderer is invoked.*
-- `events`, `actions`, `scene`, `cam`, `cur`, `sw`, `sh`, `et` - forwarded verbatim to `fx_state_at`.
+- `events`, `actions`, `effects`, `scene`, `cam`, `cur`, `screen`, `has_webcam`, `sw`, `sh`, `region_t`, `ev_t`, `spot_sim` - forwarded verbatim to `fx_state_at`. `FrameRenderer::composite_at` passes `&self.cursor.screen()` (the `Cursor`'s own `ScreenInfo`, already used for its own `to_frame` conversions in `clicks`/`compute_anchors`) rather than storing a second copy, and `self.has_webcam` (computed once via `paths.webcam().exists()` in `FrameRenderer::new`).
 - `keys: &HotkeySettings` - hotkey bindings forwarded to `caption::overlay`. *Why:* captions label hotkey actions and need the binding strings to construct the text.*
 
 ### Implementation
 
 1. Return immediately if `!fx.enabled`.
 2. Call `fx_state_at`; if `Some(state)`, call `r.apply(out, ow, oh, &state)`.
-3. Call `caption::overlay(out, ow, oh, actions, keys, et, fx.captions)` unconditionally. *Why always:* captions are independent of click/spotlight FX and must appear even when FX rendering was skipped.*
+3. Call `caption::overlay(out, ow, oh, actions, keys, ev_t, fx.captions)` unconditionally. *Why `ev_t`:* captions label hotkey presses read straight from the action log, which is an event-clock stream - not a doc region. *Why always:* captions are independent of click/spotlight FX and must appear even when FX rendering was skipped.*

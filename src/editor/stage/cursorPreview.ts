@@ -23,7 +23,9 @@ export function cursorAt(kinds: CursorKindSample[], ms: number): string {
 }
 
 /** Draw the real export cursor sprite at the mapped position `p`, gated by style: only when
- *  "enhanced" (System = the OS cursor is already in the video; Hidden = none). Sized like the
+ *  "enhanced" (Hidden = none; System = the OS cursor is already in the video, EXCEPT on a
+ *  recording that baked none - Stage passes an effective "enhanced" there, see its plain-OS
+ *  fallback, which is why this gate stays a plain style check). Sized like the
  *  export (size * outH * 0.033, uniform on the sprite's canvas height), anchored at the hotspot,
  *  with the same post-click bounce dip and a fading motion trail (driven by `motionBlur`). */
 export function drawCursorSprite(

@@ -26,6 +26,7 @@ Renders the full HUD window content and manages the recording lifecycle.
 - `barShown` - toggles the `.as-box` CSS class and gates the bar content subtree. *Why needed:* the window morphs to a smaller box for panels; while morphing the bar must be invisible so it does not flash underneath the incoming panel.
 - `lastFolder` ref - stores the project folder path returned by `stopRecording` so the export-error listener can call `revealItemInDir` even after recording state has reset.
 - `themeRef` ref - persists `{ theme, accent }` so the `matchMedia` OS-change handler can call `applyTheme` with fresh values without closing over stale state.
+- `animatedBrand` (Task 39) - the `ui.animated_brand` feel knob, as real React state (unlike `theme`/`accent`, which apply imperatively via CSS vars through `applyTheme` and so only need a ref) since it's a value `TcursorMark`'s `state` prop is derived from - a prop change needs a re-render. Set from `getSettings()` on mount and from `Preferences`'s `onUiChange` (below).
 - `elapsed` - elapsed recording time from `useRecordingTimer(recording, paused)`.
 - `levels` - mic waveform bar heights (0-1 floats) from `useMicWaveform(recording && !paused)`.
 
@@ -33,12 +34,12 @@ Renders the full HUD window content and manages the recording lifecycle.
 While `barShown` is true, calls `win.setSize(barSize())` whenever a dropdown opens or closes. `barSize()` returns `LogicalSize(WIDTH, menu ? 430 : 132)` - taller when a dropdown is open so the menu list overflows into extra window space rather than being clipped by the frame. *Why gated on `barShown`:* the panel transition uses `morphWindow` for a spring animation; resizing during that animation would fight it.
 
 **Theme effect (`useEffect` on `[]`, runs once).**
-Calls `getSettings()` and immediately applies the persisted theme and accent color via `applyTheme`. Attaches a `matchMedia("prefers-color-scheme: dark")` listener so System mode stays reactive to OS changes during the session. Reads from `themeRef` (not state) to avoid a stale-closure bug. Cleans up the listener on unmount.
+Calls `getSettings()` and immediately applies the persisted theme and accent color via `applyTheme`, and (Task 39) sets `animatedBrand` from `s.ui.animated_brand`. Attaches a `matchMedia("prefers-color-scheme: dark")` listener so System mode stays reactive to OS changes during the session. Reads from `themeRef` (not state) to avoid a stale-closure bug. Cleans up the listener on unmount.
 
 **Export event listeners (`useEffect` on `[]`).**
 Subscribes to three Tauri events:
 - `export-progress` (payload `number`) - updates `pct`.
-- `export-done` (payload folder path string) - sets `exporting` false and calls `revealItemInDir` on `final.mp4`.
+- `export-done` (payload: the exported file's own absolute path, `<folder>/final.<ext>` - see `run.rs`, not just the project folder) - sets `exporting` false and calls `revealItemInDir` on it directly (no hardcoded `\final.mp4` guess, which used to be wrong for a webm/gif export).
 - `export-error` - sets `exporting` false and reveals `video.mp4` from `lastFolder` as a fallback.
 
 All three `listen` promises return unsubscribe functions called on cleanup.
@@ -54,8 +55,8 @@ Calls `openProject()` (native `*.tcursor` file picker) and, on success, calls `o
 - `restoreBar()` - called from `AnimatePresence`'s `onExitComplete` after the panel exit animation finishes. Calls `morphWindow` back from box to bar dimensions, then sets `barShown = true` so the bar fades in only after the resize completes.
 
 **Rendered regions.**
-- `AnimatePresence` overlay: mounts either `<Settings>` or `<Preferences>` with a scale+opacity spring (0.97->1 in, 0.98->0 out over 180ms). `key={panel}` ensures the exit animation fires when switching panels.
-- Titlebar: drag region with brand name, optional error label, and window controls. Open Project, Settings, and Preferences buttons are hidden while recording or exporting; Open Project is additionally disabled while `saving` (avoids a race between a just-finished recording's own `onEdit` call and one triggered by opening a different project mid-save).
+- `AnimatePresence` overlay: mounts either `<Settings>` or `<Preferences>` with a scale+opacity spring (0.97->1 in, 0.98->0 out over 180ms). `key={panel}` ensures the exit animation fires when switching panels. `<Preferences>`'s `onUiChange` (Task 39 - see `Preferences.md`) updates `themeRef`/`applyTheme` (as before) AND `animatedBrand`.
+- Titlebar: drag region with the brand mark + name (`.brand`, `TcursorMark state={animatedBrand && recording ? "recording" : "idle"}` inside `.brand-mark` - see `docs/api/src/lib/TcursorMark.md`), optional error label, and window controls. Open Project, Settings, and Preferences buttons are hidden while recording or exporting; Open Project is additionally disabled while `saving` (avoids a race between a just-finished recording's own `onEdit` call and one triggered by opening a different project mid-save).
 - Grip: left drag handle (`data-tauri-drag-region`).
 - Camera preview: `<video>` bound to `cam.ref`, with a camera-off icon overlay when `camOn && cam.on` is false.
 - Four conditional rows for bar content, in priority order: exporting progress (`exporting`), saving/preprocessing progress (`saving` - a `Saving… {savePct}%` pill, same `.exporting` style class plus a `.saving` hook), device selectors (idle), waveform meter (recording).

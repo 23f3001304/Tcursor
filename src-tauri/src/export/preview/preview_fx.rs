@@ -1,16 +1,25 @@
 // The editor preview's FX overlay as a standalone transparent PNG (spotlight + click effects),
 // blitted over the JS-composited base frame. The frontend has already resolved every value
 // (spotlight centre/radius/feather/alpha and click hits, all in FX-canvas pixels), so this builds
-// an `FxState` straight from the params - no events/actions/scene - and runs the exact `CpuFx`
-// primitives the export uses. Those primitives composite ONTO an opaque frame (multiply-dim +
+// an `FxState` straight from the params - no events/actions/scene - and renders it through
+// `select_fx`, the EXPORT's own renderer selector (see `with_fx`), so preview and export run the
+// same shader/primitives per effect. Those primitives composite ONTO an opaque frame (multiply-dim +
 // additive tint, in place), so there is no source alpha to read back: instead we render the effect
 // twice - over solid black and over solid white - and invert the "over" composite per pixel,
 // `a = 1 - (white - black)/255`, straight colour = black / a. Without this command the
 // `preview_fx_overlay` invoke rejected (it was never registered), `fxOverlay.ts` swallowed the
 // error and returned null, so the spotlight never showed in the preview.
-use crate::export::fx::fx_state::{FxHit, FxRenderer, FxState, Spot, VideoFx};
-use crate::export::fx::fxdraw::CpuFx;
-use crate::export::preview::{base64_encode, png_encode};
+//
+// One exception to "pure function of its params": the spotlight's camera-exclusion hole
+// (`cam_rect`/`cam_radius`/`dim_camera`) is gated on `PreviewSession::has_webcam` - the frontend
+// has no reliable way to know whether `webcam.webm` actually exists on disk, so without this the
+// preview could show an un-dimmed hole for a layout with a camera panel but no recorded webcam,
+// which the export (gated the same way in `fx_state.rs`) never shows. `gate_cam_hole` is the pure
+// part of that; `render_fx_overlay` takes the resolved `has_webcam` bool directly, so it stays
+// testable without a warm `PreviewSession` - see `preview_fx_tests.rs`.
+use std::sync::{Mutex, OnceLock};
+use crate::export::fx::fx_state::{select_fx, FxHit, FxRenderer, FxState, Spot, VideoFx};
+use crate::export::preview::{base64_encode, png_encode, PreviewSession};
 use crate::settings::model::{ClickFxStyle, SpotlightMode, VideoFxMode};
 
 fn click_style_of(s: &str) -> ClickFxStyle {
@@ -65,12 +74,38 @@ fn reconstruct(on_black: &[u8], on_white: &[u8]) -> Vec<u8> {
     overlay
 }
 
-/// Tauri command: render the frontend-resolved FX overlay and return a transparent PNG data URL.
+/// Whether the spotlight's camera-exclusion hole should apply this frame - `has_webcam` mirrors
+/// the export's `has_hole = has_webcam && scene.camera.alpha > 0.05` gate (`fx_state.rs`); the
+/// preview has no `scene.camera.alpha` to check (the frontend never resolves one), so a requested
+/// hole (`cam_rect.is_some()`) is the preview's equivalent signal of "a camera panel wants a hole
+/// here". When the gate fails, the rect/radius are dropped and `dim_camera` forced to `true`
+/// (belt-and-suspenders, same as `fx_state_at`'s zeroed representation) so a stray `false` from
+/// the frontend can never leave an un-dimmed rectangle over a project with no recorded webcam.
+fn gate_cam_hole(
+    has_webcam: bool, cam_rect: Option<[f32; 4]>, cam_radius: Option<f32>, dim_camera: Option<bool>,
+) -> (Option<[f32; 4]>, Option<f32>, Option<bool>) {
+    if cam_rect.is_some() && !has_webcam { (None, None, Some(true)) } else { (cam_rect, cam_radius, dim_camera) }
+}
+
+/// Run `f` with the FX renderer the preview overlay draws with, cached for one output size.
+/// The renderer is MOVED out of the cache for the duration of the call, never borrowed from
+/// under the guard - see the notes in `preview_fx.md` on why the lock must not span `f`.
+pub(crate) fn with_fx<T>(ow: u32, oh: u32, f: impl FnOnce(&dyn FxRenderer) -> T) -> T {
+    static FX: OnceLock<Mutex<Option<(u32, u32, Box<dyn FxRenderer>)>>> = OnceLock::new();
+    let cell = FX.get_or_init(|| Mutex::new(None));
+    let lock = || cell.lock().unwrap_or_else(|e| e.into_inner());
+    let cached = lock().take().filter(|(w, h, _)| *w == ow && *h == oh);
+    let (w, h, fx) = cached.unwrap_or_else(|| (ow, oh, select_fx(ow, oh)));
+    let out = f(fx.as_ref());
+    *lock() = Some((w, h, fx));
+    out
+}
+
+/// Render the frontend-resolved FX overlay into a transparent PNG data URL. Pure aside from
+/// `has_webcam` (resolved by the caller from `PreviewSession`), so it's directly unit-testable.
 #[allow(clippy::too_many_arguments)]
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
-pub fn preview_fx_overlay(
-    ow: u32, oh: u32,
+fn render_fx_overlay(
+    fx: &dyn FxRenderer, ow: u32, oh: u32, has_webcam: bool,
     style: String, color: [u8; 3], intensity: f32, hits: Vec<[f32; 3]>,
     spot_cx: Option<f32>, spot_cy: Option<f32>, spot_dim: Option<f32>,
     spot_radius: Option<f32>, spot_feather: Option<f32>, spot_alpha: Option<f32>,
@@ -79,6 +114,7 @@ pub fn preview_fx_overlay(
     cam_rect: Option<[f32; 4]>, cam_radius: Option<f32>, dim_camera: Option<bool>,
 ) -> Result<String, String> {
     let (ow, oh) = (ow.max(1), oh.max(1));
+    let (cam_rect, cam_radius, dim_camera) = gate_cam_hole(has_webcam, cam_rect, cam_radius, dim_camera);
     let spot = match (spot_cx, spot_cy, spot_alpha) {
         (Some(cx), Some(cy), Some(alpha)) if alpha > 0.0 => Some(Spot {
             cx, cy, dim: spot_dim.unwrap_or(0.6),
@@ -103,71 +139,36 @@ pub fn preview_fx_overlay(
     let mut on_black = vec![0u8; n];
     for p in on_black.chunks_exact_mut(4) { p[3] = 255; }
     let mut on_white = vec![255u8; n];
-    CpuFx.apply(&mut on_black, ow, oh, &state);
-    CpuFx.apply(&mut on_white, ow, oh, &state);
+    fx.apply(&mut on_black, ow, oh, &state);
+    fx.apply(&mut on_white, ow, oh, &state);
 
     let overlay = reconstruct(&on_black, &on_white);
     let png = png_encode(&overlay, ow, oh).map_err(|e| e.to_string())?;
     Ok(format!("data:image/png;base64,{}", base64_encode(&png)))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn dim_area_becomes_black_with_matching_alpha() {
-        // A pixel dimmed to 40% (m=0.4): black stays 0, white -> 102. a = 1-0.4 = 0.6.
-        let o = reconstruct(&[0, 0, 0, 255], &[102, 102, 102, 255]);
-        assert_eq!((o[0], o[1], o[2]), (0, 0, 0), "dim overlay colour is black");
-        assert!((o[3] as i32 - 153).abs() <= 1, "alpha ~0.6 -> 153, got {}", o[3]);
-    }
-
-    #[test]
-    fn untouched_pixel_is_fully_transparent() {
-        let o = reconstruct(&[0, 0, 0, 255], &[255, 255, 255, 255]);
-        assert_eq!(o[3], 0, "a pixel the effect never touched must be transparent");
-    }
-
-    #[test]
-    fn additive_click_recovers_bright_colour() {
-        // additive c=128: black -> 128, white saturates -> 255. a = 128/255 ~ 0.502.
-        let o = reconstruct(&[128, 128, 128, 255], &[255, 255, 255, 255]);
-        assert!(o[3] > 120 && o[3] < 135, "alpha ~0.5, got {}", o[3]);
-        assert!(o[0] > 240 && o[1] > 240 && o[2] > 240, "colour recovered near full");
-    }
-
-    #[test]
-    fn spotlight_command_returns_a_png_data_url() {
-        let url = preview_fx_overlay(
-            80, 80, "none".into(), [255, 255, 255], 1.0, vec![],
-            Some(40.0), Some(40.0), Some(0.6), Some(0.13), Some(0.10), Some(1.0),
-            Some("classic".into()), Some([130, 90, 255]), Some(0.0),
-            None, None, None,
-            None, None, None,
-        ).unwrap();
-        assert!(url.starts_with("data:image/png;base64,"), "returns a PNG data URL");
-        assert!(url.len() > 200, "non-trivial overlay encoded");
-    }
-    #[test]
-    fn dim_camera_false_is_threaded_into_the_spot() {
-        // Same call but with dim_camera:false and a cam rect covering the whole frame - the
-        // corner (which spotlight_command_returns_a_png_data_url dims) should stay untouched,
-        // so the reconstructed overlay must differ from the dim_camera:true case above.
-        let url_dimmed = preview_fx_overlay(
-            80, 80, "none".into(), [255, 255, 255], 1.0, vec![],
-            Some(40.0), Some(40.0), Some(0.6), Some(0.13), Some(0.10), Some(1.0),
-            Some("classic".into()), Some([130, 90, 255]), Some(0.0),
-            None, None, None,
-            Some([0.0, 0.0, 80.0, 80.0]), Some(0.0), Some(true),
-        ).unwrap();
-        let url_kept = preview_fx_overlay(
-            80, 80, "none".into(), [255, 255, 255], 1.0, vec![],
-            Some(40.0), Some(40.0), Some(0.6), Some(0.13), Some(0.10), Some(1.0),
-            Some("classic".into()), Some([130, 90, 255]), Some(0.0),
-            None, None, None,
-            Some([0.0, 0.0, 80.0, 80.0]), Some(0.0), Some(false),
-        ).unwrap();
-        assert_ne!(url_dimmed, url_kept, "dim_camera flag must change the rendered overlay");
-    }
+/// Tauri command: render the frontend-resolved FX overlay and return a transparent PNG data URL.
+/// A thin wrapper over `render_fx_overlay` - its only job is resolving `has_webcam` from the warm
+/// `PreviewSession` (whichever project is currently open; see `PreviewSession::has_webcam`).
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub fn preview_fx_overlay(
+    ow: u32, oh: u32,
+    style: String, color: [u8; 3], intensity: f32, hits: Vec<[f32; 3]>,
+    spot_cx: Option<f32>, spot_cy: Option<f32>, spot_dim: Option<f32>,
+    spot_radius: Option<f32>, spot_feather: Option<f32>, spot_alpha: Option<f32>,
+    spot_mode: Option<String>, spot_tint: Option<[u8; 3]>, spot_t: Option<f32>,
+    video_mode: Option<String>, video_alpha: Option<f32>, video_t: Option<f32>,
+    cam_rect: Option<[f32; 4]>, cam_radius: Option<f32>, dim_camera: Option<bool>,
+    session: tauri::State<'_, PreviewSession>,
+) -> Result<String, String> {
+    let (ow, oh) = (ow.max(1), oh.max(1));
+    let has_webcam = session.has_webcam();
+    with_fx(ow, oh, |fx| render_fx_overlay(fx, ow, oh, has_webcam, style, color, intensity, hits,
+        spot_cx, spot_cy, spot_dim, spot_radius, spot_feather, spot_alpha, spot_mode, spot_tint, spot_t,
+        video_mode, video_alpha, video_t, cam_rect, cam_radius, dim_camera))
 }
+
+#[cfg(test)]
+#[path = "preview_fx_tests.rs"]
+mod tests;

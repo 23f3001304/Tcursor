@@ -4,6 +4,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use crate::actions::matcher::{Arm, Mods};
 use crate::actions::model::ActionEvent;
+use crate::session::record::pause_totals::PauseTotals;
 
 /// Printable typing keys (digits, letters, space, enter, backspace, tab). We stamp a
 /// timestamp on each fresh DOWN of any of these - NEVER which key (privacy).
@@ -40,7 +41,7 @@ pub struct KeyboardTracker {
 }
 
 impl KeyboardTracker {
-    pub fn start(arms: Vec<Arm>) -> Self {
+    pub fn start(arms: Vec<Arm>, ledger: Arc<PauseTotals>) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let events: Arc<Mutex<Vec<ActionEvent>>> = Arc::new(Mutex::new(Vec::new()));
         let typing: Arc<Mutex<Vec<u32>>> = Arc::new(Mutex::new(Vec::new()));
@@ -59,14 +60,16 @@ impl KeyboardTracker {
                         active[i] = now;
                         let kind = if now { Some(arm.on_down) } else { arm.on_up };
                         if let Some(kind) = kind {
-                            let t = start.elapsed().as_millis() as u32;
+                            let raw = start.elapsed().as_millis() as u64;
+                            let t = ledger.stamp(raw);
                             if let Ok(mut g) = e.lock() { g.push(ActionEvent { t, kind }); }
                         }
                     }
                     for (k, &vk) in TYPING_VKS.iter().enumerate() {
                         let d = key_down(vk);
                         if d && !typ_prev[k] {
-                            let t = start.elapsed().as_millis() as u32;
+                            let raw = start.elapsed().as_millis() as u64;
+                            let t = ledger.stamp(raw);
                             if let Ok(mut g) = ty.lock() { g.push(t); }
                         }
                         typ_prev[k] = d;
@@ -103,7 +106,7 @@ mod tests {
 
     #[test]
     fn stop_returns_tuple_with_empty_vecs_when_no_input() {
-        let tracker = KeyboardTracker::start(vec![]);
+        let tracker = KeyboardTracker::start(vec![], Arc::new(PauseTotals::new()));
         let (actions, typing) = tracker.stop();
         assert!(actions.is_empty());
         assert!(typing.is_empty());

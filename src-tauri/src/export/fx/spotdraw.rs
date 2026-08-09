@@ -10,11 +10,13 @@ fn rrect_cov(x: f32, y: f32, mn: [f32; 2], mx: [f32; 2], r: f32) -> f32 {
     (0.5 - sd).clamp(0.0, 1.0)
 }
 
-/// Render the cursor spotlight (mode-dependent) onto the BGRA frame. When `s.dim_camera` is
-/// false, the dim is undone inside `s.cam_rect` (the camera PiP), mirroring fx.wgsl's
-/// `camcov` un-dim so the CPU path (used by both the export CPU fallback and the editor
-/// preview via `preview_fx.rs`) matches the GPU shader exactly.
-pub fn draw_spot(out: &mut [u8], ow: u32, oh: u32, s: &Spot) {
+/// Render the cursor spotlight (mode-dependent) onto the BGRA frame. `intensity` is
+/// `FxState::intensity`, which fx.wgsl reads as `u.c.z` to scale the Halo ring. When `s.dim_camera`
+/// is false, the dim is undone inside `s.cam_rect` (the camera PiP), mirroring fx.wgsl's `camcov`
+/// un-dim. Blur/Nebula stay deliberate approximations here (see `factor`): the shader's 4-tap blur
+/// needs an unmutated source copy and its nebula needs per-pixel fbm, neither affordable per frame
+/// on the CPU - `fx.wgsl` is the reference look and `select_fx` picks it whenever an adapter exists.
+pub fn draw_spot(out: &mut [u8], ow: u32, oh: u32, s: &Spot, intensity: f32) {
     let dim = s.dim.clamp(0.0, 1.0) * s.alpha.clamp(0.0, 1.0);
     if dim <= 0.0 { return; }
     let breathe = if s.mode == SpotlightMode::Breathing { 1.0 + 0.12 * (s.t * 3.1416).sin() } else { 1.0 };
@@ -23,6 +25,7 @@ pub fn draw_spot(out: &mut [u8], ow: u32, oh: u32, s: &Spot) {
     let (fcx, fcy) = (ow as f32 / 2.0, oh as f32 / 2.0);
     let maxd = (fcx * fcx + fcy * fcy).sqrt();
     let halo_w = oh as f32 * 0.02;
+    let inten = intensity.clamp(0.0, 1.0);
     let keep_cam = !s.dim_camera;
     let cam_mn = [s.cam_rect[0], s.cam_rect[1]];
     let cam_mx = [s.cam_rect[2], s.cam_rect[3]];
@@ -45,8 +48,10 @@ pub fn draw_spot(out: &mut [u8], ow: u32, oh: u32, s: &Spot) {
             }
             if s.mode == SpotlightMode::Halo {
                 let d = (x as f32 - s.cx).hypot(y as f32 - s.cy);
+                // fx.wgsl scales the halo ring by `u.c.z` (FxState::intensity); without this the
+                // CPU ring was always full-strength while the shader's faded with the setting.
                 let band = (1.0 - (d - r_in).abs() / halo_w.max(1.0)).clamp(0.0, 1.0);
-                if band > 0.0 { add_tint(out, i, s.tint, band); }
+                if band > 0.0 { add_tint(out, i, s.tint, band * inten); }
             }
             // Undo the dim (and any tint this pixel just picked up) inside the camera rect
             // when the "don't dim the webcam" option is on - matches fx.wgsl's `camcov` mix.
@@ -81,14 +86,28 @@ mod tests {
     #[test]
     fn vignette_dims_corner_not_center() {
         let (w,h)=(100u32,100u32); let mut out = vec![200u8; (w*h*4) as usize];
-        draw_spot(&mut out, w, h, &spot(SpotlightMode::Vignette));
+        draw_spot(&mut out, w, h, &spot(SpotlightMode::Vignette), 1.0);
         assert!(out[0] < out[((50*w+50)*4) as usize], "vignette darkens corners vs center");
     }
     #[test]
     fn halo_tints_the_ring_edge() {
         let (w,h)=(100u32,100u32); let mut out = vec![10u8; (w*h*4) as usize];
-        draw_spot(&mut out, w, h, &spot(SpotlightMode::Halo));
+        draw_spot(&mut out, w, h, &spot(SpotlightMode::Halo), 1.0);
         assert!(out.chunks(4).any(|p| p[0] > 40), "halo paints blue tint (B idx 0)");
+    }
+    #[test]
+    fn halo_ring_scales_with_intensity_like_the_shader() {
+        // fx.wgsl: `color + u.tint.rgb * band * u.c.z` - halving FxState::intensity must halve
+        // the ring's added tint. Before this fix the CPU ring ignored intensity entirely.
+        let (w, h) = (100u32, 100u32);
+        let brightest = |inten: f32| {
+            let mut out = vec![10u8; (w * h * 4) as usize];
+            draw_spot(&mut out, w, h, &spot(SpotlightMode::Halo), inten);
+            out.chunks(4).map(|p| p[0]).max().unwrap()
+        };
+        let (full, half) = (brightest(1.0), brightest(0.5));
+        assert!(half < full, "intensity 0.5 must dim the halo ring ({half} vs {full})");
+        assert!(brightest(0.0) <= 10, "intensity 0 paints no ring at all");
     }
     #[test]
     fn dim_camera_false_keeps_camera_rect_lit() {
@@ -100,7 +119,7 @@ mod tests {
         // rect regardless of corner radius, unlike the bounding-box corner pixel itself (which
         // the rounding legitimately excludes, same as a real rounded-rect SDF).
         s.cam_rect = [0.0, 0.0, 20.0, 20.0]; s.cam_radius = 2.0; s.dim_camera = false;
-        draw_spot(&mut out, w, h, &s);
+        draw_spot(&mut out, w, h, &s, 1.0);
         let center_i = ((10 * w + 10) * 4) as usize;
         assert_eq!(out[center_i], 200, "cam-rect center stays at full brightness when dim_camera is false");
     }
@@ -110,7 +129,7 @@ mod tests {
         let mut out = vec![200u8; (w * h * 4) as usize];
         let mut s = spot(SpotlightMode::Classic);
         s.cam_rect = [0.0, 0.0, 20.0, 20.0]; s.cam_radius = 2.0; s.dim_camera = true;
-        draw_spot(&mut out, w, h, &s);
+        draw_spot(&mut out, w, h, &s, 1.0);
         assert!(out[0] < 200, "dim_camera:true -> today's behavior, camera rect dims like everything else");
     }
 }

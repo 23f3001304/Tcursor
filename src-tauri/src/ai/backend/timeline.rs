@@ -16,28 +16,37 @@ fn fmt(ms: u32) -> String { format!("{:.1}", ms as f64 / 1000.0) }
 struct Moment { t_ms: u32, line: String }
 fn mo(t_ms: u32, line: String) -> Moment { Moment { t_ms, line } }
 
+/// Ms to ADD to an event-clock timestamp to land on the OUTPUT clock, saturating at 0 - the same
+/// shape as `edit::migrate::output_shift`'s recipe (this fn takes the already-computed shift
+/// rather than a `ProjectPaths`, since `ai::commands::build_plan` derives it once and this module
+/// has no path/IO concerns of its own).
+fn sh(t: u32, shift: i64) -> u32 { (t as i64 + shift).max(0) as u32 }
+
 pub fn serialize(
     log: &EventLog, actions: &[ActionEvent], cursor: &CursorTrack,
-    typing: &[u32], dur_ms: u32,
+    typing: &[u32], dur_ms: u32, shift: i64,
 ) -> String {
     let (w, h) = (log.screen.w, log.screen.h);
     let mut m: Vec<Moment> = Vec::new();
 
     for ev in &log.events {
         if ev.kind == EventKind::Down {
-            m.push(mo(ev.t, format!("{}s click ({},{}) {}", fmt(ev.t), ev.x, ev.y, region(ev.x, ev.y, w, h))));
+            let t = sh(ev.t, shift);
+            m.push(mo(t, format!("{}s click ({},{}) {}", fmt(t), ev.x, ev.y, region(ev.x, ev.y, w, h))));
         }
     }
 
     for act in actions {
         if let ActionKind::SetLayout(id) = act.kind {
-            m.push(mo(act.t, format!("{}s layout -> {}", fmt(act.t), format!("{:?}", id).to_lowercase())));
+            let t = sh(act.t, shift);
+            m.push(mo(t, format!("{}s layout -> {}", fmt(t), format!("{:?}", id).to_lowercase())));
         }
     }
 
     if !typing.is_empty() {
-        let (mut s, mut e) = (typing[0], typing[0]);
+        let (mut s, mut e) = (sh(typing[0], shift), sh(typing[0], shift));
         for &ms in &typing[1..] {
+            let ms = sh(ms, shift);
             if ms - e < 1000 { e = ms; }
             else {
                 m.push(mo(s, format!("{}-{}s typing", fmt(s), fmt(e))));
@@ -51,20 +60,21 @@ pub fn serialize(
     let mut ib: Option<u32> = None;
     for i in 0..smp.len() {
         let (t, ct) = smp[i];
+        let t = sh(t, shift);
         if ct == CursorType::IBeam && ib.is_none() { ib = Some(t); }
         else if ct != CursorType::IBeam {
             if let Some(start) = ib.take() {
-                let end = if i > 0 { smp[i - 1].0 } else { start };
+                let end = if i > 0 { sh(smp[i - 1].0, shift) } else { start };
                 m.push(mo(start, format!("{}-{}s text field", fmt(start), fmt(end))));
             }
         }
     }
     if let Some(start) = ib {
-        let end = smp.last().map(|s| s.0).unwrap_or(start);
+        let end = smp.last().map(|s| sh(s.0, shift)).unwrap_or(start);
         m.push(mo(start, format!("{}-{}s text field", fmt(start), fmt(end))));
     }
 
-    let times: Vec<u32> = log.events.iter().map(|e| e.t).collect();
+    let times: Vec<u32> = log.events.iter().map(|e| sh(e.t, shift)).collect();
     for w in times.windows(2) {
         if w[1] - w[0] >= 2000 {
             m.push(mo(w[0], format!("{}-{}s idle", fmt(w[0]), fmt(w[1]))));
@@ -117,7 +127,7 @@ mod tests {
     fn serialize_contains_expected_lines() {
         let out = serialize(&make_log(),
             &[ActionEvent { t: 2000, kind: ActionKind::SetLayout(LayoutId::Camera) }],
-            &CursorTrack::default(), &[1000u32, 1200, 1400], 5000);
+            &CursorTrack::default(), &[1000u32, 1200, 1400], 5000, 0);
         assert!(out.starts_with("clip 5.0s, screen 1920x1080"), "{}", out);
         assert!(out.contains("0.5s click (100,100) top-left"), "{}", out);
         assert!(out.contains("3.5s click (960,540) center"), "{}", out);
@@ -130,7 +140,7 @@ mod tests {
     fn time_ordered() {
         let out = serialize(&make_log(),
             &[ActionEvent { t: 2000, kind: ActionKind::SetLayout(LayoutId::Screen) }],
-            &CursorTrack::default(), &[1000u32, 1100], 5000);
+            &CursorTrack::default(), &[1000u32, 1100], 5000, 0);
         let times: Vec<f64> = out.lines().skip(1).filter_map(|l|
             l.split('s').next().and_then(|s| s.split('-').next()?.parse().ok())
         ).collect();
@@ -144,15 +154,44 @@ mod tests {
         let (log, actions, cursor, typing) = (make_log(),
             vec![ActionEvent { t: 2000, kind: ActionKind::SetLayout(LayoutId::Camera) }],
             CursorTrack::default(), vec![1000u32, 1200]);
-        assert_eq!(serialize(&log, &actions, &cursor, &typing, 5000),
-                   serialize(&log, &actions, &cursor, &typing, 5000));
+        assert_eq!(serialize(&log, &actions, &cursor, &typing, 5000, -800),
+                   serialize(&log, &actions, &cursor, &typing, 5000, -800));
     }
 
     #[test]
     fn ibeam_span_emitted() {
         let log = EventLog { started_unix_ms: 0, screen: scr(), events: vec![] };
         let cursor = CursorTrack { samples: vec![(1000, CursorType::IBeam), (2000, CursorType::Arrow)] };
-        let out = serialize(&log, &[], &cursor, &[], 5000);
+        let out = serialize(&log, &[], &cursor, &[], 5000, 0);
         assert!(out.contains("text field"), "{}", out);
+    }
+
+    /// The whole point of the task: with `events_ms=0, video_start=800` (`shift=-800`, the
+    /// ~0.8s real-recording offset), a click recorded at raw event t=3100 must serialize at
+    /// its OUTPUT-clock time (2.3s), not its raw event-clock time (3.1s) - the director's ops
+    /// land as output-time zooms, so its transcript must reason on that same clock.
+    #[test]
+    fn click_timestamps_shift_onto_the_output_clock() {
+        let log = EventLog { started_unix_ms: 0, screen: scr(),
+            events: vec![ev(3100, EventKind::Down, 100, 100), ev(3100, EventKind::Move, 100, 100)] };
+        let out = serialize(&log, &[], &CursorTrack::default(), &[], 5000, -800);
+        assert!(out.contains("2.3s click"), "{}", out);
+        assert!(!out.contains("3.1s click"), "{}", out);
+    }
+
+    /// Layout switches, typing spans and idle windows all shift by the SAME amount as clicks -
+    /// every timestamp in the transcript must agree on one clock. The clip duration line does
+    /// NOT shift: the caller already passes the true output-clock duration.
+    #[test]
+    fn layout_typing_and_idle_timestamps_shift_identically() {
+        let out = serialize(&make_log(),
+            &[ActionEvent { t: 2000, kind: ActionKind::SetLayout(LayoutId::Camera) }],
+            &CursorTrack::default(), &[1000u32, 1200, 1400], 5000, -800);
+        assert!(out.starts_with("clip 5.0s"), "duration line must not shift: {}", out);
+        assert!(out.contains("0.0s click (100,100) top-left"), "500ms - 800ms clamps to 0: {}", out);
+        assert!(out.contains("2.7s click (960,540) center"), "{}", out);
+        assert!(out.contains("1.2s layout -> camera"), "{}", out);
+        assert!(out.contains("0.2-0.6s typing"), "{}", out);
+        assert!(out.contains("0.0-2.7s idle"), "{}", out);
     }
 }

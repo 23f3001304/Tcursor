@@ -1,4 +1,6 @@
-// Tests for export::camera::moves, split into their own file so moves.rs stays under the size limit.
+// Tests for export::camera::moves, split into their own file so moves.rs stays under the size
+// limit. This file covers the IN-SPAN interpolation (unchanged by Task 27); the span/blend
+// semantics live in moves_span_tests.rs.
 use super::*;
 use crate::edit::model::CameraMove;
 
@@ -9,36 +11,9 @@ fn kf(t_ms: u32, x: f32, y: f32, size: f32, easing: &str) -> CameraMove {
 #[test]
 fn empty_track_samples_to_none() {
     let track = CameraMoveTrack::from_doc(&[]);
+    assert_eq!(track.span(), None);
     assert_eq!(track.sample(0, None), None);
     assert_eq!(track.sample(5000, None), None);
-}
-
-#[test]
-fn single_keyframe_holds_at_any_time() {
-    let track = CameraMoveTrack::from_doc(&[kf(1000, 0.3, 0.7, 0.2, "smooth")]);
-    let want = CamPose { x: 0.3, y: 0.7, size: 0.2 };
-    assert_eq!(track.sample(0, None), Some(want));
-    assert_eq!(track.sample(1000, None), Some(want));
-    assert_eq!(track.sample(50_000, None), Some(want));
-}
-
-#[test]
-fn holds_first_pose_before_and_at_first_keyframe() {
-    let moves = vec![kf(1000, 0.1, 0.1, 0.1, "linear"), kf(2000, 0.9, 0.9, 0.5, "linear")];
-    let track = CameraMoveTrack::from_doc(&moves);
-    let first = CamPose { x: 0.1, y: 0.1, size: 0.1 };
-    assert_eq!(track.sample(0, None), Some(first));
-    assert_eq!(track.sample(999, None), Some(first));
-    assert_eq!(track.sample(1000, None), Some(first));
-}
-
-#[test]
-fn holds_last_pose_at_and_after_last_keyframe() {
-    let moves = vec![kf(1000, 0.1, 0.1, 0.1, "linear"), kf(2000, 0.9, 0.9, 0.5, "linear")];
-    let track = CameraMoveTrack::from_doc(&moves);
-    let last = CamPose { x: 0.9, y: 0.9, size: 0.5 };
-    assert_eq!(track.sample(2000, None), Some(last));
-    assert_eq!(track.sample(9000, None), Some(last));
 }
 
 #[test]
@@ -70,8 +45,8 @@ fn coincident_keyframe_times_snap_to_b_without_dividing_by_zero() {
     let moves = vec![kf(1000, 0.2, 0.2, 0.2, "linear"), kf(1000, 0.8, 0.8, 0.8, "linear"), kf(2000, 0.0, 0.0, 0.0, "linear")];
     let track = CameraMoveTrack::from_doc(&moves);
     let p = track.sample(1000, None).unwrap();
-    // Sorted-stable duplicate t_ms: at exactly t=1000 the "at/before first" hold branch
-    // wins (both kfs share the min t_ms), returning whichever sort placed first.
+    // Sorted-stable duplicate t_ms: at exactly t=1000 the straddling pair is (the LATER of the
+    // two coincident kfs, the 2000 one) with f=0, so one of the two coincident poses comes back.
     assert!(p.x == 0.2 || p.x == 0.8, "got {}", p.x);
 }
 
@@ -85,33 +60,21 @@ fn out_of_order_input_is_sorted_defensively() {
     assert!((mid.x - 0.45).abs() < 1e-6, "x={}", mid.x);
 }
 
+// Task 27 regression guard: the MID-SPAN math is untouched by the span/blend rewrite. Keyframes
+// at 2000/4000 sampled at 3000 must still produce the pre-change interpolation values, computed
+// here the way the old code did (`a + (b-a) * ease(b.easing, (t-a)/(b-a))`), independently of
+// `sample`'s own implementation - and it must not depend on `live` at all.
 #[test]
-fn single_keyframe_with_static_pose_animates_in_from_the_static_start() {
-    // One keyframe at t=1000; static_pose is the caller's un-overridden webcam pose (what it
-    // would show with zero camera_moves). t=0 should read back (approximately) the static pose,
-    // t=1000 the keyframe's pose, and the midpoint must sit strictly between them on every axis -
-    // proving this animates in, rather than holding the keyframe flat for all t (the old bug).
-    let moves = vec![kf(1000, 0.9, 0.9, 0.5, "linear")];
+fn mid_span_interpolation_is_unchanged_by_the_span_rewrite() {
+    let moves = vec![kf(2000, 0.10, 0.80, 0.12, "smooth"), kf(4000, 0.70, 0.20, 0.34, "smooth")];
     let track = CameraMoveTrack::from_doc(&moves);
-    let static_pose = CamPose { x: 0.1, y: 0.1, size: 0.1 };
-
-    let at0 = track.sample(0, Some(static_pose)).unwrap();
-    assert!((at0.x - static_pose.x).abs() < 1e-6, "x={}", at0.x);
-    assert!((at0.y - static_pose.y).abs() < 1e-6, "y={}", at0.y);
-    assert!((at0.size - static_pose.size).abs() < 1e-6, "size={}", at0.size);
-
-    let at1000 = track.sample(1000, Some(static_pose)).unwrap();
-    let want = CamPose { x: 0.9, y: 0.9, size: 0.5 };
-    assert!((at1000.x - want.x).abs() < 1e-6, "x={}", at1000.x);
-    assert!((at1000.y - want.y).abs() < 1e-6, "y={}", at1000.y);
-    assert!((at1000.size - want.size).abs() < 1e-6, "size={}", at1000.size);
-
-    let mid = track.sample(500, Some(static_pose)).unwrap();
-    assert!(mid.x > static_pose.x && mid.x < want.x, "x={}", mid.x);
-    assert!(mid.y > static_pose.y && mid.y < want.y, "y={}", mid.y);
-    assert!(mid.size > static_pose.size && mid.size < want.size, "size={}", mid.size);
-
-    // None still means the old "hold the keyframe flat" behavior, at the same t=500.
-    let held = track.sample(500, None).unwrap();
-    assert_eq!(held, want);
+    let f = ease(Easing::Smooth, (3000.0 - 2000.0) / (4000.0 - 2000.0)); // == smoothstep(0.5) == 0.5
+    let want = CamPose { x: 0.10 + (0.70 - 0.10) * f, y: 0.80 + (0.20 - 0.80) * f, size: 0.12 + (0.34 - 0.12) * f };
+    let live = CamPose { x: 0.95, y: 0.05, size: 0.9 }; // must have no influence mid-span
+    for got in [track.sample(3000, None).unwrap(), track.sample(3000, Some(live)).unwrap()] {
+        assert!((got.x - want.x).abs() < 1e-4, "x={} want {}", got.x, want.x);
+        assert!((got.y - want.y).abs() < 1e-4, "y={} want {}", got.y, want.y);
+        assert!((got.size - want.size).abs() < 1e-4, "size={} want {}", got.size, want.size);
+    }
+    assert!((want.x - 0.40).abs() < 1e-6, "pinned expected value drifted: {}", want.x);
 }

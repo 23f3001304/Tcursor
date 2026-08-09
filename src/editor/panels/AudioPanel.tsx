@@ -26,7 +26,7 @@ export function AudioPanel({
         <span className="e-fl">
           Mic Sync Offset <b>{offsetMs > 0 ? "+" : ""}{offsetMs} ms</b>
         </span>
-        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--e-dim)", marginBottom: 4 }}>
+        <div className="e-hintrow">
           <span>← Mic earlier</span>
           <span>Mic later →</span>
         </div>
@@ -36,7 +36,7 @@ export function AudioPanel({
           step={10}
           value={offsetMs}
           onChange={onChangeOffset}
-          accentColor="var(--e-fg)"
+          ariaLabel="Mic Sync Offset"
         />
       </div>
 
@@ -48,7 +48,7 @@ export function AudioPanel({
           step={5}
           value={Math.round(sysVol * 100)}
           onChange={(v) => onChangeSysVol(v / 100)}
-          accentColor="var(--e-fg)"
+          ariaLabel="System Audio Volume"
         />
       </div>
 
@@ -60,7 +60,7 @@ export function AudioPanel({
           step={5}
           value={Math.round(micVol * 100)}
           onChange={(v) => onChangeMicVol(v / 100)}
-          accentColor="var(--e-fg)"
+          ariaLabel="Microphone Volume"
         />
       </div>
     </div>

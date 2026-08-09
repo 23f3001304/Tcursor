@@ -90,17 +90,17 @@ The webcam decode thread's receiving end. The webcam decoder runs at the export'
 ## WebcamPipe::spawn
 
 ```rust
-pub fn spawn(webcam: &Path, video_start: u64, size: u32, wc_bytes: usize, depth: usize, out_fps: u64) -> Result<WebcamPipe>
+pub fn spawn(webcam: &Path, video_start: u64, dims: (u32, u32), wc_bytes: usize, depth: usize, out_fps: u64) -> Result<WebcamPipe>
 ```
 
-Spawns the webcam `RawDecoder` (at `out_fps`, seeked to `video_start`, cover-cropped to a `size` square) and its decode thread. Like `ScreenPipe::spawn`, spawn errors surface immediately.
+Spawns the webcam `RawDecoder` (at `out_fps`, seeked to `video_start`, cover-cropped to `dims`) and its decode thread. Like `ScreenPipe::spawn`, spawn errors surface immediately.
 
 ### Inputs
 
 - `webcam: &Path` - the webcam recording. *Why:* the decode input for the picture-in-picture panel.*
 - `video_start: u64` - ms offset to seek the webcam to, aligning it with the screen timeline. *Why:* the two streams start at different wall-clock offsets.*
-- `size: u32` - square side length the webcam is cover-cropped to. *Why:* the compositor expects a square camera panel.*
-- `wc_bytes: usize` - bytes per webcam frame (`size * size * 4`). *Why:* sizes the pooled buffers and the decoder assertion.*
+- `dims: (u32, u32)` - the `(w, h)` box the webcam is cover-cropped to (`RenderMeta::webcam_w`/`webcam_h`). *Why a pair, not a square side:* the compositor stretches this buffer across the camera panel, so it must be decoded at the PANEL's aspect - a `CamAspect::Wide` panel is 16:9 and a square decode came out 1.78x too wide. Held on the pipe (not resent per frame) since it is fixed for the whole export.*
+- `wc_bytes: usize` - bytes per webcam frame (`dims.0 * dims.1 * 4`). *Why:* sizes the pooled buffers and the decoder assertion.*
 - `depth: usize` - channel + pool depth, as for `ScreenPipe`.
 - `out_fps: u64` - the export's resolved output frame rate (`exporter::export`'s own `out_fps`, from `ExportSettings.fps`). *Why threaded in rather than using the `OUT_FPS` constant:* the webcam decode cadence must match whatever rate the composite loop and encoder actually run at, not always exactly 60 - previously this was hardcoded to the `OUT_FPS` constant regardless of the (formerly fixed) export rate.
 
@@ -114,11 +114,11 @@ Spawns the webcam `RawDecoder` (at `out_fps`, seeked to `video_start`, cover-cro
 pub fn next(&mut self) -> Result<Option<(Vec<u8>, u32, u32)>>
 ```
 
-Returns the next webcam frame `(buf, w, h)` (both dims equal `size`), blocking on the decode channel. `Ok(None)` at EOF matches the old `read_webcam` dropping the decoder so every later frame has no camera. A stored decode error is returned as `Err`. The caller returns `buf` to the pool via `recycle` once it has been composited.
+Returns the next webcam frame `(buf, w, h)` (the `dims` `spawn` was given), blocking on the decode channel. The decode thread streams bare buffers; the dims are attached here from the pipe's own state. `Ok(None)` at EOF matches the old `read_webcam` dropping the decoder so every later frame has no camera. A stored decode error is returned as `Err`. The caller returns `buf` to the pool via `recycle` once it has been composited.
 
 ### Returns
 
-`Result<Option<(Vec<u8>, u32, u32)>>` - `Some((bgra, size, size))` while frames remain; `None` at EOF.
+`Result<Option<(Vec<u8>, u32, u32)>>` - `Some((bgra, w, h))` while frames remain; `None` at EOF.
 
 ## WebcamPipe::recycle
 

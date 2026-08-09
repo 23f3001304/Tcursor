@@ -149,6 +149,11 @@ export interface ProjectManifest {
  *  (never a rejection) when it is missing or corrupt, mirroring the Rust
  *  `ProjectManifest::load_or_default`. */
 export const getProjectManifest = (folder: string) => invoke<ProjectManifest>("get_project_manifest", { folder });
+/** Whether this recording's video already has the OS cursor baked into its pixels - derived from
+ *  the immutable record-time `settings.json` snapshot, NOT from the editable doc. `false` means
+ *  the "System" cursor style must be re-created from the recorded path (see `cursorPreview.ts`).
+ *  Resolves `true` (today's behavior: draw nothing) if the snapshot is missing or unreadable. */
+export const osCursorInVideo = (folder: string) => invoke<boolean>("os_cursor_in_video", { folder });
 /** Kicks off the full editor-preview preprocessing pass - proxy (`DEFAULT_PROXY_HEIGHT`), filmstrip
  *  thumbnails, system+mic waveforms, mixed preview audio, and the `edit.json` seed - on a
  *  background thread, reusing the exact `ensure_*`/seed functions the editor's own lazy fallback

@@ -7,6 +7,10 @@ use crate::export::types::Easing;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CamPose { pub x: f32, pub y: f32, pub size: f32 }
 
+/// Handoff length (ms) on EACH side of the keyframe span, between the live layout-resolved
+/// pose and the track. A module constant, deliberately not a setting.
+pub const KF_BLEND_MS: u32 = 350;
+
 /// One sorted keyframe, its wire-easing pre-resolved to `Easing` once at construction.
 struct Kf { t_ms: u32, x: f32, y: f32, size: f32, easing: Easing }
 
@@ -28,45 +32,66 @@ impl CameraMoveTrack {
         Self { kfs }
     }
 
-    /// `None` for an empty track (caller keeps its static pose). Otherwise: at/before the
-    /// first keyframe, ease FROM `static_pose` (the caller's un-overridden static PiP pose)
-    /// INTO the first keyframe over `[0, first.t_ms]` using the first keyframe's own easing -
-    /// an implicit t=0 keyframe at the static pose, same "ease into the entered segment"
-    /// convention `LayoutTrack::scene_at` uses. `static_pose = None` (or `first.t_ms == 0`,
-    /// nothing to ease from) holds the first keyframe's pose flat, same as before this
-    /// existed. Hold the last keyframe at/after it; between two keyframes `a`/`b` ease INTO
-    /// `b` using `b`'s own easing over `[a.t_ms, b.t_ms]` - unchanged.
-    pub fn sample(&self, t_ms: u32, static_pose: Option<CamPose>) -> Option<CamPose> {
-        if self.kfs.is_empty() { return None; }
-        let first = &self.kfs[0];
-        if t_ms <= first.t_ms {
-            return Some(match static_pose {
-                Some(s) if first.t_ms > 0 => {
-                    let f = ease(first.easing, t_ms as f32 / first.t_ms as f32);
-                    CamPose { x: s.x + (first.x - s.x) * f, y: s.y + (first.y - s.y) * f, size: s.size + (first.size - s.size) * f }
-                }
+    /// The half-open-ish span this track OWNS: `[first - KF_BLEND_MS, last + KF_BLEND_MS]`
+    /// (saturating at 0). `None` for an empty track. Outside it `sample` is `None`.
+    pub fn span(&self) -> Option<(u32, u32)> {
+        Some((self.kfs.first()?.t_ms.saturating_sub(KF_BLEND_MS),
+              self.kfs.last()?.t_ms.saturating_add(KF_BLEND_MS)))
+    }
+
+    /// The PiP pose at `t_ms`, or `None` when the keyframes do NOT own this frame - the
+    /// caller then leaves the layout-resolved panel alone. `live` is that layout-resolved
+    /// ("live") pose for THIS frame, re-read every call, not a one-off static pose.
+    ///
+    /// Five cases: outside `span()` -> `None` (layout owns it); `[first - BLEND, first)` ->
+    /// ease FROM `live` INTO the first keyframe with the first keyframe's own easing;
+    /// `[first, last]` -> keyframe interpolation, easing INTO `b` with `b`'s own easing
+    /// (unchanged math); `(last, last + BLEND]` -> ease FROM the last keyframe BACK to
+    /// `live`, which tracks a moving target because it is re-evaluated per frame. A single
+    /// keyframe therefore eases in, hits its pose for that instant, and eases back out (a
+    /// hold needs two keyframes). `live = None` skips both blends and snaps to the nearest
+    /// end keyframe; the span rule itself never depends on it.
+    pub fn sample(&self, t_ms: u32, live: Option<CamPose>) -> Option<CamPose> {
+        let (entry, exit) = self.span()?;
+        let (first, last) = (self.kfs.first()?, self.kfs.last()?);
+        if t_ms < entry || t_ms > exit { return None; }
+        if t_ms < first.t_ms {
+            let win = first.t_ms - entry; // == KF_BLEND_MS unless clamped at t=0
+            return Some(match live {
+                Some(l) if win > 0 => mix(l, pose(first), ease(first.easing, (t_ms - entry) as f32 / win as f32)),
                 _ => pose(first),
             });
         }
-        let last = self.kfs.len() - 1;
-        if t_ms >= self.kfs[last].t_ms { return Some(pose(&self.kfs[last])); }
+        if t_ms > last.t_ms {
+            return Some(match live {
+                Some(l) => mix(pose(last), l, ease(last.easing, (t_ms - last.t_ms) as f32 / KF_BLEND_MS as f32)),
+                None => pose(last),
+            });
+        }
+        if t_ms == last.t_ms { return Some(pose(last)); } // also the single-keyframe instant
 
-        // First index whose t_ms is > t_ms; since t_ms is strictly between the first and
-        // last keyframe's times (checked above), this always lands in (0, last].
+        // First index whose t_ms is > t_ms; since t_ms is inside [first, last) here, this
+        // always lands in (0, last].
         let bi = self.kfs.iter().position(|k| k.t_ms > t_ms).unwrap();
         let (a, b) = (&self.kfs[bi - 1], &self.kfs[bi]);
         if b.t_ms == a.t_ms { return Some(pose(b)); } // coincident keyframes: no divide-by-zero
         let f = ease(b.easing, (t_ms - a.t_ms) as f32 / (b.t_ms - a.t_ms) as f32);
-        Some(CamPose {
-            x: a.x + (b.x - a.x) * f,
-            y: a.y + (b.y - a.y) * f,
-            size: a.size + (b.size - a.size) * f,
-        })
+        Some(mix(pose(a), pose(b), f))
     }
 }
 
 fn pose(k: &Kf) -> CamPose { CamPose { x: k.x, y: k.y, size: k.size } }
 
+/// Component-wise lerp of a whole pose (x/y/size); the rect is derived from the result once,
+/// by `rect_from_center`, so the T14 aspect handling applies to the blended pose too.
+fn mix(a: CamPose, b: CamPose, f: f32) -> CamPose {
+    CamPose { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f, size: a.size + (b.size - a.size) * f }
+}
+
 #[cfg(test)]
 #[path = "moves_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "moves_span_tests.rs"]
+mod span_tests;

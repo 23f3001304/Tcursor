@@ -5,8 +5,8 @@ The export progress/outcome view rendered inside `ExportDialog` once an export h
 ## ExportProgress
 
 ```tsx
-export function ExportProgress({ exporting, pct, done, error, onReset, onClose }: {
-  exporting: boolean; pct: number; done: boolean; error: string | null;
+export function ExportProgress({ exporting, pct, done, error, exportPath, onReset, onClose }: {
+  exporting: boolean; pct: number; done: boolean; error: string | null; exportPath: string;
   onReset: () => void; onClose: () => void;
 }): JSX.Element
 ```
@@ -19,14 +19,15 @@ Renders one of three views depending on props: a live progress bar, a success ou
 - `pct: number` - progress percentage 0-100 (from the `export-progress` Tauri event, via `useEditorData`). *Why:* shown directly and fed to `estimateEtaMs` for the ETA line.
 - `done: boolean` - whether the export finished successfully. *Why:* switches to the checkmark outcome view once `exporting` has gone false without an error.
 - `error: string | null` - the export error message, or `null`. *Why a string not a boolean:* the message is shown directly in the error view so the user knows what failed, not just that something did.
-- `onReset: () => void` - called from the "Try again" (error) / "Export again" (done) button. *Why:* owned by the caller (`ExportDialog`/`Editor`) since it clears the lifted `exportDone`/`exportError` state, returning `ExportDialog` to its settings-form view.
+- `exportPath: string` - the finished export's own absolute file path (`export-done`'s payload, `<folder>/final.<ext>` - see `run.rs`), or `""` before any export has completed. Gates whether the done view's "Show in folder" button renders at all.
+- `onReset: () => void` - called from the "Try again" (error) / "Export again" (done) button. *Why:* owned by the caller (`ExportDialog`/`Editor`) since it clears the lifted `exportDone`/`exportError`/`exportPath` state, returning `ExportDialog` to its settings-form view.
 - `onClose: () => void` - called from "Close"/"Done". *Why:* dismisses the whole dialog; owned by the caller since the open/closed state lives in `Editor`.
 
 ### Behavior
 
 **Progress view** (`!done && !error`): a `Spin` + "Exporting..." + `{pct}%` row, a Motion-animated fill bar (`.e-export-bar-fill`, spring transition matching `TopBar`'s own mini bar), and an ETA line from `estimateEtaMs(Date.now() - startRef.current, pct)` - shows "Estimating time remaining..." until `pct > 0`.
 
-**Done view** (`done`): a check icon, "Export complete", and two buttons - "Export again" (`onReset`) and "Done" (`onClose`, primary).
+**Done view** (`done`): a check icon, "Export complete", and either two or three buttons - "Export again" (`onReset`), "Show in folder" (calls `revealItemInDir(exportPath)` from `@tauri-apps/plugin-opener`, swallowing a rejection - only rendered when `exportPath` is non-empty), and "Done" (`onClose`, primary).
 
 **Error view** (`error`, checked first so an error always wins over a stale `done`): a warning icon, "Export failed", the raw `error` message, and two buttons - "Close" (`onClose`) and "Try again" (`onReset`, primary).
 

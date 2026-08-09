@@ -27,15 +27,17 @@ pub(crate) fn spawn_screen(mut dec: RawDecoder, pool: BufPool,
     })
 }
 
-/// Webcam decode loop: stream `(buf, size)` one frame per output frame (1:1). Stops
-/// (dropping `tx`) on EOF, on a closed channel, or after storing a decode error.
+/// Webcam decode loop: stream one buffer per output frame (1:1). Stops (dropping `tx`) on
+/// EOF, on a closed channel, or after storing a decode error. The frame's dimensions are
+/// fixed for the whole export (the decoder cover-crops to them), so `WebcamPipe` holds them
+/// rather than repeating them on every message.
 pub(crate) fn spawn_webcam(mut dec: RawDecoder, pool: BufPool,
-    tx: SyncSender<(Vec<u8>, u32)>, size: u32, err: Arc<Mutex<Option<Error>>>) -> JoinHandle<()> {
+    tx: SyncSender<Vec<u8>>, err: Arc<Mutex<Option<Error>>>) -> JoinHandle<()> {
     std::thread::spawn(move || {
         loop {
             let mut buf = pool.take();
             match dec.read_frame(&mut buf) {
-                Ok(true) => { if tx.send((buf, size)).is_err() { break; } }
+                Ok(true) => { if tx.send(buf).is_err() { break; } }
                 Ok(false) => break,
                 Err(e) => { *err.lock().unwrap() = Some(e); break; }
             }

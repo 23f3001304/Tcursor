@@ -89,14 +89,20 @@ describe("resolvedCamDefault (mirrors ZoomSettings::resolved_cam_action)", () =>
 describe("resolveCamAction (mirrors cam_action_at)", () => {
   const fallback = { shrink: { to: 0.62 } } as const;
 
-  it("falls back with no zooms, an inheriting zoom, or outside every zoom", () => {
-    expect(resolveCamAction([], 500, fallback)).toEqual(fallback);
-    expect(resolveCamAction([zoom()], 500, fallback)).toEqual(fallback);
-    expect(resolveCamAction([zoom({ cam_action: "stay" })], 5000, fallback)).toEqual(fallback);
+  it("falls back to the global action AND scale with no zooms, or outside every zoom", () => {
+    expect(resolveCamAction([], 500, fallback, TS)).toEqual([fallback, TS]);
+    expect(resolveCamAction([zoom({ cam_action: "stay" })], 5000, fallback, TS)).toEqual([fallback, TS]);
+  });
+
+  it("an active zoom with no cam_action inherits the global ACTION but still reports its OWN scale", () => {
+    // zoom()'s scale defaults to 2.0, distinct from the global fallback TS=2.2 - the winner's own
+    // scale is never a "fallback" concern the way the action is, since Zoom.scale (unlike
+    // cam_action) is never optional.
+    expect(resolveCamAction([zoom()], 500, fallback, TS)).toEqual([fallback, 2.0]);
   });
 
   it("uses a per-zoom override inside the zoom", () => {
-    expect(resolveCamAction([zoom({ cam_action: "stay" })], 500, fallback)).toBe("stay");
+    expect(resolveCamAction([zoom({ cam_action: "stay" })], 500, fallback, TS)[0]).toBe("stay");
   });
 
   it("lets the highest layer win an overlap, like CameraSim", () => {
@@ -104,7 +110,24 @@ describe("resolveCamAction (mirrors cam_action_at)", () => {
       zoom({ id: "a", start_ms: 0, end_ms: 2000, layer: 0, cam_action: "stay" }),
       zoom({ id: "b", start_ms: 1000, end_ms: 3000, layer: 1, cam_action: "hide" }),
     ];
-    expect(resolveCamAction(zs, 1500, fallback)).toBe("hide");
-    expect(resolveCamAction(zs, 500, fallback)).toBe("stay");
+    expect(resolveCamAction(zs, 1500, fallback, TS)[0]).toBe("hide");
+    expect(resolveCamAction(zs, 500, fallback, TS)[0]).toBe("stay");
+  });
+
+  // THE bug this task fixes: a zoom's own `scale` (a first-class per-zoom slider, presets
+  // 1.6/2.2/2.8) must drive its shrink/hide progress, not the global `zoom.target_scale` -
+  // otherwise a 1.6x zoom only ever reaches ~50% progress against a 2.2x global default.
+  it("returns the winning zoom's own scale, not the global fallback scale", () => {
+    const zs = [zoom({ cam_action: "hide", scale: 1.6 })];
+    const [action, scale] = resolveCamAction(zs, 500, fallback, TS);
+    expect(action).toBe("hide");
+    expect(scale).toBe(1.6);
+  });
+
+  it("reaches full effect at the zoom's own peak scale, not the global one", () => {
+    const zs = [zoom({ cam_action: "hide", scale: 1.6 })];
+    const [action, scale] = resolveCamAction(zs, 500, fallback, TS);
+    // live scale === the zoom's own peak (1.6, not TS=2.2) -> full hide.
+    expect(camZoomAlpha(action, 1.6, scale)).toBe(0);
   });
 });

@@ -9,14 +9,40 @@ pub struct FfmpegFrameSink {
     child: Child,
     width: u32,
     height: u32,
+    warned: bool,
 }
 ```
 
 Active encode session. Holds the spawned ffmpeg process and the expected frame dimensions.
 
 - `child: Child` - *Spawned ffmpeg process. `stdin` is a `Stdio::piped()` handle to which `push` writes BGRA bytes. Closing `stdin` in `finish` signals EOF so ffmpeg flushes and exits.*
-- `width: u32` - *Expected frame width. Used in `debug_assert` inside `push` to catch dimension mismatches early in development builds.*
+- `width: u32` - *Expected frame width, checked against every pushed frame by `write_or_skip`.*
 - `height: u32` - *Expected frame height; same role.*
+- `warned: bool` - *Latches `true` the first time `push` sees a dimension mismatch (e.g. a mid-record window resize on the legacy capture path), so the stderr warning fires once per session instead of once per mismatched frame.*
+
+## write_or_skip
+
+```rust
+fn write_or_skip(w: &mut dyn Write, f: &Frame, expected: (u32, u32), warned: &mut bool) -> std::io::Result<bool>
+```
+
+The frame-size guard `push` delegates to. A dimension mismatch would misalign every later frame in the fixed-size rawvideo pipe (ffmpeg was launched with `-video_size {width}x{height}` and never re-reads it), so instead of writing misaligned bytes, a mismatched frame is skipped entirely - the encoder keeps its byte alignment and the output video simply freezes on the last good frame until dimensions match again. Takes `w: &mut dyn Write` rather than the sink's `Child` directly so it's unit-testable against a plain `Vec<u8>` without spawning ffmpeg.
+
+### Inputs
+
+- `w: &mut dyn Write` - The byte sink to write matching frames to (ffmpeg's stdin in production, a `Vec<u8>` in tests).
+- `f: &Frame` - The frame under consideration.
+- `expected: (u32, u32)` - The dimensions the pipe was opened with (`(self.width, self.height)`).
+- `warned: &mut bool` - Flips to `true` on the first mismatch and gates the `eprintln!` so repeated mismatches don't spam stderr.
+
+### Implementation
+
+1. If `(f.width, f.height) != expected`: log `ffmpeg sink: frame {w}x{h} != expected {w}x{h}, skipping (window resized mid-record?)` once, gated on `!*warned`, then return `Ok(false)` without writing anything.
+2. Otherwise write `f.bgra` in full via `w.write_all(&f.bgra)` and return `Ok(true)`.
+
+### Returns
+
+`std::io::Result<bool>` - `Ok(true)` if the frame was written, `Ok(false)` if it was skipped for a dimension mismatch (skipping is not a failure - callers must not count a skipped frame as encoded or record its timestamp); `Err` only if the underlying `write_all` fails.
 
 ### Used by
 
@@ -129,10 +155,10 @@ Spawns ffmpeg for offline export (`exporter::export`'s only caller). Unlike `new
 ## FfmpegFrameSink::push
 
 ```rust
-fn push(&mut self, f: &Frame) -> std::io::Result<()>
+fn push(&mut self, f: &Frame) -> std::io::Result<bool>
 ```
 
-Writes all bytes of `f.bgra` to ffmpeg's stdin in one `write_all` call.
+Writes `f.bgra` to ffmpeg's stdin, or skips it if the dimensions don't match this session's fixed pipe size.
 
 ### Inputs
 
@@ -140,13 +166,12 @@ Writes all bytes of `f.bgra` to ffmpeg's stdin in one `write_all` call.
 
 ### Implementation
 
-1. In debug builds, `debug_assert_eq!((f.width, f.height), (self.width, self.height))`. *Why assert:* a dimension mismatch produces corrupted output silently in release builds; the assert catches it in development.*
-2. Get a mutable reference to `child.stdin` via `.as_mut().expect(...)`. *Why `expect`:* `stdin` is `Some` from construction until `finish` takes it; panicking here indicates a programming error.*
-3. Call `stdin.write_all(&f.bgra)`.
+1. Get a mutable reference to `child.stdin` via `.as_mut().expect(...)`. *Why `expect`:* `stdin` is `Some` from construction until `finish` takes it; panicking here indicates a programming error.*
+2. Delegate to `write_or_skip(stdin, f, (self.width, self.height), &mut self.warned)`, which writes (returning `Ok(true)`) on a dimension match and skips (logging once, returning `Ok(false)`) on a mismatch - see `write_or_skip` above for why a mismatch is skipped rather than written, and why the caller must check this bool before counting the frame.
 
 ### Returns
 
-`std::io::Result<()>` - fails if ffmpeg exited early and the stdin pipe is broken.
+`std::io::Result<bool>` - fails if ffmpeg exited early and the stdin pipe is broken; otherwise `Ok(true)` for a normal write or `Ok(false)` for a skipped mismatched frame - callers (`RecordingSession::pump_once`, `pacing::emit_due`) only count/timestamp a frame on `Ok(true)`.
 
 ## FfmpegFrameSink::finish
 

@@ -91,7 +91,7 @@ A speed-ramp segment that stretches or compresses a time range in the export.
 ## LayoutSeg
 
 ```ts
-export interface LayoutSeg { id: string; start_ms: number; end_ms: number; layout: string; transition_ms: number; easing: string }
+export interface LayoutSeg { id: string; start_ms: number; end_ms: number; layout: string; transition_ms: number; easing: string; transition_out_ms: number; easing_out: string }
 ```
 
 A time range in which a specific output layout (screen-only, picture-in-picture, presenter, etc.) is active.
@@ -99,7 +99,8 @@ A time range in which a specific output layout (screen-only, picture-in-picture,
 - `id: string` - stable identifier.
 - `start_ms / end_ms: number` - playback time range for this segment.
 - `layout: string` - layout mode name (e.g., `"screen"`, `"presenter"`, `"camera_only"`). *Why a string rather than a typed union:* matches the Rust serde representation and allows new layout names to be added without regenerating the TS types.
-- `transition_ms: number` - cross-fade duration (ms) blending in from whatever layout preceded this segment.
+- `transition_ms: number` - cross-fade duration (ms) blending IN from whatever layout preceded this segment; the blend STARTS at `start_ms`.
+- `transition_out_ms: number` / `easing_out: string` - the exit cross-fade, which COMPLETES at `end_ms`. `0` is a hard cut. *Why these are required here despite being serde-defaulted in Rust:* Rust always SERIALIZES them, so every doc that reaches TypeScript has them - only files on disk can be missing them.
 - `easing: string` - easing function name for that cross-fade, same free-form string convention as `Zoom.easing`.
 
 ### Used by
@@ -232,8 +233,8 @@ Discriminated union of all edit verbs. Each variant is tagged by the `op` string
 - `set_aspect` - replaces `EditDoc.aspect`; the next export or preview build re-resolves the output `Layout` from it.
 - `add_cut` - appends a new `Cut` for the given time range.
 - `set_speed` - sets or replaces the speed ramp covering `[start_ms, end_ms]` with the given `factor`. *Why set rather than add:* the backend merges or replaces overlapping speed segments; the caller describes the desired outcome, not the mutation.
-- `add_layout_seg` - appends a new `LayoutSeg` of `layout` starting at `at_ms` with duration `dur_ms`.
-- `update_layout_seg` - patches any subset of a layout segment's fields by `id`: time range, `layout` name, `transition_ms`, `easing`. *Why partial update:* dragging a segment's edge on the timeline changes only `start_ms`/`end_ms`.
+- `add_layout_seg` - appends a new `LayoutSeg` of `layout` starting at `at_ms` with duration `dur_ms`. `transition_out_ms`/`easing_out` are optional; omitted, the segment gets the hard-cut default, so existing callers are unchanged.
+- `update_layout_seg` - patches any subset of a layout segment's fields by `id`: time range, `layout` name, `transition_ms`, `easing`, `transition_out_ms`, `easing_out`. *Why partial update:* dragging a segment's edge on the timeline changes only `start_ms`/`end_ms`.
 - `remove_layout_seg` - deletes the layout segment with the given `id`.
 - `add_effect` - appends a new `EffectRegion` of `kind` for the given time range.
 - `update_effect` - patches any subset of an effect region's fields by `id`, including `layer` for overlap stacking.

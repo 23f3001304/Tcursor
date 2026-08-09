@@ -5,18 +5,20 @@ Resolves the active `Scene` at any video timestamp from the recording's `SetLayo
 ## LayoutTrack
 
 ```rust
-pub struct LayoutTrack {
-    switches: Vec<(u32, Scene)>,
-    transition_ms: u32,
-}
+pub struct LayoutTrack { segs: Vec<Seg>, base: Scene }
+
+struct Seg { start_ms: u32, end_ms: u32, scene: Scene, transition_ms: u32, easing: Easing,
+    transition_out_ms: u32, easing_out: Easing }
 ```
 
-Holds the precomputed sequence of layout changes for one export. Initialized once in `new` and queried per output frame in `scene_at`.
+Holds the resolved layout segments for one export. Built once (`new` from recorded actions, or `from_segs` from `doc.layout`) and queried per output frame in `scene_at`.
 
 ### Fields
 
-- `switches: Vec<(u32, Scene)>` - *time-ordered list of `(start_ms, scene)` pairs. Always begins with `(0, Screen)` so every timestamp has a valid base scene. Each `SetLayout` action appends one entry.*
-- `transition_ms: u32` - *cross-fade duration in milliseconds. `0` disables interpolation (hard cut).*
+- `segs: Vec<Seg>` - *segments sorted by `start_ms`. Each is active only INSIDE `[start_ms, end_ms)` and carries its own cross-fade feel in AND out.*
+- `base: Scene` - *the `screen` layout. OUTSIDE every segment - a gap, or before the first / after the last - this is what resolves, the free-pill "empty means default" model.*
+- `Seg::transition_ms` / `easing` - *the ENTRY blend, which STARTS at `start_ms`.*
+- `Seg::transition_out_ms` / `easing_out` - *the EXIT blend, which COMPLETES at `end_ms` (symmetric with the entry). `0` is a hard cut - the value every doc written before exit transitions existed deserializes to, so old docs render bit-identically.*
 
 ### Used by
 
@@ -57,11 +59,11 @@ Builds the switch list from the `SetLayout` actions in the recording.
 pub fn scene_at(&self, t_ms: u32) -> Scene
 ```
 
-Returns the interpolated `Scene` at `t_ms`, cross-fading from the previous switch over the first `transition_ms` after a layout change.
+Returns the resolved `Scene` at `t_ms`: the active segment (else `base`), cross-faded in from what preceded it and out toward what follows it.
 
 ### Inputs
 
-- `t_ms: u32` - video timestamp in milliseconds. *Why:* called once per output frame by the exporter.*
+- `t_ms: u32` - OUTPUT time in milliseconds (0 = the first video frame). *Why:* the track's segments come from `doc.layout`, and every `EditDoc` region list is stored on the output clock, so the query must use the same base. `FrameRenderer::step_camera` passes `pose.out_t`; `anchor_regions` passes a zoom's `start_ms`, which is output time too. The recorded-action fallback track (`LayoutTrack::new`) is shifted onto the output clock by its builder (`EditState::load`) so this holds for both construction paths.*
 
 ### Returns
 
@@ -69,17 +71,41 @@ Returns the interpolated `Scene` at `t_ms`, cross-fading from the previous switc
 
 ### Implementation
 
-1. Find `i = rposition` of the last switch with `start <= t_ms`. *Why `rposition`:* the last qualifying entry is the active one; scanning backwards stops at the first match.*
-2. If `i == 0` or `transition_ms == 0`, return the current scene immediately.
-3. Compute `elapsed = t_ms - start`. If `elapsed >= transition_ms`, return the current scene (transition settled).
-4. Compute `t = ease(Easing::Smooth, elapsed / transition_ms)`. *Why Smooth:* a cubic ease avoids the visual pop of a linear blend when panels change size.*
-5. Return `Scene::lerp(&prev, &cur, t)`.
+1. `active_idx(t_ms)` - the LAST-starting segment containing `t_ms`, so an overlap resolves to the newer one. `None` (a gap) returns `base` immediately.
+2. **Entry**, checked FIRST: if `transition_ms > 0` and `elapsed = t_ms - start_ms` is inside it, blend `raw_scene(start_ms - 1)` -> this segment over `ease(easing, elapsed / transition_ms)`. Checking entry first is what makes a segment shorter than its own two transitions still resolve deterministically - it eases in, never out.
+3. **Exit**: if `transition_out_ms > 0` and `t_ms >= end_ms - transition_out_ms`, ask `successor(end_ms)` what this segment hands off to and whether that successor's own entry is still running there.
+   - If the successor's entry IS running, it **wins** the overlap: the exit stands down and the segment's own scene is returned. One blend at a time - no double-blend, and gapless back-to-back segments stay bit-identical to their pre-exit-transition behavior (the successor's entry already blends FROM this segment, so it was never a pop).
+   - Otherwise blend this segment -> the successor over `ease(easing_out, (t_ms - exit_from) / transition_out_ms)`. The fraction reaches exactly `1` at `end_ms`, so the exit lands ON the successor's pose rather than jumping to it. This is what smooths a segment falling back into a gap, or into a successor that hard-cuts in.
+4. Otherwise return the segment's own scene.
+
+*Why the exit is expressed as "completes at `end_ms`" rather than "starts at `end_ms`":* the pill on the timeline is an honest bound - everything the segment does happens inside its own span, exactly like a zoom's `zoom_out_ms`.
 
 ### Behaviors worth knowing
 
 - `no_actions_is_screenfocus_everywhere` - no `SetLayout` actions -> every timestamp returns the default `Screen` scene.
 - `switch_transitions_then_settles` - at `t=999` the scene is Screen; transition starts at `t=1000`; by `t=1400` it has settled to Camera (400ms transition). The midpoint `t=1200` has `screen.rect.w` strictly between the two presets.
 - `latest_switch_wins` - with switches at `t=100` and `t=200`, querying `t=10000` returns the `t=200` preset.
+- `default_zero_exit_is_the_historical_hard_cut` - the pre-exit-transition gap fixture, sample for sample.
+- `exit_blend_completes_exactly_at_end_ms` - the window opens at `f=0`, is strictly between the two poses mid-way, and the last active sample is within 0.05px of what `end_ms` resolves to; the blend fraction itself is exactly `1.0` at `end_ms`.
+- `a_gapless_successors_entry_wins_the_overlap` - the exit is suppressed against a successor with its own entry, and DOES run against one that hard-cuts in.
+- `a_segments_own_entry_beats_its_own_exit_when_they_overlap` - a 300ms segment with 300ms of each still only eases in.
+
+## from_segs
+
+```rust
+pub fn from_segs(segs: &[crate::edit::model::LayoutSeg], app: &AppearanceSettings,
+                 ow: u32, oh: u32, sw: u32, sh: u32) -> Self
+```
+
+The EDITED path: one `Seg` per `LayoutSeg`, each carrying its own span, entry feel and exit feel (both easing strings go through `easing_from`, so a custom `cubic(...)` curve works for either). Gaps between segments fall back to the base `screen`. Segments are sorted by `start_ms` on construction, so `active_idx`'s "last one wins" is a genuine latest-start rule.
+
+## successor
+
+```rust
+fn successor(&self, end_ms: u32) -> (Scene, bool)
+```
+
+What a segment hands off to at its `end_ms` - the next segment if the two are gapless, else the base `screen` - plus whether that successor's OWN entry blend is still running at that instant. The `bool` is the overlap rule: `true` means the successor's entry wins and the exit must not run.
 
 ## anchor_regions
 
@@ -92,7 +118,7 @@ Re-anchors each zoom region into the screen panel coordinate system that is acti
 ### Inputs
 
 - `raw: Vec<ZoomRegion>` - zoom regions with screen-local anchors (from `autozoom::generate` or `manual::from_actions`). *Why:* those modules produce anchors in full-screen coordinates; the renderer needs them relative to the screen panel rect, which varies by layout.*
-- `track: &LayoutTrack` - the layout track for the current export. *Why:* `track.scene_at(r.start_ms)` yields the screen panel rect at the moment each zoom begins.*
+- `track: &LayoutTrack` - the layout track for the current export. *Why:* `track.scene_at(r.start_ms)` yields the screen panel rect at the moment each zoom begins. Both sides of that call are output time (a zoom's `start_ms` and the track's segments), so the panel looked up really is the one active when the zoom fires.*
 - `sw: u32`, `sh: u32` - source screen dimensions. *Why:* `to_panel` uses these to normalize the anchor into the panel rect.*
 
 ### Returns

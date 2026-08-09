@@ -79,6 +79,22 @@ Borrows the owned mouse log. *Why it exists:* `FrameRenderer` keeps a single cop
 
 `&[MouseEvent]` - the events passed to `new`, in ascending time order.
 
+## Cursor::screen
+
+```rust
+pub fn screen(&self) -> ScreenInfo
+```
+
+Returns the recording's `ScreenInfo` (`Copy`, so this is a cheap read, not a second owner). *Why it exists:* `Cursor` already applies `coordmap::to_frame(&self.screen, ...)` to convert its own raw mouse points to screen-local (`clicks`, `compute_anchors`); FX rendering (`fx_state::render`) needs the same origin to convert click-hit coordinates the same way, so `FrameRenderer::composite_at` reads it through this accessor rather than the renderer storing a second copy of `ScreenInfo`.
+
+### Returns
+
+`ScreenInfo` - the value passed to `new`.
+
+### Used by
+
+- `src-tauri/src/export/render/mod.rs` - `FrameRenderer::composite_at` passes `&self.cursor.screen()` to `fx_state::render`.
+
 ## Cursor::clicks
 
 ```rust

@@ -2,14 +2,19 @@ import { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import type { EditDoc, EditOp } from "../../lib/edit";
 import { CAM_CURVES } from "../inspectors/curves";
+import { KF_BLEND_MS } from "../stage/cameraMoves";
+import { snapKeyframeMs } from "./camSnap";
 
 /** Camera-move keyframe lane: a diamond per doc.camera_moves entry at (t_ms/dur)*100%, over a
  *  dashed baseline (the track). A glowing segment is drawn between each consecutive pair - that's
  *  where the PiP animates; clicking it opens a compact curve popover to set that transition's
- *  easing (into the later keyframe), the same choice the keyframe inspector offers. Gaps before the
- *  first / after the last keyframe stay dashed (the PiP holds there). Single-point keyframes, not
- *  regions (no useRegionDrag): click a diamond selects, horizontal drag retimes (committed on
- *  release). Motion owns the diamond transform (scale + rotate), so it centers by margin. */
+ *  easing (into the later keyframe), the same choice the keyframe inspector offers. Behind it all,
+ *  a translucent span bar marks what the keyframes actually OWN - `[first - KF_BLEND_MS,
+ *  last + KF_BLEND_MS]` - with the two blend windows drawn as the fade ramps of a static CSS
+ *  gradient (no Motion: nothing here moves). Outside that bar the layout segments own the webcam.
+ *  Single-point keyframes, not regions (no useRegionDrag): click a diamond selects, horizontal
+ *  drag retimes (snapped to layout-segment edges and sibling keyframes, committed on release).
+ *  Motion owns the diamond transform (scale + rotate), so it centers by margin. */
 export function CameraLane({ doc, dur, sel, onSel, onApply, track }: {
   doc: EditDoc; dur: number; sel: string | null; onSel: (id: string) => void;
   onApply: (op: EditOp) => Promise<EditDoc | null>; track: React.RefObject<HTMLDivElement | null>;
@@ -31,16 +36,21 @@ export function CameraLane({ doc, dur, sel, onSel, onApply, track }: {
 
   useEffect(() => {
     if (!drag) return;
+    // Snap targets, in ms space so the feel is zoom-independent: every layout-segment edge, plus
+    // every OTHER keyframe's time (its own would pin it where the drag started).
+    const segEdges = doc.layout.flatMap((s) => [s.start_ms, s.end_ms]);
+    const otherKfs = doc.camera_moves.filter((m) => m.id !== drag.id).map((m) => m.t_ms);
     const move = (e: PointerEvent) => {
       const el = track.current; if (!el) return;
       const dms = ((e.clientX - startX.current) / el.getBoundingClientRect().width) * dur;
-      setDrag((d) => d ? { id: d.id, t_ms: Math.max(0, Math.min(dur, Math.round(startT.current + dms))) } : d);
+      const raw = Math.max(0, Math.min(dur, Math.round(startT.current + dms)));
+      setDrag((d) => d ? { id: d.id, t_ms: snapKeyframeMs(raw, segEdges, otherKfs) } : d);
     };
     const up = () => setDrag((d) => { if (d) void onApply({ op: "update_camera_move", id: d.id, t_ms: d.t_ms }); return null; });
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
     return () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
-  }, [drag, dur, onApply, track]);
+  }, [doc, drag, dur, onApply, track]);
 
   // Dismiss the curve popover on any outside pointerdown / Escape.
   useEffect(() => {
@@ -66,16 +76,27 @@ export function CameraLane({ doc, dur, sel, onSel, onApply, track }: {
     setPick((p) => p ? { ...p, easing } : p);
   };
 
+  // The span the track owns, drag-draft included so the bar follows the diamond being moved.
+  // Its two BLEND-long ends are the gradient's fade ramps; the middle sits at a flat 12% alpha.
+  const span = kfs.length > 0
+    ? { from: Math.max(0, kfs[0].t - KF_BLEND_MS), to: kfs[kfs.length - 1].t + KF_BLEND_MS } : null;
+  const ramp = span ? (KF_BLEND_MS / Math.max(span.to - span.from, 1)) * 100 : 0;
+
   return (
     <div className="e-camlane">
       <div className="e-camrow">
         <div className="e-cambase" />
+        {span && (
+          <div className="e-camspan" style={{ left: `${pct(span.from)}%`, width: `${pct(span.to - span.from)}%`,
+            background: `linear-gradient(90deg, rgba(224,93,158,0) 0%, rgba(224,93,158,.12) ${Math.min(ramp, 50)}%,`
+              + ` rgba(224,93,158,.12) ${Math.max(100 - ramp, 50)}%, rgba(224,93,158,0) 100%)` }} />
+        )}
         {kfs.slice(1).map((b, i) => {
           const a = kfs[i];
           return (
             <div key={`seg-${a.id}-${b.id}`} className={`e-camseg${pick?.id === b.id ? " on" : ""}`}
               style={{ left: `${pct(a.t)}%`, width: `${pct(b.t - a.t)}%` }}
-              title={`${b.easing.replace(/_/g, " ")} transition - click to change`}
+              title={`${b.easing.replace(/_/g, " ")} transition - click to change it`}
               onPointerDown={(e) => { e.stopPropagation(); setPick({ id: b.id, leftPct: (pct(a.t) + pct(b.t)) / 2, easing: b.easing }); }} />
           );
         })}

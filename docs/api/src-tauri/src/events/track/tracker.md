@@ -24,7 +24,7 @@ RAII handle for the mouse hook thread. `thread` is `Option` so `stop` and `Drop`
 ## MouseTracker::start
 
 ```rust
-pub fn start(move_min_interval_ms: u32) -> Self
+pub fn start(move_min_interval_ms: u32, ledger: Arc<PauseTotals>) -> Self
 ```
 
 Spawns the hook thread and returns a handle. Returns immediately after the thread has installed the hook.
@@ -32,6 +32,7 @@ Spawns the hook thread and returns a handle. Returns immediately after the threa
 ### Inputs
 
 - `move_min_interval_ms: u32` - forwarded to `EventCollector::new` inside the hook thread. *Why passed here rather than read from settings inside the thread:* the caller already has the resolved config; threading it in avoids a re-read from disk on the hook thread.*
+- `ledger: Arc<PauseTotals>` - the recorder's exact-span paused-time ledger. *Why:* `hook_proc` runs on the hook thread and has no other way to reach the recorder's pause state; every event's raw elapsed-ms reading is pause-adjusted via `ledger.stamp` before being pushed to the collector, so recorded events land in the same pause-compressed timeline as video/audio.
 
 ### Returns
 
@@ -41,14 +42,18 @@ Spawns the hook thread and returns a handle. Returns immediately after the threa
 
 1. Create an `mpsc::channel` to receive the hook thread's OS thread id.
 2. Spawn a named thread `"mouse-hook"`.
-3. Inside the thread (Windows): call `imp::run(move_min_interval_ms, callback)`:
-   a. Initialize `SINK` with a new `Sink { start: Instant::now(), collector: EventCollector::new(...) }`.
+3. Inside the thread (Windows): call `imp::run(move_min_interval_ms, ledger, callback)`:
+   a. Initialize `SINK` with a new `Sink { start: Instant::now(), collector: EventCollector::new(...), ledger }`.
    b. Get and send the OS thread id via `GetCurrentThreadId` + the channel callback.
    c. Install the low-level mouse hook via `SetWindowsHookExW(WH_MOUSE_LL, hook_proc, ...)`. *Why `WH_MOUSE_LL`:* a low-level hook receives global mouse events regardless of which window has focus, which is required to capture clicks outside the TCursor window during recording.*
    d. Run `GetMessageW` in a loop until `WM_QUIT`. Every OS mouse event triggers `hook_proc`.
    e. On `WM_QUIT`: unhook via `UnhookWindowsHookEx` and return.
-4. `hook_proc`: maps the Windows message (`WM_MOUSEMOVE`, `WM_LBUTTONDOWN`, etc.) to `(EventKind, Option<Button>)`, acquires `SINK`, timestamps via `sink.start.elapsed()`, calls `collector.push`. Always calls `CallNextHookEx` to not break the global hook chain.
+4. `hook_proc`: maps the Windows message (`WM_MOUSEMOVE`, `WM_LBUTTONDOWN`, etc.) to `(EventKind, Option<Button>)`, acquires `SINK`, computes the raw elapsed ms via `sink.start.elapsed()`, pause-adjusts it via `sink.ledger.stamp(raw)`, and calls `collector.push` with the adjusted value. Always calls `CallNextHookEx` to not break the global hook chain.
 5. On non-Windows: thread body is a no-op; `thread_id = 0`.
+
+### Behaviors
+
+- `paused_span_is_subtracted_before_reaching_the_collector` - mirrors the `hook_proc` stamp site (raw elapsed ms -> `ledger.stamp` -> `collector.push`) without a real Windows hook: with the ledger paused 1000..3000, a raw reading of 3100 reaches the collector as `t = 1100`.
 
 ## MouseTracker::stop
 

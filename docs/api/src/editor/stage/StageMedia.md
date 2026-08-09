@@ -1,24 +1,25 @@
 # src/editor/stage/StageMedia.tsx
 
-The Stage's hidden native media elements: the screen and webcam `<video>`s that `useCompositeLoop` reads every frame via `canvas.drawImage` (never actually shown on screen - see `HIDDEN`), the mixed preview `<audio>`, and the "preview unavailable" error overlay. Extracted from `Stage.tsx` to keep that file under the 200-line limit. Holds no state of its own - `Stage` owns the refs, the `err` string, and every event-handler closure; this component only renders what it's handed, so its output is byte-identical to the markup that used to live inline in `Stage.tsx`.
+The Stage's hidden native media elements: the screen and webcam `<video>`s that `useCompositeLoop` reads every frame via `canvas.drawImage` (never actually shown on screen - see `HIDDEN`), the mixed preview `<audio>`, and (on `err`) a recoverable error card with a Retry button. Extracted from `Stage.tsx` to keep that file under the 200-line limit. Holds no state of its own - `Stage` owns the refs, the `err` string, and every event-handler closure; this component only renders what it's handed.
 
 ## StageMedia
 
 ```tsx
 export function StageMedia({
-  screenRef, webcamRef, audioRef, src, webcamSrc, audioSrc, err,
+  screenRef, webcamRef, audioRef, src, webcamSrc, audioSrc, err, onRetry,
   onScreenLoadedData, onScreenSeeked, onScreenEnded, onScreenLoadedMetadata, onScreenError,
   onWebcamLoadedData, onWebcamSeeked,
 }): JSX.Element
 ```
 
-Renders (in order) the screen `<video>` when `src` is set, the webcam `<video>` when `webcamSrc` is set, the preview `<audio>` when `audioSrc` is set, and the error overlay when `err` is non-null - the same conditional structure and DOM order `Stage.tsx` rendered inline before this extraction.
+Renders (in order) the screen `<video>` when `src` is set, the webcam `<video>` when `webcamSrc` is set, the preview `<audio>` when `audioSrc` is set, and the error card when `err` is non-null.
 
 ### Props
 
 - `screenRef` / `webcamRef` / `audioRef` (`RefObject<HTMLVideoElement | null>` / `RefObject<HTMLVideoElement | null>` / `RefObject<HTMLAudioElement | null>`) - the same ref objects `Stage` also hands to `useMediaPlayback` and `useCompositeLoop`, so the elements this component renders are the exact ones those hooks read/control. *Why refs are props here:* `Stage` must create them (its hooks need them before this component even mounts, e.g. when `src` is empty), so ownership stays in `Stage` and only the JSX moves.
 - `src: string` / `webcamSrc: string` / `audioSrc: string` - the three media URLs; each element only renders when its URL is truthy (a falsy `src` skips the `<video>` entirely rather than rendering one with an empty `src` attribute).
-- `err: string | null` - the current load-error message (or `null`). Drives the `.e-stage-empty` "Preview unavailable - {err}" overlay.
+- `err: string | null` - the current load-error message (or `null`). Drives the `.e-media-err` error card.
+- `onRetry: () => void` - the error card's Retry button. `Stage` supplies a handler that clears `err`, calls `useEditorData`'s `retryMedia`, and force-reloads the screen `<video>` (see `Stage.md`'s Behavior section for why all three).
 - `onScreenLoadedData: () => void` / `onScreenSeeked: () => void` - fired on the screen video's `loadeddata`/`seeked`; `Stage` uses these to clear `err` and mark the paused-idle composite loop dirty.
 - `onScreenEnded: () => void` - fired on the screen video's `ended`; `Stage` reports the exact rounded duration as the final playhead position (the throttled `onTime` can otherwise miss the last tick).
 - `onScreenLoadedMetadata: (e: SyntheticEvent<HTMLVideoElement>) => void` - fired on the screen video's `loadedmetadata`; `Stage` reports the true duration, restores `currentTime`, and resumes playback if it was playing - handles the raw-capture-to-proxy `src` swap without resetting the playhead.
@@ -32,4 +33,4 @@ Renders (in order) the screen `<video>` when `src` is set, the webcam `<video>` 
 
 ### Used by
 
-- `src/editor/stage/Stage.tsx` - renders one `<StageMedia>`, passing the three refs it created via `useRef` plus its local `err` state and the load/seek/error handler closures.
+- `src/editor/stage/Stage.tsx` - renders one `<StageMedia>`, passing the three refs it created via `useRef` plus its local `err` state, `onRetry`, and the load/seek/error handler closures.

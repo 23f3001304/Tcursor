@@ -1,5 +1,10 @@
 use serde::{Deserialize, Serialize};
 
+/// Current `EditDoc` schema version. v2 is the one-clock contract: EVERY region list in the doc
+/// (`zooms`, `effects`, `layout`, `camera_moves`) is on the OUTPUT clock (0 = first video frame).
+/// v1 docs stored `effects`/`layout` on the raw EVENT clock; `seed::load_or_seed` migrates them.
+pub const DOC_VERSION: u32 = 2;
+
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 #[serde(default)]
 pub struct Trim { pub in_ms: u32, pub out_ms: u32 }
@@ -42,6 +47,7 @@ pub struct Zoom {
     pub cam_action: Option<crate::settings::model::CamZoomAction>,
 }
 
+fn oldest_version() -> u32 { 1 }
 fn default_zoom_in_ms() -> u32 { 350 }
 fn default_zoom_out_ms() -> u32 { 450 }
 /// Matches `fx_state::FADE_MS` (the spotlight fade baseline).
@@ -57,6 +63,12 @@ pub struct LayoutSeg {
     #[serde(default = "default_layout_transition_ms")] pub transition_ms: u32,
     /// Easing wire-name for the fade ("linear" | "smooth" | "spring").
     #[serde(default = "default_layout_easing")] pub easing: String,
+    /// Cross-fade duration (ms) OUT of this layout, COMPLETING at `end_ms` (symmetric with the
+    /// entry, which starts at `start_ms`). `0` - the default, and what every pre-existing doc
+    /// deserializes to - is today's hard cut.
+    #[serde(default)] pub transition_out_ms: u32,
+    /// Easing wire-name for the exit fade; only meaningful when `transition_out_ms > 0`.
+    #[serde(default = "default_layout_easing")] pub easing_out: String,
 }
 fn default_layout_transition_ms() -> u32 { 350 }
 fn default_layout_easing() -> String { "smooth".into() }
@@ -90,8 +102,17 @@ pub struct EffectRegion {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct EditDoc {
-    pub version: u32,
+    /// Missing on disk means the OLDEST schema, never the current one: the app has always written
+    /// this field, so a doc without it predates versioning and must still be offered to `migrate`.
+    /// (Without this field default the container `#[serde(default)]` would fill in `DOC_VERSION`
+    /// and silently skip every migration.) A doc built in memory starts at `DOC_VERSION`.
+    #[serde(default = "oldest_version")] pub version: u32,
     pub trim: Trim,
+    /// The recording's TRUE full duration (ms), independent of `trim`. The upper bound every
+    /// region-placing op (`AddZoom`, `AddLayoutSeg`, `AddCameraMove`, ...) clamps against via
+    /// `edit::ops::region::dur_bound` - so trimming the clip no longer collapses a NEW region to
+    /// the trim point. `0` means "not yet known"; `seed`/`migrate` always backfill it.
+    #[serde(default)] pub clip_ms: u32,
     pub cuts: Vec<Cut>,
     pub zooms: Vec<Zoom>,
     pub speed: Vec<Speed>,
@@ -108,20 +129,45 @@ pub struct EditDoc {
 }
 impl Default for EditDoc {
     fn default() -> Self {
-        Self { version: 1, trim: Trim::default(), cuts: vec![], zooms: vec![], speed: vec![], layout: vec![], effects: vec![], camera_moves: vec![],
+        Self { version: DOC_VERSION, trim: Trim::default(), clip_ms: 0, cuts: vec![], zooms: vec![], speed: vec![], layout: vec![], effects: vec![], camera_moves: vec![],
             aspect: crate::export::types::Aspect::default(), settings: crate::settings::model::Settings::default() }
     }
 }
 
 impl EditDoc {
     pub fn save(&self, path: &std::path::Path) -> std::io::Result<()> {
-        std::fs::write(path, serde_json::to_vec_pretty(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?)
+        let bytes = serde_json::to_vec_pretty(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let tmp = crate::win::sys::proc::tmp_sibling(path);
+        if let Err(e) = std::fs::write(&tmp, &bytes) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e);
+        }
+        std::fs::rename(&tmp, path)
     }
     pub fn load(path: &std::path::Path) -> Option<EditDoc> {
         let bytes = std::fs::read(path).ok()?;
-        serde_json::from_slice(&bytes).ok()
+        match serde_json::from_slice(&bytes) {
+            Ok(doc) => Some(doc),
+            Err(e) => {
+                let corrupt = corrupt_sibling(path);
+                let _ = std::fs::remove_file(&corrupt); // clear a stale corrupt from a prior crash
+                if let Err(re) = std::fs::rename(path, &corrupt) {
+                    eprintln!("edit.json parse failed ({e}) and could not be preserved at {corrupt:?}: {re}");
+                } else {
+                    eprintln!("edit.json parse failed ({e}); original preserved at {corrupt:?}");
+                }
+                None
+            }
+        }
     }
+}
+
+/// `<path>.corrupt`, same directory - where `load` preserves an unparseable file so a reseed
+/// never silently destroys it.
+fn corrupt_sibling(path: &std::path::Path) -> std::path::PathBuf {
+    let name = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    path.with_file_name(format!("{name}.corrupt"))
 }
 
 #[cfg(test)]

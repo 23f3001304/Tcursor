@@ -5,8 +5,9 @@ import { ConfirmDialog } from "../controls/ConfirmDialog";
 const SUPPRESS_KEY = "tcursor_hide_move_off_warn";
 
 /** Owns the "Move in preview" toggle and guards turning it OFF. camera_moves keyframes override the
- *  static webcam controls (size/dock), so switching back to static only takes effect if the
- *  keyframes are cleared - otherwise the static sliders look dead. Turning Move off therefore
+ *  static webcam controls (size/dock) within the span they own (Task 27), so switching back to
+ *  static only fully takes effect if the keyframes are cleared - otherwise the static sliders look
+ *  dead across that span while working everywhere else. Turning Move off therefore
  *  removes the keyframes, but warns first (unless the user ticked "don't ask again") so they are
  *  not lost by accident. Returns the current mode, the toggle handler, and the dialog to render. */
 export function useMoveModeGuard(doc: EditDoc | null, applyOp: (op: EditOp) => Promise<EditDoc | null>) {

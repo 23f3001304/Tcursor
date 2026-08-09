@@ -30,8 +30,8 @@ pub fn export(paths: &ProjectPaths, settings: ExportSettings, on_progress: impl 
     let (mut r, meta) = FrameRenderer::new(paths, layout, capture_fps, settings.resolution, None)?;
 
     let screen_bytes = meta.screen_bytes;
-    let size = meta.webcam_size;
-    let wc_bytes = (size * size * 4) as usize;
+    let wc_dims = (meta.webcam_w, meta.webcam_h); // panel-aspect decode box, not a square
+    let wc_bytes = (wc_dims.0 * wc_dims.1 * 4) as usize;
 
     let (out_w, out_h) = (meta.out_w, meta.out_h);
     let tmp = paths.folder.join(format!("tmp_export.{}", settings.format.extension()));
@@ -48,7 +48,7 @@ pub fn export(paths: &ProjectPaths, settings: ExportSettings, on_progress: impl 
     let encoder = std::thread::spawn(move || -> Result<()> {
         let mut sink = sink;
         for frame in rx {
-            sink.push(&frame).context("encode push")?;
+            let _written = sink.push(&frame).context("encode push")?; // export dims never change; skip never happens here
             let _ = out_returner.send(frame.bgra); // recycle the ~33MB output buffer
         }
         Box::new(sink).finish().context("finish encoder")?;
@@ -57,7 +57,7 @@ pub fn export(paths: &ProjectPaths, settings: ExportSettings, on_progress: impl 
 
     let mut spipe = ScreenPipe::spawn(&paths.video(), screen_bytes, None, depth, out_fps)?;
     let mut wpipe = if paths.webcam().exists() {
-        Some(WebcamPipe::spawn(&paths.webcam(), meta.video_start, size, wc_bytes, depth, out_fps)?)
+        Some(WebcamPipe::spawn(&paths.webcam(), meta.video_start, wc_dims, wc_bytes, depth, out_fps)?)
     } else { None };
     // Zero-frame fallback as a black nv12 frame (Y=16, U=V=128); a zeroed buffer would decode to a
     // green tint through the color convert. Only used if the screen decode yields nothing.

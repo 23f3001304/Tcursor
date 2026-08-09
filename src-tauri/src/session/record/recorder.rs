@@ -13,12 +13,15 @@ use crate::actions::matcher::arming_from_settings;
 use crate::session::paths::ProjectPaths;
 use crate::session::project::manifest::ProjectManifest;
 use crate::session::project::recents;
+use crate::session::record::pause_totals::PauseTotals;
 use crate::session::record::recorder_threads::{save_inputs, spawn_mic_thread, spawn_system_thread};
 use crate::session::record::video_sink::{start_video, VideoSink};
 
 struct Running {
     stop: Arc<AtomicBool>,
     paused: Arc<AtomicBool>,
+    paused_totals: Arc<PauseTotals>,
+    clock: Arc<dyn Clock>,
     video: VideoSink,
     mic_thread: Option<JoinHandle<()>>,
     system_thread: Option<JoinHandle<()>>,
@@ -53,13 +56,12 @@ pub fn start_recording(
     system_audio: bool,
     game_mode: bool,
     recorder: tauri::State<'_, Recorder>,
+    app: tauri::AppHandle,
 ) -> Result<String, String> {
     let mut guard = recorder.inner.lock().unwrap_or_else(|e| e.into_inner());
     if guard.is_some() { return Err("already recording".into()); }
 
-    let base = dirs_next::video_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join("TCursor");
+    let base = dirs_next::video_dir().unwrap_or_else(std::env::temp_dir).join("TCursor");
     let paths = ProjectPaths::new(&base, &project_name);
     paths.ensure().map_err(|e| format!("prepare folder: {e}"))?;
     // Snapshot the active settings so the export reproduces this recording exactly.
@@ -78,13 +80,14 @@ pub fn start_recording(
     // with the slow setup, so they start ~when the screen does.
     let stop = Arc::new(AtomicBool::new(false));
     let paused = Arc::new(AtomicBool::new(false));
+    let paused_totals = Arc::new(PauseTotals::new());
     let mic_start = Arc::new(AtomicU64::new(0));
     let system_start = Arc::new(AtomicU64::new(0));
     let events_ms = clock.now_ms();
-    let mouse = Some(MouseTracker::start(8));
-    let keyboard = Some(KeyboardTracker::start(arming_from_settings(&snap.hotkeys)));
+    let mouse = Some(MouseTracker::start(8, paused_totals.clone()));
+    let keyboard = Some(KeyboardTracker::start(arming_from_settings(&snap.hotkeys), paused_totals.clone()));
     // Only track cursor shape when Enhanced (System/Hidden don't draw a synthetic cursor).
-    let cursor = (snap.cursor.style == crate::settings::model::CursorStyle::Enhanced).then(CursorTypeTracker::start);
+    let cursor = (snap.cursor.style == crate::settings::model::CursorStyle::Enhanced).then(|| CursorTypeTracker::start(paused_totals.clone()));
     let mic_thread = spawn_mic_thread(
         mic_id, paths.mic().to_string_lossy().into_owned(),
         stop.clone(), paused.clone(), clock.clone(), mic_start.clone(),
@@ -118,18 +121,16 @@ pub fn start_recording(
     println!("recording {w}x{h} @ {fps}fps (origin {origin_x},{origin_y})");
 
     let screen = ScreenInfo { w, h, origin_x, origin_y };
-    let started_unix_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
+    let started_unix_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
 
     *guard = Some(Running {
-        stop, paused, video,
+        stop, paused, paused_totals, clock, video,
         mic_thread, system_thread, mouse, keyboard, cursor,
         events_path: paths.events(), actions_path: paths.actions(),
         typing_path: paths.typing(), cursor_path: paths.cursor(),
         screen, started_unix_ms, events_ms, mic_start, system_start, folder: folder.clone(),
     });
+    crate::win::sys::brand_icon::set_recording(&app, true); // brand flair only - never fails the recording
     Ok(folder) // return the folder so the HUD can stream the webcam into it during recording
 }
 
@@ -137,7 +138,9 @@ pub fn start_recording(
 pub fn pause_recording(recorder: tauri::State<'_, Recorder>) -> Result<(), String> {
     let guard = recorder.inner.lock().unwrap_or_else(|e| e.into_inner());
     match guard.as_ref() {
-        Some(r) => { r.paused.store(true, Ordering::SeqCst); Ok(()) }
+        // Ledger stamped under this same lock, from this same clock, beside the flag flip -
+        // the exact span every input tracker's `elapsed_paused` subtracts at its stamp site.
+        Some(r) => { r.paused_totals.pause(r.clock.now_ms()); r.paused.store(true, Ordering::SeqCst); Ok(()) }
         None => Err("not recording".into()),
     }
 }
@@ -146,15 +149,16 @@ pub fn pause_recording(recorder: tauri::State<'_, Recorder>) -> Result<(), Strin
 pub fn resume_recording(recorder: tauri::State<'_, Recorder>) -> Result<(), String> {
     let guard = recorder.inner.lock().unwrap_or_else(|e| e.into_inner());
     match guard.as_ref() {
-        Some(r) => { r.paused.store(false, Ordering::SeqCst); Ok(()) }
+        Some(r) => { r.paused_totals.resume(r.clock.now_ms()); r.paused.store(false, Ordering::SeqCst); Ok(()) }
         None => Err("not recording".into()),
     }
 }
 
 #[tauri::command]
-pub fn stop_recording(recorder: tauri::State<'_, Recorder>) -> Result<RecordingResult, String> {
+pub fn stop_recording(recorder: tauri::State<'_, Recorder>, app: tauri::AppHandle) -> Result<RecordingResult, String> {
     let running = recorder.inner.lock().unwrap_or_else(|e| e.into_inner())
         .take().ok_or("not recording")?;
+    crate::win::sys::brand_icon::set_recording(&app, false); // brand flair only - never fails the stop
 
     // Signal the audio threads to stop; the video pipeline is stopped below.
     running.stop.store(true, Ordering::SeqCst);

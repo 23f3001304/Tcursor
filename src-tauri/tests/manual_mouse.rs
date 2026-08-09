@@ -1,10 +1,12 @@
 // Run: cargo test --test manual_mouse -- --ignored --nocapture
+use std::sync::Arc;
 use cursor_zoom_lib::events::track::tracker::MouseTracker;
+use cursor_zoom_lib::session::record::pause_totals::PauseTotals;
 
 #[test]
 #[ignore]
 fn logs_two_seconds_of_mouse() {
-    let t = MouseTracker::start(8);
+    let t = MouseTracker::start(8, Arc::new(PauseTotals::new()));
     println!("move the mouse and click for 2s...");
     std::thread::sleep(std::time::Duration::from_secs(2));
     let events = t.stop();
@@ -20,7 +22,7 @@ fn hook_captures_injected_moves() {
         SendInput, INPUT, INPUT_MOUSE, MOUSEEVENTF_MOVE, MOUSEINPUT,
     };
 
-    let tracker = MouseTracker::start(0); // 0 ms interval — keep every move
+    let tracker = MouseTracker::start(0, Arc::new(PauseTotals::new())); // 0 ms interval — keep every move
     std::thread::sleep(std::time::Duration::from_millis(50)); // let hook install
 
     for i in 1i32..=5 {

@@ -14,6 +14,7 @@ import { Dropdown } from "./components/Dropdown";
 import { TargetPicker } from "./devices/TargetPicker";
 import { Grip, Mic, MicOff, Speaker, SpeakerOff, Camera, CameraOff, MinIcon, CloseIcon, Gear, Gamepad, Palette, FolderOpen } from "./components/icons";
 import { getSettings, openProject } from "../lib/ipc";
+import { TcursorMark } from "../lib/TcursorMark";
 import { applyTheme } from "./preferences/applyTheme";
 import type { ThemeMode } from "./settings/settings";
 import { useWebcamRecorder } from "./hooks/useWebcamRecorder";
@@ -35,6 +36,9 @@ export function Hud({ onEdit }: { onEdit?: (folder: string) => void }) {
   const [barShown, setBarShown] = useState(true);
   const lastFolder = useRef<string>("");
   const themeRef = useRef<{ theme: ThemeMode; accent: [number, number, number] }>({ theme: "light", accent: [239, 68, 68] });
+  // Task 39's feel knob - gates whether the titlebar mark flows/pulses at all. Real React state
+  // (unlike theme/accent, applied imperatively via CSS vars) because it's a prop TcursorMark reads.
+  const [animatedBrand, setAnimatedBrand] = useState(true);
   const webcam = useWebcamRecorder();
   // Owns record/stop/preprocess state + the toggle/togglePause handlers - see useRecordingFlow's
   // doc comment for why preprocessing is awaited (with progress) between Stop and onEdit.
@@ -58,6 +62,7 @@ export function Hud({ onEdit }: { onEdit?: (folder: string) => void }) {
     getSettings().then(s => {
       themeRef.current = { theme: s.ui.theme, accent: s.ui.accent };
       applyTheme(s.ui.theme, s.ui.accent);
+      setAnimatedBrand(s.ui.animated_brand);
     });
     const mq = matchMedia("(prefers-color-scheme: dark)");
     const onMqChange = () => applyTheme(themeRef.current.theme, themeRef.current.accent);
@@ -73,7 +78,9 @@ export function Hud({ onEdit }: { onEdit?: (folder: string) => void }) {
     unsubs.push(listen<number>("export-progress", e => setPct(e.payload)));
     unsubs.push(listen<string>("export-done", e => {
       setExporting(false);
-      revealItemInDir(`${e.payload}\\final.mp4`).catch(() => {});
+      // `e.payload` is now the exported file's own absolute path (`<folder>/final.<ext>`, see
+      // run.rs) - no more hardcoded `\final.mp4` guess, which was wrong for a webm/gif export.
+      revealItemInDir(e.payload).catch(() => {});
     }));
     unsubs.push(listen<string>("export-error", () => {
       setExporting(false);
@@ -99,14 +106,18 @@ export function Hud({ onEdit }: { onEdit?: (folder: string) => void }) {
             transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}>
             {panel === "settings"
               ? <Settings onClose={() => setPanel(null)} />
-              : <Preferences onClose={() => setPanel(null)} onThemeChange={(t, a) => { themeRef.current = { theme: t, accent: a }; applyTheme(t, a); }} />}
+              : <Preferences onClose={() => setPanel(null)} onUiChange={(ui) => {
+                  themeRef.current = { theme: ui.theme, accent: ui.accent };
+                  applyTheme(ui.theme, ui.accent);
+                  setAnimatedBrand(ui.animated_brand);
+                }} />}
           </motion.div>
         )}
       </AnimatePresence>
       {barShown && (
         <>
           <div className="titlebar" data-tauri-drag-region>
-            <span className="brand">TCursor</span>
+            <span className="brand"><span className="brand-mark"><TcursorMark size={11} dotColor="var(--accent, #ef4444)" state={animatedBrand && recording ? "recording" : "idle"} /></span>TCursor</span>
             {err && <span style={{ color: "#ff6b6b", fontSize: 11, marginLeft: 10 }} title={err}>⚠ recording failed: {err}</span>}
             <span className="winctrls">
               {!recording && !exporting && (<>

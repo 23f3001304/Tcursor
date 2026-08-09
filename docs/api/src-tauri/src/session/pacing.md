@@ -37,7 +37,7 @@ Emits every not-yet-emitted frame index that is due by `active` time. Each emitt
 ### Inputs
 
 - `source: &mut dyn FrameSource` - the live capture source. *Why:* `drain_latest` is called per loop tick to refresh the held frame; the source may produce nothing (no new capture yet), in which case the previous `latest` is duplicated.
-- `sink: &mut dyn FrameSink` - the video encoder. *Why:* receives the constructed frame; push errors are logged to stderr but do not abort the loop, so one bad frame does not stop the recording.
+- `sink: &mut dyn FrameSink` - the video encoder. *Why:* receives the constructed frame; push errors are logged to stderr but do not abort the loop, so one bad frame does not stop the recording. A push that returns `Ok(false)` (the sink deliberately skipped the frame, e.g. a dimension mismatch) is likewise non-fatal but is not counted - see `frames`/`frame_ts` below.
 - `frames: &mut u64` - running count of successfully encoded frames. *Why:* mutated here so `RecordingSession::frames_written` reflects the true count across both run modes.
 - `frame_ts: &mut Vec<u64>` - per-frame capture timestamps in encode order. *Why:* written to `sync.json` on stop so the exporter can reconstruct the real timeline fps-agnostically.
 - `start: u64` - clock value (ms) at recording start. *Why:* the base for uniform timestamp computation; all frame timestamps in `sync.json` are relative to this origin.
@@ -56,12 +56,13 @@ The new emitted count `k` after this call, suitable as the `emitted` argument on
 2. Walk indices `k` from `emitted` to `due - 1`.
 3. Per index: attempt `source.drain_latest()` and update `latest` if a new frame arrived. *Why drain_latest, not next_frame:* CFR mode does not block waiting for a frame; it takes whatever is available and duplicates otherwise.
 4. Construct a new `Frame` with `latest`'s pixel data and a computed uniform timestamp `start + k * 1000 / fps as u64`.
-5. Push to `sink`. On success, increment `*frames` and append the timestamp to `frame_ts`. On error, log to stderr and continue. *Why continue:* a transient encoder error should not stop the entire recording.
+5. Push to `sink`. On `Ok(true)`, increment `*frames` and append the timestamp to `frame_ts`. On `Ok(false)` (skipped by the sink, e.g. a dimension mismatch), do nothing - `k` still advances so the loop does not retry the same due index forever, but the skipped frame is not counted or timestamped. On `Err`, log to stderr and continue. *Why continue:* a transient encoder error should not stop the entire recording.
 6. Return `k` (the final value of the counter).
 
 ### Behaviors
 
 - `emit_due_emits_uniform_timestamps_and_duplicates`: verifies that after two calls covering `active = 0` then `active = 50ms` at 60fps, the recorded timestamps are `[1000, 1016, 1033, 1050]` with `frames == 4`, confirming uniform spacing and frame duplication when the source is exhausted.
+- `emit_due_does_not_count_or_timestamp_skipped_frames`: with a sink whose `push` always returns `Ok(false)`, a single call covering `active = 50ms` at 60fps still advances the emitted counter to `4` (the due indices are still walked) but `frames` stays `0` and `frame_ts` stays empty.
 
 ## run_paced
 

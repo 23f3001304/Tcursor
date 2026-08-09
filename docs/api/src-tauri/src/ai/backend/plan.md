@@ -25,9 +25,8 @@ Extracts and validates the AI plan from a raw model response string.
    - Use `checked_add` on `at_ms + zdur`; drop on overflow. *Why:* adversarial or buggy model output could produce `u32::MAX` durations that panic under debug overflow checks without this guard.
    - Drop any zoom whose `at_ms >= clip_len` or whose `end > clip_len`. *Why:* zooms past the clip boundary would reference non-existent frames.
 4. If `Plan.trim` is present, validate and push `EditOp::SetTrim { in_ms, out_ms }`:
-   - `in_ms = t.in_ms.min(t.out_ms)` guards against inverted trim values.
-   - `out_ms = t.out_ms.min(clip_len)` guards against out-of-bound trim end.
-   - Only pushed when `out_ms > in_ms`.
+   - **Head-trim convention:** when `t.out_ms == 0 && t.in_ms > 0 && t.in_ms < clip_len`, push `SetTrim { in_ms: t.in_ms, out_ms: 0 }` directly - `0` is the "runs to true end" sentinel (`TrimOverlay`/`useTrimActions`' convention, not "zero length"), and the prompt's own example teaches exactly this shape (`{"in_ms":2000,"out_ms":0}`). Without this branch `in_ms = min(t.in_ms, 0) = 0` collapsed every head-only trim to a no-op.
+   - Otherwise: `in_ms = t.in_ms.min(t.out_ms)` guards against inverted trim values; `out_ms = t.out_ms.min(clip_len)` guards against out-of-bound trim end; only pushed when `out_ms > in_ms` (so `{"in_ms":0,"out_ms":0}`, "no trim decision made", yields nothing).
 5. Return `Err("no usable edits")` if the ops vec is empty after all filtering. *Why error rather than Ok(empty):* callers use `?` and rely on the error to leave `edit.json` untouched.
 
 ### Returns
@@ -43,6 +42,8 @@ Extracts and validates the AI plan from a raw model response string.
 - `garbage_returns_err` - plain text with no JSON object returns `Err`.
 - `valid_trim_maps_to_set_trim` - a valid `trim` block produces a `SetTrim` op with the correct `in_ms` and `out_ms`.
 - `huge_dur_ms_is_dropped_not_overflow` - `dur_ms = u32::MAX` is caught by `checked_add` and dropped; the function returns `Err` rather than panicking on debug overflow checks.
+- `head_trim_with_zero_out_ms_runs_to_true_end` - `{"in_ms":2000,"out_ms":0}` produces `SetTrim { in_ms: 2000, out_ms: 0 }`, not a dropped op.
+- `zero_in_and_out_ms_trim_yields_no_trim_op` - `{"in_ms":0,"out_ms":0}` ("no trim decision") produces no `SetTrim` op.
 
 ### Used by
 

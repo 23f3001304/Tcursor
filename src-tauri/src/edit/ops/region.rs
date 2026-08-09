@@ -2,10 +2,14 @@
 // split out of api.rs so that file stays under the size limit.
 use crate::edit::model::EditDoc;
 
-/// The document's known upper time bound, or `u32::MAX` if the trim hasn't been set yet (should
-/// not happen in practice - `edit::seed` always seeds `trim.out_ms` to the real clip duration -
-/// but this keeps a not-yet-seeded doc from collapsing every region to zero length).
-pub(crate) fn dur_bound(doc: &EditDoc) -> u32 { if doc.trim.out_ms > 0 { doc.trim.out_ms } else { u32::MAX } }
+/// The document's known upper time bound for PLACING a new/moved region. `clip_ms` (the true
+/// recording length) wins when known, so trimming the clip does not collapse a region added past
+/// the trim point; `trim.out_ms` is the fallback for a doc predating `clip_ms`; `u32::MAX` is the
+/// last resort for a not-yet-seeded doc (should not happen in practice - `edit::seed` always seeds
+/// both fields to the real clip duration).
+pub(crate) fn dur_bound(doc: &EditDoc) -> u32 {
+    if doc.clip_ms > 0 { doc.clip_ms } else if doc.trim.out_ms > 0 { doc.trim.out_ms } else { u32::MAX }
+}
 
 /// Assigns a new region to the lowest layer (0, 1, 2, ...) with no existing region
 /// overlapping `[start_ms, end_ms)` on that layer. Existing regions' own layers are read
@@ -21,9 +25,37 @@ pub(crate) fn auto_layer(existing: &[(u32, u32, u32)], start_ms: u32, end_ms: u3
     }
 }
 
+/// Known layout preset wire-names; anything else falls back to "screen".
+pub(crate) fn valid_layout(s: &str) -> String {
+    match s { "screen" | "camera" | "presenter" | "screen_only" | "camera_only" => s.to_string(), _ => "screen".into() }
+}
+
+/// Coerce an easing wire-name to something `easing_from` can reconstruct: one of the six named
+/// curves, or a well-formed custom `cubic(x1,y1,x2,y2)` re-emitted in canonical form (which also
+/// applies the x-clamp). Anything else degrades to "smooth" rather than being stored as garbage.
+pub(crate) fn valid_easing(s: &str) -> String {
+    match s {
+        "linear" | "smooth" | "spring" | "ease_in" | "ease_out" | "ease_in_out" => s.to_string(),
+        _ => crate::export::cubic::parse_cubic(s)
+            .map(|(x1, y1, x2, y2)| crate::export::cubic::format_cubic(x1, y1, x2, y2))
+            .unwrap_or_else(|| "smooth".into()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn valid_easing_keeps_named_curves_and_canonicalises_cubics() {
+        assert_eq!(valid_easing("ease_in_out"), "ease_in_out");
+        assert_eq!(valid_easing("cubic(0.25,0.1,0.25,1)"), "cubic(0.250,0.100,0.250,1.000)");
+        // Out-of-range x is clamped rather than rejected, so a slightly-off client value survives.
+        assert_eq!(valid_easing("cubic(-1,0.5,2,0.5)"), "cubic(0.000,0.500,1.000,0.500)");
+        // Garbage still degrades to the tuned default.
+        assert_eq!(valid_easing("cubic(1,2)"), "smooth");
+        assert_eq!(valid_easing("wobble"), "smooth");
+    }
 
     #[test]
     fn auto_layer_finds_lowest_free_layer() {

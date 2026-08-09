@@ -1,4 +1,5 @@
 pub mod fx_state;
+mod spotlight_sim;
 pub mod fx_uniforms;
 pub mod fx_gpu;
 pub mod fxdraw;

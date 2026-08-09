@@ -36,3 +36,12 @@ export function layoutRegions<T extends { start_ms: number; end_ms: number; laye
   return assigned.sort((a, b) => a.start_ms - b.start_ms);
 }
 
+
+/** How wide a layout pill's in/out fade ramp should be, as a percentage of the pill itself:
+ *  the transition's share of the segment's own span, capped at `MAX_RAMP_PCT` so a segment
+ *  shorter than its transitions still reads as a pill with two ends rather than a solid gradient. */
+export const MAX_RAMP_PCT = 40;
+export function transitionRampPct(transitionMs: number, spanMs: number): number {
+  if (!(spanMs > 0) || !(transitionMs > 0)) return 0;
+  return Math.min(MAX_RAMP_PCT, (transitionMs / spanMs) * 100);
+}

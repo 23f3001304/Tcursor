@@ -29,7 +29,7 @@ A spawned ffmpeg process emitting a continuous stream of raw BGRA frames at a fi
 ## RawDecoder::spawn
 
 ```rust
-pub fn spawn(video: &Path, rate: f64, input_rate: bool, seek_ms: Option<u64>, square_scale: Option<u32>, target_dims: Option<(u32, u32)>, pix_fmt: &str, frame_bytes: usize) -> Result<Self>
+pub fn spawn(video: &Path, rate: f64, input_rate: bool, seek_ms: Option<u64>, cover_scale: Option<(u32, u32)>, target_dims: Option<(u32, u32)>, pix_fmt: &str, frame_bytes: usize) -> Result<Self>
 ```
 
 Spawns the ffmpeg decoder subprocess and captures its stdout.
@@ -40,8 +40,8 @@ Spawns the ffmpeg decoder subprocess and captures its stdout.
 - `rate: f64` - target frame rate; `<= 0` decodes at the native rate. *Why:* the exporter controls timing and may need frames at a specific rate for sync.*
 - `input_rate: bool` - if `true`, `-r rate` is placed before `-i` (input demux rate override); if `false`, after (output filter rate). *Why:* certain container formats need the input rate set to suppress duplicate-frame detection; others need the output filter.*
 - `seek_ms: Option<u64>` - trim start offset in ms (`-ss`). *Why:* using ffmpeg's native seek is orders of magnitude faster than decoding and discarding frames.*
-- `square_scale: Option<u32>` - if set, cover-crops the video to a centered square of this size. *Why:* webcam feeds are 16:9; squaring avoids aspect-ratio distortion in the picture-in-picture overlay.*
-- `target_dims: Option<(u32, u32)>` - if set, scales output to these exact dimensions via an FFmpeg `-vf scale`. *Why:* lets the screen decoder resize directly in FFmpeg (e.g. to the adapted output resolution) instead of a separate CPU resize pass. Mutually exclusive with `square_scale` in practice - `target_dims` is checked first.*
+- `cover_scale: Option<(u32, u32)>` - if set, cover-crops the video to a centered `w`x`h` box (scale-up to cover, then crop). *Why a pair rather than one square side:* the decoded webcam buffer is stretched across the camera panel by the compositor, so it has to be decoded at the PANEL's aspect - a `CamAspect::Wide` panel is 16:9 (`RenderMeta::webcam_w`/`webcam_h`), and always cover-cropping to a square made every Wide export 1.78x too wide. Equal dims reproduce the old square exactly.*
+- `target_dims: Option<(u32, u32)>` - if set, scales output to these exact dimensions via an FFmpeg `-vf scale`. *Why:* lets the screen decoder resize directly in FFmpeg (e.g. to the adapted output resolution) instead of a separate CPU resize pass. Mutually exclusive with `cover_scale` in practice - `target_dims` is checked first, and unlike `cover_scale` it does NOT preserve the source aspect.*
 - `pix_fmt: &str` - output raw pixel format (`"bgra"` or `"nv12"`). *Why:* the screen decodes as `nv12` (Y + interleaved half-res UV) so far fewer bytes cross the pipe and ffmpeg skips the yuv->bgra convert (the GPU/CPU compositor converts instead); the webcam stays `bgra`.*
 - `frame_bytes: usize` - expected bytes per frame (matches `pix_fmt`: `w*h*4` bgra, `w*h*3/2` nv12). *Why:* stored for the `debug_assert` in `read_frame`.*
 
@@ -57,10 +57,10 @@ Spawns the ffmpeg decoder subprocess and captures its stdout.
 ## decode_args
 
 ```rust
-fn decode_args(video: &Path, rate: f64, input_rate: bool, seek_ms: Option<u64>, square_scale: Option<u32>, target_dims: Option<(u32, u32)>, pix_fmt: &str) -> Vec<String>
+fn decode_args(video: &Path, rate: f64, input_rate: bool, seek_ms: Option<u64>, cover_scale: Option<(u32, u32)>, target_dims: Option<(u32, u32)>, pix_fmt: &str) -> Vec<String>
 ```
 
-Pure builder for `RawDecoder::spawn`'s ffmpeg arg list - no process spawn, so the `-r`/`-vf`/`-pix_fmt` selection is unit-testable directly. Mirrors the exact arg order the command used to be built inline: `-v error -hwaccel auto`, optional `-ss seek_ms/1000.0`, optional input `-r rate` (`input_rate == true`), `-i video`, optional output `-r rate` (`input_rate == false`), `-sws_flags fast_bilinear`, then either `-vf scale=w:h:flags=fast_bilinear` (`target_dims`) or `-vf scale=sz:sz:force_original_aspect_ratio=increase,crop=sz:sz` (`square_scale`), `-f rawvideo -pix_fmt <pix_fmt>`, `-` (stdout).
+Pure builder for `RawDecoder::spawn`'s ffmpeg arg list - no process spawn, so the `-r`/`-vf`/`-pix_fmt` selection is unit-testable directly. Mirrors the exact arg order the command used to be built inline: `-v error -hwaccel auto`, optional `-ss seek_ms/1000.0`, optional input `-r rate` (`input_rate == true`), `-i video`, optional output `-r rate` (`input_rate == false`), `-sws_flags fast_bilinear`, then either `-vf scale=w:h:flags=fast_bilinear` (`target_dims`) or `-vf scale=W:H:force_original_aspect_ratio=increase,crop=W:H` (`cover_scale`), `-f rawvideo -pix_fmt <pix_fmt>`, `-` (stdout). NOTE: `flags` is a `scale` option, NOT a `crop` option - putting it on `crop` makes newer ffmpeg reject the whole filtergraph ("Option not found"), which silently zeroes the webcam decode and drops the camera from every export; the global `-sws_flags fast_bilinear` already covers the scale.
 
 ### Inputs
 
@@ -75,6 +75,8 @@ Same as `RawDecoder::spawn` minus `frame_bytes` (that field is stored on `RawDec
 - `positive_output_rate_emits_r_after_i` - `rate > 0.0, input_rate = false` (the screen/webcam decode's shape) places `-r <rate>` AFTER `-i`, formatted `%.4f`.
 - `positive_input_rate_emits_r_before_i` - `input_rate = true` places `-r` BEFORE `-i` instead.
 - `non_positive_rate_omits_r_entirely` - `rate <= 0.0` (native-rate decode, e.g. the preview engine's seek-one-frame calls) emits no `-r` at all.
+- `cover_scale_emits_the_panels_own_w_h` - a Wide webcam panel (`Some((448, 252))`) emits `scale=448:252:force_original_aspect_ratio=increase,crop=448:252`, not a square the compositor would then stretch 1.78x across the panel.
+- `cover_scale_of_equal_dims_is_the_old_square_filter` - `Some((420, 420))` emits the byte-identical filter the square-only version did, so Square panels are unchanged.
 
 ## RawDecoder::read_frame
 

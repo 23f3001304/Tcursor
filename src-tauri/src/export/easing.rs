@@ -10,6 +10,7 @@ pub fn ease(e: Easing, t: f32) -> f32 {
         Easing::EaseIn => t * t,
         Easing::EaseOut => t * (2.0 - t),
         Easing::EaseInOut => if t < 0.5 { 2.0 * t * t } else { 1.0 - 2.0 * (1.0 - t) * (1.0 - t) },
+        Easing::Cubic { x1, y1, x2, y2 } => crate::export::cubic::eval(x1, y1, x2, y2, t),
     }
 }
 

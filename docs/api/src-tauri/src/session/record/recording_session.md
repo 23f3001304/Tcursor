@@ -36,7 +36,7 @@ Owns the capture source and encoder sink for one recording.
 - `source: Box<dyn FrameSource>` - abstracted frame producer (WGC capture in production, `FakeFrameSource` in tests). *Why Box<dyn>:* allows injecting test doubles without conditional compilation.
 - `sink: Box<dyn FrameSink>` - abstracted encoder (ffmpeg in production, `FakeFrameSink` / `FailingSink` in tests).
 - `state: SessionState` - tracks whether the session is active or stopped. *Why state field:* `stop_and_finalize` consumes `self` (by value), so reading `state` before that call is the only way to inspect whether finalization has occurred via an earlier reference.
-- `frames: u64` - count of frames for which `sink.push` returned `Ok`. *Why count only successes:* encoder errors are non-fatal; the count must reflect what is actually in the file, not what was attempted.
+- `frames: u64` - count of frames for which `sink.push` returned `Ok(true)`. *Why count only actual writes:* encoder errors are non-fatal, and a sink may also deliberately skip a frame (e.g. `FfmpegFrameSink`'s dimension-mismatch guard, returning `Ok(false)`) - the count must reflect what is actually in the file, not what was attempted.
 - `frame_ts: Vec<u64>` - millisecond capture timestamp of each successfully encoded frame, already shifted to exclude paused time. *Why Vec:* unbounded; a 1-hour recording at 60fps produces 216000 entries (~1.7 MB), acceptable in memory.
 - `pause_clock: PauseClock` - accumulates paused wall-clock time across the session's lifetime and shifts recorded timestamps to exclude it (see `pause_clock.rs`). *Why one shared instance:* both `pump_once` (unpaused pushes) and `run` (paused discards) feed the same accumulator, so a pause spanning multiple `next_frame` calls is measured correctly regardless of which method observes which tick.
 
@@ -100,19 +100,20 @@ Pulls one frame from `source` and pushes it to `sink`. Returns `false` when the 
 
 ### Returns
 
-`true` if the source returned a frame (even if the sink push failed). `false` when `source.next_frame()` returns `None`, signalling end of source.
+`true` if the source returned a frame (even if the sink push failed or skipped it). `false` when `source.next_frame()` returns `None`, signalling end of source.
 
 ### Implementation
 
 1. Call `source.next_frame()`. On `None`, return `false`.
 2. Feed `frame.ts.0` through `self.pause_clock.observe(_, false)` to get the paused-time-adjusted timestamp to record. *Why via `pause_clock` even for an always-unpaused call:* the accumulator is what makes the shift correct after a prior pause observed via `run`'s discard branch; calling it unconditionally (rather than only when a pause has occurred) keeps the bookkeeping in one place.
-3. Call `sink.push(&frame)` (the original, unshifted frame - only the recorded timestamp changes). On `Ok`, increment `frames` and push the adjusted ts onto `frame_ts`. On `Err`, log to stderr. *Why log but continue:* a single encoder hiccup should not abort a potentially long recording.
+3. Call `sink.push(&frame)` (the original, unshifted frame - only the recorded timestamp changes). On `Ok(true)`, increment `frames` and push the adjusted ts onto `frame_ts`. On `Ok(false)` (the sink deliberately skipped the frame, e.g. a dimension mismatch), do nothing - counting it would record a `sync.json` timestamp for a frame that was never actually written. On `Err`, log to stderr. *Why log but continue:* a single encoder hiccup should not abort a potentially long recording.
 4. Return `true` (the source had a frame, regardless of sink outcome).
 
 ### Behaviors
 
 - `pumps_all_frames_then_reports_exhausted`: three pumps succeed; the fourth returns `false`; `frames_written` is 3.
 - `frames_written_counts_only_successful_pushes`: with `FailingSink`, two frames are returned by the source (pump returns `true`) but `frames_written` stays 0.
+- `skipped_frame_is_not_counted_and_pushes_no_timestamp`: with `SkippingSink` (`push` always returns `Ok(false)`), two frames are pulled from the source (`pump_once` returns `true` both times) but `frames_written` stays 0 and `frame_timestamps()` stays empty.
 
 ## RecordingSession::run_until_stopped
 

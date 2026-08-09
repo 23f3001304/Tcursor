@@ -36,28 +36,42 @@ All per-export Enhanced cursor state, created once by `prep` and mutated each fr
 
 - `src-tauri/src/export/pipeline/exporter.rs` - creates one `CursorPrep` per export via `prep`, then calls `draw` once per rendered frame.
 
+## draws_synthetic
+
+```rust
+pub fn draws_synthetic(cursor: &CursorSettings, os_cursor_in_video: bool) -> bool
+```
+
+Whether a synthetic cursor is drawn at all for these settings: `Enhanced` always, `System` only as the plain-OS stand-in for a video with no baked cursor (`CursorSettings::plain_os`), `Hidden` never.
+
+*Why it is split out of `prep`:* `prep`'s remaining work decodes PNGs through `ffio`, which shells out to ffmpeg - so the gate itself would only be testable on a machine with ffmpeg installed. As a pure predicate it is covered exhaustively (`draws_synthetic_covers_every_style_and_bake_combination`) with no environment dependency.
+
+*Why `os_cursor_in_video` is a parameter rather than read here:* it is RECORD-time truth, derived from the immutable `settings.json` snapshot by `settings::store::os_cursor_in_video`. It must never be inferred from `cursor.style`, which is the editable doc's value and is exactly what the user changes to trigger this path.
+
 ## prep
 
 ```rust
-pub fn prep(cursor: &CursorSettings, events: &[MouseEvent], track: CursorTrack, dark: bool) -> Option<CursorPrep>
+pub fn prep(cursor: &CursorSettings, events: &[MouseEvent], track: CursorTrack, dark: bool,
+            os_cursor_in_video: bool) -> Option<CursorPrep>
 ```
 
 Decodes all cursor sprites and assembles the `CursorPrep` for an export run. Sprite bytes come from `cursor.pack` via `pack::sprite_sources` (see `export/cursor/pack.rs`) - the built-in set for `pack == "default"`, or an imported pack folder falling back to the built-in sprite for any kind it doesn't provide.
 
 ### Inputs
 
-- `cursor: &CursorSettings` - the user's cursor settings; `cursor.style` is checked first, then `cursor.pack` selects the sprite source. *Why:* only `CursorStyle::Enhanced` requires the sprite set; `System` and `Hidden` return `None` immediately, skipping all decode work.
+- `cursor: &CursorSettings` - the user's cursor settings; the `draws_synthetic` gate is checked first, then `cursor.pack` selects the sprite source. *Why:* `Hidden` (and `System` on a video that already has the OS cursor baked in) returns `None` immediately, skipping all decode work.
+- `os_cursor_in_video: bool` - whether the recorded video already contains a baked OS cursor. *Why:* it is what distinguishes the two meanings of `System` - "the cursor is already in the pixels, draw nothing" from "nothing is in the pixels, re-create it from the recorded path".
 - `events: &[MouseEvent]` - the full mouse event log. *Why:* used only to extract `Down` timestamps into `click_ms` for the bounce animation.
 - `track: CursorTrack` - the per-frame cursor type sequence from the recorder. *Why:* stored in `CursorPrep` for per-frame sprite lookup.
 - `dark: bool` - whether the user's theme is dark. *Why:* cursor sprites are authored for a light background; on a dark background `invert_rgb` is applied to each decoded sprite so the cursor remains visible.
 
 ### Returns
 
-`Some(CursorPrep)` when `style == Enhanced` and the Arrow sprite decodes successfully. `None` in all other cases. Non-Arrow decode failures are silently skipped (the Arrow sprite covers them as a fallback); an Arrow failure means no cursor can be drawn at all.
+`Some(CursorPrep)` when `draws_synthetic` passes and the Arrow sprite decodes successfully. `None` in all other cases. Non-Arrow decode failures are silently skipped (the Arrow sprite covers them as a fallback); an Arrow failure means no cursor can be drawn at all.
 
 ### Implementation
 
-1. Return `None` immediately if `cursor.style != CursorStyle::Enhanced`.
+1. Return `None` immediately if `!draws_synthetic(cursor, os_cursor_in_video)`.
 2. For each `(kind, png, hot)` row in `pack::sprite_sources(&cursor.pack)`, call `decode_sprite(&png, hot)`. On success, if `dark`, call `invert_rgb` on `spr.bgra` in place, then insert into `set`.
 3. Verify `set.get(&CursorType::Arrow)` is `Some`; if not, return `None` (the universal fallback is required).
 4. Extract `click_ms` from `events` filtered to `EventKind::Down`.
@@ -65,7 +79,8 @@ Decodes all cursor sprites and assembles the `CursorPrep` for an export run. Spr
 
 ### Behaviors
 
-- `prep_is_none_for_system_and_hidden` - returns `None` for `CursorStyle::System` and `CursorStyle::Hidden` without attempting any decode.
+- `prep_is_none_for_system_and_hidden_when_the_video_has_the_os_cursor` - returns `None` for `System` (with a baked cursor) and for `Hidden` (either way) without attempting any decode.
+- `draws_synthetic_covers_every_style_and_bake_combination` - all six style x baked pairs. The row that changed is `System` + no baked cursor, which now draws instead of rendering nothing at all.
 
 ## invert_rgb
 
@@ -113,10 +128,17 @@ Returns the sprite for the cursor type active at `ev_t`, falling back to Arrow i
 
 ```rust
 pub fn draw(cp: &mut CursorPrep, out: &mut [u8], ow: u32, oh: u32, cur: FramePoint,
-            cam: Camera, screen: &Panel, inset_w: f32, ev_t: u32, c: &CursorSettings)
+            cam: Camera, screen: &Panel, inset_w: f32, ev_t: u32, c: &CursorSettings,
+            os_cursor_in_video: bool)
 ```
 
-Per-frame Enhanced cursor draw, clipped to the screen panel.
+Per-frame synthetic cursor draw, clipped to the screen panel.
+
+**Plain-OS mode.** When `c.plain_os(os_cursor_in_video)` - i.e. the doc asks for `System` but the video has no baked cursor - the draw is stripped back to what a real OS cursor looks like: the **Arrow** sprite regardless of the recorded type track, no click bounce, no motion trail. (The other half of the mode, the raw un-smoothed path, is applied upstream by `CursorSettings::follow_alpha_at`/`idealize_at` when the `Cursor` is built or reloaded.)
+
+*Why Arrow rather than the recorded type track:* the track may not exist at all - a `Hidden` recording never ran the type tracker - and "System" promises a plain pointer, not Enhanced-minus-polish. Always-Arrow makes the fallback look the same whatever the recording style was.
+
+*Why the mode is decided here per frame instead of being cached on `CursorPrep`:* `prep` only runs on a full renderer build, while `reload_edit` refreshes doc settings in place on every edit. Deciding at draw time means flipping the style picker updates the warm preview immediately rather than after the next rebuild.
 
 ### Inputs
 
@@ -128,7 +150,8 @@ Per-frame Enhanced cursor draw, clipped to the screen panel.
 - `screen: &Panel` - the screen panel's alpha and screen-space rect. *Why:* two uses - `screen.alpha < 0.5` is the early-out guard (no cursor when the screen panel is invisible), and `screen.rect` is projected into the clip box that confines the cursor to the panel bounds.
 - `inset_w: f32` - width of the full inset region in output pixels. *Why:* the cursor size scales by `screen.rect.w / inset_w` so a small PiP screen gets a proportionally smaller cursor.
 - `ev_t: u32` - current frame event-time; forwarded to `sprite_for` and `apply_enhanced`.
-- `c: &CursorSettings` - cursor display settings (size, motion blur, click bounce, bounce intensity).
+- `c: &CursorSettings` - the LIVE cursor display settings (size, motion blur, click bounce, bounce intensity, and the `style` that plain-OS mode keys off).
+- `os_cursor_in_video: bool` - record-time truth, threaded from `FrameRenderer`. *Why here as well as in `prep`:* `prep` decides whether there is anything to draw; this decides how to draw it, and only this one is re-evaluated per frame.
 
 ### Returns
 

@@ -40,7 +40,7 @@ pub fn generate(events: &[MouseEvent], screen: &ScreenInfo, cfg: &ZoomConfig, ty
                 end_ms: last_t + cfg.idle_release_ms + cfg.zoom_out_ms,
                 zoom_in_ms: cfg.zoom_in_ms, zoom_out_ms: cfg.zoom_out_ms,
                 target_scale: cfg.target_scale, anchor: to_frame(screen, first.x, first.y), easing: cfg.easing,
-                layer: 0, cam_action: None,
+                layer: 0, cam_action: None, follow_cursor: false,
             });
             i = j;
         } else {

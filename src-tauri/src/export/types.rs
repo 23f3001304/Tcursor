@@ -8,7 +8,8 @@ use crate::export::settings::Resolution;
 #[derive(Clone, Copy, Debug, PartialEq)] pub struct Camera { pub cx: f32, pub cy: f32, pub scale: f32 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Easing { Smooth, Linear, Spring { stiffness: f32, damping: f32 }, EaseIn, EaseOut, EaseInOut }
+pub enum Easing { Smooth, Linear, Spring { stiffness: f32, damping: f32 }, EaseIn, EaseOut, EaseInOut,
+    Cubic { x1: f32, y1: f32, x2: f32, y2: f32 } }
 
 #[derive(Clone, Copy, Debug)]
 pub struct ZoomConfig {
@@ -33,6 +34,8 @@ pub struct ZoomRegion {
     pub cam_action: Option<crate::settings::model::CamZoomAction>,
     /// Priority when this region overlaps another - higher wins (see `CameraSim::step`).
     pub layer: u32,
+    /// Zoom-in aims at the LIVE cursor every step instead of the stored `anchor` (`ZoomTarget::Cursor`).
+    pub follow_cursor: bool,
 }
 
 #[derive(Clone, Debug)]

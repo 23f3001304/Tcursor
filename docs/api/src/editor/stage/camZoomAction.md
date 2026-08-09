@@ -37,15 +37,19 @@ Mirror of `ZoomSettings::resolved_cam_action` - the GLOBAL default.
 ## resolveCamAction
 
 ```ts
-export function resolveCamAction(zooms: Zoom[], tMs: number, fallback: CamZoomAction): CamZoomAction
+export function resolveCamAction(
+  zooms: Zoom[], tMs: number, fallback: CamZoomAction, fallbackScale: number,
+): [CamZoomAction, number]
 ```
 
-Mirror of `cam_action_at`. The highest-`layer` zoom containing `tMs` supplies the action; ties go to the LAST such zoom, matching Rust's `max_by_key`.
+Mirror of `cam_action_at`. The highest-`layer` zoom containing `tMs` supplies BOTH the action and its OWN `scale`; ties go to the LAST such zoom, matching Rust's `max_by_key`.
+
+**Returns the winning zoom's own scale, not just its action.** `Zoom.scale` is a first-class per-zoom slider (presets 1.6/2.2/2.8), and `zoomProgress` (used by both `applyCamZoomAction` and `camZoomAlpha`) divides by whatever scale it is handed - so a 1.6x zoom fed the global `fallbackScale` (e.g. 2.2) could only ever reach ~50% shrink/hide progress, never its own full effect. Unlike `cam_action` (which a zoom may leave unset, inheriting `fallback`), `Zoom.scale` is never optional - so ANY active zoom reports its own scale, even one whose ACTION inherits the global default. Only when NO zoom is active at `tMs` does the return fall back to `[fallback, fallbackScale]`.
 
 ### Behaviors worth knowing
 
 - Overlap resolution deliberately matches `CameraSim`'s highest-layer-wins rule - if they disagreed, the webcam would follow one zoom while the framing followed another.
-- Outside every zoom the scale is 1.0, so the returned `fallback` is a no-op whatever it is.
+- `resolveCamAction([zoom()], t, fallback, TS)` (an active zoom with no `cam_action`) returns `[fallback, zoom.scale]`, NOT `[fallback, TS]` - the action inherits, the scale never does.
 
 ## applyCamZoomAction
 

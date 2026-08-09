@@ -10,10 +10,12 @@ fn sample_doc() -> EditDoc {
     EditDoc {
         version: 1,
         trim: Trim { in_ms: 100, out_ms: 5000 },
+        clip_ms: 5000,
         cuts: vec![Cut { start_ms: 500, end_ms: 1000 }],
         zooms: vec![Zoom { id: "z1".into(), start_ms: 200, end_ms: 800, target: ZoomTarget::Cursor, scale: 2.2, easing: "ease".into(), zoom_in_ms: 350, zoom_out_ms: 450, layer: 0, cam_action: None }],
         speed: vec![Speed { id: "s1".into(), start_ms: 1000, end_ms: 2000, factor: 2.0 }],
-        layout: vec![LayoutSeg { id: "l1".into(), start_ms: 0, end_ms: 5000, layout: "screen".into(), transition_ms: 350, easing: "smooth".into() }],
+        layout: vec![LayoutSeg { id: "l1".into(), start_ms: 0, end_ms: 5000, layout: "screen".into(), transition_ms: 350, easing: "smooth".into(),
+            transition_out_ms: 0, easing_out: "smooth".into() }],
         effects: vec![],
         camera_moves: vec![],
         aspect: crate::export::types::Aspect::default(),
@@ -31,6 +33,21 @@ fn zoom_and_effect_region_layer_defaults_to_zero_on_missing_field() {
     let effect_json = r#"{"id":"e0","kind":"spotlight","start_ms":0,"end_ms":1000,"fade_in_ms":250,"fade_out_ms":250}"#;
     let effect: EffectRegion = serde_json::from_str(effect_json).unwrap();
     assert_eq!(effect.layer, 0);
+}
+
+#[test]
+fn layout_seg_exit_transition_defaults_to_a_hard_cut_on_missing_fields() {
+    // A v2 layout segment exactly as it was written before exit transitions existed. `0` is the
+    // whole back-compat contract: it is the historical hard cut, so an old doc renders unchanged.
+    let json = r#"{"id":"l0","start_ms":0,"end_ms":1000,"layout":"camera","transition_ms":350,"easing":"smooth"}"#;
+    let s: LayoutSeg = serde_json::from_str(json).unwrap();
+    assert_eq!(s.transition_out_ms, 0);
+    assert_eq!(s.easing_out, "smooth");
+    // And a whole doc containing one still loads, with every OTHER field untouched.
+    let doc_json = format!(r#"{{"version":2,"trim":{{"in_ms":0,"out_ms":5000}},"cuts":[],"zooms":[],"speed":[],"layout":[{json}],"settings":{{}}}}"#);
+    let doc: EditDoc = serde_json::from_str(&doc_json).unwrap();
+    assert_eq!(doc.layout[0], LayoutSeg { id: "l0".into(), start_ms: 0, end_ms: 1000, layout: "camera".into(),
+        transition_ms: 350, easing: "smooth".into(), transition_out_ms: 0, easing_out: "smooth".into() });
 }
 
 #[test]
@@ -160,3 +177,16 @@ fn trim_resolve_clamps_in_to_out_and_both_to_the_clip() {
     assert_eq!(Trim { in_ms: 2_000, out_ms: 999_999 }.resolve(10_000), (2_000, 10_000));
     assert_eq!(Trim { in_ms: 9_000, out_ms: 5_000 }.resolve(10_000), (5_000, 5_000));
 }
+
+/// Back-compat: an `edit.json` saved before `clip_ms` existed loads as `0` ("not yet known") -
+/// `seed::migrate` backfills it from `true_duration_ms` on the next `load_or_seed`.
+#[test]
+fn clip_ms_missing_field_defaults_to_zero() {
+    let doc: EditDoc = serde_json::from_str(r#"{"zooms":[]}"#).unwrap();
+    assert_eq!(doc.clip_ms, 0);
+}
+
+// Atomic-save + corrupt-file-preservation tests live in their own file - model_tests.rs was at
+// the 200-line budget.
+#[path = "model_save_tests.rs"]
+mod save_tests;

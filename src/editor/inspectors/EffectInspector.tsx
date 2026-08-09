@@ -24,8 +24,8 @@ function OverrideField({ label, value, defaultValue, min, max, step, onToggle, o
 }) {
   return (
     <label className="e-field">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-        <span className="e-fl" style={{ margin: 0 }}>{label}</span>
+      <div className="e-switchrow" style={{ marginBottom: 4 }}>
+        <span className="e-fl">{label}</span>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 12, color: "var(--e-mut)" }}>
             {value !== undefined
@@ -36,7 +36,7 @@ function OverrideField({ label, value, defaultValue, min, max, step, onToggle, o
         </div>
       </div>
       <Slider min={min} max={max} step={step} value={value ?? defaultValue} disabled={value === undefined}
-        onChange={onChange} accentColor="var(--e-fx)" />
+        onChange={onChange} accentColor="var(--e-fx)" ariaLabel={label} />
     </label>
   );
 }
@@ -80,7 +80,7 @@ export function EffectInspector({ effect, dur, settings, onApply, onDimCamera, o
 
       <label className="e-field">
         <span className="e-fl">Spotlight Mode</span>
-        <Picker value={effect.mode || "global"} options={MODE_OPTIONS} onChange={(v) => upd({ mode: v })} />
+        <Picker value={effect.mode || "global"} options={MODE_OPTIONS} onChange={(v) => upd({ mode: v })} ariaLabel="Spotlight Mode" />
       </label>
 
       <OverrideField label="Dim" value={effect.dim} defaultValue={defaultDim} min={0.2} max={0.9} step={0.05}
@@ -93,8 +93,8 @@ export function EffectInspector({ effect, dur, settings, onApply, onDimCamera, o
         onToggle={(on) => upd({ feather: on ? defaultFeather : -1 })} onChange={(v) => upd({ feather: v })} />
 
       <div className="e-field" style={{ marginTop: 4 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span className="e-fl" style={{ margin: 0 }}>Dim webcam</span>
+        <div className="e-switchrow">
+          <span>Dim webcam</span>
           <Switch on={settings.clickfx.spotlight_dim_camera} onChange={onDimCamera} />
         </div>
         <span className="e-lede" style={{ marginTop: 4 }}>Off keeps the webcam PiP lit while the spotlight dims everything else. Applies to all spotlights.</span>

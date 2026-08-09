@@ -86,31 +86,33 @@ impl ScreenPipe {
 /// Webcam decode thread — one frame per output frame (1:1, no superseding). Simpler than
 /// `ScreenPipe`; the caller recycles each buffer via `recycle` after compositing it.
 pub struct WebcamPipe {
-    rx: Receiver<(Vec<u8>, u32)>,
+    rx: Receiver<Vec<u8>>,
     returner: Sender<Vec<u8>>,
+    dims: (u32, u32),
     err: Arc<Mutex<Option<Error>>>,
     handle: JoinHandle<()>,
 }
 
 impl WebcamPipe {
     /// Spawn the webcam `RawDecoder` (at `out_fps` - the export's resolved output frame rate,
-    /// from `ExportSettings.fps` - seeked to `video_start`, cover-cropped to `size`) and its
-    /// decode thread. `depth` sizes the channel and the buffer pool.
-    pub fn spawn(webcam: &Path, video_start: u64, size: u32, wc_bytes: usize, depth: usize, out_fps: u64) -> Result<WebcamPipe> {
-        let dec = RawDecoder::spawn(webcam, out_fps as f64, false, Some(video_start), Some(size), None, "bgra", wc_bytes)?;
+    /// from `ExportSettings.fps` - seeked to `video_start`, cover-cropped to `dims`) and its
+    /// decode thread. `depth` sizes the channel and the buffer pool. `dims` is the PANEL's
+    /// `(w, h)`, so a Wide (16:9) webcam panel decodes 16:9 instead of a stretched square.
+    pub fn spawn(webcam: &Path, video_start: u64, dims: (u32, u32), wc_bytes: usize, depth: usize, out_fps: u64) -> Result<WebcamPipe> {
+        let dec = RawDecoder::spawn(webcam, out_fps as f64, false, Some(video_start), Some(dims), None, "bgra", wc_bytes)?;
         let pool = BufPool::new(depth, wc_bytes);
         let returner = pool.returner();
-        let (tx, rx) = sync_channel::<(Vec<u8>, u32)>(depth);
+        let (tx, rx) = sync_channel::<Vec<u8>>(depth);
         let err = Arc::new(Mutex::new(None));
-        let handle = spawn_webcam(dec, pool, tx, size, err.clone());
-        Ok(WebcamPipe { rx, returner, err, handle })
+        let handle = spawn_webcam(dec, pool, tx, err.clone());
+        Ok(WebcamPipe { rx, returner, dims, err, handle })
     }
 
     /// The next webcam frame `(buf, w, h)`, or `None` at EOF (matches the old
     /// `read_webcam` dropping the decoder so all later frames have no camera).
     pub fn next(&mut self) -> Result<Option<(Vec<u8>, u32, u32)>> {
         match self.rx.recv() {
-            Ok((buf, sz)) => Ok(Some((buf, sz, sz))),
+            Ok(buf) => Ok(Some((buf, self.dims.0, self.dims.1))),
             Err(_) => { take_err(&self.err)?; Ok(None) }
         }
     }

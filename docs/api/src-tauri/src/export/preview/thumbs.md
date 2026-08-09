@@ -2,11 +2,21 @@
 
 Editor-timeline media: cached ffmpeg helpers for the filmstrip thumbnails, the per-source audio waveform images, and a mixed preview-audio track. All mirror `ensure_proxy` (run once, cache by output existence) and wrap their ffmpeg pass in `win::sys::proc::generate_once` (so the post-record preprocessing pass, `export::preview::preprocess::preprocess_project`, and the editor's own lazy `ensure_*` never transcode the same file twice or storm the CPU with concurrent passes right as the editor opens) run via `ffcmd_bg` (below-normal priority, so the one serialized multi-threaded pass yields to the UI instead of freezing it). The recorder's proxy is silent; these give the editor frames to scrub, waveforms to show, and sound to play.
 
+**Off the main thread (Task 41).** All three IPC commands are `async fn`; each wraps a `_blocking` sibling (same body the sync command used to run) in `tauri::async_runtime::spawn_blocking`. Same freeze mechanism `ai::commands` fixed for Task 40: a non-`async` `#[tauri::command] fn` runs INLINE on the thread that received the IPC message (the app's main/UI thread), so a sync version of these would freeze the window for the whole ffmpeg pass - a proxy transcode (`ensure_proxy`, `preview_track.rs`) can run for seconds on a project OPEN. `preprocess::run` calls the `_blocking` functions directly (not the `async` commands) since it already runs off-thread on its own `std::thread::spawn`, outside any `.await` context.
+
 ## ensure_thumbs
 
 ```rust
 #[tauri::command]
-pub fn ensure_thumbs(folder: String, count: u32) -> Result<Vec<String>, String>
+pub async fn ensure_thumbs(folder: String, count: u32) -> Result<Vec<String>, String>
+```
+
+Tauri IPC command. `spawn_blocking(ensure_thumbs_blocking)`, `.await`ed, join failure mapped to `Err(String)`.
+
+## ensure_thumbs_blocking
+
+```rust
+pub(crate) fn ensure_thumbs_blocking(folder: String, count: u32) -> Result<Vec<String>, String>
 ```
 
 N evenly-spaced JPEG thumbnails (height 64) for the filmstrip, cached in `folder/thumbs_<count>_64/`.
@@ -29,7 +39,15 @@ N evenly-spaced JPEG thumbnails (height 64) for the filmstrip, cached in `folder
 
 ```rust
 #[tauri::command]
-pub fn ensure_waveform(folder: String, which: String) -> Result<String, String>
+pub async fn ensure_waveform(folder: String, which: String) -> Result<String, String>
+```
+
+Tauri IPC command. `spawn_blocking(ensure_waveform_blocking)`, `.await`ed, join failure mapped to `Err(String)`.
+
+## ensure_waveform_blocking
+
+```rust
+pub(crate) fn ensure_waveform_blocking(folder: String, which: String) -> Result<String, String>
 ```
 
 A waveform PNG for one source (`"system"` or `"mic"`), cached as `folder/wf_<which>.png`.
@@ -51,7 +69,15 @@ ffmpeg `dynaudnorm,showwavespic=s=1180x26:colors=#6b6b86:scale=sqrt -frames:v 1`
 
 ```rust
 #[tauri::command]
-pub fn ensure_preview_audio(folder: String) -> Result<String, String>
+pub async fn ensure_preview_audio(folder: String) -> Result<String, String>
+```
+
+Tauri IPC command. `spawn_blocking(ensure_preview_audio_blocking)`, `.await`ed, join failure mapped to `Err(String)`.
+
+## ensure_preview_audio_blocking
+
+```rust
+pub(crate) fn ensure_preview_audio_blocking(folder: String) -> Result<String, String>
 ```
 
 A mixed mic+system preview-audio track (`folder/preview_synced.m4a`, AAC) so the editor can play sound (the proxy is silent). Each track is shifted to the video start with the SAME per-track `-itsoffset`/`-ss` alignment the final render uses (`audio_mux::add_offset`), so preview playback stays in sync with the (re-timed) proxy instead of drifting by the capture-warmup lead.

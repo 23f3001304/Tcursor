@@ -24,7 +24,7 @@ Renders one composited frame at `time_ms` (uncached: builds a fresh renderer via
 1. `build_renderer(paths)` calls `FrameRenderer::new(paths, Layout::default(), fps, Resolution::Source, Some(PREVIEW_LONG_EDGE))` - the doc's `aspect` is resolved against the true source dims then downscaled to the `PREVIEW_LONG_EDGE` (1280px) budget (`Layout::resolve`), so the preview frame always matches the export's aspect proportionally. `Resolution::Source` is a no-op here (the export resolution setting only applies to the export build).
 2. Compute `k_target = time_ms as u64 * OUT_FPS / 1000`. Fast-forward the camera sim by calling `step_camera` for every `j` in `0..=k_target` at `video_start + j * 1000 / OUT_FPS`. This must ascend because `CameraSim` and the cursor index only move forward. The last returned `FramePose` is the preview pose. Cost: arithmetic only, no I/O.
 3. Spawn a `RawDecoder` on `paths.video()` seeked to `time_ms` (the screen file's frame 0 is `video_start`, so `time_ms` is the right offset), read one frame into a `screen_bytes`-sized buffer; bail if the read hits EOF (time past end of video).
-4. If `paths.webcam().exists()`, spawn a `RawDecoder` on the webcam seeked to `video_start + time_ms` (export pre-seeks the webcam by `video_start`, so its file-time is shifted) with `scale = Some(webcam_size)`, read one frame; else `webcam = None`.
+4. If `paths.webcam().exists()`, spawn a `RawDecoder` on the webcam seeked to `video_start + time_ms` (export pre-seeks the webcam by `video_start`, so its file-time is shifted) with `cover_scale = Some((webcam_w, webcam_h))` - the same panel-aspect decode box the export uses, so the preview and the export never disagree about the webcam's shape - read one frame; else `webcam = None`.
 5. Call `renderer.composite_at(&pose, &screen_buf, webcam_ref, &mut bgra)` to write a BGRA buffer into `bgra`.
 6. Call `png_encode(bgra, meta.out_w, meta.out_h)` to produce PNG bytes in-process via the `png` crate (no ffmpeg subprocess involved), at the renderer's resolved size.
 
@@ -32,26 +32,33 @@ Renders one composited frame at `time_ms` (uncached: builds a fresh renderer via
 
 ```rust
 #[tauri::command]
-pub fn preview_frame(folder: String, time_ms: u32, session: tauri::State<'_, PreviewSession>) -> Result<String, String>
+pub async fn preview_frame(folder: String, time_ms: u32, app: tauri::AppHandle) -> Result<String, String>
 ```
 
 Tauri IPC command: renders one preview frame (via the warm cache) and returns a PNG data URL.
+
+**Off the main thread (Task 41 sweep correction).** `async fn` + `spawn_blocking`, same freeze mechanism as `ai::commands` (Task 40) and `thumbs.rs`/`preview_track.rs` (Task 41): `render_frame` calls `RawDecoder::spawn` (screen, and webcam when present) which shells out to `ffmpeg` and blocks on its stdout pipe until the seeked frame decodes - a real blocking subprocess call, not in-process math. An earlier T41 sweep incorrectly grouped this command with `camera_track`/`preview_layout`/`click_track` (`preview_track.rs`) as "pure math/cache reads" and left it sync - those three genuinely are pure math (no decode, see their own docs); this one is not. Because `session: tauri::State<'_, PreviewSession>` can't be moved into `spawn_blocking` (its lifetime isn't `'static`), the command instead takes `app: tauri::AppHandle` (`'static`, `Clone`, `Send`) and re-derives the same managed-state handle inside the blocking closure via `app.state::<PreviewSession>()` (`tauri::Manager`).
+
+**Verified uncalled by the frontend today** (Task 41 sweep correction - grepped `src/` for `preview_frame`/`previewFrame`, no hits) - the editor's M3 preview plays the recording natively via `<video>` (see `Editor.md`) rather than fetching per-frame PNGs, so nothing currently invokes this command. Converted anyway per "dead-or-not, it must not be a landmine" - a future caller (or a re-enabled `render_preview`-style flow) would otherwise silently reintroduce a main-thread freeze.
 
 ### Inputs (what, and why it is needed)
 
 - `folder: String` - absolute path to the project directory. *Why:* the frontend holds the folder path from `stopRecording`; it is the stable identity for a recording session across Tauri calls.
 - `time_ms: u32` - scrub position in ms. *Why:* the editor timeline drives this; the frontend passes the current playhead position.
-- `session: State<PreviewSession>` - the warm renderer cache. *Why:* scrubbing reuses one renderer instead of rebuilding per frame.
+- `app: tauri::AppHandle` - resolves the `PreviewSession` managed state from inside the `spawn_blocking` closure (see above).
 
 ### Returns
 
-`Result<String, String>` - on success, a `data:image/png;base64,...` data URL ready for use in an `<img>` `src` attribute. On error, a human-readable error string that the frontend can display.
+`Result<String, String>` - on success, a `data:image/png;base64,...` data URL ready for use in an `<img>` `src` attribute. On error, a human-readable error string that the frontend can display. A `spawn_blocking` join failure also maps to `Err(String)`, same shape as every other failure this command can return.
 
 ### Implementation
 
-1. Via `with_warm`, call `render_frame` at `time_ms` and the cached size.
-2. Base64-encode the PNG bytes with the local `base64_encode` helper (RFC 4648 alphabet, no line breaks).
-3. Prefix with `"data:image/png;base64,"` and return.
+The whole body runs inside `tauri::async_runtime::spawn_blocking(move || { ... })`, `.await`ed then `?`-unwrapped:
+
+1. `app.state::<PreviewSession>()` re-derives the managed-state handle.
+2. Via `with_warm`, call `render_frame` at `time_ms` and the cached size.
+3. Base64-encode the PNG bytes with the local `base64_encode` helper (RFC 4648 alphabet, no line breaks).
+4. Prefix with `"data:image/png;base64,"` and return.
 
 ## preview_bg
 
@@ -61,6 +68,8 @@ pub fn preview_bg(folder: String, session: tauri::State<'_, PreviewSession>) -> 
 ```
 
 Returns the export background (the BGRA mesh/gradient the compositor draws under the screen) as a PNG data URL, so the editor's canvas preview paints the exact same background the export uses instead of an approximate gradient.
+
+**Stays sync (verified, Task 41 sweep correction).** On a warm cache (the common case - the background doesn't change per-edit, so the frontend fetches it once per folder and it stays cached in `PreviewSession`) this command's own call chain is `with_warm`'s fast path + `accessors::bg` (`&self.bg`, a plain field read, no I/O) + `png_encode` (in-memory only, the `png` crate, no subprocess) - verified by reading both implementations. The COLD-build path (`with_warm` rebuilding a renderer from scratch, e.g. first open or an aspect change) can still shell out to ffmpeg internally via `FrameRenderer::new`'s background decode - but that warm-up cost is shared unconditionally by every `PreviewSession`-based command (`camera_track`/`preview_layout`/`click_track` included), all of which stay off `spawn_blocking` today for the same `tauri::State` lifetime reason - a pre-existing, broader seam this fix doesn't attempt to close.
 
 ### Inputs (what, and why it is needed)
 
@@ -88,6 +97,14 @@ Runs `f` with the warm `FrameRenderer` for `folder`. A full rebuild happens only
 ### Implementation
 
 Checks `folder` + `edit.json` mtime first (cheapest: one `metadata()` syscall, no JSON parse) - if both match the cached entry, reuses it as-is with no further work. Only when something changed does it peek `edit::seed::load_or_seed(&paths).aspect` (one small JSON read) to decide `reload_edit` (same aspect) vs a full `build_renderer` (different aspect, different folder, or first build for this folder).
+
+## PreviewSession::has_webcam
+
+```rust
+pub fn has_webcam(&self) -> bool
+```
+
+Whether the CURRENTLY-CACHED preview renderer's project has a recorded webcam - used by `preview_fx_overlay` (`preview_fx.rs`) to gate the spotlight's camera-exclusion hole the same way the export gates it (`has_webcam` in `fx_state.rs`/`render/mod.rs`). Reads whichever renderer is warm right now via `FrameRenderer::has_webcam` (`render/accessors.rs`), regardless of `folder` - same as every other preview command implicitly relies on: the editor keeps at most one project's renderer warm via `with_warm`, refreshed by `camera_track`/`preview_layout`/etc. on essentially every render, so by the time an FX overlay is requested the warm renderer already belongs to the open project. Returns `false` (no hole) before anything has warmed the cache yet - fails safe, never an un-dimmed rectangle.
 
 ## PREVIEW_LONG_EDGE
 

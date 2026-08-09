@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { saveEdit } from "../../lib/ipc";
 import type { EditDoc } from "../../lib/edit";
 
@@ -8,11 +8,20 @@ const COALESCE_MS = 400; // merge a rapid burst (e.g. a slider drag firing many 
 // Frontend edit history for the EditDoc. `record(current)` snapshots the pre-edit doc before every
 // mutation; undo/redo swap between the two stacks, persist the restored doc (saveEdit) and bump
 // `rev` so the preview refetches. No backend history is needed - the doc IS the whole edit state.
+//
+// `enqueue` (from `Editor`'s `createQueue()`, shared with `applyOp`) serializes `undo`/`redo`
+// behind any in-flight `applyOp` - without it, an undo/redo issued while an edit's IPC round trip
+// is still pending could `setDoc` the restored snapshot, only for the apply's OWN `setDoc` to
+// land after and silently overwrite it (UI and disk diverge). Routing through the same queue here
+// (not just at the call sites in `Editor`) also covers this hook's OWN `Ctrl+Z` listener below,
+// which calls these same `undo`/`redo` functions.
 export function useEditHistory(
   folder: string,
-  doc: EditDoc | null,
+  docRef: RefObject<EditDoc | null>,
   setDoc: (d: EditDoc) => void,
   bumpRev: () => void,
+  enqueue: <T>(fn: () => Promise<T>) => Promise<T>,
+  onSwap?: (kind: "undo" | "redo") => void,
 ) {
   const undoStack = useRef<EditDoc[]>([]);
   const redoStack = useRef<EditDoc[]>([]);
@@ -38,19 +47,27 @@ export function useEditHistory(
     sync();
   }, []);
 
-  const swap = useCallback(async (from: { current: EditDoc[] }, to: { current: EditDoc[] }) => {
+  // Reads `docRef.current` (not a captured `doc` value) at the moment this actually RUNS - since
+  // `swap` only ever executes from inside `enqueue` (via `undo`/`redo` below), a call queued
+  // behind an in-flight `applyOp` must see whatever doc that apply just settled to, not whatever
+  // was current back when the undo/redo was first triggered. A closure-captured `doc` would push
+  // that stale pre-apply snapshot as "the doc we're leaving" - the wrong doc ends up on the
+  // counterpart stack, and a later redo/undo would silently discard the apply's real result.
+  const swap = useCallback(async (from: { current: EditDoc[] }, to: { current: EditDoc[] }, kind: "undo" | "redo") => {
     const next = from.current.pop();
-    if (!next || !doc) return;
-    to.current.push(doc); // the doc we're leaving becomes the counterpart step
+    const current = docRef.current;
+    if (!next || !current) return; // nothing to swap - no toast, no write
+    to.current.push(current); // the doc we're leaving becomes the counterpart step
     setDoc(next);
     lastAt.current = 0; // the next edit after undo/redo always starts its own step
     try { await saveEdit(folder, next); } catch { /* keep the UI state even if the disk write fails */ }
     bumpRev();
     sync();
-  }, [doc, folder, setDoc, bumpRev]);
+    onSwap?.(kind);
+  }, [docRef, folder, setDoc, bumpRev, onSwap]);
 
-  const undo = useCallback(() => swap(undoStack, redoStack), [swap]);
-  const redo = useCallback(() => swap(redoStack, undoStack), [swap]);
+  const undo = useCallback(() => enqueue(() => swap(undoStack, redoStack, "undo")), [swap, enqueue]);
+  const redo = useCallback(() => enqueue(() => swap(redoStack, undoStack, "redo")), [swap, enqueue]);
 
   // Ctrl/Cmd+Z = undo, Ctrl/Cmd+Shift+Z or Ctrl+Y = redo. Ignored while typing in a field so the
   // input's own undo still works.

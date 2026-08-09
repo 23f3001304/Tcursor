@@ -33,13 +33,16 @@ pub(crate) struct EditState {
 impl EditState {
     /// Load the edit-derived state from `paths`. `actions`/`layout`/`sw`/`sh` are the
     /// edit-INDEPENDENT inputs the caller already holds (recorded action log, preview layout,
-    /// probed video dims), so this touches only `edit.json`.
-    pub(crate) fn load(paths: &ProjectPaths, actions: &[ActionEvent], layout: &Layout, sw: u32, sh: u32) -> Self {
+    /// probed video dims), so this touches only `edit.json`. `shift` is `events_ms - video_start`,
+    /// needed only by the recorded-action fallback below (that log is on the EVENT clock; the
+    /// track it builds is sampled on the OUTPUT clock like every other region).
+    pub(crate) fn load(paths: &ProjectPaths, actions: &[ActionEvent], layout: &Layout, sw: u32, sh: u32, shift: i64) -> Self {
         let doc = crate::edit::seed::load_or_seed(paths);
         let settings = doc.settings.clone();
         let cfg = settings.zoom.to_zoom_config();
         let track = if doc.layout.is_empty() {
-            LayoutTrack::new(actions, &settings.appearance, layout.out_w, layout.out_h, sw, sh, TRANSITION_MS)
+            let acts = crate::edit::seed::actions_on_output_clock(actions, shift);
+            LayoutTrack::new(&acts, &settings.appearance, layout.out_w, layout.out_h, sw, sh, TRANSITION_MS)
         } else {
             LayoutTrack::from_segs(&doc.layout, &settings.appearance, layout.out_w, layout.out_h, sw, sh)
         };

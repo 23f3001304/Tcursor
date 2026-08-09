@@ -21,7 +21,7 @@ pub struct RawDecoder {
 /// exact arg order `spawn` used to build inline via `Command::args`.
 fn decode_args(
     video: &Path, rate: f64, input_rate: bool, seek_ms: Option<u64>,
-    square_scale: Option<u32>, target_dims: Option<(u32, u32)>, pix_fmt: &str,
+    cover_scale: Option<(u32, u32)>, target_dims: Option<(u32, u32)>, pix_fmt: &str,
 ) -> Vec<String> {
     let r = format!("{rate:.4}");
     let mut args: Vec<String> = ["-v", "error", "-hwaccel", "auto"].map(String::from).into();
@@ -33,14 +33,15 @@ fn decode_args(
     args.push("-sws_flags".into()); args.push("fast_bilinear".into());
     if let Some((w, h)) = target_dims {
         args.push("-vf".into()); args.push(format!("scale={w}:{h}:flags=fast_bilinear"));
-    } else if let Some(sz) = square_scale {
-        // Cover-crop to a centered square so a 16:9 webcam isn't skewed. NOTE: `flags` is a
-        // `scale` option, NOT a `crop` option - putting it on `crop` makes newer ffmpeg reject
-        // the whole filtergraph ("Option not found"), which silently zeroed the webcam decode
-        // and dropped the camera from every export. The global `-sws_flags fast_bilinear` above
-        // already sets the scale flags, so `crop` needs none.
+    } else if let Some((w, h)) = cover_scale {
+        // Cover-crop to a centered `w`x`h` so the decoded webcam already has the PANEL's aspect
+        // (a Wide panel is 16:9); decoding a square here made the compositor stretch it 1.78x.
+        // NOTE: `flags` is a `scale` option, NOT a `crop` option - putting it on `crop` makes
+        // newer ffmpeg reject the whole filtergraph ("Option not found"), which silently zeroed
+        // the webcam decode and dropped the camera from every export. The global `-sws_flags
+        // fast_bilinear` above already sets the scale flags, so `crop` needs none.
         args.push("-vf".into());
-        args.push(format!("scale={sz}:{sz}:force_original_aspect_ratio=increase,crop={sz}:{sz}"));
+        args.push(format!("scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"));
     }
     // `nv12` (Y + interleaved half-res UV, ~2.6x smaller than bgra) is nvdec's native output, so
     // the screen decode skips the expensive yuv->bgra swscale AND pushes far fewer bytes through
@@ -56,13 +57,13 @@ impl RawDecoder {
     /// Spawn `ffmpeg` decoding `video` to rawvideo BGRA. `rate <= 0` decodes at
     /// the native frame rate (used when the caller places frames by timestamp);
     /// otherwise `rate` is applied as an input (`input_rate`) or output `-r`.
-    /// `seek_ms` trims the start (`-ss`); `square_scale` cover-crops to a square;
+    /// `seek_ms` trims the start (`-ss`); `cover_scale` cover-crops to a `(w, h)` box;
     /// `target_dims` scales output dimensions directly in FFmpeg.
     pub fn spawn(
         video: &Path, rate: f64, input_rate: bool, seek_ms: Option<u64>,
-        square_scale: Option<u32>, target_dims: Option<(u32, u32)>, pix_fmt: &str, frame_bytes: usize
+        cover_scale: Option<(u32, u32)>, target_dims: Option<(u32, u32)>, pix_fmt: &str, frame_bytes: usize
     ) -> Result<Self> {
-        let args = decode_args(video, rate, input_rate, seek_ms, square_scale, target_dims, pix_fmt);
+        let args = decode_args(video, rate, input_rate, seek_ms, cover_scale, target_dims, pix_fmt);
         let mut child = ffcmd("ffmpeg")
             .args(&args)
             .stdout(Stdio::piped())
@@ -124,5 +125,22 @@ mod tests {
     fn non_positive_rate_omits_r_entirely() {
         let args = decode_args(Path::new("v.mp4"), 0.0, false, None, None, None, "nv12");
         assert!(!args.iter().any(|a| a == "-r"), "unexpected -r in {args:?}");
+    }
+
+    /// A Wide (16:9) webcam panel must cover-crop to W:H, not to a square that the
+    /// compositor then stretches 1.78x across the panel.
+    #[test]
+    fn cover_scale_emits_the_panels_own_w_h() {
+        let args = decode_args(Path::new("w.mp4"), 60.0, false, None, Some((448, 252)), None, "bgra");
+        let vf = args.iter().position(|a| a == "-vf").expect("no -vf");
+        assert_eq!(args[vf + 1], "scale=448:252:force_original_aspect_ratio=increase,crop=448:252");
+    }
+
+    /// A Square panel keeps the exact filter it always had (no behavior change).
+    #[test]
+    fn cover_scale_of_equal_dims_is_the_old_square_filter() {
+        let args = decode_args(Path::new("w.mp4"), 60.0, false, None, Some((420, 420)), None, "bgra");
+        let vf = args.iter().position(|a| a == "-vf").expect("no -vf");
+        assert_eq!(args[vf + 1], "scale=420:420:force_original_aspect_ratio=increase,crop=420:420");
     }
 }

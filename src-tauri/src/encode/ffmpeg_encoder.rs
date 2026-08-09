@@ -12,6 +12,23 @@ pub struct FfmpegFrameSink {
     child: Child,
     width: u32,
     height: u32,
+    warned: bool, // latches true after the first mid-record dimension-mismatch warning
+}
+
+/// A mid-record resize corrupts the rawvideo pipe's fixed frame size; skip a mismatched
+/// frame (never write partial/misaligned bytes into it) and warn once via `warned`
+/// instead of spamming - a frozen-then-recovered video beats a corrupt stream. `w` is
+/// generic (not tied to `ChildStdin`) so this is unit-testable with a plain `Vec<u8>`.
+fn write_or_skip(w: &mut dyn Write, f: &Frame, expected: (u32, u32), warned: &mut bool) -> std::io::Result<bool> {
+    if (f.width, f.height) != expected {
+        if !*warned {
+            eprintln!("ffmpeg sink: frame {}x{} != expected {}x{}, skipping (window resized mid-record?)", f.width, f.height, expected.0, expected.1);
+            *warned = true;
+        }
+        return Ok(false);
+    }
+    w.write_all(&f.bgra)?;
+    Ok(true)
 }
 
 /// Encode one test frame to verify the encoder actually works on this machine.
@@ -87,7 +104,7 @@ impl FfmpegFrameSink {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()?;
-        Ok(Self { child, width, height })
+        Ok(Self { child, width, height, warned: false })
     }
 
     /// High-quality CFR encode for offline export (slower preset, near-lossless).
@@ -128,15 +145,14 @@ impl FfmpegFrameSink {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()?;
-        Ok(Self { child, width, height })
+        Ok(Self { child, width, height, warned: false })
     }
 }
 
 impl FrameSink for FfmpegFrameSink {
-    fn push(&mut self, f: &Frame) -> std::io::Result<()> {
-        debug_assert_eq!((f.width, f.height), (self.width, self.height));
+    fn push(&mut self, f: &Frame) -> std::io::Result<bool> {
         let stdin = self.child.stdin.as_mut().expect("ffmpeg stdin");
-        stdin.write_all(&f.bgra)
+        write_or_skip(stdin, f, (self.width, self.height), &mut self.warned)
     }
     fn finish(mut self: Box<Self>) -> std::io::Result<()> {
         // Closing stdin signals EOF so ffmpeg flushes and exits.
@@ -151,3 +167,7 @@ impl FrameSink for FfmpegFrameSink {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "ffmpeg_encoder_tests.rs"]
+mod tests;

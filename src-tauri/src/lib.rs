@@ -58,6 +58,7 @@ pub fn run() {
             session::project::commands::list_recent_projects,
             session::project::commands::get_launch_project,
             session::project::commands::get_project_manifest,
+            session::project::commands::os_cursor_in_video,
         ])
         .setup(|app| {
             use tauri::Manager;

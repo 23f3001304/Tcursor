@@ -91,6 +91,14 @@ pub fn get_project_manifest(folder: String) -> ProjectManifest {
     ProjectManifest::load_or_default(&paths.manifest())
 }
 
+/// Whether this recording's video already contains a baked OS cursor - derived from the
+/// record-time `settings.json` snapshot, so it stays true for recordings made before this
+/// existed. A derived read, deliberately NOT a field on the persisted manifest.
+#[tauri::command]
+pub fn os_cursor_in_video(folder: String) -> bool {
+    crate::settings::store::os_cursor_in_video(&ProjectPaths { folder: PathBuf::from(&folder) })
+}
+
 #[cfg(test)]
 #[path = "commands_tests.rs"]
 mod tests;

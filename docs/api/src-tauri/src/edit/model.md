@@ -2,6 +2,24 @@
 
 Data model for `edit.json`: the complete type hierarchy from atomic clip edits (`Trim`, `Cut`, `Zoom`, `Speed`, `LayoutSeg`) up to the root `EditDoc`, plus save/load helpers that make `EditDoc` self-serializing. All types derive `Serialize`/`Deserialize` so they transit IPC and disk without a separate DTO layer.
 
+## DOC_VERSION
+
+```rust
+pub const DOC_VERSION: u32 = 2;
+```
+
+Current `edit.json` schema version - the value every doc this build writes carries, and the target `seed::migrate` upgrades older docs to.
+
+- **v1** - `zooms` and `camera_moves` on the output clock, but `effects` and `layout` seeded straight off the recorded action log (event clock), so on a real recording they sat ~800 ms early against the editor timeline and the export disagreed with the preview.
+- **v2** - the one-clock contract: EVERY region list in the doc is output time (0 = first video frame). `seed::v1_to_v2` shifts a v1 doc's `effects`/`layout` by `events_ms - video_start` on load.
+
+Bump this constant and add one `if doc.version < N` step in `seed::migrate` for a future schema change.
+
+### Used by
+
+- `src-tauri/src/edit/model.rs` - `EditDoc::default`
+- `src-tauri/src/edit/seed.rs` - `build_default` stamps it; `migrate` compares against it
+
 ## Trim
 
 ```rust
@@ -125,14 +143,22 @@ A playback-speed multiplier applied to a time range.
 
 ```rust
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct LayoutSeg { pub id: String, pub start_ms: u32, pub end_ms: u32, pub layout: String }
+pub struct LayoutSeg {
+    pub id: String, pub start_ms: u32, pub end_ms: u32, pub layout: String,
+    #[serde(default = "default_layout_transition_ms")] pub transition_ms: u32,
+    #[serde(default = "default_layout_easing")] pub easing: String,
+    #[serde(default)] pub transition_out_ms: u32,
+    #[serde(default = "default_layout_easing")] pub easing_out: String,
+}
 ```
 
-A contiguous time span that uses a named screen layout (e.g. `"screen"`, `"pip"`, `"camera"`).
+A time span that uses a named screen layout (e.g. `"screen"`, `"camera"`, `"presenter"`).
 
-- `id` - *stable key (e.g. `"l0"`) used by `SetLayoutSeg` to target the segment to update.*
-- `start_ms` / `end_ms` - *the span where this layout is active; segments must be non-overlapping and cover the full clip duration.*
+- `id` - *stable key (e.g. `"l0"`) used by `UpdateLayoutSeg` to target the segment to update.*
+- `start_ms` / `end_ms` - *the span where this layout is active, `[start, end)`. Segments may overlap (latest start wins) and need not tile the clip - a gap resolves to the base `screen` layout.*
 - `layout` - *serde wire name of the layout variant (lowercase snake_case); consumed by the compositor to choose the frame composition template.*
+- `transition_ms` / `easing` - *the ENTRY cross-fade, which STARTS at `start_ms`. Defaults to 350ms / `"smooth"`.*
+- `transition_out_ms` / `easing_out` - *the EXIT cross-fade, which COMPLETES at `end_ms` - symmetric with the entry, so everything a segment does stays inside its own timeline pill. Defaults to `0` = a hard cut, which is exactly what every doc written before exit transitions existed deserializes to, so old docs render bit-identically (pinned by `layout_seg_exit_transition_defaults_to_a_hard_cut_on_missing_fields`). `easing_out` is only meaningful when `transition_out_ms > 0`. See `export/scene/layout.md` for the blend semantics, including why a gapless successor's entry wins the overlap.*
 
 ### Used by
 
@@ -164,13 +190,15 @@ One keyframe of the webcam PiP's position + size track (`EditDoc.camera_moves`).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct EditDoc {
-    pub version: u32,
+    #[serde(default = "oldest_version")] pub version: u32,
     pub trim: Trim,
+    #[serde(default)] pub clip_ms: u32,
     pub cuts: Vec<Cut>,
     pub zooms: Vec<Zoom>,
     pub speed: Vec<Speed>,
     pub layout: Vec<LayoutSeg>,
-    pub camera_moves: Vec<CameraMove>,
+    #[serde(default)] pub effects: Vec<EffectRegion>,
+    #[serde(default)] pub camera_moves: Vec<CameraMove>,
     pub aspect: crate::export::types::Aspect,
     pub settings: crate::settings::model::Settings,
 }
@@ -178,12 +206,16 @@ pub struct EditDoc {
 
 Root of `edit.json`. Carries the complete editor state for one recording project.
 
-- `version` - *schema version, currently always `1`; reserved for future migration guards.*
+**One clock.** Every region list in the doc - `zooms`, `effects`, `layout`, `camera_moves` - stores OUTPUT time (ms, 0 = the first video frame), the same base the editor timeline, the TS preview and `FramePose::out_t` use. Raw recorded streams (`events.json`, `actions.json`, `cursor.json`) stay on the EVENT clock and are converted at the boundary (`seed::actions_on_output_clock`, `FrameRenderer::click_track`, `cursor_kinds`). This is what `DOC_VERSION` 2 guarantees; v1 stored `effects`/`layout` on the event clock.
+
+- `version` - *schema version; `DOC_VERSION` for anything this build writes. `#[serde(default = "oldest_version")]` overrides the container default so a file WITHOUT the key reads as `1` (the oldest schema) and gets migrated - with the container default it would read as `DOC_VERSION` and silently skip every migration. `edit::migrate::migrate` upgrades older docs on load.*
 - `trim` - *clip in/out bounds; the only time bounds that affect the exported file's duration.*
+- `clip_ms` - *the recording's TRUE full duration (ms), independent of `trim`. The upper bound `edit::ops::region::dur_bound` clamps new/moved regions against, so trimming the clip no longer collapses a region added past the trim point. `#[serde(default)]` so a pre-existing doc loads it as `0` ("not yet known"); `seed::build_default` seeds it and `edit::migrate::migrate` backfills it on every load where it is still `0`, regardless of `version`.*
 - `cuts` - *ordered list of removed spans within the trim window.*
 - `zooms` - *ordered list of zoom events; `api.rs` manages ids; the renderer tolerates any order.*
 - `speed` - *ordered list of speed-change segments.*
 - `layout` - *ordered, non-overlapping layout segments covering `[0, trim.out_ms]`.*
+- `effects` - *ordered list of editable effect regions (v1: Spotlight); `#[serde(default)]` for back-compat. See `EffectRegion`.*
 - `camera_moves` - *ordered list of webcam PiP keyframes; `#[serde(default)]` so a pre-existing `edit.json` with no `camera_moves` loads as an empty `Vec`, which the exporter/preview treat as "no override" (byte-identical to today).*
 - `aspect` - *output frame aspect ratio; `#[serde(default)]` so a pre-existing `edit.json` with no `aspect` loads as `Aspect::Source` - today's behavior exactly. See `export::types::Aspect`.*
 - `settings` - *snapshot of the user's `Settings` at the time the doc was seeded; preserves the zoom config and theme for a re-render even if the user later changes settings.*
@@ -202,7 +234,7 @@ Root of `edit.json`. Carries the complete editor state for one recording project
 pub fn save(&self, path: &std::path::Path) -> std::io::Result<()>
 ```
 
-Serializes the doc to pretty-printed JSON and writes it atomically to `path`.
+Serializes the doc to pretty-printed JSON and writes it atomically to `path`: the bytes go to a temp sibling (`crate::win::sys::proc::tmp_sibling`) first, then `std::fs::rename` moves it into place. A crash or power loss mid-write leaves the old `edit.json` untouched (the rename either fully happens or not at all) instead of a half-written, truncated file - the failure mode `EditDoc::load` used to see as silent corruption.
 
 ### Inputs
 
@@ -211,11 +243,13 @@ Serializes the doc to pretty-printed JSON and writes it atomically to `path`.
 
 ### Returns
 
-`Ok(())` on success; `Err(io::Error)` on serialization or write failure.
+`Ok(())` on success; `Err(io::Error)` on serialization, temp-file write, or rename failure. On success no temp sibling is left behind; `rename` replaces an existing `path` in place (verified on Windows - no need to remove the destination first).
 
 ### Behaviors
 
 - `round_trip_save_load` - a full `EditDoc` with all fields populated serializes and deserializes without data loss.
+- `save_leaves_no_tmp_sibling_on_success` - after a successful save, the directory contains only the target file, no leftover temp sibling.
+- `save_overwrites_an_existing_file` - saving over a path that already holds a doc replaces it (the common per-edit-op case).
 
 ## EditDoc::load
 
@@ -223,11 +257,26 @@ Serializes the doc to pretty-printed JSON and writes it atomically to `path`.
 pub fn load(path: &std::path::Path) -> Option<EditDoc>
 ```
 
-Reads and deserializes `edit.json` at `path`. Returns `None` on any error.
+Reads and deserializes `edit.json` at `path`. A missing file and a corrupt (unparseable) file both return `None`, so the caller's reseed path (`load_or_seed`) runs either way - but they are NOT treated the same on disk: a read failure (no file) is left alone, while a parse failure renames the bad file aside to `<path>.corrupt` (overwriting any older `.corrupt` from a previous crash) and `eprintln!`s the parse error, so a reseed never silently destroys the user's actual edit - the original bytes survive on disk for recovery.
 
 ### Inputs
 
 - `path: &std::path::Path` - file to read. *Why `Option` rather than `Result`:* callers treat missing-or-corrupt as "seed needed", not an error, so a silent `None` matches the intended flow.*
+
+### Returns
+
+`Some(EditDoc)` if the file exists and is valid JSON; `None` on any I/O or parse failure.
+
+### Behaviors
+
+- `load_missing_path_is_none` - a path that does not exist returns `None`.
+- `partial_json_fills_defaults` - JSON with only a `zooms` key fills all other fields from `Default`.
+- `zoom_target_fixed_serializes_with_xy` - `ZoomTarget::Fixed` round-trips with `"fixed"`, `"x"`, and `"y"` keys present.
+- `aspect_missing_field_defaults_to_source` - JSON without an `aspect` key loads `Aspect::Source` (back-compat).
+- `clip_ms_missing_field_defaults_to_zero` - JSON without a `clip_ms` key loads it as `0` (back-compat; `edit::migrate::migrate` backfills it).
+- `aspect_round_trips_through_json` - a non-default `Aspect` round-trips through `EditDoc` serialization.
+- `load_on_truncated_json_returns_none_and_preserves_original_bytes` - a parse failure returns `None` and the original bytes end up unmodified at `<path>.corrupt`.
+- `load_on_truncated_json_overwrites_an_older_corrupt_file` - a stale `.corrupt` sibling from an earlier crash does not block preserving the new one.
 
 ## EffectKind
 
@@ -254,15 +303,3 @@ pub struct EffectRegion {
 ```
 
 An editable effect region on the timeline (v1: Spotlight). `EditDoc.effects` is a `Vec<EffectRegion>` with `#[serde(default)]` for back-compat (a pre-existing `edit.json` without `effects` loads). Params default from settings for now; at export, `fx_state::spotlight_region_alpha` fades a Spotlight region in/out over its span and unions it with the settings + hotkey-hold spotlight.
-
-### Returns
-
-`Some(EditDoc)` if the file exists and is valid JSON; `None` on any I/O or parse failure.
-
-### Behaviors
-
-- `load_missing_path_is_none` - a path that does not exist returns `None`.
-- `partial_json_fills_defaults` - JSON with only a `zooms` key fills all other fields from `Default`.
-- `zoom_target_fixed_serializes_with_xy` - `ZoomTarget::Fixed` round-trips with `"fixed"`, `"x"`, and `"y"` keys present.
-- `aspect_missing_field_defaults_to_source` - JSON without an `aspect` key loads `Aspect::Source` (back-compat).
-- `aspect_round_trips_through_json` - a non-default `Aspect` round-trips through `EditDoc` serialization.

@@ -14,13 +14,15 @@ pub(crate) fn ease(e: Easing, p: f32) -> f32 {
         Easing::EaseIn => p * p,
         Easing::EaseOut => p * (2.0 - p),
         Easing::EaseInOut => if p < 0.5 { 2.0 * p * p } else { 1.0 - 2.0 * (1.0 - p) * (1.0 - p) },
+        Easing::Cubic { x1, y1, x2, y2 } => crate::export::cubic::eval(x1, y1, x2, y2, p),
     }
 }
 
-/// The camera panel's un-overridden (static) rect, as a `CamPose` - the pose
-/// `CameraMoveTrack::sample`'s implicit t=0 keyframe eases FROM when a single `camera_moves`
-/// keyframe exists. `ow`/`oh` are the output frame's pixel dims (same basis `rect_from_center`
-/// converts back into); inverse of that conversion (center + height fraction, not top-left rect).
+/// The camera panel's un-overridden (layout-resolved) rect as a `CamPose` - `CameraMoveTrack::
+/// sample`'s `live` argument, which its entry blend eases FROM and its exit blend eases back TO.
+/// Recomputed every frame from that frame's own scene, so a layout transition still in flight
+/// moves it. `ow`/`oh` are the output frame's pixel dims (same basis `rect_from_center` converts
+/// back into); inverse of that conversion (center + height fraction, not top-left rect).
 pub fn static_cam_pose(rect: RectF, ow: f32, oh: f32) -> CamPose {
     CamPose { x: (rect.x + rect.w * 0.5) / ow, y: (rect.y + rect.h * 0.5) / oh, size: rect.h / oh }
 }
@@ -42,9 +44,9 @@ struct Transition { from_scale: f32, from_cx: f32, from_cy: f32, start_ms: u32, 
 /// A virtual camera whose zoom scale follows a deterministic eased curve contained
 /// entirely within each zoom region: it ramps 1 -> target over `zoom_in_ms`, holds,
 /// then ramps target -> 1 over `zoom_out_ms`, reaching 1 exactly at `end_ms` (so the
-/// timeline pill is an honest bound). The center eases toward the click point in
-/// lockstep on zoom-in, pans to keep the cursor in view during hold, and is recentred
-/// by the in-frame clamp as scale returns to 1.
+/// timeline pill is an honest bound). The center eases in lockstep on zoom-in toward the
+/// aim - `r.anchor`, or the LIVE cursor for a `follow_cursor` region - pans to keep the
+/// cursor in view during hold, and is recentred by the in-frame clamp as scale returns to 1.
 ///
 /// The **highest-`layer`** active region wins an overlap (ties broken by the most
 /// recently added, i.e. the later index) - not simply whichever is most recent. When the
@@ -79,6 +81,16 @@ impl CameraSim {
             .map(|(i, _)| i)
     }
 
+    /// How much of `r`'s zoom-in window is still ahead of `t_ms` (its full `zoom_in_ms`
+    /// once that window has already elapsed) - the length a handoff blend INTO `r` must
+    /// run so it finishes exactly where `r`'s own ramp does.
+    fn remaining_zoom_in(r: &ZoomRegion, t_ms: u32) -> u32 {
+        let span = r.end_ms.saturating_sub(r.start_ms).max(1);
+        let (zi, _) = fit_durations(r.zoom_in_ms, r.zoom_out_ms, span);
+        let zin_end = r.start_ms + zi;
+        if t_ms < zin_end { zin_end - t_ms } else { r.zoom_in_ms }
+    }
+
     pub fn step(&mut self, t_ms: u32, cursor: FramePoint, regions: &[ZoomRegion], cfg: &ZoomConfig) -> Camera {
         let (fw, fh) = (self.frame_w as f32, self.frame_h as f32);
         let winner_idx = Self::winner(regions, t_ms);
@@ -86,18 +98,24 @@ impl CameraSim {
         if winner_idx != self.driver {
             if self.driver.is_some() {
                 // A real handoff: something -> something else, or something -> nothing.
-                // Ease from wherever the camera actually is right now.
+                // Ease from wherever the camera actually is right now, over what is LEFT of
+                // the incoming region's zoom-in window, so the blend lands exactly where its
+                // own ramp would have (no second curve running past the ramp's end).
                 let (dur_ms, easing) = match winner_idx {
-                    Some(i) => (regions[i].zoom_in_ms, regions[i].easing),
+                    Some(i) => (Self::remaining_zoom_in(&regions[i], t_ms), regions[i].easing),
                     None => (self.driver_zoom_out_ms, self.driver_easing),
                 };
                 self.transition = Some(Transition {
                     from_scale: self.scale, from_cx: self.cx, from_cy: self.cy,
                     start_ms: t_ms, dur_ms: dur_ms.max(1), easing,
                 });
+            } else {
+                // `None -> Some` (a fresh start) needs no transition - the natural zoom-in-
+                // from-center computation below is already correct. Any transition still in
+                // flight here is the previous driver's stale `Some -> None` exit blend, which
+                // would otherwise attenuate this region's whole ramp; drop it.
+                self.transition = None;
             }
-            // `None -> Some` (a fresh start) needs no transition - the natural zoom-in-from-
-            // center computation below is already correct in that case.
             self.driver = winner_idx;
         }
         if let Some(i) = winner_idx {
@@ -115,10 +133,17 @@ impl CameraSim {
                 let (zin_end, zout_start) = (r.start_ms + zi, r.end_ms.saturating_sub(zo));
                 let s = r.target_scale;
                 if t_ms < zin_end {
-                    let e = ease(r.easing, (t_ms - r.start_ms) as f32 / zi.max(1) as f32);
+                    // While a handoff blend is in flight the natural target is this region's
+                    // STEADY pose, not its own ramp: easing both on the same clock multiplies
+                    // the two curves and pulses the camera back OUT mid-handoff.
+                    let e = if self.transition.is_some() { 1.0 }
+                        else { ease(r.easing, (t_ms - r.start_ms) as f32 / zi.max(1) as f32) };
+                    // A cursor-target zoom re-aims at the LIVE cursor every step, so the ramp
+                    // ends where the follow phase would already be (no second, visible move).
+                    let aim = if r.follow_cursor { cursor } else { r.anchor };
                     (1.0 + (s - 1.0) * e,
-                     fw / 2.0 + (r.anchor.x as f32 - fw / 2.0) * e,
-                     fh / 2.0 + (r.anchor.y as f32 - fh / 2.0) * e)
+                     fw / 2.0 + (aim.x as f32 - fw / 2.0) * e,
+                     fh / 2.0 + (aim.y as f32 - fh / 2.0) * e)
                 } else if t_ms >= zout_start {
                     let e = ease(r.easing, (r.end_ms - t_ms) as f32 / zo.max(1) as f32);
                     (1.0 + (s - 1.0) * e, self.cx, self.cy)
@@ -161,6 +186,10 @@ impl CameraSim {
 #[cfg(test)]
 #[path = "camera_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cursor_tests.rs"]
+mod cursor_tests;
 
 pub mod autozoom;
 pub mod manual;

@@ -1,10 +1,13 @@
 import type { LayoutSeg } from "../../lib/edit";
 import type { LayoutPresets, LayoutPresetName, LayoutPresetDto, PanelRectDto, PreviewLayout } from "../../lib/ipc";
+import { evalCubic, parseCubic } from "../../lib/cubicBezier";
 
 /** Easing mirror of the export's curves (crate::export::camera::ease): linear / smoothstep /
- *  ease-out-back spring / quadratic ease-in / ease-out / ease-in-out. Exported so other per-frame
- *  TS mirrors (e.g. camMoveAt) share this single implementation. MUST stay identical to the Rust
- *  `ease` - export is the source of truth, this only drives the live preview. */
+ *  ease-out-back spring / quadratic ease-in / ease-out / ease-in-out, plus a custom
+ *  `cubic(x1,y1,x2,y2)` curve (crate::export::cubic). The ONLY place easing is evaluated in TS -
+ *  exported so other per-frame mirrors (e.g. camMoveAt) share this single implementation. MUST
+ *  stay identical to the Rust `ease` - export is the source of truth, this only drives the live
+ *  preview. An unparseable name falls through to smooth, matching `valid_easing`'s coercion. */
 export function ease(name: string, p: number): number {
   const c = Math.min(1, Math.max(0, p));
   if (name === "linear") return c;
@@ -12,6 +15,8 @@ export function ease(name: string, p: number): number {
   if (name === "ease_in") return c * c;
   if (name === "ease_out") return c * (2 - c);
   if (name === "ease_in_out") return c < 0.5 ? 2 * c * c : 1 - 2 * (1 - c) * (1 - c);
+  const cub = parseCubic(name);
+  if (cub) return evalCubic(cub[0], cub[1], cub[2], cub[3], c);
   return c * c * (3 - 2 * c); // smooth (default)
 }
 
@@ -51,24 +56,45 @@ function rawPresetAt(ordered: LayoutSeg[], presets: LayoutPresets, t: number): L
   return found ?? presets.screen;
 }
 
+/** The index of the segment active at `t` (latest-starting one containing it), or -1 in a gap. */
+function activeIdx(ordered: LayoutSeg[], t: number): number {
+  let idx = -1;
+  for (let k = 0; k < ordered.length; k++) { const s = ordered[k]; if (t >= s.start_ms && t < s.end_ms) idx = k; }
+  return idx;
+}
+
 /** The active layout at output time `t`, mirroring LayoutTrack::scene_at exactly: a segment is
  *  active only INSIDE `[start, end)`; outside every segment (a gap, or before/after all) falls
  *  back to the base `screen` preset ("empty means default"). Latest-starting containing segment
  *  wins. On entering a segment, cross-fades from whatever was active just before it over that
- *  segment's own transition_ms/easing. Returns null when presets haven't loaded (caller falls back). */
+ *  segment's own transition_ms/easing; over the last transition_out_ms before its end it fades
+ *  toward whatever follows it, landing on that successor exactly AT end_ms - unless the successor's
+ *  OWN entry blend covers end_ms, in which case that entry wins and the exit stands down (one blend
+ *  at a time). Returns null when presets haven't loaded (caller falls back). */
 export function layoutAt(segs: LayoutSeg[], presets: LayoutPresets | null, t: number, canvas: [number, number]): PreviewLayout | null {
   if (!presets) return null;
   const ordered = [...segs].sort((a, b) => a.start_ms - b.start_ms);
-  let idx = -1;
-  for (let k = 0; k < ordered.length; k++) { const s = ordered[k]; if (t >= s.start_ms && t < s.end_ms) idx = k; }
+  const idx = activeIdx(ordered, t);
   if (idx < 0) { const b = presets.screen; return toPreviewLayout(b.screen, b.cam, canvas); } // gap/outside -> screen
 
   const s = ordered[idx];
   const cur = presetOf(presets, s.layout);
-  const elapsed = t - s.start_ms;
-  if (s.transition_ms <= 0 || elapsed >= s.transition_ms) return toPreviewLayout(cur.screen, cur.cam, canvas);
+  const blend = (from: LayoutPresetDto, to: LayoutPresetDto, f: number) =>
+    toPreviewLayout(lerpRect(from.screen, to.screen, f), lerpRect(from.cam, to.cam, f), canvas);
 
-  const from = rawPresetAt(ordered, presets, Math.max(0, s.start_ms - 1)); // active just before this seg
-  const f = ease(s.easing, elapsed / s.transition_ms);
-  return toPreviewLayout(lerpRect(from.screen, cur.screen, f), lerpRect(from.cam, cur.cam, f), canvas);
+  const elapsed = t - s.start_ms;
+  if (s.transition_ms > 0 && elapsed < s.transition_ms) {
+    const from = rawPresetAt(ordered, presets, Math.max(0, s.start_ms - 1)); // active just before this seg
+    return blend(from, cur, ease(s.easing, elapsed / s.transition_ms));
+  }
+  const exitFrom = s.end_ms - s.transition_out_ms;
+  if (s.transition_out_ms > 0 && t >= exitFrom) {
+    const next = activeIdx(ordered, s.end_ms);
+    const nextEntryWins = next >= 0 && ordered[next].transition_ms > 0 && s.end_ms - ordered[next].start_ms < ordered[next].transition_ms;
+    if (!nextEntryWins) {
+      const to = next >= 0 ? presetOf(presets, ordered[next].layout) : presets.screen;
+      return blend(cur, to, ease(s.easing_out, (t - exitFrom) / s.transition_out_ms));
+    }
+  }
+  return toPreviewLayout(cur.screen, cur.cam, canvas);
 }

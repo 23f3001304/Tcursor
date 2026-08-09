@@ -15,7 +15,7 @@ export interface DrawCursor {
 }
 ```
 
-Everything needed to draw the real export cursor: the recording's cursor `style`/`size` + click-bounce + motion-blur settings, the cursor-shape track (`kinds`), the decoded sprite images by lowercase type name (`sprites`) with their hotspots (`hots`, 0..1 of the sprite) and original canvas heights (`canvasH`) for uniform scaling, and `recent` - a small ring of recent on-canvas positions used to draw the motion trail. The cursor is drawn only for `style === "enhanced"` (System = the OS cursor is already baked into the capture; Hidden = none).
+Everything needed to draw the real export cursor: the recording's cursor `style`/`size` + click-bounce + motion-blur settings, the cursor-shape track (`kinds`), the decoded sprite images by lowercase type name (`sprites`) with their hotspots (`hots`, 0..1 of the sprite) and original canvas heights (`canvasH`) for uniform scaling, and `recent` - a small ring of recent on-canvas positions used to draw the motion trail. The cursor is drawn only for `style === "enhanced"` (Hidden = none; System = the OS cursor is already baked into the capture). The gate stays a plain style check on purpose: for a `System` recording with NO baked cursor, `Stage` substitutes an effective `"enhanced"` style (plus an empty `kinds` array, no bounce and no trail) so the plain-OS fallback reuses this exact draw path - see `Stage.md`.
 
 ### Used by
 

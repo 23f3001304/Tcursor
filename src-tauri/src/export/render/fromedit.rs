@@ -16,13 +16,18 @@ pub fn easing_from(name: &str, cfg_easing: Easing) -> Easing {
         "ease_in" => Easing::EaseIn,
         "ease_out" => Easing::EaseOut,
         "ease_in_out" => Easing::EaseInOut,
-        _ => cfg_easing, // "spring" (params lost) or unknown -> config's easing
+        // A custom `cubic(x1,y1,x2,y2)` string carries its whole curve, so it reconstructs exactly.
+        _ => crate::export::cubic::parse_cubic(name)
+            .map(|(x1, y1, x2, y2)| Easing::Cubic { x1, y1, x2, y2 })
+            .unwrap_or(cfg_easing), // "spring" (params lost) or unknown -> config's easing
     }
 }
 
 /// Anchor for a zoom: `Fixed` carries the screen-local press point the seed stored;
-/// `Cursor` (only a user-added target; seeded docs are all `Fixed`) has no stored
+/// `Cursor` (only a user- or AI-added target; seeded docs are all `Fixed`) has no stored
 /// point, so default to screen center (`anchor_regions` then re-anchors into panel).
+/// A `Cursor` region also sets `follow_cursor`, so `CameraSim` aims at the live cursor
+/// and never reads this fallback - it exists only to keep the field total.
 fn anchor_for(z: &Zoom, sw: u32, sh: u32) -> FramePoint {
     match z.target {
         ZoomTarget::Fixed { x, y } => {
@@ -52,6 +57,7 @@ pub fn regions_from_doc(doc: &EditDoc, sw: u32, sh: u32) -> Vec<ZoomRegion> {
             easing: easing_from(&z.easing, cfg.easing),
             layer: z.layer,
             cam_action: z.cam_action,
+            follow_cursor: matches!(z.target, ZoomTarget::Cursor),
         })
         .collect()
 }

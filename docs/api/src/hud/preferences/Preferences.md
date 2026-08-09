@@ -5,9 +5,9 @@ Preferences overlay panel with "Interface" and "Layout" tabs for theme/accent an
 ## Preferences
 
 ```ts
-export function Preferences({ onClose, onThemeChange }: {
+export function Preferences({ onClose, onUiChange }: {
   onClose: () => void;
-  onThemeChange: (theme: ThemeMode, accent: [number, number, number]) => void;
+  onUiChange: (ui: InterfaceSettings) => void;
 }): JSX.Element | null
 ```
 
@@ -16,7 +16,7 @@ A two-tab settings panel. Returns `null` until the initial `getSettings()` resol
 ### Props
 
 - `onClose` (`() => void`) - called when the back-arrow button in the panel header is clicked. *Why a callback rather than internal navigation:* `Hud` owns the panel state and the window morph; it needs to drive the transition back to the bar.
-- `onThemeChange` (`(theme: ThemeMode, accent: [number, number, number]) => void`) - called whenever the Interface tab changes the theme or accent color. *Why propagated up:* `Hud` holds `themeRef` and must call `applyTheme` immediately so CSS variables update in the current session without waiting for the next settings reload.
+- `onUiChange` (`(ui: InterfaceSettings) => void`) - called with the FULL new `InterfaceSettings` whenever the Interface tab changes anything (theme, accent, or Task 39's `animated_brand`). *Why propagated up:* `Hud` holds `themeRef` and must call `applyTheme` immediately so CSS variables update in the current session without waiting for the next settings reload, and (Task 39) sets its own `animatedBrand` state so the titlebar mark reacts immediately too. *Why the whole object rather than positional args (renamed from `onThemeChange`, Task 39):* a growing list of individual changed-field parameters doesn't scale past two: passing the full `InterfaceSettings` once covers every current AND future field this tab writes, with one call site to update instead of one per field.
 
 ### Behavior
 
@@ -34,7 +34,7 @@ Sets `draft` to `next` and calls `setSettings(next)`. Errors are silently ignore
 Tab panels are wrapped in `AnimatePresence mode="wait"`. Each `motion.div` (keyed by `tab`) slides in from `{ opacity: 0, x: 8 }` and exits to `{ opacity: 0, x: -8 }` over 160ms with ease `[0.4, 0, 0.2, 1]`. *Why `mode="wait"`:* ensures the exiting tab fully disappears before the entering one starts, preventing overlap.
 
 **Tab content:**
-- `"interface"` tab: renders `<SettingsInterface>` receiving `draft.ui`. Its `onChange` calls `patch({ ...draft, ui })` and additionally calls `onThemeChange(ui.theme, ui.accent)` to propagate immediate theme changes to `Hud`.
+- `"interface"` tab: renders `<SettingsInterface>` receiving `draft.ui`. Its `onChange` calls `patch({ ...draft, ui })` and additionally calls `onUiChange(ui)` to propagate the change to `Hud`.
 - `"layout"` tab: renders `<SettingsAppearance>` receiving `draft.appearance`. Its `onChange` calls `patch({ ...draft, appearance })`.
 
 ### Notes

@@ -6,14 +6,14 @@ Defines the `FrameSink` trait for push-based frame consumption and `FakeFrameSin
 
 ```rust
 pub trait FrameSink: Send {
-    fn push(&mut self, f: &Frame) -> std::io::Result<()>;
+    fn push(&mut self, f: &Frame) -> std::io::Result<bool>;
     fn finish(self: Box<Self>) -> std::io::Result<()>;
 }
 ```
 
 Abstraction over any consumer of captured frames.
 
-- `push(&mut self, f: &Frame) -> std::io::Result<()>` - *Accepts one frame for processing. Returns `Ok(())` on success or an `io::Error` on failure. Called in a tight loop by the encoder thread; a returned error is treated as fatal by the caller.*
+- `push(&mut self, f: &Frame) -> std::io::Result<bool>` - *Accepts one frame for processing. Returns `Ok(true)` if the frame was actually written, `Ok(false)` if the sink deliberately skipped it (e.g. `FfmpegFrameSink`'s dimension-mismatch guard), or an `io::Error` on failure. Called in a tight loop by the encoder thread; a returned error is treated as fatal by the caller. Callers that track a frame count / timestamp log (`RecordingSession::pump_once`, `pacing::emit_due`) must only count/record on `Ok(true)` - counting `Ok(false)` would record a timestamp for a frame that was never written, desyncing `sync.json` from the actual video.*
 - `finish(self: Box<Self>) -> std::io::Result<()>` - *Signals that no more frames will arrive and performs finalization (flushing, waiting for a child process, writing headers). Takes `Box<Self>` to release the sink's resources without requiring a separate `Drop` impl. Must be called exactly once after the last `push`.*
 
 ### Used by
@@ -34,7 +34,7 @@ pub struct FakeFrameSink {
 
 Test double. Records the `(width, height)` of every frame passed to `push` in order. `finish` is a no-op.
 
-- `pushed: Vec<(u32, u32)>` - *Accumulates `(f.width, f.height)` for each call to `push`. `pub` so tests can assert on it directly after the loop under test completes.*
+- `pushed: Vec<(u32, u32)>` - *Accumulates `(f.width, f.height)` for each call to `push`. `pub` so tests can assert on it directly after the loop under test completes.* `push` always returns `Ok(true)` - this fake never skips a frame.
 
 ### Used by
 

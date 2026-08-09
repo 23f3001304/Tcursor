@@ -1,6 +1,6 @@
 # src-tauri/src/export/preview/preprocess.rs
 
-Pre-generates the editor's heavy preview media - proxy, filmstrip thumbnails, waveforms, mixed preview audio, and the `edit.json` seed - right after a recording stops, instead of lazily on editor open. Reuses the exact `ensure_*`/`load_or_seed` functions the editor's own lazy fallback calls (all `generate_once`-cached), so nothing here duplicates or re-runs their logic - the new behavior is running them eagerly, in sequence, with progress events, then marking the project preprocessed so `useEditorData` can skip its own lazy calls. Supersedes the old fire-and-forget `thumbs::prewarm` background spawn: the same sequence, now AWAITED by the frontend (with progress) instead of racing the editor's mount on a detached thread - that race was why the preview could still take a while to load right after Stop.
+Pre-generates the editor's heavy preview media - proxy, filmstrip thumbnails, waveforms, mixed preview audio, and the `edit.json` seed - right after a recording stops, instead of lazily on editor open. Reuses the exact `ensure_*_blocking`/`load_or_seed` functions the editor's own lazy `ensure_*` IPC commands call (all `generate_once`-cached), so nothing here duplicates or re-runs their logic - the new behavior is running them eagerly, in sequence, with progress events, then marking the project preprocessed so `useEditorData` can skip its own lazy calls. `run` calls the `_blocking` variants directly rather than the `async fn` commands (Task 41 - the commands themselves moved off the main thread via `spawn_blocking`): `run` already executes on its own `std::thread` from `preprocess_project`, off the Tokio runtime, so there is no `.await` context to call the `async` wrappers from. Supersedes the old fire-and-forget `thumbs::prewarm` background spawn: the same sequence, now AWAITED by the frontend (with progress) instead of racing the editor's mount on a detached thread - that race was why the preview could still take a while to load right after Stop.
 
 ## DEFAULT_PROXY_HEIGHT
 
@@ -50,7 +50,7 @@ The sequence itself: proxy first (so the thumbnail pass reads the small proxy ra
 
 ### Returns
 
-`Ok(())` only on FULL success, after which `manifest.preprocessed` is set to `true` and saved. Any failed step (`?` on an `ensure_*` call) short-circuits BEFORE the manifest is touched, so it stays `false` - a later editor open still falls back to its own lazy `ensure_*` (same as an un-preprocessed project).
+`Ok(())` only on FULL success, after which `manifest.preprocessed` is set to `true` and saved. Any failed step (`?` on an `ensure_*_blocking` call) short-circuits BEFORE the manifest is touched, so it stays `false` - a later editor open still falls back to its own lazy `ensure_*` (same as an un-preprocessed project).
 
 ## step_pct
 

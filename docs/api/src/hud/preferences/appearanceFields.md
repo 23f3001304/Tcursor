@@ -175,4 +175,23 @@ Factory defaults for all five modes, shipped as code rather than a config file s
 
 - `src/hud/settings/SettingsAppearance.tsx` - reset-to-defaults button
 - `src/hud/Hud.tsx` - initial settings hydration fallback
-- `src/editor/panels/CameraPanel.tsx` - reset-to-defaults button (screen mode only)
+- `src/editor/panels/CameraPanel.tsx` - via `resetCameraAppearance` (screen mode only)
+
+## resetCameraAppearance
+
+```ts
+export function resetCameraAppearance(settings: AppearanceSettings): AppearanceSettings
+```
+
+`CameraPanel`'s Reset action. Writes only the webcam knobs that panel actually shows for the
+`screen` mode - `cam_size`, `cam_margin_x`, `cam_margin_y`, `cam_shape`, `cam_radius`,
+`cam_aspect`, `cam_corner`, `cam_ring` - from `DEFAULT_APPEARANCE.screen`, leaving `pad`/
+`screen_size`/`screen_radius` on `screen` untouched (`BackgroundPanel` owns `pad`/`screen_radius`)
+and the other four appearance modes (`screen_only`/`camera`/`camera_only`/`presenter`) completely
+untouched. *Why this exists:* the panel previously called `onChange(DEFAULT_APPEARANCE)` directly,
+silently resetting all five modes - a scope bug from a Task 26 audit, fixed here by making the
+reset scope an explicit, testable pure function instead of inlining it in the component.
+
+### Used by
+
+- `src/editor/panels/CameraPanel.tsx` - `PanelHeader`'s `onReset`

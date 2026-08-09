@@ -1,6 +1,6 @@
 # src/editor/hooks/useMoveModeGuard.tsx
 
-Owns the editor's "Move in preview" toggle and guards turning it OFF, since `camera_moves` keyframes override the static webcam controls (size/dock) - so returning to static only works if the keyframes are cleared.
+Owns the editor's "Move in preview" toggle and guards turning it OFF, since `camera_moves` keyframes override the static webcam controls (size/dock) within the span they own (Task 27) - so returning to static only fully works if the keyframes are cleared, otherwise the static sliders stay dead across that span while working everywhere else.
 
 ## useMoveModeGuard
 

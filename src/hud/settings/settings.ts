@@ -13,7 +13,10 @@ export interface AppearanceSettings {
   camera_only: ModeAppearance; presenter: ModeAppearance;
 }
 export type ThemeMode = "light" | "dark" | "system";
-export interface InterfaceSettings { theme: ThemeMode; accent: [number, number, number] }
+/** `animated_brand` (Task 39) - the living-brand feel knob: whether `TcursorMark` flows/pulses
+ *  for its recording/exporting/directing states, in the HUD and the editor's TopBar. `false`
+ *  and `prefers-reduced-motion` both fall the mark back to its static idle rendering. */
+export interface InterfaceSettings { theme: ThemeMode; accent: [number, number, number]; animated_brand: boolean }
 export type CursorStyle = "system" | "enhanced" | "hidden";
 export interface CursorSettings { style: CursorStyle; size: number; smoothness: number; path_idealize: number; motion_blur: number; click_bounce: boolean; bounce_intensity: number; pack: string }
 export type ClickFxStyle = "none" | "ripple" | "pulse" | "glow" | "shockwave" | "particles" | "neon";

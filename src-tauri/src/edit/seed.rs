@@ -2,23 +2,28 @@
 // load_or_seed returns an existing edit.json or seeds one from the same auto-zoom,
 // manual-zoom, layout-track and settings the exporter derives, then writes it.
 use crate::actions::model::{ActionEvent, ActionKind, LayoutId};
-use crate::edit::model::{EditDoc, EffectKind, EffectRegion, LayoutSeg, Trim, Zoom, ZoomTarget};
+use crate::edit::model::{EditDoc, EffectKind, EffectRegion, LayoutSeg, Trim, Zoom, ZoomTarget, DOC_VERSION};
 use crate::export::types::{Easing, ZoomRegion};
 use crate::session::paths::ProjectPaths;
+
+// Doc-version migrations + the shared event/output clock shift live in their own file (seed.rs
+// was at the 200-line budget); re-exported here so callers keep using the `seed::` path.
+pub use crate::edit::migrate::true_duration_ms;
+pub(crate) use crate::edit::migrate::output_shift;
 
 /// Stable lowercase name for an easing curve (mirrors the export `Easing` enum).
 /// NOTE: `Spring` carries stiffness/damping that a plain string cannot hold; the
 /// default `to_zoom_config()` never produces `Spring`, so this is not hit today.
 fn easing_str(e: Easing) -> String {
     match e {
-        Easing::Smooth => "smooth",
-        Easing::Linear => "linear",
-        Easing::Spring { .. } => "spring",
-        Easing::EaseIn => "ease_in",
-        Easing::EaseOut => "ease_out",
-        Easing::EaseInOut => "ease_in_out",
+        Easing::Smooth => "smooth".into(),
+        Easing::Linear => "linear".into(),
+        Easing::Spring { .. } => "spring".into(),
+        Easing::EaseIn => "ease_in".into(),
+        Easing::EaseOut => "ease_out".into(),
+        Easing::EaseInOut => "ease_in_out".into(),
+        Easing::Cubic { x1, y1, x2, y2 } => crate::export::cubic::format_cubic(x1, y1, x2, y2),
     }
-    .to_string()
 }
 
 /// PURE: one `Zoom` per region, ids `z0, z1, ...`. The region `anchor` (the click /
@@ -43,9 +48,10 @@ fn layout_name(id: LayoutId) -> String {
         .unwrap_or_else(|| "screen".to_string())
 }
 
-/// PURE: one `LayoutSeg` per active span in the recorded `SetLayout` track (mirrors
-/// `LayoutTrack`: always starts at `(0, Screen)`), each span running to the next
-/// switch and the last to `dur_ms`. Empty track -> a single `screen` span [0, dur].
+/// PURE: one `LayoutSeg` per active span in the `SetLayout` track (mirrors `LayoutTrack`: always
+/// starts at `(0, Screen)`), each span running to the next switch and the last to `dur_ms`. Empty
+/// track -> a single `screen` span [0, dur]. `actions` and `dur_ms` share one clock (the seed
+/// passes both on the OUTPUT clock).
 pub fn layout_from_actions(actions: &[ActionEvent], dur_ms: u32) -> Vec<LayoutSeg> {
     let mut switches: Vec<(u32, LayoutId)> = vec![(0, LayoutId::Screen)];
     for a in actions {
@@ -57,29 +63,39 @@ pub fn layout_from_actions(actions: &[ActionEvent], dur_ms: u32) -> Vec<LayoutSe
     for (i, &(start, id)) in switches.iter().enumerate() {
         let end = switches.get(i + 1).map(|&(s, _)| s).unwrap_or(dur_ms).max(start);
         segs.push(LayoutSeg { id: format!("l{}", i), start_ms: start, end_ms: end, layout: layout_name(id),
-            transition_ms: 350, easing: "smooth".into() });
+            transition_ms: 350, easing: "smooth".into(), transition_out_ms: 0, easing_out: "smooth".into() });
     }
     segs
 }
 
 /// Return an existing `edit.json`, else build the default `EditDoc` from the recording (same
-/// auto/manual zooms, layout track, settings, clip duration the exporter uses). An always-on
-/// spotlight is lifted to an editable region here (on fresh AND older docs); writes when changed.
+/// auto/manual zooms, layout track, settings, clip duration the exporter uses). Older docs are
+/// migrated to `DOC_VERSION` and an always-on spotlight is lifted to an editable region here (on
+/// fresh AND older docs); writes when anything changed.
 pub fn load_or_seed(paths: &ProjectPaths) -> EditDoc {
     let (mut doc, fresh) = match EditDoc::load(&paths.edit()) {
         Some(d) => (d, false),
         None => (build_default(paths), true),
     };
-    if crate::edit::ops::effects::lift_always_on_spotlight(&mut doc) || fresh { let _ = doc.save(&paths.edit()); }
+    let migrated = crate::edit::migrate::migrate(&mut doc, paths);
+    if crate::edit::ops::effects::lift_always_on_spotlight(&mut doc) || fresh || migrated {
+        let _ = doc.save(&paths.edit());
+    }
     doc
+}
+
+/// PURE: recorded actions with every timestamp moved onto the output clock by `shift` (saturating
+/// at 0), kinds untouched. Both region seeders (`layout_from_actions`, `spotlight_effects`) and the
+/// renderer's recorded-layout fallback build from the SAME shifted log, so they cannot disagree.
+pub fn actions_on_output_clock(actions: &[ActionEvent], shift: i64) -> Vec<ActionEvent> {
+    actions.iter().map(|a| ActionEvent { t: (a.t as i64 + shift).max(0) as u32, kind: a.kind }).collect()
 }
 
 /// Construct the default doc. Mirrors `exporter::export`'s input build exactly so a
 /// seeded render matches today: settings snapshot -> `ZoomConfig`, auto + manual raw
 /// zoom regions, the `SetLayout` track, and `[0, clip duration]` for the trim.
 fn build_default(paths: &ProjectPaths) -> EditDoc {
-    let settings: crate::settings::model::Settings = std::fs::read(paths.settings())
-        .ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    let settings = crate::settings::store::record_snapshot(paths);
     let cfg = settings.zoom.to_zoom_config();
     let log = match crate::events::model::EventLog::load(&paths.events()) {
         Ok(l) => l,
@@ -98,10 +114,10 @@ fn build_default(paths: &ProjectPaths) -> EditDoc {
     };
     raw.extend(crate::export::camera::manual::from_actions(&actions, &log.events, &log.screen, &cfg));
 
-    // Auto/manual zoom regions come out in EVENT time (click/press timestamps); the editor
-    // timeline is OUTPUT time (0 = first video frame). Shift zooms onto the output clock so a
-    // seeded zoom lands where its pill sits - the same `out = et + events_ms - video_start`
-    // conversion clicks use - and so edited/added zooms (already output-time) stay consistent.
+    // Everything the recording hands us is EVENT time (click/press timestamps); every region list
+    // in an `EditDoc` is OUTPUT time (0 = first video frame). Shift once here - the same
+    // `out = et + events_ms - video_start` conversion clicks use - so seeded regions land where
+    // their pills sit and edited/added ones (already output-time) stay consistent.
     let tl = crate::export::pipeline::timeline::build_timeline(paths, &log, 60);
     let video_start = tl.frames.first().copied().unwrap_or(0);
     let dur_ms = (tl.frames.last().copied().unwrap_or(video_start).max(video_start + 1) - video_start) as u32;
@@ -110,34 +126,26 @@ fn build_default(paths: &ProjectPaths) -> EditDoc {
         r.start_ms = (r.start_ms as i64 + shift).max(0) as u32;
         r.end_ms = (r.end_ms as i64 + shift).max(0) as u32;
     }
+    // Layout + spotlight regions are derived from the action log, so shift IT rather than the
+    // spans: the derived segments then tile `[0, dur_ms]` on the output clock with no tail gap.
+    let out_actions = actions_on_output_clock(&actions, shift);
     EditDoc {
-        version: 1,
+        version: DOC_VERSION,
         trim: Trim { in_ms: 0, out_ms: dur_ms },
+        clip_ms: dur_ms,
         cuts: vec![],
         zooms: zooms_from_regions(&raw),
         speed: vec![],
-        layout: layout_from_actions(&actions, dur_ms),
-        effects: spotlight_effects(&actions, dur_ms),
+        layout: layout_from_actions(&out_actions, dur_ms),
+        effects: spotlight_effects(&out_actions, dur_ms),
         camera_moves: vec![],
         aspect: crate::export::types::Aspect::default(),
         settings,
     }
 }
 
-/// The recording's TRUE full duration (ms) - `video_end - video_start` from the real capture
-/// timeline, independent of any user `trim.out_ms` selection. Preview helpers that need "how
-/// long is the whole clip" (proxy re-timing in `ensure_proxy`, filmstrip thumbnail spacing in
-/// `ensure_thumbs`) call this rather than reading `trim.out_ms` - which, once a user actually
-/// trims, no longer means the recording's length. Returns 0 if `events.json` cannot be loaded.
-pub fn true_duration_ms(paths: &ProjectPaths) -> u32 {
-    let log = match crate::events::model::EventLog::load(&paths.events()) { Ok(l) => l, Err(_) => return 0 };
-    let tl = crate::export::pipeline::timeline::build_timeline(paths, &log, 60);
-    let vs = tl.frames.first().copied().unwrap_or(0);
-    (tl.frames.last().copied().unwrap_or(vs).max(vs + 1) - vs) as u32
-}
-
-/// Recorded spotlight holds as editable Spotlight regions (event-time spans clamped to `[0, dur]`,
-/// the base seeded zooms use), so a hotkey-held spotlight is an editable/removable timeline pill.
+/// Recorded spotlight holds as editable Spotlight regions, clamped to `[0, dur]`. `actions` must
+/// already be on the output clock (`actions_on_output_clock`), like every other seeded region.
 fn spotlight_effects(actions: &[ActionEvent], dur: u32) -> Vec<EffectRegion> {
     crate::export::fx::hold::hold_spans(actions, dur,
         |k| matches!(k, ActionKind::SpotlightHoldStart), |k| matches!(k, ActionKind::SpotlightHoldEnd))

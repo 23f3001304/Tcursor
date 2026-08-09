@@ -3,49 +3,85 @@ import { ease } from "../timeline/layoutTrack";
 
 export interface CamPose { x: number; y: number; size: number }
 
+/** Handoff length (ms) on EACH side of the keyframe span, between the live layout-resolved pose
+ *  and the track. Mirrors the Rust `KF_BLEND_MS` (export/camera/moves.rs) - a module constant,
+ *  deliberately not a setting; the two MUST stay equal. */
+export const KF_BLEND_MS = 350;
+
+/** The RAW `[first, last]` keyframe times of a track (unsorted input is fine), or `null` when
+ *  empty. NOT the ownership window: that is this padded by `KF_BLEND_MS` on each side (clamped at
+ *  0), which is what Rust's `CameraMoveTrack::span` returns and what `camMoveAt` tests against.
+ *  Callers that want the window pad it themselves - kept unpadded because both consumers need the
+ *  raw ends (one clamps a time into them, one pads them with its own drag-adjusted values). */
+export function camKfRange(moves: CameraMove[]): [number, number] | null {
+  if (moves.length === 0) return null;
+  let first = Infinity, last = -Infinity;
+  for (const m of moves) { if (m.t_ms < first) first = m.t_ms; if (m.t_ms > last) last = m.t_ms; }
+  return [first, last];
+}
+
 /** TS mirror of `CameraMoveTrack::sample` (export/camera/moves.rs) - the Rust export path is
  *  the source of truth, this drives the live preview and must match it frame-for-frame.
- *  `null` for an empty track (caller keeps its static pose). At/before the first keyframe,
- *  eases FROM `staticPose` (the caller's un-overridden static PiP pose) INTO the first keyframe
- *  over `[0, first.t_ms]` using the first keyframe's own easing - an implicit t=0 keyframe at
- *  the static pose; `staticPose` omitted/null (or `first.t_ms === 0`) holds the first keyframe's
- *  pose flat, same as before this existed. Holds the last keyframe's pose outside the track's
- *  span; between two keyframes `a`/`b`, eases INTO `b` using `b`'s own easing over
- *  `[a.t_ms, b.t_ms]`. */
-export function camMoveAt(moves: CameraMove[], t: number, staticPose?: CamPose | null): CamPose | null {
+ *  `null` means the keyframes do NOT own this frame and the caller keeps its layout-resolved
+ *  panel. `live` is that layout-resolved pose for THIS frame, re-read every call.
+ *
+ *  Five cases: empty track or outside `[first - KF_BLEND_MS, last + KF_BLEND_MS]` -> `null`;
+ *  `[first - BLEND, first)` -> ease FROM `live` INTO the first keyframe with its own easing;
+ *  `[first, last]` -> keyframe interpolation, easing INTO `b` with `b`'s own easing (unchanged);
+ *  `(last, last + BLEND]` -> ease FROM the last keyframe back to `live`, which tracks a moving
+ *  target because it is re-evaluated per frame. A single keyframe is therefore a bump: ease in,
+ *  hit its pose for that instant, ease back out. `live` omitted/null skips both blends and snaps
+ *  to the nearest end keyframe; the span rule itself never depends on it. */
+export function camMoveAt(moves: CameraMove[], t: number, live?: CamPose | null): CamPose | null {
   const ks = [...moves].sort((a, b) => a.t_ms - b.t_ms);
   if (ks.length === 0) return null;
-  const first = ks[0];
-  if (t <= first.t_ms) {
-    if (staticPose && first.t_ms > 0) {
-      const f = ease(first.easing, t / first.t_ms);
-      return { x: staticPose.x + (first.x - staticPose.x) * f, y: staticPose.y + (first.y - staticPose.y) * f,
-        size: staticPose.size + (first.size - staticPose.size) * f };
-    }
-    return pose(first);
+  const first = ks[0], last = ks[ks.length - 1];
+  const entry = Math.max(0, first.t_ms - KF_BLEND_MS);
+  if (t < entry || t > last.t_ms + KF_BLEND_MS) return null;
+  if (t < first.t_ms) {
+    const win = first.t_ms - entry; // === KF_BLEND_MS unless clamped at t=0
+    if (!live || win <= 0) return pose(first);
+    return mix(live, pose(first), ease(first.easing, (t - entry) / win));
   }
-  const last = ks[ks.length - 1];
-  if (t >= last.t_ms) return pose(last);
+  if (t > last.t_ms) {
+    if (!live) return pose(last);
+    return mix(pose(last), live, ease(last.easing, (t - last.t_ms) / KF_BLEND_MS));
+  }
+  if (t >= last.t_ms) return pose(last); // also the single-keyframe instant
 
   const bi = ks.findIndex((k) => k.t_ms > t);
   const a = ks[bi - 1], b = ks[bi];
   if (b.t_ms === a.t_ms) return pose(b); // coincident keyframes: no divide-by-zero
-  const f = ease(b.easing, (t - a.t_ms) / (b.t_ms - a.t_ms));
-  return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f, size: a.size + (b.size - a.size) * f };
+  return mix(pose(a), pose(b), ease(b.easing, (t - a.t_ms) / (b.t_ms - a.t_ms)));
 }
 
 function pose(k: CameraMove): CamPose { return { x: k.x, y: k.y, size: k.size }; }
+/** Component-wise lerp of a whole pose; the rect is derived from the result once, by
+ *  `rectFromCenter`, so the aspect handling applies to a blended pose too. Mirrors Rust `mix`. */
+function mix(a: CamPose, b: CamPose, f: number): CamPose {
+  return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f, size: a.size + (b.size - a.size) * f };
+}
 
 /** TS mirror of `rect_from_center` (export/scene/mod.rs) - converts a sampled `CamPose` into a
  *  fraction-of-output `[x, y, w, h]` rect (top-left form), matching the export byte-for-byte.
  *  `ow`/`oh` are the output frame's pixel dims (the preview's canvas backing store, sized from
  *  `PreviewLayout.canvas` to match the chosen aspect - same basis `PreviewLayout` fractions use) -
- *  the square is computed in PIXEL space (`h = size*oh`
- *  reused for both sides) before dividing back to fractions, so it stays a true pixel square even
- *  though `ow != oh` would otherwise skew it. */
-export function rectFromCenter(p: CamPose, ow: number, oh: number): [number, number, number, number] {
+ *  the rect is computed in PIXEL space (`h = size*oh`, `w = h*aspect`) before dividing back to
+ *  fractions, so it keeps its true pixel shape even though `ow != oh` would otherwise skew it.
+ *  `aspect` is the panel's own w/h in pixels (1 = square, 16/9 = a Wide PiP): a pose carries
+ *  height only, so without it one keyframe would square a Wide panel for the whole clip. */
+export function rectFromCenter(p: CamPose, ow: number, oh: number, aspect: number): [number, number, number, number] {
   const h = p.size * oh;
-  return [(p.x * ow - h / 2) / ow, (p.y * oh - h / 2) / oh, h / ow, h / oh];
+  const w = h * Math.max(aspect, 0.01);
+  return [(p.x * ow - w / 2) / ow, (p.y * oh - h / 2) / oh, w / ow, h / oh];
+}
+
+/** The static PiP panel's pixel aspect (w/h) from a `PreviewLayout.cam` tuple, whose `w`/`h`
+ *  are fractions of DIFFERENT axes (`ow`/`oh`) and so must be converted back to pixels first.
+ *  This is the `aspect` `rectFromCenter` needs, and mirrors the renderer reading it off
+ *  `scene.camera.rect` (export/render/mod.rs) rather than re-deriving it from settings. */
+export function camAspect(cam: [number, number, number, number, ...number[]], ow: number, oh: number): number {
+  return (cam[2] * ow) / Math.max(cam[3] * oh, 0.001);
 }
 
 /** TS mirror of `override_camera`'s radius scaling (export/scene/mod.rs, Task 9 Part C) - the
@@ -62,12 +98,14 @@ export function radiusScaleForResize(oldH: number, newH: number): number {
  *  the sampled pose and scales BOTH radius and ring width by the same height ratio, so a circle
  *  (and its ring) stay proportional after a camera_moves keyframe resizes the panel; ring color
  *  (and alpha, left to the caller) is untouched - matches `Panel { rect, radius: r*m, ring_px:
- *  ring_px*m, ..panel }`. `baseCam` is `PreviewLayout.cam` (non-null, [x,y,w,h,r,ringPx,r,g,b]). */
+ *  ring_px*m, ..panel }`. `baseCam` is `PreviewLayout.cam` (non-null, [x,y,w,h,r,ringPx,r,g,b]).
+ *  The keyframed rect keeps the STATIC panel's pixel aspect (`baseCam` w/h converted to px),
+ *  mirroring how the renderer reads `scene.camera.rect` before applying the override. */
 export function overrideCamPanel(
   baseCam: [number, number, number, number, number, number, number, number, number],
   p: CamPose, ow: number, oh: number,
 ): [number, number, number, number, number, number, number, number, number] {
-  const newRect = rectFromCenter(p, ow, oh);
+  const newRect = rectFromCenter(p, ow, oh, camAspect(baseCam, ow, oh));
   const scale = radiusScaleForResize(baseCam[3], newRect[3]);
   return [...newRect, baseCam[4] * scale, baseCam[5] * scale, baseCam[6], baseCam[7], baseCam[8]];
 }

@@ -73,12 +73,19 @@ pub fn render(bg: &Background, w: u32, h: u32) -> Vec<u8> {
             fill(&mut buf, w, h, |_, _| Rgb { r: 24, g: 24, b: 30 });
         }
         Background::Gradient { from, to, angle_deg } => {
+            // Normalize against the projection's TRUE range over the four frame corners, not
+            // `.abs()` of a single corner - `.abs()` mirror-folds any angle whose projection goes
+            // negative (including the DEFAULT 135deg), putting a crease of `from` on the fold line
+            // instead of a monotonic corner-to-corner ramp.
             let rad = angle_deg.to_radians();
             let (dx, dy) = (rad.cos(), rad.sin());
-            let max = ((w as f32 - 1.0) * dx.abs()) + ((h as f32 - 1.0) * dy.abs());
-            let max = max.max(1.0);
+            let (wf, hf) = (w as f32 - 1.0, h as f32 - 1.0);
+            let corners = [0.0, wf * dx, hf * dy, wf * dx + hf * dy];
+            let pmin = corners.iter().cloned().fold(f32::INFINITY, f32::min);
+            let pmax = corners.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+            let range = (pmax - pmin).max(1e-6);
             fill(&mut buf, w, h, |x, y| {
-                let t = ((x as f32 * dx) + (y as f32 * dy)).abs() / max;
+                let t = ((x as f32 * dx) + (y as f32 * dy) - pmin) / range;
                 lerp(*from, *to, t.clamp(0.0, 1.0))
             });
         }
@@ -115,6 +122,22 @@ mod tests {
         let g = Background::Gradient { from: Rgb { r: 0, g: 0, b: 0 }, to: Rgb { r: 255, g: 255, b: 255 }, angle_deg: 0.0 };
         let buf = render(&g, 4, 1);
         assert!(buf[0] < buf[(3 * 4) as usize]); // left darker than right at 0deg
+    }
+    #[test]
+    fn gradient_at_135deg_is_a_true_monotonic_ramp_not_mirror_folded() {
+        // The DEFAULT angle (135deg, top-left -> bottom-right diagonal). The old
+        // `.abs()`-normalized formula folded the ramp along y=x, putting a crease of `from`
+        // there instead of a monotonic corner-to-corner ramp - this is exactly the angle that
+        // regresses if normalization goes back to projecting-onto-`[0, max]` with an abs().
+        let g = Background::Gradient { from: Rgb { r: 0, g: 0, b: 0 }, to: Rgb { r: 255, g: 255, b: 255 }, angle_deg: 135.0 };
+        let (w, h) = (100u32, 100u32);
+        let buf = render(&g, w, h);
+        let px = |x: u32, y: u32| buf[((y * w + x) * 4) as usize]; // blue channel; from/to are gray
+        let (top_right, center, bottom_left) = (px(99, 0), px(50, 50), px(0, 99));
+        assert!(top_right < center, "top-right ({top_right}) must be darker than center ({center})");
+        assert!(center < bottom_left, "center ({center}) must be darker than bottom-left ({bottom_left})");
+        // The two corners perpendicular to the gradient axis sit at the diagonal's midpoint.
+        assert_eq!(px(0, 0), px(99, 99), "the off-axis corners must be equal (both at t=0.5)");
     }
 
     // `build` tests only exercise Solid/Gradient (pure Rust, deterministic) - `Mesh` shells out

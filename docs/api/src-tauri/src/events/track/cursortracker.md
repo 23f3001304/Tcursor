@@ -24,14 +24,14 @@ RAII handle for the polling thread. Dropping without calling `stop` is safe - th
 ## CursorTypeTracker::start
 
 ```rust
-pub fn start() -> Self
+pub fn start(ledger: Arc<PauseTotals>) -> Self
 ```
 
 Spawns the polling thread and returns a handle to it. Returns immediately; polling runs concurrently.
 
 ### Inputs
 
-None. *Why no config parameter:* the poll interval (16 ms, ~60 Hz) is a fixed hardware-aligned constant; the classification table is built once inside the thread from the OS standard cursor set.*
+- `ledger: Arc<PauseTotals>` - the recorder's exact-span paused-time ledger. *Why:* every shape-change sample's raw elapsed-ms reading is pause-adjusted via `ledger.stamp` before being recorded, so the cursor-type timeline lands in the same pause-compressed timeline as video/audio. The poll interval itself (16 ms, ~60 Hz) is still a fixed hardware-aligned constant; the classification table is built once inside the thread from the OS standard cursor set.
 
 ### Returns
 
@@ -41,9 +41,9 @@ None. *Why no config parameter:* the poll interval (16 ms, ~60 Hz) is a fixed ha
 
 1. Create `Arc<AtomicBool>` stop flag.
 2. Spawn a named thread `"cursor-type"`.
-3. Inside the thread (Windows only): call `imp::run(stop)`.
+3. Inside the thread (Windows only): call `imp::run(stop, ledger)`.
    - `classify_table()` calls `LoadCursorW` once for each standard IDC constant to build a `(HCURSOR, CursorType)` lookup table. *Why build at thread start rather than compile time:* `HCURSOR` values are runtime handles, not compile-time constants.*
-   - Poll loop (every 16 ms while `!stop`): call `GetCursorInfo`. Match `info.hCursor` against the table. On a recognized shape change, append `(elapsed_ms, ty)`. On an unrecognized (custom app) cursor, keep the last known type rather than guessing. If the very first sample is custom, seed with `Arrow` so `type_at` always has a base entry.
+   - Poll loop (every 16 ms while `!stop`): call `GetCursorInfo`. Match `info.hCursor` against the table. On a recognized shape change, compute the raw elapsed ms and pause-adjust it via `ledger.stamp` before appending `(t, ty)`. On an unrecognized (custom app) cursor, keep the last known type rather than guessing. If the very first sample is custom, seed with `Arrow` so `type_at` always has a base entry (also pause-adjusted).
 4. On non-Windows builds, the thread body is a no-op that returns `Vec::new()`.
 
 ## CursorTypeTracker::stop

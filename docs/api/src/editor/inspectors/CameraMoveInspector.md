@@ -19,8 +19,8 @@ export function CameraMoveInspector({ move, dur, onApply, onClose }: {
 
 ### Behavior
 
-**Fields.** Time (seconds, converted to/from `t_ms`), X, Y, and Size are plain number inputs (`x`/`y`/`size` clamped to `[0, 1]` client-side to match the Edit API's own clamp) - not `NumberField`, since that control hardcodes a seconds (`s`) suffix that doesn't fit the 0-1 fraction fields.
+**Fields.** Time (seconds, converted to/from `t_ms`, `NumberField`'s default `unit="s"`), X, Y, and Size (`NumberField` with `unit=""` - no suffix, since these are 0-1 fractions, not a time value) are all `NumberField` (`src/editor/controls/NumberField.tsx`), mirroring `ZoomInspector`. Not a raw `<input type="number">`: that control's `onChange` fires on every keystroke including a momentarily-cleared field (`Number("")` is `0`), which used to collapse the PiP to size 0 mid-edit and could send a negative value the Rust side's u32 deserialization rejected (silently, via `applyOp`'s `catch{}`). `NumberField` has no such intermediate state - `x`/`y`/`size` are clamped to `[0, 1]` (matching the Edit API's own clamp) purely by `NumberField`'s stepper only ever moving by `step`, never by a directly-typed value.
 
-**Transition Curve.** An `e-curve-pick` grid of the shared `CAM_CURVES` (linear, ease-in, ease-out, in/out, smooth, spring - see `src/editor/inspectors/curves.ts`), each card applying `{ easing }` on click. The same curves are pickable straight off the timeline via `CameraLane`'s per-segment popover.
+**Transition Curve.** A `<CurveEditor>` (see `CurveEditor.md`): the six shared `CAM_CURVES` as one-click cards, with the selected one expanding into a draggable cubic-bezier editor that commits a custom `cubic(x1,y1,x2,y2)`. The named curves are still pickable straight off the timeline via `CameraLane`'s per-segment popover, which keeps its own compact glyph row.
 
 **Delete.** Removes the keyframe and deselects.

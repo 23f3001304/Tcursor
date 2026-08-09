@@ -22,10 +22,11 @@ Spawns a background thread that runs the full export and emits progress/completi
 
 ### Implementation
 
-1. Spawn a detached thread: construct `ProjectPaths` from `folder`; clone `app` for the progress callback; move `settings` in.
-2. Call `exporter::export(&paths, settings, ...)` with a closure that emits `"export-progress"` (payload `u8` 0..=100) on each percentage advance.
-3. On `Ok(())`: emit `"export-done"` with the folder string.
-4. On `Err(e)`: emit `"export-error"` with the error's `to_string()`.
+1. Spawn a detached thread: construct `ProjectPaths` from `folder`; compute `final_path = paths.folder.join("final.<ext>")` (`<ext>` from `settings.format.extension()`) - the exact path `audio_mux::mux` writes the finished export to; clone `app` for the progress callback; move `settings` in.
+2. Call `exporter::export(&paths, settings, ...)` with a closure that emits `"export-progress"` (payload `u8` 0..=100) on each percentage advance AND (Task 39) mirrors the same percent onto the Windows taskbar progress bar via `win::sys::brand_icon::set_export_progress(&app2, Some(p))` - brand flair riding the exact same callback, not a second polling path. `settings` is `Copy` (`ExportSettings` derives it), so `final_path` reading `settings.format` before this call and the call itself consuming `settings` by value don't conflict - the call gets its own copy.
+3. Once `exporter::export` returns (either outcome), call `brand_icon::set_export_progress(&app, None)` (Task 39) to clear the taskbar bar - a finished export (success OR error) never leaves a stale progress indicator sitting on the icon.
+4. On `Ok(())`: emit `"export-done"` with `final_path` (as a `String`, `to_string_lossy().into_owned()`) - NOT the project folder. The frontend stores this and offers a "Show in folder" button (`revealItemInDir`) without needing to re-derive the output filename/extension itself.
+5. On `Err(e)`: emit `"export-error"` with the error's `to_string()`.
 
 ### Behaviors worth knowing
 

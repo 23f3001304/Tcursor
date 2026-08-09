@@ -2,8 +2,8 @@ import { useState } from "react";
 import { PanelHeader } from "./PanelHeader";
 import type { EditDoc } from "../../lib/edit";
 import type { BackgroundSettings } from "../../hud/settings/settings";
-import { Slider } from "../controls/Controls";
-import { COLOR_PRESETS, GRADIENT_PRESETS, ACCENTS } from "./backgroundPresets";
+import { Slider, Swatches, type SwatchItem } from "../controls/Controls";
+import { COLOR_PRESETS, GRADIENT_PRESETS, ACCENTS, type GradientPreset } from "./backgroundPresets";
 
 type BgTab = "default" | "color" | "gradient";
 const rgb = (c: [number, number, number]) => `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
@@ -11,6 +11,14 @@ const DEFAULT_BG: BackgroundSettings = {
   kind: "mesh", solid: [24, 24, 30],
   gradient_from: [36, 41, 56], gradient_to: [88, 64, 120], gradient_angle_deg: 135, blur: 0,
 };
+
+// `ariaLabel` uses each preset's own name (COLOR_PRESETS/ACCENTS carry one; the gradients don't,
+// so those swatches fall back to Swatches' default - their CSS gradient string).
+const COLOR_ITEMS: SwatchItem<[number, number, number]>[] = COLOR_PRESETS.map((p) => ({ key: rgb(p.rgb), css: rgb(p.rgb), value: p.rgb, ariaLabel: p.name }));
+const GRADIENT_ITEMS: SwatchItem<GradientPreset>[] = GRADIENT_PRESETS.map((g, i) => ({
+  key: `g${i}`, css: `linear-gradient(${g.angle}deg, ${rgb(g.from)}, ${rgb(g.to)})`, value: g,
+}));
+const ACCENT_ITEMS: SwatchItem<[number, number, number]>[] = ACCENTS.map((p) => ({ key: rgb(p.rgb), css: rgb(p.rgb), value: p.rgb, ariaLabel: p.name }));
 
 export function BackgroundPanel({
   doc,
@@ -26,8 +34,8 @@ export function BackgroundPanel({
   const padPct = Math.round((app.screen?.pad ?? 0.03125) * 100);
   const radiusPx = Math.round((app.screen?.screen_radius ?? 0.016) * 1000);
   // Which preset grid is showing. Derived from the saved kind so reopening the panel lands on
-  // the right tab, but merely BROWSING the image/video tabs (no real backend) never saves -
-  // only picking a color/gradient swatch below does.
+  // the right tab, but merely BROWSING to the "default" tab never saves - only picking a
+  // color/gradient swatch (or the "default" tab's own mesh swatch) below does.
   const [tab, setTab] = useState<BgTab>(bg.kind === "solid" ? "color" : bg.kind === "gradient" ? "gradient" : "default");
 
   const setBg = (patch: Partial<BackgroundSettings>) =>
@@ -89,68 +97,42 @@ export function BackgroundPanel({
       {tab === "color" && (
         <div className="e-field">
           <span className="e-sechead">Presets</span>
-          <div className="e-preset-grid">
-            {COLOR_PRESETS.map((c, idx) => {
-              const isSelected = bg.kind === "solid" && rgb(bg.solid) === rgb(c);
-              return (
-                <button key={idx} type="button" className={`e-preset-circle ${isSelected ? "on" : ""}`}
-                  style={{ background: rgb(c) }} onClick={() => setBg({ kind: "solid", solid: c })} />
-              );
-            })}
-          </div>
+          <Swatches items={COLOR_ITEMS} variant="preset"
+            isSelected={(c) => bg.kind === "solid" && rgb(bg.solid) === rgb(c)}
+            onSelect={(c) => setBg({ kind: "solid", solid: c })} />
         </div>
       )}
 
       {tab === "gradient" && (
         <div className="e-field">
           <span className="e-sechead">Presets</span>
-          <div className="e-preset-grid">
-            {GRADIENT_PRESETS.map((g, idx) => {
-              const isSelected = bg.kind === "gradient" && rgb(bg.gradient_from) === rgb(g.from) && rgb(bg.gradient_to) === rgb(g.to);
-              return (
-                <button key={idx} type="button" className={`e-preset-circle ${isSelected ? "on" : ""}`}
-                  style={{ background: `linear-gradient(${g.angle}deg, ${rgb(g.from)}, ${rgb(g.to)})` }}
-                  onClick={() => setBg({ kind: "gradient", gradient_from: g.from, gradient_to: g.to, gradient_angle_deg: g.angle })} />
-              );
-            })}
-          </div>
+          <Swatches items={GRADIENT_ITEMS} variant="preset"
+            isSelected={(g) => bg.kind === "gradient" && rgb(bg.gradient_from) === rgb(g.from) && rgb(bg.gradient_to) === rgb(g.to)}
+            onSelect={(g) => setBg({ kind: "gradient", gradient_from: g.from, gradient_to: g.to, gradient_angle_deg: g.angle })} />
         </div>
       )}
 
       {/* Accent Colors */}
       <div className="e-field">
         <span className="e-sechead">Accent Colors</span>
-        <div className="e-accent-list">
-          {ACCENTS.map((c) => {
-            const colorStr = rgb(c);
-            const isSelected = rgb(doc.settings.ui.accent) === colorStr;
-            return (
-              <button
-                key={colorStr}
-                type="button"
-                className={`e-accent-circle ${isSelected ? "on" : ""}`}
-                style={{ background: colorStr }}
-                onClick={() => setAccent(c)}
-              />
-            );
-          })}
-        </div>
+        <Swatches items={ACCENT_ITEMS} variant="accent"
+          isSelected={(c) => rgb(doc.settings.ui.accent) === rgb(c)} onSelect={setAccent} />
       </div>
 
       {/* Custom Sliders */}
       <div className="e-field">
         <span className="e-fl">Background Blur <b>{Math.round(bg.blur * 100)}%</b></span>
-        <Slider min={0} max={100} step={5} value={Math.round(bg.blur * 100)} onChange={(v) => setBg({ blur: v / 100 })} />
+        <Slider min={0} max={100} step={5} value={Math.round(bg.blur * 100)} onChange={(v) => setBg({ blur: v / 100 })} ariaLabel="Background Blur" />
       </div>
 
       <div className="e-field">
         <span className="e-fl">Corner Radius <b>{radiusPx}px</b></span>
-        <Slider min={0} max={80} step={1} value={radiusPx} onChange={setRadius} />
+        <Slider min={0} max={80} step={1} value={radiusPx} onChange={setRadius} ariaLabel="Corner Radius" />
       </div>
 
       <div className="e-field">
         <span className="e-fl">Padding <b>{padPct}%</b></span>
-        <Slider min={0} max={25} step={1} value={padPct} onChange={setPad} />
+        <Slider min={0} max={25} step={1} value={padPct} onChange={setPad} ariaLabel="Padding" />
       </div>
     </div>
   );

@@ -103,7 +103,15 @@ Returns the click (mouse-down) track over the whole timeline, for click-ripple e
 
 ```rust
 #[tauri::command]
-pub fn ensure_proxy(folder: String, height: u32) -> Result<String, String>
+pub async fn ensure_proxy(folder: String, height: u32) -> Result<String, String>
+```
+
+Tauri IPC command (Task 41: off the main thread). `spawn_blocking(ensure_proxy_blocking)`, `.await`ed, join failure mapped to `Err(String)` - see `export::preview::thumbs`'s module doc for why (same freeze mechanism as Task 40's `ai::commands`, a proxy transcode being the essential preprocessing step run right on a project OPEN). `export::preview::preprocess::run` calls `ensure_proxy_blocking` directly since it already runs off-thread on its own `std::thread::spawn`.
+
+## ensure_proxy_blocking
+
+```rust
+pub(crate) fn ensure_proxy_blocking(folder: String, height: u32) -> Result<String, String>
 ```
 
 Ensures a low-res preview proxy `preview_<height>_rt.mp4` exists (transcoded once, cached) and returns its path, so the editor plays a light proxy instead of the raw (often 4K) capture. The `_rt` ("re-timed") proxy is stretched to the real recording duration (see below), because the capture encoder tags frames at a fixed nominal fps that's usually faster than the real capture rate, so `video.mp4` plays sped up.

@@ -42,6 +42,12 @@ impl Cursor {
     /// has a single owner of the event log rather than a second copy.
     pub fn events(&self) -> &[MouseEvent] { &self.events }
 
+    /// The recording's `ScreenInfo` (virtual-desktop origin). `Copy`, so this is a cheap read, not
+    /// a second owner - shared with FX rendering (`fx_state::render`) so a click hit's raw
+    /// `WH_MOUSE_LL` coordinates go through the same origin subtraction (`coordmap::to_frame`)
+    /// this cursor already applies to itself (see `clicks`, `compute_anchors`).
+    pub fn screen(&self) -> ScreenInfo { self.screen }
+
     /// Click (mouse-down) positions as 0..1 fractions of the screen content, in the same
     /// coordinate basis as the smoothed cursor (`to_frame` then divide by the screen size),
     /// paired with each click's event time. The editor preview uses these for click ripples.

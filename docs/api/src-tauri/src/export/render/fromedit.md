@@ -13,7 +13,7 @@ Pure inverse of `seed::zooms_from_regions`. Rebuilds one `ZoomRegion` per `Zoom`
 ### Inputs
 
 - `doc: &EditDoc` - the persisted edit document containing the user's zoom timeline and settings snapshot. *Why:* all zoom data lives here after the user edits it in the editor; the exporter reads this instead of re-running autozoom.*
-- `sw: u32`, `sh: u32` - source screen dimensions. *Why:* only consulted for the `ZoomTarget::Cursor` fallback; `Fixed` anchors (every seeded zoom) are reproduced exactly without these values.*
+- `sw: u32`, `sh: u32` - source screen dimensions. *Why:* only consulted for the `ZoomTarget::Cursor` fallback; `Fixed` anchors (every seeded zoom) are reproduced exactly without these values.* Since a `Cursor` zoom also sets `follow_cursor`, `CameraSim` aims at the live cursor and never reads that fallback - it only keeps the field total.
 
 ### Returns
 
@@ -23,14 +23,15 @@ Pure inverse of `seed::zooms_from_regions`. Rebuilds one `ZoomRegion` per `Zoom`
 
 1. Call `doc.settings.zoom.to_zoom_config()` to recover `zoom_in_ms`, `zoom_out_ms`, and `easing`. *Why re-derive from settings:* these fields are not stored per-`Zoom` (they are uniform across the doc); the settings snapshot in the doc reproduces the same config that was active when the doc was seeded.*
 2. For each `Zoom`, call `anchor_for(z, sw, sh)` to recover the `FramePoint` and `easing_from(&z.easing, cfg.easing)` to recover the `Easing` variant.
-3. Build `ZoomRegion { start_ms, end_ms, zoom_in_ms, zoom_out_ms, target_scale: z.scale, anchor, easing }`.
+3. Build `ZoomRegion { start_ms, end_ms, zoom_in_ms, zoom_out_ms, target_scale: z.scale, anchor, easing, layer, cam_action, follow_cursor: matches!(z.target, ZoomTarget::Cursor) }`. *Why the flag rather than resolving a point here:* there is no cursor track at this layer, and even with one a point resolved at `start_ms` goes stale the moment the pill is dragged along the timeline - `CameraSim` re-reads the live cursor every step instead.
 
 ### Behaviors worth knowing
 
 - `regions_round_trip_through_edit_doc` - regions -> `seed::zooms_from_regions` -> `EditDoc` -> `regions_from_doc` returns field-identical regions. This is the proof of losslessness.
 - `empty_zooms_make_no_regions` - default `EditDoc` produces an empty vec.
-- `cursor_target_defaults_to_screen_center` - `ZoomTarget::Cursor` anchor becomes `(sw/2, sh/2)`.
+- `cursor_target_defaults_to_screen_center` - `ZoomTarget::Cursor` anchor becomes `(sw/2, sh/2)` (and `follow_cursor` becomes `true`, which is what makes that value inert).
 - `easing_unknown_or_spring_falls_back_to_config` - "spring" and unknown easing strings fall back to the config's easing; "smooth", "linear", "ease_in", "ease_out", and "ease_in_out" are reconstructed exactly.
+- A `cubic(x1,y1,x2,y2)` string is also reconstructed exactly, into `Easing::Cubic` (via `export::cubic::parse_cubic`) - it is the fallback arm's FIRST try, so only a genuinely unparseable name reaches `cfg_easing`. That is what makes a custom curve survive the doc round trip where `Spring` cannot: the string carries the whole shape.
 
 ## layout_segs_from_doc
 

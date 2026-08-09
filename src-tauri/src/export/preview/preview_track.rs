@@ -95,8 +95,20 @@ pub fn click_track(folder: String, session: tauri::State<'_, PreviewSession>) ->
 /// capture is often 4K, wasteful to decode in the editor. Transcodes once (cached per height)
 /// with a fast preset, no audio, faststart, and stretched (setpts) to the real recording
 /// duration so the preview plays at true speed (video.mp4 is encoded sped up). Returns the path.
+/// `async` + `spawn_blocking` - same freeze mechanism as `ai::commands` (Task 40) and
+/// `thumbs::ensure_thumbs` (Task 41): a sync `#[tauri::command] fn` would run the blocking ffmpeg
+/// `.status()` call inline on the main thread, freezing the window for the transcode's duration
+/// (a project OPEN, since this is the essential preprocessing step). The blocking body is
+/// `ensure_proxy_blocking`, called directly (no runtime hop needed) by `preprocess::run`, which
+/// already runs off the main thread on its own `std::thread`.
 #[tauri::command]
-pub fn ensure_proxy(folder: String, height: u32) -> Result<String, String> {
+pub async fn ensure_proxy(folder: String, height: u32) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || ensure_proxy_blocking(folder, height))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn ensure_proxy_blocking(folder: String, height: u32) -> Result<String, String> {
     let paths = ProjectPaths { folder: PathBuf::from(&folder) };
     let h = height.clamp(240, 2160) & !1; // even
     let proxy = paths.folder.join(format!("preview_{h}_rt.mp4"));

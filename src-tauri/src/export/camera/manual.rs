@@ -39,6 +39,7 @@ pub fn from_actions(actions: &[ActionEvent], events: &[MouseEvent], screen: &Scr
                         easing: cfg.easing,
                         cam_action: None,
                         layer: 0,
+                        follow_cursor: false,
                     });
                 }
             }

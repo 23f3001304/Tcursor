@@ -174,28 +174,38 @@ Closes the in-progress span on `paused_totals`, then clears the shared `paused` 
 
 ```rust
 #[tauri::command]
-pub fn stop_recording(recorder: tauri::State<'_, Recorder>, app: tauri::AppHandle) -> Result<RecordingResult, String>
+pub async fn stop_recording(app: tauri::AppHandle) -> Result<RecordingResult, String>
 ```
 
-Signals all threads to stop, joins them in dependency order, persists input data, `sync.json`, and `project.tcursor`, and returns the `RecordingResult`.
+Signals all threads to stop, joins them in dependency order, persists input data, `sync.json`, and `project.tcursor`, and returns the `RecordingResult`. A thin `async` wrapper: the work is `stop_blocking`, below.
+
+**Off the main thread (sweep-2 Task 1).** `async fn` + `spawn_blocking`, the same conversion `ai::commands`, `thumbs.rs` and `preview_track.rs` already had. As a sync `#[tauri::command] fn` this ran on the whole app's main thread while it joined the mic and system-audio threads (each a 50 ms poll loop plus a WAV-header finalize), gzip-compressed and wrote the entire mouse-event log, and then joined the video pipeline - which waits for the encoder to close its pipe and write the `moov` atom of a potentially multi-GB MP4. On a long 4K recording that froze the HUD outright: no repaint, no "Saving..." spinner motion, no input, for the whole finalize.
+
+`recorder: tauri::State<'_, Recorder>` is gone from the signature because a `State<'_, T>` cannot cross into `spawn_blocking` (its lifetime is not `'static`); `stop_blocking` re-derives it from the `AppHandle` instead. Both were injected params, so the JS call (`invoke("stop_recording")`) is unchanged.
 
 ### Inputs
 
-- `recorder: tauri::State<'_, Recorder>` - the singleton managed state.
-- `app: tauri::AppHandle` (Task 39) - resolves the main window to swap the icon back to normal. Brand flair only - never fails the command.
+- `app: tauri::AppHandle` - resolves the `Recorder` managed state inside the blocking closure, and (Task 39) the main window whose icon is swapped back to normal. The icon swap is brand flair only - never fails the command.
 
 ### Returns
 
-`Ok(RecordingResult)` with the project folder and frame count. `Err(String)` if the video thread panicked or `stop_and_finalize` failed.
+`Ok(RecordingResult)` with the project folder and frame count. `Err(String)` if the video thread panicked, `stop_and_finalize` failed, or the `spawn_blocking` task itself failed to join.
+
+## stop_blocking
+
+```rust
+fn stop_blocking(app: &tauri::AppHandle) -> Result<RecordingResult, String>
+```
+
+The whole body of `stop_recording`, split out so the command itself is just the `spawn_blocking` hop (and so `recorder.rs` stays under the line cap). Runs on a blocking-pool thread. Every handle it touches is thread-agnostic by construction: `MouseTracker::stop` and `CaptureControl::stop` post `WM_QUIT` to a *stored* thread id and then join, `KeyboardTracker`/`CursorTypeTracker` are an atomic flag plus a join, and `windows-capture`'s `VideoEncoder` is declared `Send` and does its muxing on its own transcode thread.
 
 ### Implementation
 
-1. Lock `recorder.inner` and `take` the `Running`. Return `Err("not recording")` if `None`. *Why `take`:* consumes the `Running`, making the state `None` so a subsequent `start_recording` is permitted.
+1. `app.state::<Recorder>()`, lock `inner` and `take` the `Running`. Return `Err("not recording")` if `None`. *Why `take`:* consumes the `Running`, making the state `None` so a subsequent `start_recording` is permitted.
 2. Call `brand_icon::set_recording(&app, false)` (Task 39) - only reached once step 1 confirms a recording was actually taken, so a redundant Stop (already-idle) never touches the icon.
 3. Set `stop = true` (SeqCst) - signals the audio threads (the video pipeline is stopped below).
 4. Join `mic_thread` and `system_thread`. *Why audio first:* lightweight (50ms loop), they finish quickly.
 5. Call `save_inputs`. *Why before the video stop:* if finalizing the video errors, the `?` would skip `save_inputs` and lose the events/actions; saving first guarantees they persist.
 6. `running.video.stop_and_collect()` - stop + finalize the video pipeline (GPU: end capture + `encoder.finish()`; ffmpeg: set halt + WM_QUIT to unblock the WGC thread + join), returning `(frames, frame_ts)`. Propagate errors as `Err(String)`.
-7. Build `SyncLog` from `frame_ts`, `events_ms`, and the atomic audio start times (0 treated as absent). Save to `folder/sync.json`. *Why after the video stop:* `frame_ts` is only complete once the pipeline has finalized.
-8. Build a `project::manifest::ProjectManifest` from `running.screen.w/h` (`preprocessed: false`) and save it to `paths.manifest()` (`folder/project.tcursor`), then call `project::recents::touch(&running.folder)`. Both best-effort (`eprintln!`/silently swallowed on failure) - a write failure here must never fail the recording, since the folder is already a fully valid project without them. `preprocessed` starts `false` here regardless - the frontend calls `export::preview::preprocess::preprocess_project` right after this command resolves (shown as the HUD's "Saving..." progress via `useRecordingFlow`) and that flips it once its pass finishes. This is NOT done as a detached background thread from `stop_recording` itself anymore (that used to race the editor's mount - the proxy/thumbs/waveform transcode could still be running when the editor opened, which was exactly the "preview still takes a while to load" lag); awaiting it with progress in the caller fixes that.
-9. Return `RecordingResult { folder, frames }`.
+7. Call `recorder_threads::save_session_files` with `frame_ts`, `events_ms`, the atomic audio start times (0 treated as absent) and `running.screen` - it writes `sync.json`, `project.tcursor` and the recents entry, all best-effort. *Why after the video stop:* `frame_ts` is only complete once the pipeline has finalized. Split into `recorder_threads.rs` alongside `save_inputs` so this file stays under the line cap; see `recorder_threads.md` for the `preprocessed: false` rationale.
+8. Return `RecordingResult { folder, frames }`.

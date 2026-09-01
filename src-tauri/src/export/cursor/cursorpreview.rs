@@ -50,15 +50,23 @@ pub struct CursorKindSample { pub t: u32, pub kind: CursorType }
 /// The cursor-type track in OUTPUT time, so the preview can pick the right sprite as the shape
 /// changes. Maps each `cursor.json` sample (event time) to output ms the same way the click
 /// track does (`et + events_ms - video_start`, dropping pre-start samples).
+///
+/// `async` + `spawn_blocking` like every other `with_warm` command (see `preview_frame`): the
+/// body itself is a file read + map, but a cold cache runs `FrameRenderer::new` underneath it.
 #[tauri::command]
-pub fn cursor_kinds(folder: String, session: tauri::State<'_, PreviewSession>) -> Result<Vec<CursorKindSample>, String> {
-    with_warm(&session, &folder, |c, paths| {
-        let off = c.renderer.events_ms() as i64 - c.meta.video_start as i64;
-        Ok(CursorTrack::load(&paths.cursor()).samples.iter().filter_map(|&(et, kind)| {
-            let t = et as i64 + off;
-            (t >= 0).then_some(CursorKindSample { t: t as u32, kind })
-        }).collect())
+pub async fn cursor_kinds(folder: String, app: tauri::AppHandle) -> Result<Vec<CursorKindSample>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri::Manager;
+        with_warm(&app.state::<PreviewSession>(), &folder, |c, paths| {
+            let off = c.renderer.events_ms() as i64 - c.meta.video_start as i64;
+            Ok(CursorTrack::load(&paths.cursor()).samples.iter().filter_map(|&(et, kind)| {
+                let t = et as i64 + off;
+                (t >= 0).then_some(CursorKindSample { t: t as u32, kind })
+            }).collect())
+        })
     })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Invert R/G/B in place for a dark-theme cursor; alpha untouched. Mirrors `cursorset`.

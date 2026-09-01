@@ -46,15 +46,17 @@ One cursor-shape change at output time `t` (ms); `kind` serializes to the lowerc
 
 ```rust
 #[tauri::command]
-pub fn cursor_kinds(folder: String, session: tauri::State<'_, PreviewSession>) -> Result<Vec<CursorKindSample>, String>
+pub async fn cursor_kinds(folder: String, app: tauri::AppHandle) -> Result<Vec<CursorKindSample>, String>
 ```
 
 The cursor-type track in **output** time, so the preview picks the right sprite as the shape changes.
 
+**Off the main thread (sweep-2 Task 1).** `async fn` + `spawn_blocking`, the pattern `preview_frame` documents (`export/preview/mod.md`). Its own body is a small file read plus a map, but it goes through `with_warm`, whose cold path is `FrameRenderer::new` (event-log decode, ffprobe/ffmpeg subprocesses, wgpu init, cursor-pack prep) - and this is one of six `with_warm` commands the editor fires on the same mount tick. `tauri::State<'_, PreviewSession>` cannot cross into `spawn_blocking`, so the command takes `app: tauri::AppHandle` and re-derives the managed state inside the closure; Tauri injects `AppHandle`, so the JS call is unchanged.
+
 ### Inputs (what, and why it is needed)
 
 - `folder: String` - absolute project path. *Why:* identifies the recording (`cursor.json`).
-- `session: State<PreviewSession>` - the warm renderer cache. *Why:* it provides `events_ms` + `video_start` to map event time to output time.
+- `app: tauri::AppHandle` - resolves the warm renderer cache (`PreviewSession`) inside the blocking closure. *Why:* it provides `events_ms` + `video_start` to map event time to output time.
 
 ### Returns
 

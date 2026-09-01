@@ -150,9 +150,17 @@ fn render_fx_overlay(
 /// Tauri command: render the frontend-resolved FX overlay and return a transparent PNG data URL.
 /// A thin wrapper over `render_fx_overlay` - its only job is resolving `has_webcam` from the warm
 /// `PreviewSession` (whichever project is currently open; see `PreviewSession::has_webcam`).
+///
+/// `async` + `spawn_blocking` (see `preview_frame` for the pattern and the `AppHandle`-instead-of-
+/// `State` reason). This is the app's hottest command - the composite loop fires it ~25x/sec for
+/// the whole of playback and every scrub - and each call does two full GPU render+readback fences
+/// (`device.poll(Maintain::Wait)`, which drains the process-shared device queue), a per-pixel
+/// alpha reconstruction, a PNG deflate and a base64 encode. As a sync command all of that ran on
+/// the main thread, which is what made the whole window unresponsive during playback and
+/// dramatically worse while an export was pushing work onto the same wgpu device.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
-pub fn preview_fx_overlay(
+pub async fn preview_fx_overlay(
     ow: u32, oh: u32,
     style: String, color: [u8; 3], intensity: f32, hits: Vec<[f32; 3]>,
     spot_cx: Option<f32>, spot_cy: Option<f32>, spot_dim: Option<f32>,
@@ -160,13 +168,18 @@ pub fn preview_fx_overlay(
     spot_mode: Option<String>, spot_tint: Option<[u8; 3]>, spot_t: Option<f32>,
     video_mode: Option<String>, video_alpha: Option<f32>, video_t: Option<f32>,
     cam_rect: Option<[f32; 4]>, cam_radius: Option<f32>, dim_camera: Option<bool>,
-    session: tauri::State<'_, PreviewSession>,
+    app: tauri::AppHandle,
 ) -> Result<String, String> {
-    let (ow, oh) = (ow.max(1), oh.max(1));
-    let has_webcam = session.has_webcam();
-    with_fx(ow, oh, |fx| render_fx_overlay(fx, ow, oh, has_webcam, style, color, intensity, hits,
-        spot_cx, spot_cy, spot_dim, spot_radius, spot_feather, spot_alpha, spot_mode, spot_tint, spot_t,
-        video_mode, video_alpha, video_t, cam_rect, cam_radius, dim_camera))
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri::Manager;
+        let (ow, oh) = (ow.max(1), oh.max(1));
+        let has_webcam = app.state::<PreviewSession>().has_webcam();
+        with_fx(ow, oh, |fx| render_fx_overlay(fx, ow, oh, has_webcam, style, color, intensity, hits,
+            spot_cx, spot_cy, spot_dim, spot_radius, spot_feather, spot_alpha, spot_mode, spot_tint, spot_t,
+            video_mode, video_alpha, video_t, cam_rect, cam_radius, dim_camera))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]

@@ -2,12 +2,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { FxOverlayParams } from "../../lib/ipc";
 
 const sent: FxOverlayParams[] = [];
+let nextResult: () => Promise<string> = () => Promise.resolve("data:image/png;base64,x");
 vi.mock("../../lib/ipc", () => ({
-  previewFxOverlay: (p: FxOverlayParams) => { sent.push(p); return Promise.resolve("data:image/png;base64,x"); },
+  previewFxOverlay: (p: FxOverlayParams) => { sent.push(p); return nextResult(); },
 }));
 
 const { requestFxOverlay } = await import("./fxOverlay");
-const { newSpotlightSimState } = await import("./spotlightPreview");
+const { resolveSpotlight, newSpotlightSimState } = await import("./spotlightPreview");
 
 const clickfx = {
   enabled: true, style: "ripple", color: [255, 0, 0], intensity: 1,
@@ -17,14 +18,18 @@ const clickfx = {
 } as any;
 
 const identity = (x: number, y: number): [number, number] => [x, y];
+// spotlight always ON so the "enabled" gate is the only thing that can suppress it. resolveSpotlight
+// is called once here, mirroring the real caller (useCompositeLoop resolves once per tick and
+// passes the result in - requestFxOverlay no longer resolves it itself).
+const resolvedSpotlightOn = () => resolveSpotlight(
+  { effects: [], on: true, params: { dim: 0.6, radius: 0.13, feather: 0.1, mode: "classic", tint: [130, 90, 255] } },
+  0, newSpotlightSimState(),
+)!;
 const call = (fx: unknown, clicks: { t: number; x: number; y: number }[], now: number) =>
-  requestFxOverlay(100, 100, clicks as never, now, [50, 50],
-    // spotlight always ON so the "enabled" gate is the only thing that can suppress it
-    { effects: [], on: true, params: { dim: 0.6, radius: 0.13, feather: 0.1, mode: "classic", tint: [130, 90, 255] } },
-    fx as never, identity, newSpotlightSimState(), 1, null);
+  requestFxOverlay(100, 100, clicks as never, now, [50, 50], resolvedSpotlightOn(), fx as never, identity, 1, null);
 
 describe("requestFxOverlay", () => {
-  beforeEach(() => { sent.length = 0; });
+  beforeEach(() => { sent.length = 0; nextResult = () => Promise.resolve("data:image/png;base64,x"); });
 
   it("uses the export's 600ms click lifetime, not 500ms", async () => {
     // A click 550ms old is EXPIRED at 500ms but still alive (progress ~0.92) at the export's 600.
@@ -49,5 +54,14 @@ describe("requestFxOverlay", () => {
     await call({ ...clickfx, style: "none" }, [{ t: 0, x: 0.5, y: 0.5 }], 100);
     expect(sent[0].hits.length).toBe(0);
     expect(sent[0].spotAlpha).toBe(1);
+  });
+
+  // A real IPC/backend failure must stay a REJECTED promise, distinct from the two "nothing to
+  // draw" `null` returns above (disabled fx / no active hit or spotlight) - a null RESOLUTION is
+  // a valid terminal state the caller latches and stops re-requesting; a rejection must not be,
+  // or a transient backend hiccup would wedge that cache key as permanently "done".
+  it("rejects (does not resolve null) when the backend call fails", async () => {
+    nextResult = () => Promise.reject(new Error("ipc down"));
+    await expect(call(clickfx, [{ t: 0, x: 0.5, y: 0.5 }], 100)).rejects.toThrow("ipc down");
   });
 });

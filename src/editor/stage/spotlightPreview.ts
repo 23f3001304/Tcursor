@@ -66,7 +66,12 @@ export function resolveSpotlight(spotlight: SpotlightInput, ms: number, sim: Spo
   }
   const natural = win ? regionAlpha(win, ms) : 0;
   if (sim.transitionStart !== null && sim.transitionDur !== null && sim.transitionFrom !== null) {
-    const elapsed = ms - sim.transitionStart;
+    // Clamp at 0, mirroring Rust's `et.saturating_sub(tr.start_ms)`: a backwards time (scrubbing
+    // the playhead before transitionStart) can only ever mean "the transition hasn't started
+    // yet," never a negative elapsed. Signed elapsed here let `e = elapsed / transitionDur` go
+    // negative, and `e*e*(3-2e)` is unbounded for negative `e` (e.g. e=-8 -> 1216), driving alpha
+    // far outside 0..1 - and never clearing, since `elapsed < transitionDur` stays true forever.
+    const elapsed = Math.max(0, ms - sim.transitionStart);
     if (elapsed < sim.transitionDur) {
       const e = elapsed / sim.transitionDur; // Smooth easing, matches the Rust default
       const smooth = e * e * (3 - 2 * e);

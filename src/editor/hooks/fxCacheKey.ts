@@ -29,3 +29,21 @@ export function fxCacheKey(
 export function isStaleFxResponse(requestedKey: string, wantedKey: string): boolean {
   return requestedKey !== wantedKey;
 }
+
+/** What the `.then` handler of a RESOLVED (not rejected) FX-overlay request should do. A
+ *  rejected promise - an actual IPC/backend failure - never reaches this function; the caller's
+ *  `.catch` handles that separately and leaves the key unlatched so it retries next tick. */
+export type FxResponseAction =
+  | { kind: "stale" }
+  | { kind: "apply"; imageUrl: string | null };
+
+/** Decide what a resolved FX-overlay response means. Stale (`isStaleFxResponse`) responses are
+ *  dropped outright. Otherwise the response is applied - and a `null` `imageUrl` is just as much
+ *  a landed answer as a real one: it means "nothing to draw at this key" (fx disabled, or no
+ *  active click/spotlight), a valid terminal state, not a failure. Both cases latch the same way
+ *  in the caller, which is what stops the loop from re-requesting a key it already knows renders
+ *  nothing - the common no-fx case - every tick forever. */
+export function fxResponseAction(requestedKey: string, wantedKey: string, imageUrl: string | null): FxResponseAction {
+  if (isStaleFxResponse(requestedKey, wantedKey)) return { kind: "stale" };
+  return { kind: "apply", imageUrl };
+}

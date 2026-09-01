@@ -1,7 +1,7 @@
 import type { ClickSample } from "../../lib/ipc";
 import { previewFxOverlay, type FxOverlayParams } from "../../lib/ipc";
 import type { ClickFxSettings } from "../../hud/settings/settings";
-import { resolveSpotlight, type SpotlightInput, type SpotlightSimState } from "./spotlightPreview";
+import type { ResolvedSpotlight } from "./spotlightPreview";
 
 /** Click-effect lifetime. MUST equal the export's `LIFE_MS` (`fx_state.rs`): `progress` is
  *  `elapsed / lifetime`, so a shorter one here made every ring smaller and fainter than the
@@ -14,15 +14,21 @@ export type FxCamRect = { rect: [number, number, number, number]; radius: number
 
 /** Build FxOverlayParams from the current preview state and call the backend.
  *  Returns a data URL PNG or null if nothing is active. The backend runs the
- *  exact same GPU/CPU shader pipeline the export uses. */
+ *  exact same GPU/CPU shader pipeline the export uses.
+ *
+ *  `resolved` must already be the caller's own `resolveSpotlight(...)` result for this exact
+ *  frame, not raw settings to resolve here: `resolveSpotlight` mutates a `SpotlightSimState` in
+ *  place (region handoff/transition tracking), so it must run exactly once per composite tick.
+ *  The caller also uses that same resolved value to build the FX request's cache key, so passing
+ *  it in here (instead of re-resolving) keeps "what the cache key says the spotlight looks like"
+ *  and "what actually gets requested" in sync by construction - they're the same call. */
 export async function requestFxOverlay(
   ow: number, oh: number,
   clicks: ClickSample[], now: number,
   cursorPx: [number, number] | null,
-  spotlight: SpotlightInput | null,
+  resolved: ResolvedSpotlight | null,
   clickfx: ClickFxSettings,
   mapFn: (fx: number, fy: number) => [number, number] | null,
-  sim: SpotlightSimState,
   // Screen-panel height as a fraction of the FX render height (= layout.screen[3]). The
   // radius/feather settings are fractions of the SCREEN, so pre-scale by this before the
   // backend's `oh * frac` - mirrors the export's `fx_state_at` (scene.screen.h / oh) so the
@@ -50,8 +56,6 @@ export async function requestFxOverlay(
     }
   }
 
-  // Resolve spotlight
-  const resolved = spotlight ? resolveSpotlight(spotlight, now, sim) : null;
   const spotActive = resolved && resolved.alpha > 0.001 && cursorPx;
 
   // Skip if nothing to render
@@ -83,7 +87,11 @@ export async function requestFxOverlay(
   try {
     return await previewFxOverlay(params);
   } catch (e) {
+    // Rethrow rather than swallow to null: a `null` RETURN (above) means "nothing to draw here",
+    // a valid, latch-able terminal state for this cache key. A rejected IPC call is a genuine
+    // failure and must stay a rejected promise so the caller's `.catch` keeps it retryable
+    // instead of also latching it as "done".
     if (import.meta.env.DEV) console.warn("preview_fx_overlay:", e);
-    return null;
+    throw e;
   }
 }

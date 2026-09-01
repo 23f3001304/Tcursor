@@ -90,7 +90,7 @@ Closing either means giving this command the warm session's actions plus an even
 
 ```rust
 #[tauri::command]
-pub fn preview_fx_overlay(
+pub async fn preview_fx_overlay(
     ow: u32, oh: u32,
     style: String, color: [u8; 3], intensity: f32, hits: Vec<[f32; 3]>,
     spot_cx: Option<f32>, spot_cy: Option<f32>, spot_dim: Option<f32>,
@@ -98,15 +98,19 @@ pub fn preview_fx_overlay(
     spot_mode: Option<String>, spot_tint: Option<[u8; 3]>, spot_t: Option<f32>,
     video_mode: Option<String>, video_alpha: Option<f32>, video_t: Option<f32>,
     cam_rect: Option<[f32; 4]>, cam_radius: Option<f32>, dim_camera: Option<bool>,
-    session: tauri::State<'_, PreviewSession>,
+    app: tauri::AppHandle,
 ) -> Result<String, String>
 ```
 
-Registered in `lib.rs`; the frontend calls it via `previewFxOverlay` (`src/lib/ipc.ts`) → `requestFxOverlay` (`src/editor/stage/fxOverlay.ts`) - neither passes `session` explicitly, since Tauri injects `State<'_, T>` params from managed app state rather than the invoke payload, so this command's IPC signature from the frontend's side is unchanged by the `has_webcam` gate. **This command being absent is exactly why the spotlight never appeared in the preview at all, historically:** the invoke rejected as an unregistered command, `fxOverlay.ts` caught the error and returned `null`, so no overlay was ever blitted.
+Registered in `lib.rs`; the frontend calls it via `previewFxOverlay` (`src/lib/ipc.ts`) → `requestFxOverlay` (`src/editor/stage/fxOverlay.ts`) - neither passes `app` explicitly, since Tauri injects `AppHandle`/`State<'_, T>` params from managed app state rather than the invoke payload, so this command's IPC signature from the frontend's side is unchanged by the `has_webcam` gate (and was unchanged again when the injected param switched from `State` to `AppHandle`). **This command being absent is exactly why the spotlight never appeared in the preview at all, historically:** the invoke rejected as an unregistered command, `fxOverlay.ts` caught the error and returned `null`, so no overlay was ever blitted.
+
+**Off the main thread (sweep-2 Task 1) - the single biggest one.** `async fn` + `spawn_blocking`, the pattern `preview_frame` documents (`mod.md`). This is the app's hottest command: `useCompositeLoop` fires it once per `FX_BUCKET_MS` (40 ms) bucket, i.e. ~25x/sec, for the whole of playback *and* the whole of a scrub - and because `resolveSpotlight` returns `max(sim.alpha, settings_on ? 1 : 0)`, the overlay is continuously active whenever the global spotlight setting is on. Each call renders the effect twice (over black, over white - see `render_fx_overlay`), and on the GPU path each of those ends in `readback_into` -> `device.poll(Maintain::Wait)`, a full CPU-GPU fence that drains the **process-shared** wgpu device queue (`GpuFx` uses `gpu::shared_device()`, the same device the export compositor submits to). Then a 230k-pixel alpha reconstruction, a full PNG deflate and a hand-rolled base64. As a sync command every bit of that ran on the UI thread ~25 times a second - the dominant cause of the whole window feeling unresponsive during playback, and of the app getting dramatically worse the instant an export started pushing 4K work onto that shared device. `tauri::State<'_, PreviewSession>` cannot cross into `spawn_blocking`, so the injected param is now `app: tauri::AppHandle`. (Reducing the per-call cost - reusing GPU resources, a single alpha-capable pass, raw bytes instead of a data URL - is a separate change; this one only gets it off the main thread.)
+
+*Not newly racy:* `useCompositeLoop` keeps a single-flight guard (`fxInflightRef`), so making the command async does not put two overlay renders through `with_fx` at once.
 
 ### Implementation
 
-Clamps `ow`/`oh` to at least 1 (so the `with_fx` cache key matches the size actually rendered), resolves `has_webcam` via `session.has_webcam()` (whichever project's renderer is currently warm - see `PreviewSession::has_webcam`), then calls `render_fx_overlay` inside `with_fx` so the draw uses the export's chosen renderer.
+The whole body runs inside `tauri::async_runtime::spawn_blocking`: clamp `ow`/`oh` to at least 1 (so the `with_fx` cache key matches the size actually rendered), resolve `has_webcam` via `app.state::<PreviewSession>().has_webcam()` - now a relaxed atomic load rather than a mutex acquisition, so this 25x/sec call can never queue behind a cold renderer build (see `session.md`) - then call `render_fx_overlay` inside `with_fx` so the draw uses the export's chosen renderer. A `spawn_blocking` join failure maps to `Err(String)`, the same shape as every other failure.
 
 ### Behaviors worth knowing
 

@@ -40,6 +40,31 @@ Stops each active input tracker and writes its data to disk. Called synchronousl
 2. If `keyboard` is `Some`: call `kb.stop()` which returns `(actions, typing)`. Save `ActionLog { actions }` to `actions_path` and `TypingLog { ms: typing }` to `typing_path`. Use `.ok()` on the typing save since typing data is best-effort. *Why stop returns both:* the keyboard tracker collects both action events and raw keystroke timestamps on one hook; a single stop call drains both queues atomically.
 3. If `cursor` is `Some`: call `c.stop()` to get `samples`, save `CursorTrack { samples }` to `cursor_path`. Log error to stderr.
 
+## save_session_files
+
+```rust
+pub fn save_session_files(folder: &str, frames: Vec<u64>, events_ms: u64,
+    mic_ms: Option<u64>, system_ms: Option<u64>, screen: ScreenInfo)
+```
+
+Persists the three post-capture session files: `sync.json` (the real capture timeline the export rebuilds every clock from), the `.tcursor` project manifest, and the recents entry. Split out of `stop_recording` so `recorder.rs` stays under the line cap, alongside `save_inputs`.
+
+### Inputs (what, and why it is needed)
+
+- `folder: &str` - the project directory. *Why:* `sync.json` is written directly under it, and `ProjectPaths` is rebuilt from it for the manifest.
+- `frames: Vec<u64>` - per-frame capture timestamps (ms) from `VideoSink::stop_and_collect`. *Why:* this is the recording's true, VFR timeline; export is fps-agnostic and rebuilds every clock from it.
+- `events_ms: u64` - the input clock's epoch. *Why:* it is what maps event timestamps onto the video timeline (`output_shift`).
+- `mic_ms` / `system_ms: Option<u64>` - each audio stream's first-sample capture time, or `None` when that stream was off. *Why:* they cancel device input latency when the export mixes audio. The caller maps a stored `0` to `None`.
+- `screen: ScreenInfo` - the captured monitor's size/origin. *Why:* the manifest records the source dimensions.
+
+### Returns
+
+Nothing. All three writes are **best-effort**: `sync.json` and the manifest log to `eprintln!` on failure and `recents::touch` swallows its own errors. A failure here must never fail the recording - the folder is already a fully valid project without the manifest, just not open-project-able by dialog until the next write.
+
+### Why `preprocessed: false`
+
+The manifest is written with `preprocessed: false` regardless. The frontend calls `export::preview::preprocess::preprocess_project` right after `stop_recording` resolves (shown as the HUD's "Saving..." progress via `useRecordingFlow`) and that flips it once its pass finishes. This is NOT done as a detached background thread from the stop path anymore - that used to race the editor's mount (the proxy/thumbs/waveform transcode could still be running when the editor opened), which was exactly the "preview still takes a while to load" lag; awaiting it with progress in the caller fixes that.
+
 ## spawn_mic_thread
 
 ```rust

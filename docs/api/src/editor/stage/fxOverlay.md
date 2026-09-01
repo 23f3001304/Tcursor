@@ -30,10 +30,9 @@ export async function requestFxOverlay(
   ow: number, oh: number,
   clicks: ClickSample[], now: number,
   cursorPx: [number, number] | null,
-  spotlight: SpotlightInput | null,
+  resolved: ResolvedSpotlight | null,
   clickfx: ClickFxSettings,
   mapFn: (fx: number, fy: number) => [number, number] | null,
-  sim: SpotlightSimState,
   screenScale: number,
   camRect: FxCamRect,
 ): Promise<string | null>
@@ -44,21 +43,20 @@ export async function requestFxOverlay(
 - `ow`, `oh` - the overlay's render resolution (the caller may request less than the full canvas size to cut backend cost; the returned image upscales cleanly on blit).
 - `clicks`, `now` - the click track and current time; clicks within `RIPPLE_MS` of `now` become active hits. **`RIPPLE_MS` must stay equal to the export's `LIFE_MS` (600ms, `fx_state.rs`)** - a hit's `progress` is `elapsed / lifetime` and drives both ring radius and fade alpha, so when this constant was 500 every preview ring was ~20% further along than the export's at the same instant (smaller, fainter) and vanished 100ms early.
 - `cursorPx` - the zoom-projected cursor position in the *same* `ow`x`oh` space, or `null`.
-- `spotlight` - resolved via `resolveSpotlight`; `null`/inactive skips the spotlight entirely.
+- `resolved` - the spotlight **already resolved** by the caller's own `resolveSpotlight(...)` call for this exact frame; `null`/inactive skips the spotlight entirely. This function does not call `resolveSpotlight` itself - `resolveSpotlight` mutates a `SpotlightSimState` in place (region handoff/transition tracking), so it must run exactly once per composite tick, not once here and once in the caller's cache-key computation (that double call used to double-advance the same stateful sim for no benefit, since both calls always used the same `now`).
 - `clickfx` - the recording's click-FX settings (style/color/intensity/enabled/`spotlight_dim_camera`).
 - `mapFn` - projects a 0..1 screen-content point into the same `ow`x`oh` pixel space as `ow`/`oh` (the caller's zoom-crop projection); used to place each click hit.
-- `sim` - the persistent `SpotlightSimState` (layer/handoff state) `resolveSpotlight` reads and mutates in place, mirroring the export's `SpotlightSim`.
 - `screenScale` - the screen panel's height as a fraction of the FX render height (`= layout.screen[3]`). `spotRadius`/`spotFeather` are pre-multiplied by it so the spotlight is sized to the screen panel, matching the export's `fx_state_at` (`scene.screen.h / oh`) - without it the preview spotlight would be a fixed fraction of the whole frame (layout-agnostic).
 - `camRect: FxCamRect` - the camera panel's rect this frame, or `null` when no camera panel is shown. *Why needed even though the export derives it from `scene.camera`:* the preview has no `Scene`, so the caller must resolve and pass the equivalent rect itself.
 
 ### Returns
 
-`Promise<string | null>` - a `data:image/png;base64,...` URL of the transparent overlay, or `null` when nothing is active (no backend call is made in that case).
+`Promise<string | null>` - a `data:image/png;base64,...` URL of the transparent overlay, or `null` when nothing is active (no backend call is made in that case). **A `null` RESOLUTION and a REJECTED promise are deliberately distinct**: `null` means "nothing to draw at this key" - a valid, latchable terminal state the caller stops re-requesting until the key changes - while a rejection means the backend call itself failed and must stay retryable. See `fxResponseAction` (`fxCacheKey.ts`), which the caller uses to act on this distinction.
 
 ### Implementation
 
 0. Return `null` immediately when `clickfx.enabled` is false. *Why this is the very first check:* `enabled` is the master switch for the whole FX stack, spotlight included - the export's `fx_state::render` returns before drawing anything when it is off. Previously `enabled` only guarded the click-hit loop, so a recording with FX switched off still showed a spotlight while editing and exported without one.
 1. Build the active click `hits` (pixel position + 0..1 progress) by mapping each recent click through `mapFn`, skipping any off-crop (`mapFn` returned `null`) clicks; skipped entirely when the style is `"none"`.
-2. Resolve the spotlight via `resolveSpotlight(spotlight, now, sim)`; `spotActive = resolved && alpha > 0.001 && cursorPx`.
+2. `spotActive = resolved && resolved.alpha > 0.001 && cursorPx`, from the already-resolved `resolved` param (no `resolveSpotlight` call here).
 3. If neither hits nor an active spotlight exist, return `null` without calling the backend.
-4. Otherwise assemble `FxOverlayParams` (hits + spotlight fields, with `spotRadius`/`spotFeather` scaled by `screenScale`); when `camRect` is non-null, also set `camRect`/`camRadius`/`dimCamera` (from `clickfx.spotlight_dim_camera`) on the params. `await previewFxOverlay(params)`, catching and logging (dev-only) any IPC error as `null`.
+4. Otherwise assemble `FxOverlayParams` (hits + spotlight fields, with `spotRadius`/`spotFeather` scaled by `screenScale`); when `camRect` is non-null, also set `camRect`/`camRadius`/`dimCamera` (from `clickfx.spotlight_dim_camera`) on the params. `await previewFxOverlay(params)`; on an IPC error, log it (dev-only) and **rethrow** - it must surface as a rejected promise, not collapse into the same `null` that means "nothing to draw" (see Returns above).

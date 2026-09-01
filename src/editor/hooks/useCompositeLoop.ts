@@ -7,7 +7,7 @@ import { type CamPose } from "../stage/cameraMoves";
 import { frameCamLayout } from "../stage/frameCam";
 import { drawPreview } from "../stage/previewCanvas";
 import { requestFxOverlay, type FxCamRect } from "../stage/fxOverlay";
-import { fxCacheKey, isStaleFxResponse, timeBucket } from "./fxCacheKey";
+import { fxCacheKey, fxResponseAction, timeBucket } from "./fxCacheKey";
 import { resolveSpotlight, newSpotlightSimState } from "../stage/spotlightPreview";
 import { layoutAt } from "../timeline/layoutTrack";
 import type { CursorSpritesState } from "./useCursorSprites";
@@ -165,26 +165,26 @@ export function useCompositeLoop({
 
             if (!fxInflightRef.current && cacheKey !== fxLastTRef.current) {
               fxInflightRef.current = true;
-              requestFxOverlay(fxW, fxH, clicksRef.current, t, cpos, spot, cf, mapFn, spotSimRef.current, screenScale, camRect)
+              // Reuses the tick's ONE resolveSpotlight call (above) - resolving again would double-advance the sim.
+              requestFxOverlay(fxW, fxH, clicksRef.current, t, cpos, resolvedSpot, cf, mapFn, screenScale, camRect)
                 .then(url => {
                   fxInflightRef.current = false;
-                  // Dropped if the desired key moved on while this was outstanding, so a stale
-                  // spotlight/click frame never blits - unlatched, so the very next tick reissues
-                  // a request for whatever is ACTUALLY wanted now.
-                  if (isStaleFxResponse(cacheKey, fxWantRef.current)) return;
-                  // Only latch on landing a real response (including a definite "off" -> `null`),
-                  // never before the request started - so a failed/errored request or one that
-                  // resolved null doesn't permanently mark this key "done" and block a retry.
-                  if (url) {
-                    fxLastTRef.current = cacheKey;
+                  const action = fxResponseAction(cacheKey, fxWantRef.current, url);
+                  // Stale (wanted key moved on): drop it unlatched, next tick reissues for real.
+                  if (action.kind === "stale") return;
+                  // Any RESOLVED response - even a definite "off" -> `null`, the common no-fx
+                  // case - is a valid terminal state: latch so the loop stops re-requesting until
+                  // the key changes. Only a REJECTED request (`.catch` below) stays retryable.
+                  fxLastTRef.current = cacheKey;
+                  if (action.imageUrl) {
                     const img = new Image();
                     img.onload = () => { fxOverlayImgRef.current = img; dirtyRef.current = true; };
-                    img.src = url;
+                    img.src = action.imageUrl;
                   } else {
-                    fxOverlayImgRef.current = null; dirtyRef.current = true; // explicit clear: nothing active (or the request failed)
+                    fxOverlayImgRef.current = null; dirtyRef.current = true; // nothing active at this key
                   }
                 })
-                .catch(() => { fxInflightRef.current = false; });
+                .catch(() => { fxInflightRef.current = false; }); // failure: unlatched, retried
             }
           } catch (e) { if (import.meta.env.DEV) console.error("drawPreview", e); }
         }

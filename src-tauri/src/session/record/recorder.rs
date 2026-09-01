@@ -11,10 +11,8 @@ use crate::events::track::tracker::MouseTracker;
 use crate::actions::keyboard::KeyboardTracker;
 use crate::actions::matcher::arming_from_settings;
 use crate::session::paths::ProjectPaths;
-use crate::session::project::manifest::ProjectManifest;
-use crate::session::project::recents;
 use crate::session::record::pause_totals::PauseTotals;
-use crate::session::record::recorder_threads::{save_inputs, spawn_mic_thread, spawn_system_thread};
+use crate::session::record::recorder_threads::{save_inputs, save_session_files, spawn_mic_thread, spawn_system_thread};
 use crate::session::record::video_sink::{start_video, VideoSink};
 
 struct Running {
@@ -154,11 +152,23 @@ pub fn resume_recording(recorder: tauri::State<'_, Recorder>) -> Result<(), Stri
     }
 }
 
+/// `async` + `spawn_blocking`: this command joins the mic/system-audio threads, gzips and writes
+/// the whole input log, and then joins the video pipeline - which in both paths waits for the
+/// encoder to write the `moov` atom of a potentially multi-GB MP4. As a sync command all of that
+/// ran on the main thread, so Stop froze the HUD (no repaint, no spinner motion) for the entire
+/// finalize. Same conversion `ai::commands`, `thumbs.rs` and `preview_track.rs` already had.
 #[tauri::command]
-pub fn stop_recording(recorder: tauri::State<'_, Recorder>, app: tauri::AppHandle) -> Result<RecordingResult, String> {
-    let running = recorder.inner.lock().unwrap_or_else(|e| e.into_inner())
+pub async fn stop_recording(app: tauri::AppHandle) -> Result<RecordingResult, String> {
+    tauri::async_runtime::spawn_blocking(move || stop_blocking(&app))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn stop_blocking(app: &tauri::AppHandle) -> Result<RecordingResult, String> {
+    use tauri::Manager;
+    let running = app.state::<Recorder>().inner.lock().unwrap_or_else(|e| e.into_inner())
         .take().ok_or("not recording")?;
-    crate::win::sys::brand_icon::set_recording(&app, false); // brand flair only - never fails the stop
+    crate::win::sys::brand_icon::set_recording(app, false); // brand flair only - never fails the stop
 
     // Signal the audio threads to stop; the video pipeline is stopped below.
     running.stop.store(true, Ordering::SeqCst);
@@ -173,25 +183,10 @@ pub fn stop_recording(recorder: tauri::State<'_, Recorder>, app: tauri::AppHandl
     // Stop + finalize the video pipeline (GPU: end capture + finish the MP4; ffmpeg: WM_QUIT + join).
     let (frames, frame_ts) = running.video.stop_and_collect()?;
 
-    // Persist the real capture timeline so export can rebuild it (fps-agnostic).
+    // Persist sync.json + the .tcursor manifest + the recents entry (all best-effort).
     let pick = |c: &AtomicU64| { let v = c.load(Ordering::SeqCst); (v > 0).then_some(v) };
-    let sync = crate::session::sync::SyncLog { frames: frame_ts, events_ms: running.events_ms,
-        mic_ms: pick(&running.mic_start), system_ms: pick(&running.system_start) };
-    let sync_path = std::path::Path::new(&running.folder).join("sync.json");
-    if let Err(e) = sync.save(&sync_path) { eprintln!("sync.json save failed: {e}"); }
-
-    // Write the .tcursor project manifest (best-effort - never fails the recording; the folder
-    // is still a fully valid project without it, just not open-project-able by dialog until the
-    // NEXT time it is written). preprocessed=false here: the frontend calls `preprocess_project`
-    // right after this command resolves (shown as the HUD's "Saving..." progress) and that flips
-    // it once the pass finishes. NOT done here as a detached background thread anymore - that
-    // used to race the editor's mount (it could still be transcoding when the editor opened),
-    // which is exactly the "preview still takes a while to load" lag; awaiting it with progress
-    // in the caller fixes that.
-    let paths = ProjectPaths { folder: PathBuf::from(&running.folder) };
-    let manifest = ProjectManifest::new(running.screen.w, running.screen.h);
-    if let Err(e) = manifest.save(&paths.manifest()) { eprintln!("project.tcursor save failed: {e}"); }
-    recents::touch(&running.folder); // best-effort; also makes fresh recordings show up as "recent"
+    save_session_files(&running.folder, frame_ts, running.events_ms,
+        pick(&running.mic_start), pick(&running.system_start), running.screen);
 
     Ok(RecordingResult { folder: running.folder, frames })
 }

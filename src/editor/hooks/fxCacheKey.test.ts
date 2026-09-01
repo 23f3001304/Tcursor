@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { timeBucket, fxCacheKey, isStaleFxResponse } from "./fxCacheKey";
+import { timeBucket, fxCacheKey, isStaleFxResponse, fxResponseAction } from "./fxCacheKey";
 
 describe("timeBucket", () => {
   it("rounds to the nearest bucket boundary", () => {
@@ -31,5 +31,30 @@ describe("isStaleFxResponse", () => {
 
   it("is stale once the wanted key has moved on", () => {
     expect(isStaleFxResponse("40_a", "80_b")).toBe(true);
+  });
+});
+
+describe("fxResponseAction", () => {
+  it("drops a stale response instead of applying it", () => {
+    expect(fxResponseAction("40_a", "80_b", "data:image/png;base64,x")).toEqual({ kind: "stale" });
+  });
+
+  // The regression this guards: a null response (the common no-fx case - no click, no active
+  // spotlight) used to fall through un-latched in the hook, so the very next tick saw the same
+  // cache key as still un-answered and re-requested it - forever, at 60fps, while paused. A null
+  // response must be treated exactly like a real image: a landed answer for this key.
+  it("applies a null response (nothing to draw) exactly like a real one - both latch", () => {
+    const nullResult = fxResponseAction("40_a", "40_a", null);
+    const urlResult = fxResponseAction("40_a", "40_a", "data:image/png;base64,x");
+    expect(nullResult).toEqual({ kind: "apply", imageUrl: null });
+    expect(urlResult).toEqual({ kind: "apply", imageUrl: "data:image/png;base64,x" });
+    // Both are "apply" - the caller latches fxLastTRef on `kind === "apply"` regardless of
+    // imageUrl being null or a string, which is exactly what stops the re-request loop.
+    expect(nullResult.kind).toBe(urlResult.kind);
+  });
+
+  it("is not stale when the wanted key is unchanged, even with no request in flight yet", () => {
+    expect(fxResponseAction("0_none_off__off-1,2,3-0.5-none", "0_none_off__off-1,2,3-0.5-none", null))
+      .toEqual({ kind: "apply", imageUrl: null });
   });
 });

@@ -15,15 +15,17 @@ One sample of the camera curve at output time `t` (ms). `scale` is the zoom fact
 
 ```rust
 #[tauri::command]
-pub fn camera_track(folder: String, session: tauri::State<'_, PreviewSession>) -> Result<Vec<CamSample>, String>
+pub async fn camera_track(folder: String, app: tauri::AppHandle) -> Result<Vec<CamSample>, String>
 ```
 
 Returns the exact camera curve over the whole timeline, one `CamSample` per output frame.
 
+**Off the main thread (sweep-2 Task 1).** `async fn` + `spawn_blocking`, the pattern `preview_frame` documents (`mod.md`). An earlier sweep left this sync on the grounds that its own body is pure math on a warm cache - true, but every `with_warm` command can land on the COLD path, where `FrameRenderer::new` decodes the event log, spawns up to three `ffprobe`/`ffmpeg` subprocesses, builds two wgpu pipelines and preps the cursor pack. The editor fires six of these commands on the same mount tick (`camera_track`, `preview_layout`, `preview_layouts`, `click_track`, `cursor_kinds`, `preview_bg`), so as sync commands the first paid that build on the UI thread and the other five queued behind it - the multi-hundred-ms-to-seconds freeze on opening a project, repeated on every aspect change. Because `tauri::State<'_, PreviewSession>` is not `'static` it cannot cross into `spawn_blocking`; the command takes `app: tauri::AppHandle` instead and re-derives the same managed state inside the closure via `app.state::<PreviewSession>()`. The JS call is unchanged - `AppHandle` is injected by Tauri, never passed from the frontend.
+
 ### Inputs (what, and why it is needed)
 
 - `folder: String` - absolute project path. *Why:* identifies the recording; all assets and `edit.json` derive from it.
-- `session: State<PreviewSession>` - the warm `FrameRenderer` cache. *Why:* the curve reuses the same renderer as `preview_frame` (keyed by `edit.json` mtime), so it rebuilds only when an edit changes the timeline.
+- `app: tauri::AppHandle` - resolves the warm `FrameRenderer` cache (`PreviewSession`) from inside the `spawn_blocking` closure. *Why:* the curve reuses the same renderer as `preview_frame` (keyed by `edit.json` mtime), so it rebuilds only when an edit changes the timeline; `State<'_, _>` cannot cross a `spawn_blocking` boundary (see above).
 
 ### Returns
 
@@ -48,15 +50,15 @@ The static export framing as fractions of the output: `screen` is the screen pan
 
 ```rust
 #[tauri::command]
-pub fn preview_layout(folder: String, session: tauri::State<'_, PreviewSession>) -> Result<PreviewLayout, String>
+pub async fn preview_layout(folder: String, app: tauri::AppHandle) -> Result<PreviewLayout, String>
 ```
 
-Returns the `PreviewLayout` for the recording.
+Returns the `PreviewLayout` for the recording. `async` + `spawn_blocking` for the same reason as `camera_track` above.
 
 ### Inputs (what, and why it is needed)
 
 - `folder: String` - absolute project path. *Why:* identifies the recording.
-- `session: State<PreviewSession>` - the warm renderer cache. *Why:* the layout comes from the same scene the export uses; reusing the cache avoids a rebuild.
+- `app: tauri::AppHandle` - resolves the warm renderer cache (`PreviewSession`) inside the blocking closure. *Why:* the layout comes from the same scene the export uses; reusing the cache avoids a rebuild.
 
 ### Returns
 
@@ -80,15 +82,15 @@ One click ripple: output time `t` (ms) and `x`/`y` as 0..1 fractions of the scre
 
 ```rust
 #[tauri::command]
-pub fn click_track(folder: String, session: tauri::State<'_, PreviewSession>) -> Result<Vec<ClickSample>, String>
+pub async fn click_track(folder: String, app: tauri::AppHandle) -> Result<Vec<ClickSample>, String>
 ```
 
-Returns the click (mouse-down) track over the whole timeline, for click-ripple effects in the editor preview that match the export's click FX.
+Returns the click (mouse-down) track over the whole timeline, for click-ripple effects in the editor preview that match the export's click FX. `async` + `spawn_blocking` for the same reason as `camera_track` above.
 
 ### Inputs (what, and why it is needed)
 
 - `folder: String` - absolute project path. *Why:* identifies the recording.
-- `session: State<PreviewSession>` - the warm renderer cache. *Why:* clicks come from the renderer's owned event log; reusing the cache avoids reloading it.
+- `app: tauri::AppHandle` - resolves the warm renderer cache (`PreviewSession`) inside the blocking closure. *Why:* clicks come from the renderer's owned event log; reusing the cache avoids reloading it.
 
 ### Returns
 

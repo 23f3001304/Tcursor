@@ -5,14 +5,16 @@
 // keyed by (folder, edit.json mtime, aspect), so an edit (which rewrites edit.json)
 // transparently rebuilds it and the next preview reflects the change.
 use anyhow::{Context, Result};
-use std::path::PathBuf;
-use std::sync::Mutex;
-use std::time::SystemTime;
 use crate::export::pipeline::ffio::RawDecoder;
 use crate::export::render::{FrameRenderer, RenderMeta, OUT_FPS};
 use crate::export::settings::Resolution;
-use crate::export::types::{Aspect, Layout};
+use crate::export::types::Layout;
 use crate::session::paths::ProjectPaths;
+
+/// The warm renderer cache lives in `session.rs` (line budget); re-exported so every preview
+/// command keeps importing it from `crate::export::preview`.
+pub use session::PreviewSession;
+pub(crate) use session::with_warm;
 
 /// Long edge (px) of the preview compositing canvas - independent of the proxy-video transcode
 /// height (`ensure_proxy`'s `quality`, a separate concern). 1280 matches the old hardcoded 16:9
@@ -75,54 +77,6 @@ pub fn render_preview(paths: &ProjectPaths, time_ms: u32) -> Result<Vec<u8>> {
     render_frame(&mut renderer, &meta, paths, time_ms)
 }
 
-/// A warm preview renderer cached for one recording + edit revision.
-pub(crate) struct Cached { pub folder: String, pub mtime: Option<SystemTime>, pub aspect: Aspect, pub renderer: FrameRenderer, pub meta: RenderMeta }
-
-/// Managed Tauri state: the most-recently-used warm preview renderer (one at a time).
-#[derive(Default)]
-pub struct PreviewSession(Mutex<Option<Cached>>);
-
-impl PreviewSession {
-    /// Whether the CURRENTLY-CACHED preview renderer's project has a recorded webcam - used by
-    /// `preview_fx_overlay` to gate the spotlight's camera-exclusion hole the same way the export
-    /// gates it (`has_webcam` in `fx_state.rs`/`render/mod.rs`). Reads whichever renderer is warm
-    /// right now regardless of folder, same as every other preview command implicitly relies on:
-    /// the editor keeps at most one project's renderer warm via `with_warm`, refreshed by
-    /// `camera_track`/`preview_layout`/etc. on essentially every render, so by the time an FX
-    /// overlay is requested the warm renderer already belongs to the open project. `false` (no
-    /// hole) before anything has warmed the cache yet - fails safe, never an un-dimmed rectangle.
-    pub fn has_webcam(&self) -> bool {
-        self.0.lock().unwrap().as_ref().is_some_and(|c| c.renderer.has_webcam())
-    }
-}
-
-/// Run `f` with the warm renderer for `folder`, (re)building it when the folder or the doc's
-/// aspect changes - both resize the frame, so the cached GPU compositor/background/FX (sized for
-/// the OLD dims) cannot just refresh. A same-aspect `edit.json` change instead calls the cheap
-/// `FrameRenderer::reload_edit`. The single place the preview cache is keyed - shared by every
-/// preview command (frame, camera track, layout, clicks, background) so the warm-up logic lives once.
-pub(crate) fn with_warm<T>(session: &PreviewSession, folder: &str,
-    f: impl FnOnce(&mut Cached, &ProjectPaths) -> Result<T, String>) -> Result<T, String> {
-    let paths = ProjectPaths { folder: PathBuf::from(folder) };
-    let mtime = std::fs::metadata(paths.edit()).and_then(|m| m.modified()).ok();
-    let mut guard = session.0.lock().unwrap();
-    let fresh = matches!(guard.as_ref(), Some(c) if c.folder == folder && c.mtime == mtime);
-    if !fresh {
-        let same_folder = matches!(guard.as_ref(), Some(c) if c.folder == folder);
-        let aspect = crate::edit::seed::load_or_seed(&paths).aspect;
-        let same_aspect = same_folder && matches!(guard.as_ref(), Some(c) if c.aspect == aspect);
-        if same_aspect {
-            let c = guard.as_mut().unwrap();
-            c.renderer.reload_edit(&paths);
-            c.mtime = mtime;
-        } else {
-            let (renderer, meta) = build_renderer(&paths).map_err(|e| e.to_string())?;
-            *guard = Some(Cached { folder: folder.to_string(), mtime, aspect, renderer, meta });
-        }
-    }
-    f(guard.as_mut().unwrap(), &paths)
-}
-
 /// PNG-encode a BGRA buffer in-memory.
 pub(crate) fn png_encode(bgra: &[u8], w: u32, h: u32) -> Result<Vec<u8>> {
     let mut out = Vec::new();
@@ -167,16 +121,23 @@ pub async fn preview_frame(folder: String, time_ms: u32, app: tauri::AppHandle) 
 /// editor's canvas preview paints the exact same background the export uses instead of an
 /// approximate gradient. Reuses the warm renderer cache.
 ///
-/// Stays sync (verified, Task 41 sweep correction - see `mod.md`): on a warm cache, this command's
-/// own chain is a plain field read (`accessors::bg`) + in-memory PNG encode, no subprocess. The
-/// cold-build path can still shell out via `FrameRenderer::new`, but that's shared by every
-/// `PreviewSession` command and is a broader seam this fix doesn't attempt to close.
+/// `async` + `spawn_blocking`, same pattern (and same `AppHandle`-instead-of-`State` reason) as
+/// `preview_frame` above: an earlier sweep left this sync on the grounds that a WARM call is only
+/// a field read + PNG encode, but the COLD path runs `FrameRenderer::new` (ffprobe/ffmpeg
+/// subprocesses + wgpu init) and the full-size PNG encode itself is a multi-MB swizzle + deflate
+/// that every background-settings pointermove re-runs.
 #[tauri::command]
-pub fn preview_bg(folder: String, session: tauri::State<'_, PreviewSession>) -> Result<String, String> {
-    let png = with_warm(&session, &folder, |c, _paths| {
-        png_encode(c.renderer.bg(), c.meta.out_w, c.meta.out_h).map_err(|e| e.to_string())
-    })?;
-    Ok(format!("data:image/png;base64,{}", base64_encode(&png)))
+pub async fn preview_bg(folder: String, app: tauri::AppHandle) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri::Manager;
+        let session = app.state::<PreviewSession>();
+        let png = with_warm(&session, &folder, |c, _paths| {
+            png_encode(c.renderer.bg(), c.meta.out_w, c.meta.out_h).map_err(|e| e.to_string())
+        })?;
+        Ok(format!("data:image/png;base64,{}", base64_encode(&png)))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Base64-encode bytes (RFC 4648, no padding line-breaks).
@@ -196,4 +157,4 @@ pub(crate) fn base64_encode(input: &[u8]) -> String {
     out
 }
 
-pub mod preprocess; pub mod preview_fx; pub mod preview_layouts; pub mod preview_track; pub mod thumbs;
+pub mod preprocess; pub mod preview_fx; pub mod preview_layouts; pub mod preview_track; pub mod session; pub mod thumbs;

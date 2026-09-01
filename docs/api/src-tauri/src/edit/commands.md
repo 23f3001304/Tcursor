@@ -6,10 +6,12 @@ Tauri IPC command handlers that bridge the frontend editor to the `edit` layer. 
 
 ```rust
 #[tauri::command]
-pub fn get_edit(folder: String) -> Result<EditDoc, String>
+pub async fn get_edit(folder: String) -> Result<EditDoc, String>
 ```
 
 Loads (or seeds) the `EditDoc` for a project folder and returns it to the frontend.
+
+**Off the main thread (sweep-2 Task 1).** `async fn` + `spawn_blocking`. On a project that already has `edit.json` this is a small JSON read, but on one that was never preprocessed - a legacy recording, or one whose `preprocess::run` pass failed - `load_or_seed` falls into `seed::build_default`, which gzip-decodes the entire mouse-event log, runs `autozoom::generate` over every sample, and calls `build_timeline`, which spawns two `ffprobe` subprocesses whenever `sync.json` is missing (exactly the legacy case). `useEditorData` calls this on mount as the editor's very first IPC, so as a sync command that seed froze the window on the project-open path - a first-impression surface. `apply_edit_op` and `save_edit` are the same class but far cheaper on the steady state and are left sync for now.
 
 ### Inputs
 
@@ -21,9 +23,11 @@ Loads (or seeds) the `EditDoc` for a project folder and returns it to the fronte
 
 ### Implementation
 
+Inside `tauri::async_runtime::spawn_blocking`:
+
 1. Construct `ProjectPaths` from `folder`.
 2. Delegate to `edit::seed::load_or_seed`, which returns an existing `edit.json` or builds and writes a default one from the recording.
-3. Return the doc.
+3. Return the doc. A `spawn_blocking` join failure maps to `Err(String)`.
 
 ## apply_edit_op
 

@@ -1,36 +1,88 @@
 :root {
   --bg: #fafafa; --fg: #18181b; --muted: #71717a; --line: rgba(0, 0, 0, 0.08);
   --surface: #ffffff; --hover: #f4f4f5; --accent: #ef4444; --switch-off: #d4d4d8;
+
+  /* === Elevation system (design/premium-pass Task D5) =======================================
+     Mirrors editor.css's three-plane system (Task D1: --e-bg < --e-surface < --e-raised) into
+     the HUD's own light/dark split. Dark values are D1's exact numbers; light values reuse this
+     app's EXISTING light palette (just under elevation-system names) rather than inventing new
+     hues, picked so "higher plane = brighter" holds in both themes: --hover (the greyest
+     existing token) becomes the recessed --e-bg, today's --bg becomes the mid --e-surface (the
+     bar's own material), and today's --surface (white) becomes the popped-up --e-raised
+     (menus/pills/segmented groups). --e-fg/--e-dim are aliases onto --fg/--muted, not new
+     colors, so components can spell D1's token names where its table calls for them. */
+  --e-bg: #f4f4f5; --e-surface: #fafafa; --e-raised: #ffffff;
+  --e-line: rgba(0, 0, 0, 0.08); --e-line-strong: rgba(0, 0, 0, 0.16);
+  /* Sparing full-bleed 1px divider (flat sections only, one per panel max) - quieter than
+     --e-line so it never reads as "a border someone forgot to delete" (D1 doctrine). */
+  --e-divider: rgba(0, 0, 0, 0.05);
+  --e-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.06), 0 4px 16px rgba(0, 0, 0, 0.08);
+  --e-shadow-2: 0 2px 6px rgba(0, 0, 0, 0.10), 0 12px 40px rgba(0, 0, 0, 0.14);
+  --e-inset-hi: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  --e-fg: var(--fg); --e-dim: var(--muted);
+
+  /* Type scale + spacing grid (D1) - theme-independent (no color), defined once. */
+  --e-text-title-size: 14px;  --e-text-title-weight: 600;
+  --e-text-body-size: 12.5px; --e-text-body-weight: 450;
+  --e-text-label-size: 10.5px; --e-text-label-weight: 600; --e-text-label-ls: .08em;
+  --e-text-value-size: 12.5px; --e-text-value-weight: 560;
+  --e-text-hint-size: 12px;   --e-text-hint-weight: 400;  --e-text-hint-lh: 1.45;
+  --e-sp-1: 8px; --e-sp-2: 12px; --e-sp-3: 16px; --e-sp-4: 20px;
 }
 :root[data-theme="dark"] {
   --bg: #1c1c1e; --fg: #f5f5f7; --muted: #8e8e93; --line: rgba(255, 255, 255, 0.10);
   --surface: #3a3a3c; --hover: #2c2c2e; --switch-off: #48484a;
+
+  /* Same plane structure, D1's exact dark values. */
+  --e-bg: #0d0d0f; --e-surface: #141416; --e-raised: #1c1c1f;
+  --e-line: rgba(255, 255, 255, 0.07); --e-line-strong: rgba(255, 255, 255, 0.14);
+  --e-divider: rgba(255, 255, 255, 0.05);
+  --e-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.24);
+  --e-shadow-2: 0 2px 6px rgba(0, 0, 0, 0.5), 0 12px 40px rgba(0, 0, 0, 0.38);
+  --e-inset-hi: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
-html, body, #root { height: 100%; }
+html, body, #root { height: 100%; width: 100%; }
 body { display: flex; align-items: flex-start; justify-content: center; overflow: hidden; padding-top: 16px; }
 
 .hud {
+  /* Bar state fills the window's actual inner width (#root is width:100% above) instead of
+     hugging the row's fixed-px content - the window's LogicalSize is the single source of truth
+     for how wide the bar *should* be (see useHudWindowSize), and content that free-floated to its
+     own intrinsic width would silently rely on the two staying in sync. When they don't (a DPI
+     change mid-session leaves the window's physical size stuck at a stale scale factor - see
+     useHudWindowSize's onScaleChanged handler), width:100% clips gracefully at the real window
+     edge instead of rendering past it. `.hud.as-box` (settings.css) overrides this with its own
+     fixed 360px - two classes beats one, so that box state is unaffected. */
+  width: 100%; box-sizing: border-box; min-width: 0;
   position: relative; display: flex; flex-direction: column;
-  background: var(--bg); border: 1px solid var(--line); border-radius: 12px;
+  background: var(--e-surface); border: 1px solid var(--e-line); border-radius: 14px;
   color: var(--fg); -webkit-user-select: none;
   font-family: "Inter Variable", -apple-system, "Segoe UI", system-ui, sans-serif;
   letter-spacing: -0.011em;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 12px 28px rgba(0, 0, 0, 0.16);
+  box-shadow: var(--e-inset-hi), var(--e-shadow-2);
   animation: hud-in 0.36s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 @keyframes hud-in { from { opacity: 0; transform: translateY(8px) scale(0.99); } to { opacity: 1; transform: none; } }
 
+/* min-width:0 unblocks the shrink chain onto .banner below - same reasoning as .row (D5 clipping
+   hardening, review round 1 item 4): without it the titlebar's default min-width:auto would force
+   it (and .hud, and the window) wider than the warning banner's own content instead of eliding it. */
 .titlebar {
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between; min-width: 0;
   height: 28px; padding: 0 7px 0 13px; border-bottom: 1px solid var(--line);
 }
-.brand { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 11px; font-weight: 600; }
+.brand { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 11px; font-weight: 600; flex: none; }
 .brand-mark {
   display: flex; align-items: center; justify-content: center; flex: none; box-sizing: border-box;
   width: 14px; height: 14px; border-radius: 4px; background: var(--hover); border: 1px solid var(--line); color: var(--fg);
 }
-.winctrls { display: flex; gap: 2px; }
+/* The one flexible member of the titlebar (review round 1 item 4): an OS-originated warning
+   string is unbounded length, so it - not .brand or .winctrls, both rigid - ellipsizes under
+   pressure. The full text still reaches the user via the `title` attribute (Hud.tsx). */
+.banner { color: #ff6b6b; font-size: 11px; margin-left: 10px; flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.winctrls { display: flex; gap: 2px; flex: none; }
 .winbtn {
   width: 24px; height: 24px; border: none; background: transparent; color: var(--muted);
   border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer;
@@ -38,8 +90,12 @@ body { display: flex; align-items: flex-start; justify-content: center; overflow
 }
 .winbtn:hover { background: var(--hover); color: var(--fg); }
 .winbtn.close:hover { background: var(--accent); color: #fff; }
+.winbtn:disabled { opacity: 0.4; cursor: default; pointer-events: none; }
 
-.row { display: flex; align-items: center; gap: 6px; padding: 12px; }
+/* min-width:0 unblocks the shrink chain below it (.pickers -> .dd -> .dd-trigger -> .dd-label) -
+   without it, the row's default min-width:auto would force it (and .hud, and the window) wider
+   than the available space instead of letting the labels ellipsize (D5 clipping hardening). */
+.row { display: flex; align-items: center; gap: 6px; padding: 12px; min-width: 0; }
 
 .grip {
   display: flex; align-items: center; justify-content: center; width: 22px; height: 40px;
@@ -51,31 +107,50 @@ body { display: flex; align-items: flex-start; justify-content: center; overflow
 /* let clicks on the icon/title fall through to the drag region */
 .grip svg, .brand { pointer-events: none; }
 
+/* The three device pickers (camera/screen/mic) as one group, separated from each other and from
+   their neighbors by SPACING alone (D5 border doctrine - the pipe divider this replaced is
+   gone). flex:1 1 auto + min-width:0 makes this the row's primary shrink target: under scale
+   error the labels inside ellipsize before anything else in the bar gives (clipping hardening -
+   the rigid grip/camtoggle/toggle-group/timer/buttons all opt out via flex:none). */
+.pickers { display: flex; align-items: center; gap: var(--e-sp-2); min-width: 0; flex: 1 1 auto; }
+
 /* custom dropdown */
-.dd { position: relative; }
+.dd { position: relative; min-width: 0; }
 .dd-trigger {
   display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 8px 0 11px; border-radius: 8px;
   border: 1px solid transparent; background: transparent; color: var(--fg); font: inherit; cursor: pointer;
-  transition: background 0.14s ease, border-color 0.14s ease;
+  min-width: 0; max-width: 100%; transition: background 0.14s ease, border-color 0.14s ease;
 }
-.dd-trigger:hover, .dd.open .dd-trigger { background: var(--hover); }
-.dd.open .dd-trigger { border-color: var(--line); }
-.dd-trigger .ico { color: var(--muted); flex: none; display: flex; }
-.dd-label { font-weight: 550; font-size: 13px; max-width: 132px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dd-trigger .chev { color: var(--muted); flex: none; display: flex; transition: transform 0.18s ease; }
+/* Quiet ghost style: no fill/border at rest, raised material only on hover/open. */
+.dd-trigger:hover, .dd.open .dd-trigger { background: var(--e-raised); border-color: var(--e-line); }
+.dd-trigger .ico { color: var(--e-dim); flex: none; display: flex; }
+.dd-label {
+  color: var(--e-fg); font-size: var(--e-text-body-size); font-weight: 500; min-width: 0;
+  max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.dd-trigger .chev { color: var(--e-dim); flex: none; display: flex; transition: transform 0.18s ease; }
 .dd.open .dd-trigger .chev { transform: rotate(180deg); }
 
+/* The mount-in is Motion now (design/premium-pass D6, Dropdown.tsx/TargetPicker.tsx's MENU_MOTION)
+   - the old `animation: menu-in` keyframe did the identical thing on open; closing is still a hard
+   cut either way (no AnimatePresence here - see MENU_MOTION's own comment for why: it would race
+   `useHudWindowSize` shrinking the actual OS window the instant the menu closes). */
 .dd-menu {
   position: absolute; top: calc(100% + 6px); left: 0; min-width: 230px; z-index: 20;
-  background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 5px;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.07), 0 16px 32px rgba(0, 0, 0, 0.18);
-  max-height: 256px; overflow-y: auto; animation: menu-in 0.14s ease both;
+  background: var(--e-raised); border: 1px solid var(--e-line); border-radius: 10px; padding: 6px;
+  box-shadow: var(--e-shadow-2);
+  max-height: 256px; overflow-y: auto;
 }
-@keyframes menu-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+/* Thin inset-pill scrollbar (WebView2 is Chromium) - same visual language as the settings box's
+   own scrollbar (settings.css), sized for the menu's own --e-raised background. */
+.dd-menu::-webkit-scrollbar { width: 10px; }
+.dd-menu::-webkit-scrollbar-track { background: transparent; }
+.dd-menu::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 999px; border: 3px solid var(--e-raised); background-clip: padding-box; min-height: 32px; }
+.dd-menu:hover::-webkit-scrollbar-thumb { background: var(--fg); background-clip: padding-box; }
 .dd-item {
   display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%;
-  padding: 8px 10px; border: none; border-radius: 6px; background: transparent; color: var(--fg);
-  font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; text-align: left;
+  padding: 8px 10px; border: none; border-radius: 8px; background: transparent; color: var(--fg);
+  font: inherit; font-size: var(--e-text-body-size); font-weight: 500; cursor: pointer; text-align: left;
 }
 .dd-item:hover { background: var(--hover); }
 .dd-item.sel { font-weight: 600; }
@@ -93,49 +168,98 @@ body { display: flex; align-items: flex-start; justify-content: center; overflow
   color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 1px 6px; line-height: 1.5;
 }
 .tp-divider {
-  padding: 7px 10px 4px; margin-top: 4px; border-top: 1px solid var(--line);
+  padding: 7px 10px 4px; margin-top: 4px; border-top: 1px solid var(--e-divider);
   font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em;
 }
 
 /* camera preview tile (the on/off toggle is the camera icon in the controls row) */
 .camtoggle {
-  position: relative; width: 40px; height: 40px; border-radius: 8px; border: 1px solid var(--line);
+  position: relative; width: 52px; height: 52px; border-radius: 10px; border: 1px solid var(--line);
   background: #0b0b0d; overflow: hidden; padding: 0; flex: none;
 }
 .cam { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); display: block; }
 .cam.off { display: none; }
 .camoff { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--surface); color: var(--muted); }
 
-.divider { width: 1px; height: 22px; background: var(--line); margin: 0 3px; flex: none; }
 .spacer { flex: 1; min-width: 8px; }
 
-.recmeter { display: flex; align-items: center; gap: 8px; padding: 0 6px; }
-.recmeter .ico { color: var(--muted); display: flex; }
-.wave { display: flex; align-items: flex-end; gap: 2px; height: 22px; width: 80px; }
-.wave span { flex: 1; min-height: 3px; border-radius: 2px; background: var(--muted); transition: height 0.09s ease-out; }
+.recmeter { display: flex; align-items: center; gap: 8px; padding: 0 6px; flex: none; }
+.recmeter .ico { color: var(--e-dim); display: flex; }
+.recmeter.muted { opacity: 0.65; }
+/* Same chip material as .paused-chip, not bare text - the recording bar's four indicators
+   (timer/meter/Paused/Muted) read as one family. */
+.recmeter .muted-label {
+  display: inline-flex; align-items: center; font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.04em; color: var(--e-dim);
+  border: 1px solid var(--e-line); border-radius: 999px; padding: 2px 7px;
+}
+/* Compact level meter (gate-feedback item 2, user-reported 2026-09-02): 13 bars at a FIXED 3px
+   wide + 2px gap (13*3 + 12*2 = 63px, "no flex-grow spacer behavior" - the old `flex:1` bars
+   stretched to fill `.wave`'s width, thinning out into what read as a row of dots rather than a
+   meter) inside a matching fixed-width container - `align-items: flex-end` (baseline-anchored,
+   same as `align-items: end`) was already correct, unchanged. `useMicWaveform.ts`'s `BARS`
+   constant is 13 to match (13 levels rendered, one per bar) - see `useHudWindowSize.ts`'s
+   `RECMETER_W` for the resulting window-width math. */
+.wave { display: flex; align-items: flex-end; gap: 2px; height: 22px; width: 63px; }
+/* Accent at roughly -20% saturation (mixed 20% toward the neutral --e-dim grey) instead of the
+   plain --muted grey the bars used before - ties the live meter to the app's one accent without
+   the bars reading as loud/alert as a full-strength accent fill would. min-height 2px (down from
+   3, item 2) floors even a silent bar above zero - RecMeter.tsx's own base (`2 + level*18`)
+   matches it exactly rather than relying on the CSS floor alone. */
+.wave span { flex: none; width: 3px; min-height: 2px; border-radius: 2px; background: color-mix(in srgb, var(--accent) 80%, var(--e-dim) 20%); transition: height 0.09s ease-out; }
+/* mic toggled on but the stream isn't confirmed live yet (permission pending/denied, no device) -
+   dimmer bars so a stalled meter never reads as "capturing" (state honesty, task-6 (i)). */
+.wave.idle span { background: var(--e-line); }
 
-.timer { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 14px; padding: 0 8px; min-width: 50px; text-align: center; }
+.timer { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 14px; padding: 0 8px; min-width: 50px;
+  text-align: center; flex: none; transition: color 0.15s ease, opacity 0.15s ease; }
+.timer.paused { color: var(--e-dim); opacity: 0.7; }
+.paused-chip {
+  display: inline-flex; align-items: center; font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.04em; color: var(--e-dim); flex: none;
+  border: 1px solid var(--e-line); border-radius: 999px; padding: 2px 7px; margin-right: 2px;
+}
 .exporting { font-family: "SF Mono", ui-monospace, monospace; font-size: 12px; color: var(--muted); padding: 0 8px; }
 
+/* Same raised material as .btn.rec (review round 1 item 2 - Pause/Resume was left on the legacy
+   --surface, which in dark mode is noticeably LIGHTER than both the bar and the new --e-raised
+   tier, so it glowed next to the hero Record button on every recording). */
 .btn {
-  height: 40px; padding: 0 16px; border-radius: 8px; border: 1px solid var(--line); cursor: pointer; flex: none;
-  background: var(--surface); color: var(--fg); font: inherit; font-weight: 600; font-size: 13px;
+  height: 40px; padding: 0 16px; border-radius: 8px; border: 1px solid var(--e-line); cursor: pointer; flex: none;
+  background: var(--e-raised); color: var(--fg); font: inherit; font-weight: 600; font-size: 13px;
   display: flex; align-items: center; justify-content: center; gap: 7px;
-  transition: background 0.14s ease, transform 0.1s ease;
+  box-shadow: var(--e-inset-hi);
+  transition: background 0.14s ease, border-color 0.14s ease, transform 0.1s ease;
 }
-.btn:hover { background: var(--hover); }
-.btn:active { transform: scale(0.97); }
-.btn.rec { background: var(--accent); border-color: transparent; color: #fff; padding: 0 18px; }
+.btn:hover { background: var(--hover); border-color: var(--e-line-strong); }
+/* .rec's own press feedback is a Motion spring (Hud.tsx whileTap), not this CSS scale - excluded
+   here so the two don't fight over the same `transform`. */
+.btn:not(.rec):active { transform: scale(0.97); }
+.btn.rec {
+  height: 34px; padding: 0 18px; border-radius: 10px; background: var(--accent); border-color: transparent;
+  color: #fff; box-shadow: var(--e-inset-hi); transition: background 0.14s ease, filter 0.14s ease;
+}
 .btn.rec:hover { filter: brightness(0.92); }
 .btn.rec .dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; }
 .btn.rec.is-rec { background: var(--fg); color: var(--bg); }
 .btn.rec.is-rec .dot { border-radius: 2px; background: var(--accent); animation: blink 1.3s ease-in-out infinite; }
 @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
-.toggle {
-  width: 32px; height: 32px; border-radius: 6px; border: 1px solid var(--line); cursor: pointer;
-  background: transparent; color: var(--muted); display: flex; align-items: center; justify-content: center;
-  font-size: 15px; flex: none; transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+/* Segmented raised group (cam/mic/sys/game): one container carries the material (border-doctrine:
+   the GROUP gets the border/shadow, not each button) with 1px internal separators, replacing the
+   four floating .toggle squares this used to be. Rigid (flex:none) - never the row's shrink
+   target, see .pickers/.dd-label for what actually gives under scale-error pressure. */
+.toggle-group {
+  display: flex; align-items: stretch; border-radius: 10px; background: var(--e-raised);
+  border: 1px solid var(--e-line); box-shadow: var(--e-inset-hi); overflow: hidden; flex: none;
 }
+.toggle {
+  width: 32px; height: 32px; border: none; border-left: 1px solid var(--e-line); cursor: pointer;
+  background: transparent; color: var(--e-dim); display: flex; align-items: center; justify-content: center;
+  font-size: 15px; flex: none; transition: background 0.12s ease, color 0.12s ease;
+}
+.toggle:first-child { border-left: none; }
 .toggle:hover { background: var(--hover); color: var(--fg); }
-.toggle.on { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+/* ON = a subtle accent-tinted fill (not the old solid --fg/--bg swap) + accent icon; OFF stays a
+   plain --e-dim icon on the group's own raised fill. */
+.toggle.on { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }

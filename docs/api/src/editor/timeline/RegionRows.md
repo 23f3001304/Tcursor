@@ -13,7 +13,7 @@ The minimal shape `RegionRows` needs from a region - satisfied by the `layoutReg
 ## RegionRows
 
 ```tsx
-export function RegionRows<T extends Region>({ rows, regions, dur, sel, rowClass, blkClass, dragState, beginDrag, renderLabel, extraStyle }: {
+function RegionRowsInner<T extends Region>({ rows, regions, dur, sel, rowClass, blkClass, dragState, beginDrag, renderLabel, extraStyle }: {
   rows: number; regions: T[]; dur: number; sel: string | null;
   rowClass: string; blkClass: string;
   dragState: Drag | null;
@@ -21,7 +21,11 @@ export function RegionRows<T extends Region>({ rows, regions, dur, sel, rowClass
   renderLabel: (r: T) => React.ReactNode;
   extraStyle?: (r: T, s: number, e: number) => React.CSSProperties;
 }): JSX.Element
+
+export const RegionRows = memo(RegionRowsInner) as typeof RegionRowsInner;
 ```
+
+`React.memo`'d (cast back to `RegionRowsInner`'s own generic signature, since `memo` doesn't preserve a generic function's type parameters on its own) - only re-renders when its own props change. This only actually SKIPS work when the caller's props are themselves stable: `Timeline.tsx` passes `useMemo`'d `regions` (keyed on the underlying `doc.*` array), `dragState`/`beginDrag` from `useRegionDrag` (which only changes across a real drag start/end, not per pointermove), and module-level (not inline-per-render) `renderLabel`/`extraStyle` functions.
 
 ### Props
 
@@ -36,7 +40,9 @@ export function RegionRows<T extends Region>({ rows, regions, dur, sel, rowClass
 
 ### Behavior
 
-For each layer `0..rows-1` (rendered top-to-bottom as `rows-1..0`, matching the original per-lane loops so higher layers still paint above lower ones), renders one `<div className={rowClass}>` containing every region assigned that layer. Each pill is a `motion.div` with `data-region-id={r.id}` (harmless on layout pills - nothing currently queries it there, only zoom/FX ids are looked up by `src/editor/director/targets.ts`), positioned `left: (s/dur)*100%`, `width: max(2.5%, ((e-s)/dur)*100%)`, fading/scaling in on mount and hover (`whileHover: scale 1.02`), with `y` following `dragState.dyPx` at zero-duration while dragging (instant, no spring lag) so the pill visually tracks the pointer without remounting into a different row's DOM mid-drag - it only actually reflows into its new row once the drag ends and `regions` re-renders with the committed layer. Body `pointerDown` starts a `"move"` drag; the two `.e-zh` side handles start `"l"`/`"r"` resizes.
+For each layer `0..rows-1` (rendered top-to-bottom as `rows-1..0`, matching the original per-lane loops so higher layers still paint above lower ones), renders one `<div className={rowClass}>` containing every region assigned that layer. Each pill is a `motion.div` with `data-region-id={r.id}` (harmless on layout pills - nothing currently queries it there, only zoom/FX ids are looked up by `src/editor/director/targets.ts`), positioned `left: pillLeftPct(s, dur)%`, `width: pillWidthPct(s, e, dur, leftPct)%` (`./pillGeometry.ts` - Task 11, ux audit #26, extended gate-feedback item 1 (2026-09-02): both insets exist so a pill whose `start_ms`/`end_ms` lands exactly on the clip's own 0/duration never paints flush against `TrimOverlay`'s in/out handle, see `pillGeometry.md`), fading/scaling in on mount and hover (`whileHover: scale 1.02`), with `y` following `dragState.dyPx` at zero-duration while dragging (instant, no spring lag) so the pill visually tracks the pointer without remounting into a different row's DOM mid-drag - it only actually reflows into its new row once the drag ends and `regions` re-renders with the committed layer. Body `pointerDown` starts a `"move"` drag; the two `.e-zh` side handles (11px, inward-facing - the pill's own first/last flex children) start `"l"`/`"r"` resizes.
+
+The z-index priority a pill's resize handles need over `TrimOverlay`'s `.e-trimhandle` (z-index 6, editor.css - the thing an edge-touching pill can otherwise coincide with at that same x position when the clip is untrimmed) lives entirely in `editor.css` now, NOT here (fix round 1, controller ruling 2026-09-02): `.e-zblk:hover`/`.sel`/`.drag` (and the `.e-fxblk`/`.e-layblk` equivalents) get `z-index: 7` - gated on interactive relevance (hover/selected/dragging), not on whether the pill's raw span touches the clip's edge. The original static "any edge-touching pill, always" version (an inline `zIndex` computed here) painted a pill over `.e-trimdim`'s dimming stripe (z-index 3) whenever that same edge was ALSO independently trimmed - a state-honesty regression. At rest every pill now stays at the CSS-default z-index (stack level 0, below `.e-trimdim`), same as before item 1 existed at all.
 
 ### Used by
 

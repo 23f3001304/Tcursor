@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ComponentType } from "react";
-import { motion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import { IconSparkles, IconZoomIn, IconVideo, IconCut } from "@tabler/icons-react";
 import { PanelHeader } from "./PanelHeader";
 import { Spin } from "../controls/Spin";
@@ -7,6 +7,11 @@ import { Picker } from "../controls/Controls";
 import { Shimmer } from "../timeline/Shimmer";
 import { listOllamaModels } from "../../lib/ipc";
 import { friendlyAiError } from "../director/friendlyAiError";
+import { engineDisplayName } from "../director/engineName";
+
+// design/premium-pass D6: the progress bar and error row below both pop as the director runs -
+// a cheap opacity/y-4 tween, consistent with the existing dialog enters.
+const HINT_MOTION = { initial: { opacity: 0, y: -4 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -4 }, transition: { duration: 0.14 } };
 
 const SUMMARY: [ComponentType<{ size?: number }>, string][] = [
   [IconZoomIn, "Places zooms on your clicks"],
@@ -17,9 +22,11 @@ const SUMMARY: [ComponentType<{ size?: number }>, string][] = [
 /** The AI Director rail panel: a real Engine picker (installed Ollama models), the auto-edit
  *  run button, and what it does. */
 export function AiPanel({
-  running, error, log, onRun, model, onChangeModel, onAutoModel, progress, onClose,
+  running, exporting, error, log, onRun, model, onChangeModel, onAutoModel, progress, onClose,
 }: {
-  running: boolean; error: string | null; log: string[]; onRun: () => void; model: string; onChangeModel: (v: string) => void;
+  running: boolean;
+  exporting: boolean; // locks the run button too - see Editor.tsx's `onRun`/Transport's wand (L3)
+  error: string | null; log: string[]; onRun: () => void; model: string; onChangeModel: (v: string) => void;
   onAutoModel: (v: string) => void;
   progress: { step: number; total: number } | null; // live "k of N" while the director is running
   // AiPanel IS the "ai" tab (the router's home/fallback) - there's nowhere else for it to close
@@ -48,8 +55,17 @@ export function AiPanel({
   }, [models, model, onAutoModel]);
 
   const current = models?.includes(model) ? model : (models?.[0] ?? model);
-  const options = (models ?? []).map((m) => ({ value: m, label: m }));
+  // Raw Ollama ids can be very long, especially HF GGUF proxies (ux audit #16: wraps over two
+  // lines in this dropdown) - `label` is the short derived name, `title` keeps the full id on
+  // hover so it's never actually hidden, just not the headline.
+  const options = (models ?? []).map((m) => ({ value: m, label: engineDisplayName(m), title: m }));
   const errInfo = error ? friendlyAiError(error) : null;
+  // `models !== null` guards this to ONLY the resolved-and-empty state (not "still loading",
+  // which is already communicated by the Shimmer) - gate finding: the disabled run button gave
+  // no reason why, so a user with no models pulled had nothing to go on but a dead button.
+  const noModelsTitle = models !== null && models.length === 0
+    ? "No local Ollama models found - install one (`ollama pull <model>`), then Retry above."
+    : undefined;
 
   return (
     <div className="e-panel e-insp">
@@ -59,29 +75,36 @@ export function AiPanel({
         {models === null ? (
           <Shimmer className="e-picker-shell" />
         ) : models.length === 0 ? (
-          <p className="e-errline" role="alert">
-            Ollama isn't running or has no models — start Ollama, then
+          <div className="e-picker-shell e-picker-empty" role="status" title={noModelsTitle}>
+            <span>No local models found</span>
             <button type="button" onClick={loadModels}>Retry</button>
-          </p>
+          </div>
         ) : (
           <Picker value={current} options={options} onChange={onChangeModel} ariaLabel="Engine" />
         )}
       </div>
-      <button className="e-run" onClick={onRun} disabled={running || !models?.length} style={{ marginTop: 16 }} data-director-anchor="wand">
+      <button className="e-run" onClick={onRun} disabled={running || exporting || !models?.length}
+        title={noModelsTitle} style={{ marginTop: 16 }} data-director-anchor="wand">
         {running
           ? <><Spin size={16} />Directing{progress ? `… ${progress.step} of ${progress.total}` : "…"}</>
           : <><IconSparkles size={16} />Auto-edit</>}
       </button>
-      {running && progress && (
-        <div className="e-ai-progress">
-          <motion.div className="e-ai-progress-fill" initial={false}
-            animate={{ width: `${(progress.step / progress.total) * 100}%` }}
-            transition={{ type: "tween", duration: 0.2, ease: [0.4, 0, 0.2, 1] }} />
-        </div>
-      )}
-      {errInfo && (
-        <p className="e-ai-err" role="alert">{errInfo.title}{errInfo.hint && <span className="hint">{errInfo.hint}</span>}</p>
-      )}
+      <AnimatePresence>
+        {running && progress && (
+          <motion.div className="e-ai-progress" {...HINT_MOTION}>
+            <motion.div className="e-ai-progress-fill" initial={false}
+              animate={{ width: `${(progress.step / progress.total) * 100}%` }}
+              transition={{ type: "tween", duration: 0.2, ease: [0.4, 0, 0.2, 1] }} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {errInfo && (
+          <motion.p className="e-ai-err" role="alert" {...HINT_MOTION}>
+            {errInfo.title}{errInfo.hint && <span className="hint">{errInfo.hint}</span>}
+          </motion.p>
+        )}
+      </AnimatePresence>
       {log.length > 0 ? (
         // Agentic reveal: each edit the director applies streams in here as a narration line.
         <div className="e-ai-log">

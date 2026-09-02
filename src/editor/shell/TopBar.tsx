@@ -44,7 +44,7 @@ export function TopBar({ proj, exporting, pct, onOpenExport, onOpenSettings, onC
       <button className="e-gst" title="Redo (Ctrl+Shift+Z)" onClick={onRedo} disabled={!canRedo}><IconArrowForwardUp size={18} /></button>
       <motion.button className="e-export" onClick={onOpenExport} disabled={exporting}
         whileHover={exporting ? undefined : { scale: 1.03 }} whileTap={exporting ? undefined : { scale: 0.97 }}
-        transition={{ type: "tween", duration: 0.12, ease: [0.4, 0, 0.2, 1] }}>
+        transition={{ type: "spring", stiffness: 500, damping: 30 }}>
         {exporting ? <><Spin size={15} />{pct}%</> : <><IconDownload size={15} />Export</>}
         {exporting && (
           <motion.div className="e-export-bar" animate={{ width: `${pct}%` }}

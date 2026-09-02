@@ -72,4 +72,6 @@ export function camZoomAlpha(action: CamZoomAction, scale: number, targetScale: 
 
 The ALPHA half: the factor to multiply the webcam's draw alpha by. `hide` fades to 0 as the zoom deepens (`1 - smoothstep(z)`, matching the Rust); every other action returns 1.
 
-*Why split from `applyCamZoomAction`:* `PreviewLayout.cam` carries no alpha channel, so the fade cannot be expressed in the tuple. Keeping it a separate pure function lets `hide` be fully tested now and leaves the draw-side plumbing as an isolated change.
+*Why split from `applyCamZoomAction`:* `PreviewLayout.cam` carries no alpha channel, so the fade cannot be expressed in the tuple. Keeping it a separate pure function let `hide` be fully unit-tested well before its actual caller landed.
+
+**Actually applied in `frameCamLayout` as of bug-sweep-2 Task 8 (H2).** Until then this function had zero production callers - `frameCam.ts` called only `applyCamZoomAction` (geometry), so "Webcam during zoom -> Hide" faded the PiP in the export but left it fully opaque in the preview (`camAlpha` never moved off its layout-transition value of 1). `frameCamLayout` now multiplies `base.camAlpha` by this function's result in the same branch that calls `applyCamZoomAction` - see `frameCam.md`.

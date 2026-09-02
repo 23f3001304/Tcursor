@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import type { EditDoc, EditOp } from "../lib/edit";
@@ -27,10 +28,17 @@ function assertNever(x: never): never {
 // The left-hand inspector/panel router: an inspector for the current selection, else the panel for
 // the active rail tab. Split out of Editor (which was over the line limit) - it owns only the
 // "which panel" switch; every edit still flows through the applyOp/saveDocSettings it is handed.
-export function EditorPanels({
-  doc, sel, tab, dur, setSel, setTab, timeMs, running, aiError, aiLog, aiProgress, onRun, onAutoModel, applyOp, saveDocSettings,
+//
+// `React.memo`'d (render hygiene pass) - only `CameraPanel` (tab === "camera") needs a LIVE
+// playhead, so `Editor.tsx` gates the `timeMs` prop to a constant `0` on every other tab/inspector
+// instead of the real ticking value, letting memo actually skip a re-render on a tick while some
+// other panel is showing. The "add layout segment at the playhead" button (`EffectsPanel`) still
+// needs the TRUE current time at click time regardless of which panel is showing - `timeMsRef`
+// (a ref, so it never defeats memo on its own) supplies that.
+export const EditorPanels = memo(function EditorPanels({
+  doc, sel, tab, dur, setSel, setTab, timeMs, timeMsRef, running, exporting, aiError, aiLog, aiProgress, onRun, onAutoModel, applyOp, saveDocSettings,
   moveMode, requestMoveMode, camDraftRef, addZoom, addSpotlight, addCameraMove, osCursorInVideo,
-  aimMode, onAimMode,
+  aimMode, onAimMode, onSeek,
 }: {
   doc: EditDoc;
   sel: string | null;
@@ -38,8 +46,15 @@ export function EditorPanels({
   dur: number;
   setSel: Dispatch<SetStateAction<string | null>>;
   setTab: Dispatch<SetStateAction<Tab>>;
+  /** `Editor.tsx` passes the real playhead only while `CameraPanel` is showing, else a constant
+   *  `0` - see the component doc comment above. */
   timeMs: number;
+  timeMsRef: RefObject<number>;
   running: boolean;
+  /** Locks the AI Director's run button too (`AiPanel`) - matches `Transport`'s wand and its own
+   *  play/trim/aspect `locked` gate (L3: mutating edit.json mid-export would silently diverge the
+   *  preview/doc from the file the exporter is rendering from its own snapshot). */
+  exporting: boolean;
   aiError: string | null;
   aiLog: string[];
   aiProgress: { step: number; total: number } | null;
@@ -56,6 +71,9 @@ export function EditorPanels({
   osCursorInVideo: boolean;
   aimMode: boolean;
   onAimMode: (on: boolean) => void;
+  /** Seeks the playhead through the same path Timeline/Transport use (Editor's `onSeek`) - passed
+   *  down so ZoomInspector can jump into a zoom's span when a scoped control changes outside it. */
+  onSeek: (ms: number) => void;
 }) {
   const selZoom = doc.zooms.find((z) => z.id === sel) ?? null;
   const selEffect = doc.effects.find((e) => e.id === sel) ?? null;
@@ -68,7 +86,7 @@ export function EditorPanels({
         transition={{ type: "tween", duration: 0.16, ease: [0.4, 0, 0.2, 1] }}>
         {selZoom ? (
           <ZoomInspector zoom={selZoom} dur={dur} onApply={applyOp} onClose={() => setSel(null)}
-            aimMode={aimMode} moveMode={moveMode} onAimMode={onAimMode} />
+            aimMode={aimMode} moveMode={moveMode} onAimMode={onAimMode} timeMsRef={timeMsRef} onSeek={onSeek} />
         ) : selEffect ? (
           <EffectInspector effect={selEffect} dur={dur} settings={doc.settings} onApply={applyOp}
             onDimCamera={(v) => saveDocSettings({ ...doc.settings, clickfx: { ...doc.settings.clickfx, spotlight_dim_camera: v } })}
@@ -78,7 +96,7 @@ export function EditorPanels({
         ) : selCamMove ? (
           <CameraMoveInspector move={selCamMove} dur={dur} onApply={applyOp} onClose={() => setSel(null)} />
         ) : tab === "ai" ? (
-          <AiPanel running={running} error={aiError} log={aiLog} progress={aiProgress} onRun={onRun} model={doc.settings.ai_model}
+          <AiPanel running={running} exporting={exporting} error={aiError} log={aiLog} progress={aiProgress} onRun={onRun} model={doc.settings.ai_model}
             onChangeModel={(v) => saveDocSettings({ ...doc.settings, ai_model: v })} onAutoModel={onAutoModel} onClose={() => setTab("ai")} />
         ) : tab === "background" ? (
           <BackgroundPanel doc={doc} onSaveSettings={saveDocSettings} onClose={() => setTab("ai")} />
@@ -95,11 +113,11 @@ export function EditorPanels({
             sysVol={doc.settings.audio_sys_volume} onChangeSysVol={(v) => saveDocSettings({ ...doc.settings, audio_sys_volume: v })}
             onClose={() => setTab("ai")} />
         ) : tab === "effects" ? (
-          <EffectsPanel settings={doc.settings.clickfx} onChange={(clickfx) => saveDocSettings({ ...doc.settings, clickfx })} onClose={() => setTab("ai")} onAddZoom={addZoom} onAddSpotlight={addSpotlight} onAddLayout={async () => { await applyOp({ op: "add_layout_seg", at_ms: Math.round(timeMs), dur_ms: 2000, layout: "camera" }); }} onAddCameraMove={addCameraMove} />
+          <EffectsPanel settings={doc.settings.clickfx} onChange={(clickfx) => saveDocSettings({ ...doc.settings, clickfx })} onClose={() => setTab("ai")} onAddZoom={addZoom} onAddSpotlight={addSpotlight} onAddLayout={async () => { await applyOp({ op: "add_layout_seg", at_ms: Math.round(timeMsRef.current), dur_ms: 2000, layout: "camera" }); }} onAddCameraMove={addCameraMove} />
         ) : (
           assertNever(tab)
         )}
       </motion.div>
     </AnimatePresence>
   );
-}
+});

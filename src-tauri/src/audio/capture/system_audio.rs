@@ -12,7 +12,9 @@ pub struct SystemAudioHandle {
 impl SystemAudioHandle {
     pub fn stop(self) -> std::io::Result<()> {
         drop(self.stream);
-        if let Some(w) = self.writer.lock().unwrap().take() { w.finalize()?; }
+        // Poison-tolerant for the same reason as `CpalMicHandle::stop`: a panic on this thread
+        // is swallowed by the discarded join, leaving system.wav unfinalized and unreadable.
+        if let Some(w) = self.writer.lock().unwrap_or_else(|e| e.into_inner()).take() { w.finalize()?; }
         Ok(())
     }
 }

@@ -43,8 +43,6 @@ export const setSettings = (settings: Settings) => invoke<void>("set_settings", 
 export const getEdit = (folder: string) => invoke<EditDoc>("get_edit", { folder });
 export const applyEditOp = (folder: string, op: EditOp) => invoke<EditDoc>("apply_edit_op", { folder, op });
 export const saveEdit = (folder: string, doc: EditDoc) => invoke<void>("save_edit", { folder, doc });
-export const aiAutoedit = (folder: string, model?: string) =>
-  invoke<EditDoc>("ai_autoedit", { folder, model });
 /** One labeled step of the AI director's plan. */
 export type AiStep = { op: EditOp; label: string };
 /** The AI director's plan as ordered, labeled steps (NOT applied) - the editor reveals them

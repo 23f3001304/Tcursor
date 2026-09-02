@@ -125,16 +125,30 @@ Resolve a pack id to one `(CursorType, PNG bytes, hotspot)` row per built-in kin
 
 ### Returns
 
-One row per entry in `cursorset::SPRITES`, in the same order. For `pack_id == "default"` (or `""`), every row is the built-in `(kind, png.to_vec(), hot)` verbatim. Otherwise, delegates to `sprite_sources_from_dir(&pack_dir(pack_id))`.
+One row per entry in `cursorset::SPRITES`, in the same order. For `pack_id == "default"` (or `""`), every row is the built-in `(kind, png.to_vec(), hot)`. Otherwise, delegates to `sprite_sources_from_dir(&pack_dir(pack_id))`. Either way, `busy_as_arrow` then overwrites the `Busy` row's bytes/hotspot with `Arrow`'s before returning.
 
 ### Behaviors
 
-- `default_pack_id_resolves_to_builtin_sprites_verbatim` / `empty_pack_id_also_resolves_to_builtin` - both fast-path to `SPRITES` unchanged.
+- `default_pack_id_resolves_to_builtin_sprites_verbatim_except_busy` / `empty_pack_id_also_resolves_to_builtin` - fast-path to `SPRITES`, Busy excepted.
+- `busy_resolves_to_arrow_bytes_and_hotspot_for_the_builtin_pack` - Busy's row is Arrow's bytes/hotspot, not the builtin pinwheel PNG.
+- `busy_resolves_to_arrow_even_when_a_custom_pack_overrides_arrow` - a custom pack's own Arrow override wins for Busy too (the remap happens after per-kind resolution, not before).
 
 ### Used by
 
 - `src-tauri/src/export/cursor/cursorset.rs` (`prep`) - resolves export sprite bytes
 - `src-tauri/src/export/cursor/cursorpreview.rs` (`cursor_sprites`) - resolves preview sprite bytes
+
+## busy_as_arrow
+
+```rust
+fn busy_as_arrow(rows: &mut [(CursorType, Vec<u8>, (f32, f32))])
+```
+
+The OS shows "busy" as the plain arrow plus a spinner it draws itself; this app's only busy asset is a static multicolor pinwheel disc, which at cursor size (dimmed preview or baked into an export) reads as visual corruption rather than "loading". Rather than replace the asset, overwrites the `Busy` row in `rows` with whatever `Arrow` resolved to - built-in or a custom pack's own override - so both export and preview draw a plain arrow for Busy. No-op if `rows` has no `Arrow` entry (not reachable via `sprite_sources`, since `SPRITES` always includes one). The `CursorType::Busy` variant and the recorded cursor-type track are untouched - only which sprite bytes get drawn for it.
+
+### Used by
+
+- `sprite_sources` (this file) - applied after either resolution branch
 
 ## sprite_sources_from_dir
 

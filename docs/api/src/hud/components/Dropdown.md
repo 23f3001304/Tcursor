@@ -45,7 +45,7 @@ Renders a trigger button and, when `open` is true, a floating option list below 
 
 An outside-click listener is attached to `document` via a `useEffect` on `[open, onToggle]`. When `open` is true, any `mousedown` event whose target is outside the root `ref` div calls `onToggle` to close the menu. The listener is removed when `open` becomes false or on cleanup. *Why `mousedown` rather than `click`:* mousedown fires before the click event, preventing brief re-open races when clicking the trigger of another dropdown.
 
-The menu list conditionally renders (no `AnimatePresence` - the HUD window resize itself serves as the visual cue that the menu is appearing). Each list item is a `<button>` so it is keyboard-focusable; the selected item additionally renders a `<Check>` icon.
+The menu list is a `motion.div` (design/premium-pass D6, replacing a CSS `@keyframes` animation 1:1) that fades/slides in on mount (opacity + `y: -4 -> 0`, 0.14s). Deliberately enter-only, no `AnimatePresence`: closing is still a hard cut, same as before D6 - `Hud.tsx`'s `useHudWindowSize` shrinks the actual OS window back to its idle height the instant the menu closes (synchronously with the same `menu` state that gates `open`), so an animated exit here would visibly get clipped by the window shrinking underneath it rather than fading cleanly. The trigger itself gets the app-wide press spring (scale .96). Each list item is a `<button>` so it is keyboard-focusable; the selected item additionally renders a `<Check>` icon.
 
 ### Notes
 

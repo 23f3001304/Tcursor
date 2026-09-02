@@ -8,31 +8,43 @@
 .settings-wrap { width: 100%; }
 .settings { display: flex; flex-direction: column; height: 420px; }
 
-.settings-head { display: flex; align-items: center; gap: 6px; height: 40px; padding: 0 10px 0 6px; flex: none; }
-.settings-title { font-size: 13px; font-weight: 600; color: var(--fg); pointer-events: none; }
+/* Header row matches editor.css's PanelHeader (title + a hairline), so the box reads as the same
+   kind of panel as the editor's - see e-phead in editor.css. */
+.settings-head {
+  display: flex; align-items: center; gap: 6px; height: 40px; padding: 0 10px 0 6px; flex: none;
+  /* --e-divider (review round 1 item 1), not --line - a flat section divider is quieter than a
+     raised-element hairline (D1 doctrine); --line was louder, the opposite direction. */
+  border-bottom: 1px solid var(--e-divider);
+}
+.settings-title { font-size: var(--e-text-title-size); font-weight: var(--e-text-title-weight); color: var(--e-fg); pointer-events: none; }
 
-.tabs { display: flex; gap: 4px; background: var(--hover); padding: 3px; border-radius: 9px; margin: 0 12px 8px; flex: none; }
-.tab { flex: 1; padding: 6px 0; border: none; border-radius: 6px; background: transparent; color: var(--muted);
+/* Segmented-group treatment (same material as the HUD bar's .toggle-group): a recessed --e-bg
+   track holding a popped-up --e-raised active pill, instead of the old flat --hover/--surface pair. */
+.tabs { display: flex; gap: 4px; background: var(--e-bg); padding: 3px; border-radius: 9px; margin: var(--e-sp-2) var(--e-sp-2) var(--e-sp-1); flex: none; }
+.tab { flex: 1; padding: 6px 0; border: none; border-radius: 6px; background: transparent; color: var(--e-dim);
   font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; transition: background 0.16s ease, color 0.16s ease; }
-.tab.on { background: var(--surface); color: var(--fg); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); }
+.tab.on { background: var(--e-raised); color: var(--e-fg); box-shadow: var(--e-inset-hi), var(--e-shadow-1); }
 
-.settings-body { flex: 1; overflow-y: auto; padding: 2px 16px 16px; }
-.tab-panel { display: flex; flex-direction: column; gap: 16px; }
+.settings-body { flex: 1; overflow-y: auto; padding: 2px var(--e-sp-3) var(--e-sp-3); }
+.tab-panel { display: flex; flex-direction: column; gap: var(--e-sp-4); }
 
 /* Inset rounded-pill scrollbar (WebView2 is Chromium). */
 .settings-body::-webkit-scrollbar { width: 11px; }
 .settings-body::-webkit-scrollbar-track { background: transparent; }
-.settings-body::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 999px; border: 3px solid var(--bg); background-clip: padding-box; min-height: 40px; }
+.settings-body::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 999px; border: 3px solid var(--e-surface); background-clip: padding-box; min-height: 40px; }
 .settings-body:hover::-webkit-scrollbar-thumb { background: var(--fg); background-clip: padding-box; }
 
 /* Section + control styles (reused by the section components). */
-.sec { display: flex; flex-direction: column; gap: 11px; }
-.sec-title { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
-.sf { display: flex; flex-direction: column; gap: 7px; }
+/* Spacing grid (D1: 12 between fields, 8 label->control) - was 11/7, an ad-hoc pair the grid
+   doctrine kills on sight. */
+.sec { display: flex; flex-direction: column; gap: var(--e-sp-2); }
+.sec-title { margin: 0; font-size: var(--e-text-label-size); font-weight: var(--e-text-label-weight);
+  letter-spacing: var(--e-text-label-ls); text-transform: uppercase; color: var(--e-dim); }
+.sf { display: flex; flex-direction: column; gap: var(--e-sp-1); }
 .sf-head { display: flex; align-items: baseline; justify-content: space-between; }
 .sf-label { font-size: 13px; font-weight: 550; color: var(--fg); }
 .sf-hint { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.sf-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.sf-row { display: flex; align-items: center; justify-content: space-between; gap: var(--e-sp-2); }
 
 .sw { width: 38px; height: 22px; border-radius: 999px; border: none; background: var(--switch-off); cursor: pointer; padding: 0; position: relative; transition: background 0.16s ease; flex: none; }
 .sw.on { background: var(--accent); }
@@ -47,15 +59,20 @@
 .hk-chord.dup { border-color: var(--accent); }
 .hk-warn { font-size: 12px; color: var(--accent); }
 
-.seg { display: flex; gap: 4px; background: var(--hover); padding: 3px; border-radius: 8px; }
-.seg-btn { flex: 1; padding: 6px 0; border: none; border-radius: 6px; background: transparent; color: var(--muted); font: inherit; font-size: 12px; font-weight: 600; text-transform: capitalize; cursor: pointer; transition: background 0.14s ease, color 0.14s ease; }
-.seg-btn.on { background: var(--surface); color: var(--fg); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); }
+/* Same segmented-group treatment as .tabs/.tab (review round 1 item 3 - one recessed-track/
+   popped-pill pattern applied twice, not two coexisting segmented visual languages in one box). */
+.seg { display: flex; gap: 4px; background: var(--e-bg); padding: 3px; border-radius: 8px; }
+.seg-btn { flex: 1; padding: 6px 0; border: none; border-radius: 6px; background: transparent; color: var(--e-dim); font: inherit; font-size: 12px; font-weight: 600; text-transform: capitalize; cursor: pointer; transition: background 0.14s ease, color 0.14s ease; }
+.seg-btn.on { background: var(--e-raised); color: var(--e-fg); box-shadow: var(--e-inset-hi), var(--e-shadow-1); }
 .swatches { display: flex; gap: 8px; }
 .swatch { width: 26px; height: 26px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; box-shadow: inset 0 0 0 1px var(--line); }
 .swatch.on { border-color: var(--fg); }
 
-/* Even option grid (Style / Mode / Video effect) - equal pills, proper labels. */
-.optg { display: grid; grid-template-columns: repeat(auto-fit, minmax(88px, 1fr)); gap: 6px; }
+/* Option chip row (Style / Mode / Video effect). A fixed-column grid left a short last row of
+   ragged, stretched-width pills whenever the item count didn't divide evenly (e.g. 7 style chips
+   as 3+3+1, 5 layout-mode chips as 3+2) - a content-sized flex-wrap reads as a tidy chip cloud
+   instead, regardless of count. */
+.optg { display: flex; flex-wrap: wrap; gap: 6px; }
 .opt { padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface);
   color: var(--muted); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
   transition: border-color 0.14s ease, color 0.14s ease, background 0.14s ease; }
@@ -77,9 +94,11 @@
 .adv-tog.open .adv-caret { transform: rotate(90deg); }
 .adv-body { display: flex; flex-direction: column; gap: 11px; padding-top: 11px; }
 
-/* Layout preview stage */
+/* Layout preview stage. Token colors, not literal hex, so the mockup stays legible in dark theme -
+   the old hardcoded near-white `.lp-screen` read as a harsh, blown-out rectangle against the rest
+   of the (dark) settings box. */
 .lp-stage { position: relative; width: 100%; padding-top: 56.25%; border-radius: 8px;
-  background: linear-gradient(135deg, #3c4a66, #232c40);
+  background: var(--hover); border: 1px solid var(--line); box-sizing: border-box;
   overflow: hidden; }
-.lp-screen { background: #e9ebf0; border: 1px solid rgba(255,255,255,0.25); box-sizing: border-box; }
-.lp-cam { background: #2a2a2e; border: 1px solid rgba(255,255,255,0.18); box-sizing: border-box; }
+.lp-screen { background: var(--surface); border: 1px solid var(--line); box-sizing: border-box; }
+.lp-cam { background: var(--muted); border: 1px solid var(--line); box-sizing: border-box; }

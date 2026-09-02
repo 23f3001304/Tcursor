@@ -28,7 +28,11 @@ Renders the three audio controls and writes straight back to `doc.settings` (via
 
 Each slider is `min={0} max={150} step={5}`, displaying `Math.round(vol * 100)` and calling back with `v / 100`. *Why round-trip through a 0..150 integer instead of storing the 0..1.5 float directly in slider state:* keeps the displayed percentage exact (no floating-point display jitter) while the value written back to settings stays the same linear-gain float the backend expects.
 
-**Task 26 cleanup.** All three `Slider`s dropped an explicit `accentColor="var(--e-fg)"` - `Slider`'s own default is already `"var(--e-fg)"`, so the prop was a no-op. The "← Mic earlier / Mic later →" caption row under the offset slider now uses the shared `.e-hintrow` class (`editor.css`) instead of a one-off inline `style={{...}}` object.
+**Task 26 cleanup.** All three `Slider`s dropped an explicit `accentColor="var(--e-fg)"` - `Slider`'s own default is already `"var(--e-fg)"`, so the prop was a no-op. The "← Mic earlier / Mic later →" caption row now uses the shared `.e-hintrow` class (`editor.css`) instead of a one-off inline `style={{...}}` object.
+
+**Live readout (render hygiene pass, fix round 2).** All three sliders now pass `Slider`'s own `label`/`formatValue` props instead of a hand-rolled `<span className="e-fl">` reading the committed prop - so each readout tracks the LIVE (optimistic) value during a drag, not just the value once `onChange` (itself now ~80ms-debounced - see `Slider.md`) actually lands. For the offset slider specifically, this also moved the `.e-hintrow` from ABOVE the track (between the old hand-rolled label and the `Slider`) to BELOW it - `Slider`'s `label` always renders immediately above its own track, so the hint row can no longer sit between a label and a track it doesn't own; below the track reads fine too, as an axis legend under the thing it describes.
+
+**Reset.** `PanelHeader`'s `onReset` (previously absent - Audio was the one property panel without the reset affordance Background/Cursor have) calls `onChangeOffset(0)` / `onChangeMicVol(1)` / `onChangeSysVol(1)` directly, matching the Rust `Settings::default()` values field-for-field (`audio_offset_ms: 0`, unity gain on both volumes). A local `handleReset` rather than a shared "reset object" helper because this panel's three fields are three independent callback props, not one `onSaveSettings(patch)` call like most other panels.
 
 ### Removed (this change)
 

@@ -20,7 +20,7 @@ Otherwise steps by one and clamps at `[0, length-1]` (does not wrap).
 
 ```tsx
 export function Picker<T extends string>({ value, options, onChange, ariaLabel }: {
-  value: T; options: { value: T; label: string }[]; onChange: (v: T) => void; ariaLabel?: string;
+  value: T; options: { value: T; label: string; title?: string }[]; onChange: (v: T) => void; ariaLabel?: string;
 }): JSX.Element
 ```
 
@@ -28,6 +28,11 @@ export function Picker<T extends string>({ value, options, onChange, ariaLabel }
 
 - `ariaLabel?: string` - (Task 26) sets `aria-label` on the toggle button and the `role="listbox"`
   menu. Every call site in the codebase passes this.
+- `options[].title?: string` (Task 11) - optional per-option hover text, set as the `title` attribute
+  on both the closed button (for the currently-selected option) and each open-menu option button.
+  *Why:* `AiPanel`'s Engine picker shows a short derived `label` (`engineDisplayName`) but still
+  wants the full raw model id reachable on hover - `title` carries it without shortening `label`
+  itself. Every other existing call site simply omits it (`title` is `undefined`), unaffected.
 
 ### Behavior (Task 26 additions)
 

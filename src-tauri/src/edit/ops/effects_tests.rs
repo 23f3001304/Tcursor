@@ -76,6 +76,24 @@ fn remove_effect_drops_by_id() {
 }
 
 #[test]
+fn update_effect_start_past_end_pulls_end_to_match() {
+    let mut doc = empty(); doc.trim.out_ms = 10_000;
+    apply_effect(&mut doc, EditOp::AddEffect { kind: EffectKind::Spotlight, start_ms: 1000, end_ms: 2000 });
+    let id = doc.effects[0].id.clone();
+    apply_effect(&mut doc, EditOp::UpdateEffect { id, start_ms: Some(8000), end_ms: None, fade_in_ms: None, fade_out_ms: None, mode: None, dim: None, radius: None, feather: None, layer: None });
+    assert_eq!((doc.effects[0].start_ms, doc.effects[0].end_ms), (8000, 8000));
+}
+
+#[test]
+fn update_effect_end_before_start_pulls_start_to_match() {
+    let mut doc = empty(); doc.trim.out_ms = 10_000;
+    apply_effect(&mut doc, EditOp::AddEffect { kind: EffectKind::Spotlight, start_ms: 5000, end_ms: 6000 });
+    let id = doc.effects[0].id.clone();
+    apply_effect(&mut doc, EditOp::UpdateEffect { id, start_ms: None, end_ms: Some(1000), fade_in_ms: None, fade_out_ms: None, mode: None, dim: None, radius: None, feather: None, layer: None });
+    assert_eq!((doc.effects[0].start_ms, doc.effects[0].end_ms), (1000, 1000));
+}
+
+#[test]
 fn lifts_always_on_spotlight_to_full_span_region_and_disables_toggle() {
     let mut doc = empty();
     doc.trim.out_ms = 8000;
@@ -97,10 +115,52 @@ fn lift_is_noop_when_spotlight_toggle_off() {
 }
 
 #[test]
-fn lift_is_noop_on_zero_duration_doc() {
-    let mut doc = empty(); // trim.out_ms == 0 (degenerate no-event-log doc)
+fn lift_is_noop_on_a_truly_unseeded_doc() {
+    // Neither clip_ms nor trim.out_ms known (dur_bound == u32::MAX) - the one real degenerate
+    // case (a doc `edit::seed` should never actually hand out): a [0, u32::MAX] region would be
+    // meaningless, so the lift must not fire and must leave the toggle on for a later retry.
+    let mut doc = empty(); // clip_ms == 0, trim.out_ms == 0
     doc.settings.clickfx.spotlight = true;
-    assert!(!lift_always_on_spotlight(&mut doc)); // no un-grabbable [0,0] region...
+    assert!(!lift_always_on_spotlight(&mut doc));
     assert!(doc.effects.is_empty());
-    assert!(doc.settings.clickfx.spotlight); // ...and the toggle is left on, not silently disabled
+    assert!(doc.settings.clickfx.spotlight);
+}
+
+/// H2 / UX-audit #3, failure scenario A: a 60s recording trimmed down to 5s, THEN the spotlight
+/// toggle is turned on. The lift must bound the region by the TRUE clip length (`clip_ms`), not
+/// the now-smaller `trim.out_ms` - otherwise widening the trim back out later would still leave
+/// the spotlight capped at the old 5s trim point.
+#[test]
+fn lift_bounds_by_clip_ms_not_a_smaller_trim_out_ms() {
+    let mut doc = empty();
+    doc.clip_ms = 60_000;
+    doc.trim.out_ms = 5_000; // user trimmed the tail
+    doc.settings.clickfx.spotlight = true;
+    assert!(lift_always_on_spotlight(&mut doc));
+    assert_eq!((doc.effects[0].start_ms, doc.effects[0].end_ms), (0, 60_000));
+}
+
+/// H2, failure scenario B: `trim.out_ms == 0` is the ordinary "no trim / whole clip" sentinel
+/// (Reset Trim, or trimming out at the clip end) - once `clip_ms` is known, it must NOT be read
+/// as "degenerate doc, skip the lift". A fresh recording with no manual trim is exactly this
+/// state, and it's the state the UX audit caught playing entirely dimmed.
+#[test]
+fn lift_bounds_by_clip_ms_when_trim_out_ms_is_the_no_trim_sentinel() {
+    let mut doc = empty();
+    doc.clip_ms = 38_000; // e.g. a fresh 38s recording
+    doc.trim.out_ms = 0; // "no trim" sentinel, not "zero length"
+    doc.settings.clickfx.spotlight = true;
+    assert!(lift_always_on_spotlight(&mut doc));
+    assert_eq!((doc.effects[0].start_ms, doc.effects[0].end_ms), (0, 38_000));
+}
+
+/// Fallback chain, matching `dur_bound`: an older doc that predates `clip_ms` (still `0`) falls
+/// back to `trim.out_ms` exactly like every other region-placing op.
+#[test]
+fn lift_falls_back_to_trim_out_ms_when_clip_ms_is_unknown() {
+    let mut doc = empty();
+    doc.trim.out_ms = 12_000; // clip_ms stays 0 - predates the field
+    doc.settings.clickfx.spotlight = true;
+    assert!(lift_always_on_spotlight(&mut doc));
+    assert_eq!((doc.effects[0].start_ms, doc.effects[0].end_ms), (0, 12_000));
 }

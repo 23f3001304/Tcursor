@@ -106,7 +106,7 @@ The `preview_synced.` name (vs the old `preview_audio.`) invalidates stale cache
 fn preview_audio_shifts(paths: &ProjectPaths) -> (i64, i64)
 ```
 
-Per-track mic/system shift (ms) to align preview audio to the video's frame 0 - mirrors `exporter::export`'s own `shift()` closure, minus the trim adjustment (the preview always plays the whole clip; trim is a playback clamp the frontend applies, not a mux-time shift).
+Per-track mic/system shift (ms) to align preview audio to the video's frame 0. It CALLS the same seam the export mux uses (`pipeline::audio_shift_ms`) rather than re-deriving the formula, passing a zero trim: the preview always plays the whole clip, so trim is a playback clamp the frontend applies rather than a mux-time shift, and only the export has a (frame-floored) trim-in to subtract.
 
 ### Inputs
 
@@ -120,4 +120,4 @@ Per-track mic/system shift (ms) to align preview audio to the video's frame 0 - 
 
 1. Load the event log via `EventLog::load`; return `(0, 0)` on failure.
 2. Rebuild the `Timeline` via `build_timeline(paths, &log, 60)` - the same call the exporter makes, at a fixed 60 fallback fps (preview alignment only needs the derived mic/system start offsets, not the true capture rate).
-3. `vs` = the timeline's first frame timestamp (`video_start`). `mic = tl.mic_ms.map(|m| m - vs).unwrap_or(0) + audio_offset_ms` (from `edit::seed::load_or_seed(paths).settings`); `sys = tl.system_ms.map(|m| m - vs).unwrap_or(0)`.
+3. `vs` = the timeline's first frame timestamp (`video_start`). `mic = audio_shift_ms(tl.mic_ms, vs, 0) + audio_offset_ms` (from `edit::seed::load_or_seed(paths).settings`); `sys = audio_shift_ms(tl.system_ms, vs, 0)`.

@@ -1,6 +1,6 @@
 # src/editor/director/DirectorOverlay.tsx
 
-Everything the AI director's choreographed reveal renders at the editor root, bundled into one component so `Editor.tsx` (already at its line budget) only has to mount a single element for the whole feature.
+Everything the AI director's choreographed reveal renders, bundled into one component so `Editor.tsx` (already at its line budget) only has to mount a single element for the whole feature. Nested inside `.e-stagetoast` (Task 11) rather than at the editor root - the fake pointer and the cancel scrim are both `position:fixed` so where this mounts in the DOM doesn't move them, but the Stop pill (`DirectorScrim`) switched to `position:absolute` so it can anchor to the stage's own bottom edge instead of the viewport's (ux audit #17).
 
 ## DirectorOverlay
 
@@ -28,4 +28,4 @@ Renders `<AnimatePresence>{running && <DirectorPointer ref={pointerRef} />}</Ani
 
 ### Used by
 
-`Editor` (`src/editor/Editor.tsx`) - rendered as a sibling of `.e-body`, right before `Transport`.
+`Editor` (`src/editor/Editor.tsx`) - rendered inside `.e-stagetoast`, alongside `Stage` and `Toast` (Task 11; previously a sibling of `.e-body`, right before `Transport`).

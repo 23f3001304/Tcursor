@@ -3,6 +3,12 @@ use super::*;
 #[test]
 fn defaults_match_tuned_zoom_and_round_trip() {
     let s = Settings::default();
+    // R1 (bug-sweep-2 UX ruling): the always-on-spotlight toggle defaults OFF at record-time
+    // defaults - a project seeded with a fresh config must never play entirely dimmed out of the
+    // box. `edit::seed::build_default` snapshots exactly this default into every new recording's
+    // settings; a persisted config.json that a user has explicitly turned it on for keeps that
+    // choice (this is a record-TIME default, not a migration).
+    assert!(!s.clickfx.spotlight);
     assert!(s.zoom.enabled);
     assert_eq!(s.zoom.target_scale, 2.2);
     assert_eq!(s.zoom.hold_ms, 2200);

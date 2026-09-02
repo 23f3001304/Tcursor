@@ -34,8 +34,9 @@ export function SettingsClickFx({ value, onChange }: { value: ClickFxSettings; o
   const set = <K extends keyof ClickFxSettings>(k: K, v: ClickFxSettings[K]) => onChange({ ...value, [k]: v });
   return (
     <section className="sec">
-      <h3 className="sec-title">Effects</h3>
-
+      {/* No top-level "Effects" h3 here (unlike the other tabs) - it sat directly above "Click
+          effects" with nothing between them, reading as a duplicated, empty header. The FX tab
+          is already the fully-labeled group below; the "FX" tab pill is title enough. */}
       <div style={groupStyle}>Click effects</div>
       <div className="sf"><div className="sf-row"><span className="sf-label">Show click effects</span>
         <Switch on={value.enabled} onChange={(v) => set("enabled", v)} /></div></div>

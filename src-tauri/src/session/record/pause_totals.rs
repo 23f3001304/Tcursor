@@ -1,8 +1,14 @@
-// Exact-span paused-time ledger for the input trackers (mouse, keyboard actions/typing,
-// cursor-type). Stamped directly by the SAME code path that flips the recorder's `paused`
-// AtomicBool (`pause_recording` / `resume_recording`), which knows the exact wall-clock
-// instant the toggle happens - unlike `PauseClock` (tick-based, inferred from a stream of
-// frame-arrival samples; that model stays correct for the video path and is untouched here).
+// Exact-span paused-time ledger for the WHOLE recording: the input trackers (mouse, keyboard
+// actions/typing, cursor-type) reach it through `stamp`, and both capture paths reach it
+// through `PauseClock` - so `sync.json`, `video.mp4`'s own PTS, the audio WAVs and every event
+// stream are compressed by exactly the same number and cannot drift apart.
+//
+// Stamped directly by the SAME code path that flips the recorder's `paused` AtomicBool
+// (`pause_recording` / `resume_recording`), which knows the exact wall-clock instant the toggle
+// happens. That is the whole point: `PauseClock` used to infer the span from the gaps between
+// PAUSED frame arrivals, and since WGC only delivers frames on content change, a pause over a
+// static desktop was measured as 0ms while one over a busy desktop measured ~100% - the take's
+// reported duration was a function of what the screen happened to be doing.
 //
 // `paused_ms` and `pause_started` are one `Mutex`-guarded unit, not two independent atomics:
 // `resume` must clear `pause_started` and fold its span into `paused_ms` as a single visible
@@ -55,10 +61,17 @@ impl PauseTotals {
         if s.pause_started == 0 { s.paused_ms } else { s.paused_ms + now_ms.saturating_sub(s.pause_started) }
     }
 
-    // Pause-adjust a tracker's raw elapsed-ms reading: subtract `elapsed_paused` at that
-    // same instant. Every input tracker calls this at its stamp site instead of the raw value.
+    // Pause-adjust a raw wall-clock reading: subtract `elapsed_paused` at that same instant.
+    // The single place the "a pause never happened" rule lives - the input trackers reach it
+    // through `stamp`, both capture paths through `PauseClock` - so sync.json, video.mp4's own
+    // PTS and every event stream are compressed by exactly the same number.
+    pub fn stamp_ms(&self, raw_ms: u64) -> u64 {
+        raw_ms.saturating_sub(self.elapsed_paused(raw_ms))
+    }
+
+    // `stamp_ms` in the input trackers' narrower `t` type (ms since tracker start).
     pub fn stamp(&self, raw_ms: u64) -> u32 {
-        raw_ms.saturating_sub(self.elapsed_paused(raw_ms)) as u32
+        self.stamp_ms(raw_ms) as u32
     }
 }
 

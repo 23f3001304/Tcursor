@@ -129,9 +129,11 @@ pub(crate) fn ensure_preview_audio_blocking(folder: String) -> Result<String, St
 fn preview_audio_shifts(paths: &ProjectPaths) -> (i64, i64) {
     let log = match crate::events::model::EventLog::load(&paths.events()) { Ok(l) => l, Err(_) => return (0, 0) };
     let tl = crate::export::pipeline::timeline::build_timeline(paths, &log, 60);
-    let vs = tl.frames.first().copied().unwrap_or(0) as i64;
+    let vs = tl.frames.first().copied().unwrap_or(0);
     let offset = crate::edit::seed::load_or_seed(paths).settings.audio_offset_ms as i64;
-    let mic = tl.mic_ms.map(|m| m as i64 - vs).unwrap_or(0) + offset;
-    let sys = tl.system_ms.map(|m| m as i64 - vs).unwrap_or(0);
-    (mic, sys)
+    // The same seam the export mux uses (`pipeline::audio_shift_ms`) with a zero trim, rather
+    // than a second copy of the formula: the preview plays the WHOLE clip and applies trim as a
+    // playback clamp, so only the export has a (frame-floored) trim-in to subtract here.
+    let shift = |t| crate::export::pipeline::audio_shift_ms(t, vs, 0);
+    (shift(tl.mic_ms) + offset, shift(tl.system_ms))
 }

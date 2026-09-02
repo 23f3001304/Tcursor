@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import type { EditDoc, EditOp } from "../../lib/edit";
 import { CAM_CURVES } from "../inspectors/curves";
 import { KF_BLEND_MS } from "../stage/cameraMoves";
 import { snapKeyframeMs } from "./camSnap";
+import { pastDragThreshold } from "../hooks/dragThreshold";
 
 /** Camera-move keyframe lane: a diamond per doc.camera_moves entry at (t_ms/dur)*100%, over a
  *  dashed baseline (the track). A glowing segment is drawn between each consecutive pair - that's
@@ -15,42 +16,80 @@ import { snapKeyframeMs } from "./camSnap";
  *  Single-point keyframes, not regions (no useRegionDrag): click a diamond selects, horizontal
  *  drag retimes (snapped to layout-segment edges and sibling keyframes, committed on release).
  *  Motion owns the diamond transform (scale + rotate), so it centers by margin. */
-export function CameraLane({ doc, dur, sel, onSel, onApply, track }: {
+export const CameraLane = memo(function CameraLane({ doc, dur, sel, onSel, onApply, track, hasWebcam }: {
   doc: EditDoc; dur: number; sel: string | null; onSel: (id: string) => void;
   onApply: (op: EditOp) => Promise<EditDoc | null>; track: React.RefObject<HTMLDivElement | null>;
+  /** `hasWebcamSignal` (editorData.ts) - gates the empty-lane hint below off for a recording with
+   *  no webcam, which has nothing to keyframe (gate finding). */
+  hasWebcam: boolean;
 }) {
   const startX = useRef(0);
   const startT = useRef(0);
+  const movedRef = useRef(false); // past the click threshold since this drag began - gates `move`'s LIVE update only, not the commit (see `up`)
   const [drag, setDrag] = useState<{ id: string; t_ms: number } | null>(null);
   // Open transition-curve popover: the destination keyframe id, the anchor % (segment midpoint),
   // and its current easing (for the live highlight). null = closed.
   const [pick, setPick] = useState<{ id: string; leftPct: number; easing: string } | null>(null);
 
-  const beginDrag = (e: React.PointerEvent, id: string, t_ms: number) => {
+  const beginDrag = useCallback((e: React.PointerEvent, id: string, t_ms: number) => {
     e.stopPropagation();
     onSel(id);
     startX.current = e.clientX;
     startT.current = t_ms;
+    movedRef.current = false;
     setDrag({ id, t_ms });
-  };
+  }, [onSel]);
 
+  // Mutable per-move inputs, read from refs inside the effect so it only depends on WHETHER a
+  // drag is active - not on `doc`/`dur`/`onApply`, which would tear down and re-add both window
+  // listeners on every pointermove (see useRegionDrag.md, the same fix applied there). The snap
+  // targets (`segEdges`/`otherKfs`) are computed once per drag, at drag-start, since they only
+  // ever need to reflect the doc as it stood when the drag began.
+  const durRef = useRef(dur); durRef.current = dur;
+  const onApplyRef = useRef(onApply); onApplyRef.current = onApply;
+  const snapRef = useRef<{ segEdges: number[]; otherKfs: number[] }>({ segEdges: [], otherKfs: [] });
+  if (drag) {
+    // Recomputed on every render while a drag is active (cheap: two small array walks) rather
+    // than frozen at drag-start, so a doc change mid-drag (rare, but e.g. an undo) can't leave
+    // stale snap targets - the effect below still only (re)runs on the active/inactive transition.
+    snapRef.current = {
+      segEdges: doc.layout.flatMap((s) => [s.start_ms, s.end_ms]),
+      otherKfs: doc.camera_moves.filter((m) => m.id !== drag.id).map((m) => m.t_ms),
+    };
+  }
+
+  const active = drag !== null;
   useEffect(() => {
-    if (!drag) return;
-    // Snap targets, in ms space so the feel is zoom-independent: every layout-segment edge, plus
-    // every OTHER keyframe's time (its own would pin it where the drag started).
-    const segEdges = doc.layout.flatMap((s) => [s.start_ms, s.end_ms]);
-    const otherKfs = doc.camera_moves.filter((m) => m.id !== drag.id).map((m) => m.t_ms);
+    if (!active) return;
     const move = (e: PointerEvent) => {
       const el = track.current; if (!el) return;
-      const dms = ((e.clientX - startX.current) / el.getBoundingClientRect().width) * dur;
-      const raw = Math.max(0, Math.min(dur, Math.round(startT.current + dms)));
+      // Withhold the LIVE snapped position until past the click threshold (review round 1 minor)
+      // - otherwise a sub-threshold jiggle visibly nudges the diamond via `snapKeyframeMs`, then
+      // silently reverts on release once `up` (below) correctly declines to commit it.
+      if (!movedRef.current) {
+        if (!pastDragThreshold(e.clientX - startX.current, 0)) return;
+        movedRef.current = true;
+      }
+      const dms = ((e.clientX - startX.current) / el.getBoundingClientRect().width) * durRef.current;
+      const raw = Math.max(0, Math.min(durRef.current, Math.round(startT.current + dms)));
+      const { segEdges, otherKfs } = snapRef.current;
       setDrag((d) => d ? { id: d.id, t_ms: snapKeyframeMs(raw, segEdges, otherKfs) } : d);
     };
-    const up = () => setDrag((d) => { if (d) void onApply({ op: "update_camera_move", id: d.id, t_ms: d.t_ms }); return null; });
+    // A bare click on a diamond (no real movement) must select only, not commit a no-op
+    // `update_camera_move` for an unchanged `t_ms` (D-Medium M8; UX audit #5). Measured from the
+    // drag's ORIGIN to the RELEASE position, NOT the `movedRef` latch above (which only gates the
+    // live visual update) - a drag that returns near its origin before release still commits
+    // nothing even though it crossed the threshold at some point mid-drag.
+    const up = (e: PointerEvent) => setDrag((d) => {
+      if (d && pastDragThreshold(e.clientX - startX.current, 0)) {
+        void onApplyRef.current({ op: "update_camera_move", id: d.id, t_ms: d.t_ms });
+      }
+      return null;
+    });
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
     return () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
-  }, [doc, drag, dur, onApply, track]);
+  }, [active, track]);
 
   // Dismiss the curve popover on any outside pointerdown / Escape.
   useEffect(() => {
@@ -86,6 +125,13 @@ export function CameraLane({ doc, dur, sel, onSel, onApply, track }: {
     <div className="e-camlane">
       <div className="e-camrow">
         <div className="e-cambase" />
+        {/* Empty affordance (ux audit #25): this lane rendered as just the dashed baseline with
+            nothing on it and no hint that anything belongs here. Names the real path (CameraPanel's
+            "Move in preview" switch, matched verbatim) - disappears the moment a keyframe exists,
+            never fighting with the real content. Also gated on `hasWebcam` (gate finding): a
+            recording with no webcam has nothing to keyframe, so the hint used to invite the user
+            to turn on a switch that would only shrink an empty panel. */}
+        {hasWebcam && doc.camera_moves.length === 0 && <span className="e-camempty">Turn on Move in preview to keyframe the webcam</span>}
         {span && (
           <div className="e-camspan" style={{ left: `${pct(span.from)}%`, width: `${pct(span.to - span.from)}%`,
             background: `linear-gradient(90deg, rgba(224,93,158,0) 0%, rgba(224,93,158,.12) ${Math.min(ramp, 50)}%,`
@@ -111,7 +157,11 @@ export function CameraLane({ doc, dur, sel, onSel, onApply, track }: {
         ))}
       </div>
       {pick && (
-        <div className="e-campop" style={{ left: `${pick.leftPct}%` }}>
+        // `onPointerDown` stopPropagation: without it, every click here bubbled to `.e-tlbody`'s
+        // own scrub handler (Timeline.tsx), which seeks the playhead + pauses playback AND takes
+        // pointer capture - stealing the button's own `onClick` (the easing choice) half the time
+        // too (M3).
+        <div className="e-campop" style={{ left: `${pick.leftPct}%` }} onPointerDown={(e) => e.stopPropagation()}>
           {CAM_CURVES.map((c) => (
             <button key={c.key} type="button" title={c.name}
               className={`e-campop-b${pick.easing === c.key ? " on" : ""}`}
@@ -124,4 +174,4 @@ export function CameraLane({ doc, dur, sel, onSel, onApply, track }: {
       )}
     </div>
   );
-}
+});

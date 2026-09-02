@@ -1,7 +1,21 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { motion } from "motion/react";
 import { Chevron, Check } from "./icons";
 
 export interface DropOption { id: string; label: string }
+
+// design/premium-pass D6: the app-wide press spring for the trigger, plus a Motion mount-in for
+// the menu (replaces the CSS `menu-in` keyframe 1:1). Deliberately enter-ONLY, no AnimatePresence:
+// `useHudWindowSize` (Hud.tsx) shrinks the actual OS window back to 132px tall the instant `menu`
+// goes null, synchronously with this closing - an AnimatePresence exit would animate the menu
+// fading out UNDERNEATH a window that's already shrinking around it, getting visibly clipped
+// instead of fading cleanly (the `settings-wrap` panel elsewhere in Hud.tsx avoids this exact race
+// by resizing from `onExitComplete`, not from the state change itself - not worth re-plumbing that
+// same delay through two more components for a close animation nobody will consciously notice
+// anyway). Closing stays a hard cut, matching the pre-D6 behavior exactly.
+const PRESS_TAP = { scale: 0.96 };
+const PRESS_SPRING = { type: "spring" as const, stiffness: 500, damping: 30 };
+const MENU_MOTION = { initial: { opacity: 0, y: -4 }, animate: { opacity: 1, y: 0 }, transition: { duration: 0.14 } };
 
 /** Custom select menu. The HUD window resizes taller while one is open so the
  *  menu (which overflows the bar's window) is visible. */
@@ -27,13 +41,13 @@ export function Dropdown({ icon, value, options, open, onToggle, onPick }: {
 
   return (
     <div className={`dd ${open ? "open" : ""}`} ref={ref}>
-      <button className="dd-trigger" onClick={onToggle}>
+      <motion.button className="dd-trigger" onClick={onToggle} whileTap={PRESS_TAP} transition={PRESS_SPRING}>
         {icon && <span className="ico">{icon}</span>}
         <span className="dd-label">{label}</span>
         <span className="chev"><Chevron /></span>
-      </button>
+      </motion.button>
       {open && (
-        <div className="dd-menu">
+        <motion.div className="dd-menu" {...MENU_MOTION}>
           {options.map((o) => (
             <button
               key={o.id}
@@ -44,7 +58,7 @@ export function Dropdown({ icon, value, options, open, onToggle, onPick }: {
               {o.id === value && <span className="dd-check"><Check /></span>}
             </button>
           ))}
-        </div>
+        </motion.div>
       )}
     </div>
   );

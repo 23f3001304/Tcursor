@@ -34,6 +34,30 @@ pub fn tmp_sibling(out: &Path) -> PathBuf {
     out.with_file_name(format!(".part-{}-{k}-{name}", std::process::id()))
 }
 
+/// `<path>.corrupt`, same directory - where `preserve_corrupt` moves an unparseable file so a
+/// reseed/reload-with-defaults never silently destroys it.
+pub fn corrupt_sibling(path: &Path) -> PathBuf {
+    let name = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    path.with_file_name(format!("{name}.corrupt"))
+}
+
+/// Move an unparseable file aside to `corrupt_sibling(path)` (clearing any stale `.corrupt` from
+/// a prior crash first) and log the outcome, so a caller that falls back to defaults on a parse
+/// error never loses the original bytes. Shared by every JSON store that fails closed to defaults
+/// on corruption (`EditDoc::load`, `settings::store::load`) - each formerly rolled its own,
+/// slightly different copy of this. Never fails the caller: if the rename itself fails (e.g. the
+/// corrupt sibling is locked by another process), the bad bytes simply stay at `path` - still
+/// recoverable by hand, just not moved aside.
+pub fn preserve_corrupt(path: &Path, parse_err: &dyn std::fmt::Display) {
+    let corrupt = corrupt_sibling(path);
+    let _ = std::fs::remove_file(&corrupt);
+    if let Err(re) = std::fs::rename(path, &corrupt) {
+        eprintln!("{path:?} parse failed ({parse_err}) and could not be preserved at {corrupt:?}: {re}");
+    } else {
+        eprintln!("{path:?} parse failed ({parse_err}); original preserved at {corrupt:?}");
+    }
+}
+
 /// Directory holding the bundled ffmpeg/ffprobe, set once at startup. Unset under
 /// `cargo`/dev runs, where we fall back to PATH.
 static FFMPEG_DIR: OnceLock<PathBuf> = OnceLock::new();
@@ -123,26 +147,5 @@ fn ffcmd_prio(program: &str, extra_flags: u32) -> Command {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn choose_dir_picks_first_with_the_binary() {
-        let base = std::env::temp_dir().join(format!("tcursor-ff-{}", std::process::id()));
-        let (a, b) = (base.join("a"), base.join("b"));
-        std::fs::create_dir_all(&b).unwrap();
-        std::fs::write(b.join("ffmpeg.exe"), b"x").unwrap();
-        let cands = vec![a.clone(), b.clone()];
-        assert_eq!(choose_dir(&cands, "ffmpeg.exe"), Some(&b)); // skips missing a, finds b
-        assert_eq!(choose_dir(&cands, "nope.exe"), None);
-        let _ = std::fs::remove_dir_all(&base);
-    }
-
-    #[test]
-    fn candidates_lead_with_exe_dir_then_resource_dir() {
-        let cands = ffmpeg_candidates(Some(Path::new("C:/res")));
-        // The resource-dir candidates are appended last; exe-derived ones lead.
-        assert_eq!(cands[cands.len() - 2], Path::new("C:/res").join("resources"));
-        assert_eq!(cands[cands.len() - 1], Path::new("C:/res").to_path_buf());
-    }
-}
+#[path = "proc_tests.rs"]
+mod tests;

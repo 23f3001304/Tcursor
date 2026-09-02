@@ -76,28 +76,39 @@ None. The function reads the process environment internally.
 pub fn load() -> Settings
 ```
 
-Reads and deserialises the config file, returning `Settings::default()` on any failure.
-
-### Inputs
-
-None. Reads from the path returned by `config_path()`.
-
-### Returns
-
-`Settings` - either the fully deserialised user config or `Settings::default()` if the file is absent, unreadable, or contains malformed JSON. Partial JSON with missing fields deserialises successfully because every `Settings` field carries `#[serde(default)]`; only truly malformed bytes trigger the fallback.
-
-### Implementation
-
-1. `std::fs::read(config_path())` - returns a `Result<Vec<u8>>`. Convert to `Option` via `.ok()`.
-2. `.and_then(|b| serde_json::from_slice(&b).ok())` - deserialise; convert errors to `None`.
-3. `.unwrap_or_default()` - return `Settings::default()` if either step yielded `None`.
-
-*Why chained `ok()` rather than `?`:* the caller has no error channel to propagate to (`run` just needs settings); silently falling back to defaults is the correct behavior for a missing or corrupt config.
+Thin wrapper: `load_from(&config_path())`.
 
 ### Used by
 
 - `src-tauri/src/commands.rs` (`get_settings`) - serves the current settings over IPC to the frontend
 - `src-tauri/src/session/record/recorder.rs` - called at recording start to snapshot all settings for the session duration
+
+## load_from
+
+```rust
+fn load_from(path: &Path) -> Settings
+```
+
+`load`'s actual logic, taking an explicit path - split out (mirroring `EditDoc::load`) so it is unit-testable against a throwaway temp file instead of the real `config_path()`.
+
+### Inputs
+
+- `path: &Path` - file to read.
+
+### Returns
+
+`Settings` - either the fully deserialised config or `Settings::default()` if the file is absent, unreadable, or contains malformed JSON. Partial JSON with missing fields deserialises successfully because every `Settings` field carries `#[serde(default)]`; only truly malformed bytes trigger the fallback.
+
+### Implementation
+
+1. `std::fs::read(path)`. A missing/unreadable file -> `Settings::default()` directly (no corrupt-preservation - there is nothing to preserve).
+2. On successfully-read bytes, `serde_json::from_slice`. On success, return the parsed `Settings`.
+3. **On a parse failure (M3, bug-sweep-2):** call `win::sys::proc::preserve_corrupt(path, &e)` - moves the bad bytes aside to `<path>.corrupt` and logs the parse error - THEN return `Settings::default()`. Before this fix the bytes were simply discarded (`.ok()` chained straight to `unwrap_or_default()`), so a torn write from a crash mid-`save` silently reset every hotkey/theme/spotlight/audio setting with zero recovery path; now the original bytes survive on disk next to the file, same guarantee `EditDoc::load` already gave `edit.json`.
+
+### Behaviors
+
+- `load_from_a_truncated_file_returns_defaults_and_preserves_the_original_at_dot_corrupt` - malformed JSON returns `Settings::default()` and the original bytes end up unmodified at `<path>.corrupt`; the original path no longer holds the bad bytes.
+- `load_from_a_missing_file_returns_defaults_without_touching_disk` - a non-existent path returns defaults and creates neither the file nor a `.corrupt` sibling.
 
 ## save
 
@@ -105,23 +116,37 @@ None. Reads from the path returned by `config_path()`.
 pub fn save(s: &Settings) -> std::io::Result<()>
 ```
 
-Serialises `s` to pretty-printed JSON and writes it to `config_path()`, creating parent directories if needed.
-
-### Inputs
-
-- `s: &Settings` - the settings snapshot to persist. *Why a reference:* the caller retains ownership; `save` is a write-through that does not consume or transform the value.
-
-### Returns
-
-`std::io::Result<()>` - `Ok(())` on success. Propagates `io::Error` from `create_dir_all` or `fs::write`. Wraps any `serde_json` serialisation error as `ErrorKind::Other`. *Why `io::Result` rather than a custom error:* the only caller (`commands::set_settings`) maps the error to a `String` for the IPC response; `io::Error` provides a readable message without an additional error type.
-
-### Implementation
-
-1. Compute `path = config_path()`.
-2. `fs::create_dir_all(path.parent())` - ensures the `TCursor` directory exists before writing. Returns early on error. *Why `parent()` rather than a hardcoded dir:* keeps the directory in sync with `config_path()` automatically.
-3. `serde_json::to_vec_pretty(s)` - serialise. Map the serde error to `io::Error::new(ErrorKind::Other, e)` so the return type is uniform.
-4. `fs::write(path, json)` - atomic on most platforms (write to a temp file then rename is handled by the OS on Linux/macOS; on Windows `write` is a direct overwrite but config files are small enough that partial-write risk is negligible).
+Thin wrapper: `save_to(&config_path(), s)`.
 
 ### Used by
 
 - `src-tauri/src/commands.rs` (`set_settings`) - called after the frontend submits updated settings over IPC
+
+## save_to
+
+```rust
+fn save_to(path: &Path, s: &Settings) -> std::io::Result<()>
+```
+
+`save`'s actual logic, taking an explicit path (mirroring `EditDoc::save`, split out for the same testability reason as `load_from`). Serialises `s` to pretty-printed JSON and writes it ATOMICALLY to `path`: the bytes land at a temp sibling first, then `std::fs::rename` moves them into place - the same tmp+rename pattern `EditDoc::save` uses.
+
+### Inputs
+
+- `path: &Path` - destination file.
+- `s: &Settings` - the settings snapshot to persist. *Why a reference:* the caller retains ownership; `save_to` is a write-through that does not consume or transform the value.
+
+### Returns
+
+`std::io::Result<()>` - `Ok(())` on success. Propagates `io::Error` from `create_dir_all`, the temp-file write, or the rename. Wraps any `serde_json` serialisation error as `ErrorKind::Other`. *Why `io::Result` rather than a custom error:* the only caller (`commands::set_settings`) maps the error to a `String` for the IPC response; `io::Error` provides a readable message without an additional error type.
+
+### Implementation
+
+1. `fs::create_dir_all(path.parent())` - ensures the `TCursor` directory exists before writing. Returns early on error. *Why `parent()` rather than a hardcoded dir:* keeps the directory in sync with `config_path()` automatically.
+2. `serde_json::to_vec_pretty(s)` - serialise. Map the serde error to `io::Error::new(ErrorKind::Other, e)` so the return type is uniform.
+3. **(M3, bug-sweep-2)** `win::sys::proc::tmp_sibling(path)` - a unique temp path in the same directory. Write the JSON there; on write failure, remove the temp and return the error (nothing at `path` is touched).
+4. `fs::rename(&tmp, path)` - atomically replaces `path`. *Why this replaced the old direct `fs::write(path, json)`:* `fs::write` truncates then writes IN PLACE - a crash or forced quit between those two steps left `config.json` truncated, which `load_from` would then read back as "corrupt" and silently reset to defaults, discarding every hotkey/theme/spotlight/audio setting with no recovery path. Settings panels write on every slider tick with no debounce (`SettingsPanel.tsx`, `Preferences.tsx`), which is the maximum-exposure pattern for an in-place write.
+
+### Behaviors
+
+- `save_to_then_load_from_round_trips_and_leaves_no_tmp_sibling` - a saved `Settings` round-trips byte-for-byte through `load_from`, and the directory contains only `config.json` afterward - no leftover `.part-*` temp file.
+- `save_to_overwrites_an_existing_file` - a second `save_to` call fully replaces the first snapshot.

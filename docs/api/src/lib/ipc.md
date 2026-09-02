@@ -287,25 +287,6 @@ export const saveEdit = (folder: string, doc: EditDoc) => invoke<void>("save_edi
 - `useEditHistory` (`src/editor/hooks/useEditHistory.ts`) - `undo`/`redo` persist the restored doc via a bulk `saveEdit` rather than replaying it as an `EditOp`.
 - `Editor` (`src/editor/Editor.tsx`) - `saveDocSettings` persists the whole doc after patching `settings` (theme/cursor/background/audio/etc. aren't `EditOp`s).
 
-## aiAutoedit
-
-```ts
-export const aiAutoedit = (folder: string, model?: string) => invoke<EditDoc>("ai_autoedit", { folder, model })
-```
-
-### Inputs
-
-- `folder` (`string`) - project directory.
-- `model` (`string`, optional) - Ollama model name override. *Why optional:* `ai_autoedit`/`ai_plan` fall back to the first installed Ollama chat model when this is omitted, empty, or names a model that isn't installed - there is no hardcoded default model name (a missing model used to 404, which was the "AI returned 404" bug).
-
-### Returns
-
-`Promise<EditDoc>` - the rewritten document after the AI director has applied zooms, trim, and speed segments. Rejects (and saves nothing) if Ollama is unreachable or the reply is unparseable. *Why return the doc rather than void:* the editor must refresh its state immediately after the AI pass without a separate `getEdit` round-trip.
-
-### Used by
-
-Not currently called from any `.tsx` file - the editor's AI Director now drives `aiPlan` (below) instead, so it can reveal each step one-at-a-time. `aiAutoedit`'s one-shot apply-the-whole-plan behavior stays available as a simpler backend entry point (mirrors `ai_autoedit` on the Rust side) for any future non-agentic caller.
-
 ## AiStep
 
 ```ts
@@ -330,11 +311,11 @@ The AI director's plan as ordered, labeled steps (NOT applied) - the editor reve
 ### Inputs
 
 - `folder` (`string`) - project directory.
-- `model` (`string`, optional) - Ollama model name override, same fallback rules as `aiAutoedit`.
+- `model` (`string`, optional) - Ollama model name override. *Why optional:* falls back to the first installed Ollama chat model when this is omitted, empty, or names a model that isn't installed - there is no hardcoded default model name (a missing model used to 404, which was the "AI returned 404" bug).
 
 ### Returns
 
-`Promise<AiStep[]>` - the plan as ordered, labeled steps, not yet applied to the doc. When the doc already has zooms, the first step is a `clear_zooms` op labeled "Rethinking your zooms…", so the reveal shows the mechanical seed-time zooms give way to the smart ones. Rejects if Ollama is unreachable or the reply is unparseable, same as `aiAutoedit`.
+`Promise<AiStep[]>` - the plan as ordered, labeled steps, not yet applied to the doc. When the doc already has zooms, the first step is a `clear_zooms` op labeled "Rethinking your zooms…", so the reveal shows the mechanical seed-time zooms give way to the smart ones. Rejects if Ollama is unreachable or the reply is unparseable.
 
 ### Used by
 
@@ -350,7 +331,7 @@ Locally-installed Ollama model names, for the AI panel's Engine picker.
 
 ### Returns
 
-`Promise<string[]>` - chat model names only (embedding-only models are filtered out on the Rust side). Never rejects: resolves to `[]` when Ollama isn't running, since this is a convenience for populating a dropdown, not a precondition for `aiAutoedit`/`aiPlan`.
+`Promise<string[]>` - chat model names only (embedding-only models are filtered out on the Rust side). Never rejects: resolves to `[]` when Ollama isn't running, since this is a convenience for populating a dropdown, not a precondition for `aiPlan`.
 
 ### Used by
 

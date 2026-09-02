@@ -11,7 +11,7 @@ const { requestFxOverlay } = await import("./fxOverlay");
 const { resolveSpotlight, newSpotlightSimState } = await import("./spotlightPreview");
 
 const clickfx = {
-  enabled: true, style: "ripple", color: [255, 0, 0], intensity: 1,
+  enabled: true, style: "pulse", color: [255, 0, 0], intensity: 1,
   spotlight: false, spotlight_dim: 0.6, spotlight_radius: 0.13, spotlight_feather: 0.1,
   spotlight_mode: "classic", spotlight_tint: [130, 90, 255], spotlight_dim_camera: true,
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -28,19 +28,53 @@ const resolvedSpotlightOn = () => resolveSpotlight(
 const call = (fx: unknown, clicks: { t: number; x: number; y: number }[], now: number) =>
   requestFxOverlay(100, 100, clicks as never, now, [50, 50], resolvedSpotlightOn(), fx as never, identity, 1, null);
 
-describe("requestFxOverlay", () => {
+describe("requestFxOverlay (sweep-2: clicks fall back to the overlay for an unmirrored style)", () => {
   beforeEach(() => { sent.length = 0; nextResult = () => Promise.resolve("data:image/png;base64,x"); });
 
-  it("uses the export's 600ms click lifetime, not 500ms", async () => {
-    // A click 550ms old is EXPIRED at 500ms but still alive (progress ~0.92) at the export's 600.
+  it("includes click hits for an UNMIRRORED style (pulse) - falls back to the overlay exactly as before", async () => {
     await call(clickfx, [{ t: 0, x: 0.5, y: 0.5 }], 550);
     expect(sent[0].hits.length).toBe(1);
-    expect(sent[0].hits[0][2]).toBeCloseTo(550 / 600, 5);
+    expect(sent[0].hits[0][2]).toBeCloseTo(550 / 600, 5); // export's 600ms lifetime, not 500ms
   });
 
-  it("drops a click once it passes 600ms", async () => {
+  it("drops an unmirrored-style click once it passes 600ms", async () => {
     await call(clickfx, [{ t: 0, x: 0.5, y: 0.5 }], 650);
     expect(sent[0].hits.length).toBe(0);
+  });
+
+  it("excludes click hits for a MIRRORED style (ripple) - ripplePreview.ts draws those client-side", async () => {
+    await call({ ...clickfx, style: "ripple" }, [{ t: 0, x: 0.5, y: 0.5 }], 100);
+    expect(sent[0].hits).toEqual([]);
+  });
+
+  it("excludes click hits for a MIRRORED style (shockwave) too", async () => {
+    await call({ ...clickfx, style: "shockwave" }, [{ t: 0, x: 0.5, y: 0.5 }], 100);
+    expect(sent[0].hits).toEqual([]);
+  });
+
+  it("excludes click hits when the style is none", async () => {
+    await call({ ...clickfx, style: "none" }, [{ t: 0, x: 0.5, y: 0.5 }], 100);
+    expect(sent[0].hits).toEqual([]);
+    expect(sent[0].spotAlpha).toBe(1); // still draws the spotlight regardless of click style
+  });
+
+  it("triggers a backend call from an unmirrored-style click ALONE, spotlight off (unlike a mirrored style)", async () => {
+    const out = await requestFxOverlay(100, 100, [{ t: 0, x: 0.5, y: 0.5 }] as never, 100, null, null, clickfx, identity, 1, null);
+    expect(out).not.toBeNull();
+    expect(sent.length).toBe(1);
+    expect(sent[0].hits.length).toBe(1);
+  });
+
+  it("returns null with no backend call for a mirrored-style click ALONE, spotlight off", async () => {
+    const out = await requestFxOverlay(100, 100, [{ t: 0, x: 0.5, y: 0.5 }] as never, 100, null, null, { ...clickfx, style: "ripple" }, identity, 1, null);
+    expect(out).toBeNull();
+    expect(sent.length).toBe(0);
+  });
+
+  it("returns null with no backend call when nothing is active at all", async () => {
+    const out = await requestFxOverlay(100, 100, [] as never, 100, null, null, clickfx, identity, 1, null);
+    expect(out).toBeNull();
+    expect(sent.length).toBe(0);
   });
 
   it("renders nothing at all when fx are disabled, spotlight included", async () => {
@@ -50,16 +84,10 @@ describe("requestFxOverlay", () => {
     expect(sent.length).toBe(0);
   });
 
-  it("still draws the spotlight when the click style is none", async () => {
-    await call({ ...clickfx, style: "none" }, [{ t: 0, x: 0.5, y: 0.5 }], 100);
-    expect(sent[0].hits.length).toBe(0);
-    expect(sent[0].spotAlpha).toBe(1);
-  });
-
-  // A real IPC/backend failure must stay a REJECTED promise, distinct from the two "nothing to
-  // draw" `null` returns above (disabled fx / no active hit or spotlight) - a null RESOLUTION is
-  // a valid terminal state the caller latches and stops re-requesting; a rejection must not be,
-  // or a transient backend hiccup would wedge that cache key as permanently "done".
+  // A real IPC/backend failure must stay a REJECTED promise, distinct from the "nothing to draw"
+  // `null` returns above (disabled fx / no active click or spotlight) - a null RESOLUTION is a
+  // valid terminal state the caller latches and stops re-requesting; a rejection must not be, or a
+  // transient backend hiccup would wedge that cache key as permanently "done".
   it("rejects (does not resolve null) when the backend call fails", async () => {
     nextResult = () => Promise.reject(new Error("ipc down"));
     await expect(call(clickfx, [{ t: 0, x: 0.5, y: 0.5 }], 100)).rejects.toThrow("ipc down");

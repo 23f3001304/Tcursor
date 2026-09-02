@@ -1,6 +1,8 @@
 # src-tauri/src/edit/seed.rs
 
-Builds the first `EditDoc` from raw recording data so the editor opens with the same visual result as today's exporter, then writes it as `edit.json`. On subsequent opens `load_or_seed` returns the existing file, migrated to `DOC_VERSION` if needed (schema migrations + `clip_ms` backfill live in `edit/migrate.rs` - see `docs/api/src-tauri/src/edit/migrate.md` - and are re-exported here as `seed::true_duration_ms` and `seed::output_shift`, the latter `pub(crate)` since its only external caller, `ai::commands::build_plan`, is in-crate). The three public helpers (`zooms_from_regions`, `layout_from_actions`, `actions_on_output_clock`) are pure converters and are independently unit-tested. `build_default` also seeds recorded spotlight holds as editable Spotlight effect regions (via `spotlight_effects` + `export::hold::hold_spans`), so a hotkey-held spotlight appears as an editable/removable timeline pill instead of being baked in, and seeds `clip_ms` to the same true clip duration as `trim.out_ms`.
+Builds the first `EditDoc` from raw recording data so the editor opens with the same visual result as today's exporter, then writes it as `edit.json`. On subsequent opens `load_or_seed` returns the existing file, migrated to `DOC_VERSION` if needed (schema migrations + `clip_ms` backfill live in `edit/migrate.rs` - see `docs/api/src-tauri/src/edit/migrate.md` - and are re-exported here as `seed::true_duration_ms` and `seed::output_shift`, the latter `pub(crate)` since its only external caller, `ai::commands::build_plan`, is in-crate). The three public helpers (`zooms_from_regions`, `layout_from_actions`, `actions_on_output_clock`) are pure converters and are independently unit-tested. `build_default` (now `pub(crate)`) also seeds recorded spotlight holds as editable Spotlight effect regions (via `spotlight_effects` + `export::hold::hold_spans`), so a hotkey-held spotlight appears as an editable/removable timeline pill instead of being baked in, and seeds `clip_ms` to the same true clip duration as `trim.out_ms`.
+
+**`load_or_seed` itself, and the locking around it, live in `edit/seed_lock.rs`** (split out - `seed.rs` was at the 200-line budget), re-exported here (`pub use crate::edit::seed_lock::load_or_seed;`) so callers keep using the `seed::` path. See `docs/api/src-tauri/src/edit/seed_lock.md` for the full self-locking / two-phase-locking design (bug-sweep-2 Task 7 round 2) and `docs/api/src-tauri/src/edit/lock.md` for the shared per-folder lock it's built on.
 
 ### One clock: every seeded region is output time
 
@@ -73,35 +75,7 @@ Both arguments share ONE clock. The seed passes both on the output clock (action
 - `empty_layout_track_is_one_screen_span` - no actions -> one `"screen"` segment `[0, dur_ms]` with id `"l0"`.
 - `layout_switches_make_consecutive_spans_to_duration` - two switches at 1000 ms and 3000 ms into an 8000 ms clip produce three consecutive segments with correct ids and layout names.
 
-## load_or_seed
-
-```rust
-pub fn load_or_seed(paths: &ProjectPaths) -> EditDoc
-```
-
-Returns the existing `EditDoc` for a project, or builds and persists a default one if none exists. Either way it then brings the doc up to `DOC_VERSION` (`migrate`) and runs `effects::lift_always_on_spotlight` so an always-on `clickfx.spotlight` becomes an editable full-span timeline region, persisting the doc when a fresh seed, the migration or the lift changed it.
-
-### Inputs
-
-- `paths: &ProjectPaths` - resolved paths for the project directory. *Why `ProjectPaths` rather than individual file paths:* a single struct prevents callers from assembling mismatched paths.*
-
-### Returns
-
-`EditDoc` - always succeeds. On a new project the returned doc is identical to what `build_default` would produce for a fresh export, so the editor opens in a consistent state.
-
-### Implementation
-
-1. Load `EditDoc::load(paths.edit())` if present (`fresh = false`), else `build_default(paths)` (`fresh = true`).
-2. Run `edit::migrate::migrate(&mut doc, paths)` - schema upgrades AND the `clip_ms` backfill for docs written by older builds (returns whether it changed the doc). See `docs/api/src-tauri/src/edit/migrate.md`.
-3. Run `effects::lift_always_on_spotlight(&mut doc)` - converts an always-on spotlight toggle into an editable full-span region (idempotent; returns whether it changed the doc).
-4. If the doc was freshly seeded OR the migration OR the lift changed it, attempt `doc.save(paths.edit())` (failure silently ignored - the caller still gets a valid doc).
-5. Return the doc.
-
-### Behaviors
-
-- `v1_docs_migrate_their_regions_once` - a v1 doc's effects/layout shift by `events_ms - video_start` (saturating at 0) and come back as v2, with `clip_ms` backfilled too; a second `load_or_seed` leaves them untouched.
-- `a_v1_doc_without_a_timeline_becomes_v2_unshifted` - no `events.json`/`sync.json` -> regions AND `clip_ms` unchanged, version still bumped.
-- `clip_ms_backfills_on_an_already_current_version_doc_too` - a doc already at `DOC_VERSION` but written before `clip_ms` existed still gets it backfilled - the backfill is not gated by the version-bump step.
+`load_or_seed` (`pub fn load_or_seed(paths: &ProjectPaths) -> EditDoc`) is `pub use`-re-exported from `edit::seed_lock` here, the same way `true_duration_ms`/`output_shift` are re-exported from `edit::migrate` below - so existing callers keep using the `seed::` path. It is DEFINED, and fully documented (self-locking behavior, the fast-path/slow-path split, why `edit::commands::apply_edit_op` calls the lower-level `seed_lock::load_or_seed_locked` instead, its full caller list, and its `Behaviors`), in `docs/api/src-tauri/src/edit/seed_lock.md`.
 
 ## actions_on_output_clock
 
@@ -119,10 +93,5 @@ PURE: the recorded action log with every timestamp moved onto the output clock b
 
 - `src-tauri/src/edit/seed.rs` - `build_default`, before deriving layout segments and spotlight regions
 - `src-tauri/src/export/render/render_edit.rs` - `EditState::load`'s recorded-action layout fallback
-
-### Used by
-
-- `src-tauri/src/edit/commands.rs` - `get_edit` and `apply_edit_op` both call this as their first step
-- `src-tauri/src/ai/commands.rs` - loads the doc before applying an AI plan
 
 `true_duration_ms` and `output_shift` are re-exported here (`use crate::edit::migrate::{true_duration_ms, output_shift};`) so existing callers keep using the `seed::` path; their migration/clock siblings live in `docs/api/src-tauri/src/edit/migrate.md`.

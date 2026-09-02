@@ -1,13 +1,17 @@
-import { useEffect, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getEdit, setCapturable, cameraTrack, previewLayout, previewLayouts, clickTrack, previewBg, cursorSprites, cursorKinds, osCursorInVideo, ensureThumbs, ensureWaveform, ensurePreviewAudio, ensureProxy, fileSrc, getProjectManifest, DEFAULT_PROXY_HEIGHT } from "../../lib/ipc";
 import type { EditDoc } from "../../lib/edit";
 import type { CamSample, ClickSample, CursorSpriteDto, CursorKindSample, PreviewLayout, LayoutPresets } from "../../lib/ipc";
 import { planProxySrc } from "./editorData";
+import { debounce } from "./debounce";
+
+// Trailing debounce window for the previewBg refetch below - see editor.md "render hygiene".
+const PREVIEW_BG_DEBOUNCE_MS = 80;
 
 // All the editor's preview/timeline data fetching, split out of Editor so the component
 // itself only holds render + mutation logic. See docs/api/src/editor/Editor.md for why each
-// fetch is keyed on [folder], [folder, rev], or [folder, quality].
+// fetch is keyed on [folder], [folder, rev], or [folder, quality]. Export-run state lives in the
+// sibling useExportState.ts instead (kept separate so this file stays under its line budget).
 export function useEditorData(folder: string, rev: number, quality: number) {
   const [doc, setDoc] = useState<EditDoc | null>(null);
   const [track, setTrack] = useState<CamSample[]>([]);
@@ -23,11 +27,6 @@ export function useEditorData(folder: string, rev: number, quality: number) {
   const [audioUrl, setAudioUrl] = useState("");
   const [srcUrl, setSrcUrl] = useState("");
   const [playing, setPlaying] = useState(false);
-  const [exporting, setExporting] = useState(false);
-  const [pct, setPct] = useState(0);
-  const [exportDone, setExportDone] = useState(false);
-  const [exportError, setExportError] = useState<string | null>(null);
-  const [exportPath, setExportPath] = useState(""); // the finished export's own file path (export-done's payload), for "Show in folder"
 
   useEffect(() => {
     let live = true;
@@ -78,14 +77,32 @@ export function useEditorData(folder: string, rev: number, quality: number) {
     clickTrack(folder).then((d) => { if (live) setClicks(d); }).catch(() => {});
     return () => { live = false; };
   }, [folder]);
-  // The export background: refetch only when the doc's OWN background settings change (same
-  // "don't refetch on every unrelated edit" reasoning as cursorSprites below) - a background
-  // panel edit is the only kind of change that can actually alter what `preview_bg` returns.
-  useEffect(() => {
-    let live = true;
-    previewBg(folder).then((u) => { if (live) setBgUrl(u); }).catch(() => {});
-    return () => { live = false; };
-  }, [folder, JSON.stringify(doc?.settings.background)]);
+  // The export background: refetch only when the doc's OWN background settings change - a
+  // background panel edit is the only kind of change that can actually alter what `preview_bg`
+  // returns. Debounced (trailing): a background slider drag changes this dependency at up to the
+  // Slider's own commit rate, and `preview_bg` re-encodes/base64s the full preview background -
+  // not something to redo dozens of times a second (see editor.md "render hygiene"). `fetchBgRef`
+  // is a lazy-initialized singleton (NOT `useRef(debounce(...))` - that form still calls
+  // `debounce(...)` on every render just to discard the result) so a burst of doc changes
+  // collapses into one fetch; `bgSeqRef`/`bgLiveRef` reproduce the discarded-stale-response
+  // guarantee the other fetches here get from their own per-effect `live` flag, since this fetch
+  // now outlives any single effect run.
+  const bgSeqRef = useRef(0);
+  const bgLiveRef = useRef(true);
+  const fetchBgRef = useRef<ReturnType<typeof debounce<[string]>> | null>(null);
+  if (!fetchBgRef.current) {
+    fetchBgRef.current = debounce((f: string) => {
+      const seq = ++bgSeqRef.current;
+      previewBg(f).then((u) => { if (bgLiveRef.current && bgSeqRef.current === seq) setBgUrl(u); }).catch(() => {});
+    }, PREVIEW_BG_DEBOUNCE_MS);
+  }
+  useEffect(() => { fetchBgRef.current!(folder); }, [folder, JSON.stringify(doc?.settings.background)]);
+  // Resets `bgLiveRef` true on EVERY mount, not just at declaration - React 19 StrictMode
+  // (`main.tsx`) double-invokes effects in dev (mount -> cleanup -> mount, same fiber), so
+  // `useRef(true)`'s initial value only applies to the FIRST pass; without this reset, the dev-
+  // only cleanup pass permanently flips it false and every response is discarded thereafter -
+  // `bgUrl` never leaves `""` in dev.
+  useEffect(() => { bgLiveRef.current = true; return () => { bgLiveRef.current = false; fetchBgRef.current?.cancel(); }; }, []);
   // Cursor type track and the record-time "is the OS cursor baked in?" flag: both are properties
   // of the RECORDING, not of the doc, so they never change with edits - fetch once per folder.
   // `osCursor` defaults to true (draw nothing), the safe answer while the fetch is in flight.
@@ -136,7 +153,10 @@ export function useEditorData(folder: string, rev: number, quality: number) {
   // `immediate`/`known` branches the resolved filename is deterministic and unchanged by a retry,
   // so `<video>`'s actual reload there is Stage's own `screen.current?.load()` call.
   const [reloadTick, setReloadTick] = useState(0);
-  const retryMedia = () => setReloadTick((t) => t + 1);
+  // `useCallback`'d (render hygiene pass, deps `[]` - `setReloadTick` is a `useState` setter, so
+  // it's already stable forever) so `retryMedia`'s identity holds across renders, which `Stage`
+  // (`React.memo`'d) needs to actually skip re-rendering for it.
+  const retryMedia = useCallback(() => setReloadTick((t) => t + 1), []);
   useEffect(() => {
     setPlaying(false);
     if (lastFolderRef.current !== folder) { lastFolderRef.current = folder; proxyReadyRef.current = false; }
@@ -154,20 +174,8 @@ export function useEditorData(folder: string, rev: number, quality: number) {
     return () => { live = false; };
   }, [folder, quality, manifest, reloadTick]);
 
-  useEffect(() => {
-    const subs = [
-      listen<number>("export-progress", (e) => setPct(e.payload)),
-      // Payload is the exported file's own absolute path (`<folder>/final.<ext>`, see run.rs),
-      // not just the project folder - stored so ExportProgress can offer "Show in folder".
-      listen<string>("export-done", (e) => { setExporting(false); setExportDone(true); setExportPath(e.payload); }),
-      listen<string>("export-error", (e) => { setExporting(false); setExportError(e.payload); }),
-    ];
-    return () => { subs.forEach((s) => s.then((f) => f())); };
-  }, []);
-
   return {
     doc, setDoc, track, layout, layoutPresets, clicks, bgUrl, cursorSpr, cursorKnd, osCursor,
-    thumbs, waves, wavesReady, audioUrl, srcUrl, playing, setPlaying, exporting, setExporting, pct, setPct,
-    exportDone, setExportDone, exportError, setExportError, exportPath, setExportPath, retryMedia,
+    thumbs, waves, wavesReady, audioUrl, srcUrl, playing, setPlaying, retryMedia,
   };
 }

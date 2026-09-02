@@ -1,8 +1,7 @@
-import { useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { exportProject, applyEditOp, fileSrc, DEFAULT_PROXY_HEIGHT } from "../lib/ipc";
-import type { EditDoc, EditOp } from "../lib/edit";
 import type { MarkState } from "../lib/brandWave";
-import { resolveTrim } from "../lib/edit";
+import { resolveTrim, type EditDoc, type EditOp } from "../lib/edit";
 import type { CamPose } from "./stage/cameraMoves";
 import { TopBar } from "./shell/TopBar";
 import { ExportDialog } from "./shell/ExportDialog";
@@ -17,6 +16,9 @@ import { zoomTargetPoint } from "./stage/zoomTargetMapper";
 import { Transport } from "./stage/Transport";
 import { Timeline } from "./timeline/Timeline";
 import { useEditorData } from "./hooks/useEditorData";
+import { hasWebcamSignal } from "./hooks/editorData";
+import { useExportState } from "./hooks/useExportState";
+import { useEditorCallbacks } from "./hooks/useEditorCallbacks";
 import { useEditorKeymap } from "./hooks/useEditorKeymap";
 import { useMoveModeGuard } from "./hooks/useMoveModeGuard";
 import { useTrimActions } from "./hooks/useTrimActions";
@@ -36,9 +38,8 @@ export function Editor({ folder, onClose }: { folder: string; onClose: () => voi
   const [rev, setRev] = useState(0);
   const [tab, setTab] = useState<Tab>("ai");
   const [sel, setSel] = useState<string | null>(null);
-  // On-stage aim mode for a Region zoom. Mutually exclusive with the camera Move mode - both claim
-  // the same pointer on the same canvas - so entering Move exits aiming, and aiming stays
-  // suppressed (not cancelled) while Move is on. See `aimMode` below.
+  // On-stage aim mode for a Region zoom. Exclusive with camera Move mode (both claim the same
+  // pointer): entering Move exits aiming, and aiming stays suppressed while Move is on.
   const [aimOn, setAimOn] = useState(false);
   const [running, setRunning] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null); // last AI auto-edit failure, shown in the panel
@@ -50,84 +51,96 @@ export function Editor({ folder, onClose }: { folder: string; onClose: () => voi
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  // The UNSAVED Move-mode webcam pose: dragging the PiP updates it live (preview only), the Camera
-  // panel's Update/Add button saves it as a keyframe, and Stage discards it when the playhead moves.
-  // Shared here so both Stage (drag) and CameraPanel (save button) see the same draft.
+  // The UNSAVED Move-mode webcam pose: dragging the PiP updates it live (preview only); the Camera
+  // panel's Update/Add button saves it as a keyframe. Shared so Stage (drag) and CameraPanel (save) see it.
   const camDraftRef = useRef<CamPose | null>(null);
-  // Fed to useEditHistory's onSwap below - a minimal "Undid"/"Redid" pill for keyboard-triggered undo/redo.
-  const { msg: toast, onSwap, dismiss: dismissToast } = useUndoToast();
+  // Fed to useEditHistory's onSwap below (undo/redo pill); `push` is the same pill generalized to
+  // also carry the export-warning text (Task 11).
+  const { msg: toast, onSwap, push: pushToast, dismiss: dismissToast } = useUndoToast();
   // Serializes every EditDoc mutation (applyOp/onRun/undo/redo) through one promise chain (see
   // opQueue.ts + Editor.md) so none of them can race a still-in-flight one.
   const enqueue = useRef(createQueue()).current;
 
   const {
     doc, setDoc, track, layout, layoutPresets, clicks, bgUrl, cursorSpr, cursorKnd, osCursor,
-    thumbs, waves, wavesReady, audioUrl, srcUrl, playing, setPlaying, exporting, setExporting, pct, setPct,
-    exportDone, setExportDone, exportError, setExportError, exportPath, setExportPath, retryMedia,
+    thumbs, waves, wavesReady, audioUrl, srcUrl, playing, setPlaying, retryMedia,
   } = useEditorData(folder, rev, quality);
-  // Mirrors `doc` (reassigned every render) so queued closures read it fresh at execution time - see Editor.md.
+  const { exporting, pct, exportDone, setExportDone, exportError, setExportError, exportPath, setExportPath, startExport, exportStartedAt } =
+    useExportState(pushToast);
+  // Mirrors `doc`/`timeMs` (reassigned every render) so queued closures/tick-stable callbacks read
+  // them fresh at execution time instead of closing over a stale value (Editor.md, "render hygiene").
   const docRef = useRef(doc);
   docRef.current = doc;
+  const timeMsRef = useRef(timeMs);
+  timeMsRef.current = timeMs;
 
   const dur = vidDurMs > 0 ? vidDurMs : (doc?.trim.out_ms ?? 0);
   const proj = folder.split(/[\\/]/).pop() ?? "project";
-  const { record, undo, redo, canUndo, canRedo } = useEditHistory(folder, docRef, setDoc, () => setRev((r) => r + 1), enqueue, onSwap);
+  const { record, unrecord, undo, redo, canUndo, canRedo } = useEditHistory(folder, docRef, setDoc, () => setRev((r) => r + 1), enqueue, onSwap);
   const director = useDirector(); // fake-pointer choreography for onRun below - see director/useDirector.ts
 
-  // Clamp playback to the trim's out point (not just the clip end), so pressing play never runs
-  // past a trimmed-out tail; scrubbing the timeline itself is unrestricted (resolveTrim's inMs/
-  // outMs mirror the export gate exactly, via the same doc.trim the backend reads).
-  const onTime = (ms: number) => {
-    const { outMs } = resolveTrim(doc?.trim ?? { in_ms: 0, out_ms: 0 }, dur);
-    // At the trim-out, park the playhead exactly on the boundary - not in the frame or two of
-    // overshoot the rAF loop reports before the pause lands - so it doesn't sit past the line.
-    if (dur > 0 && ms >= outMs) { setTimeMs(outMs); setPlaying(false); }
-    else setTimeMs(ms);
-  };
-
-  const applyOp = (op: EditOp): Promise<EditDoc | null> => enqueue(async () => {
-    if (docRef.current) record(docRef.current); // snapshot the pre-edit doc for undo, read fresh at execution time
+  const applyOp = useCallback((op: EditOp): Promise<EditDoc | null> => enqueue(async () => {
+    // `token.snapshot` is non-null only if record() actually pushed a NEW undo entry (vs
+    // coalesced) - unrecord(token) below is an identity-checked no-op otherwise/always-safe. See useEditHistory.md.
+    const token = docRef.current ? record(docRef.current) : null;
     try {
-      const d = await applyEditOp(folder, op); setDoc(d);
+      const d = await applyEditOp(folder, op);
+      setDoc(d); docRef.current = d; // read by a queued undo/redo BEFORE React's own re-render lands (M1)
       if (!op.op.endsWith("_effect")) setRev((r) => r + 1);
       return d;
-    } catch { return null; }
-  });
-  const { moveMode, requestMoveMode, moveOffDialog } = useMoveModeGuard(doc, applyOp);
+    } catch {
+      if (token) unrecord(token); // a failed apply changed nothing - no phantom undo step either (L1)
+      return null;
+    }
+  }), [enqueue, docRef, record, unrecord, folder, setDoc, setRev]);
+  const { moveMode, requestMoveMode, moveOffDialog, moveOffOpen } = useMoveModeGuard(doc, applyOp);
   // Only a Region-target zoom has a stored aim point, so `aimPoint` doubles as "is aiming even
-  // possible right now" - a cursor-following or unselected zoom renders no reticle and leaves the
-  // canvas click on its normal add-a-zoom meaning.
-  const aimPoint = zoomTargetPoint(doc?.zooms.find((z) => z.id === sel)?.target);
+  // possible right now". Memoized on the found zoom (stable across ticks) rather than recomputed
+  // every render: `zoomTargetPoint` returns a fresh `[x, y]` array every call, which would
+  // otherwise defeat `Stage`'s memo (`aimPoint` is one of its props) on every single tick.
+  const selZoom = doc?.zooms.find((z) => z.id === sel);
+  const aimPoint = useMemo(() => zoomTargetPoint(selZoom?.target), [selZoom]);
   const aimMode = aimOn && !moveMode && !!aimPoint;
-  const onMoveMode = (want: boolean) => { if (want) setAimOn(false); requestMoveMode(want); };
-  const aimAt = (x: number, y: number) => { if (sel) void applyOp({ op: "update_zoom", id: sel, target: { fixed: { x, y } } }); };
-  const { onTrimIn, onTrimOut, onResetTrim } = useTrimActions(doc, timeMs, dur, applyOp);
-  const { saveDocSettings, onAutoModel } = useDocSettings(folder, doc, setDoc, record, setRev);
-  const { addZoom, addSpotlight, addCameraMove, zoomAt } = useTimelineActions(applyOp, timeMs, setSel, setPlaying);
+  // Trim range, kept in a ref alongside `docRef`/`timeMsRef` above - `useEditorCallbacks`'s
+  // `onTime`/`onPlayToggle` read it at call time so their identity doesn't depend on the trim
+  // (which `resolveTrim` recomputes as a fresh object every render regardless of real changes).
+  const trimRange = resolveTrim(doc?.trim ?? { in_ms: 0, out_ms: 0 }, dur);
+  const trimRangeRef = useRef(trimRange);
+  trimRangeRef.current = trimRange;
 
-  useEditorKeymap({ sel, doc, timeMs, setSel, setPlaying, applyOp, addZoom, addSpotlight, onOverlay: () => setShowShortcuts((s) => !s) });
+  const { onTime, aimAt, onMoveMode, onSeek, onPlayToggle, onAspect, cycleQuality, onMuteToggle } = useEditorCallbacks({
+    applyOp, sel, dur, timeMsRef, trimRangeRef, setTimeMs, setPlaying, setAimOn, setQuality, setMuted, requestMoveMode,
+  });
+  // Shared by Rail and StageToolbar - navigating AWAY clears selection/aim; re-clicking the
+  // already-open tab is a no-op (fix round 1: used to clear unconditionally, dropping selection).
+  const onTab = useCallback((t: Tab) => { if (t !== tab) { setSel(null); setAimOn(false); } setTab(t); }, [tab]);
+  const { onTrimIn, onTrimOut, onResetTrim } = useTrimActions(doc, timeMsRef, dur, applyOp);
+  const { saveDocSettings, onAutoModel } = useDocSettings(folder, docRef, setDoc, record, setRev, enqueue);
+  const { addZoom, addSpotlight, addCameraMove, zoomAt } = useTimelineActions(applyOp, timeMsRef, docRef, setSel, setPlaying);
 
-  // Agentic AI director: `director.run` (director/useDirector.ts) fetches the plan and
-  // choreographs the fake pointer AROUND the exact apply+narrate sequence the F2 fix (commit
-  // d08c71e) requires - see that hook's own comment. `running` is still set synchronously - before
-  // anything is enqueued - so the re-entrancy guard AND the Transport wand's `disabled` take effect
-  // immediately; the whole pass still runs as ONE `enqueue(...)` call (see Editor.md) so an
-  // undo/redo issued mid-run is queued behind it, not interleaved with a reveal step's `setDoc`.
-  const onRun = () => {
-    if (!doc || running) return;
+  // Inert behind any modal (M4), incl. the AI director's own scrim (`running`). `shortcutsOpen`
+  // lets "?" still toggle ShortcutsOverlay closed while it's the one open (keymap.ts).
+  const modalOpen = showExportDialog || showShortcuts || showSettings || moveOffOpen || running;
+  useEditorKeymap({ sel, doc, timeMs, setSel, setPlaying, applyOp, addZoom, addSpotlight, onOverlay: () => setShowShortcuts((s) => !s), modalOpen, shortcutsOpen: showShortcuts });
+
+  // Agentic AI director: `director.run` fetches the plan and choreographs the fake pointer
+  // (see that hook's own comment). `running` is set synchronously so the wand's `disabled` takes
+  // effect immediately; the whole pass runs as ONE `enqueue(...)` so a mid-run undo/redo queues
+  // behind it. `exporting` guard (L3) belt-and-braces Transport's wand + AiPanel's own `disabled`.
+  const onRun = useCallback(() => {
+    if (!doc || running || exporting) return;
     setRunning(true); setAiError(null); setAiLog([]);
     void enqueue(() => director.run(folder, docRef, record, dur, setDoc, setRev, setAiLog, setAiError, setPlaying, setTimeMs)
       .finally(() => setRunning(false)));
-  };
+  }, [doc, running, exporting, enqueue, director.run, folder, docRef, record, dur, setDoc, setRev]);
 
   if (!doc) return <div className="editor"><div className="e-stage-empty" style={{ margin: "auto" }}>Loading edit...</div></div>;
 
-  const trimRange = resolveTrim(doc.trim, dur);
   const trimmed = trimRange.inMs > 0 || trimRange.outMs < dur;
   // The living brand mark's state (Task 39) - gated by the doc's own `ui.animated_brand` feel
   // knob (a per-recording settings snapshot, same as `doc.settings.cursor.pack` elsewhere) before
   // TcursorMark ever sees anything but "idle"; exporting wins over directing if somehow both were
-  // true (can't actually happen - the AI director doesn't run mid-export).
+  // true - `onRun`'s own `exporting` guard above is what actually enforces that, not just this order.
   const brandState: MarkState = !doc.settings.ui.animated_brand ? "idle" : exporting ? "exporting" : running ? "directing" : "idle";
 
   return (
@@ -136,31 +149,27 @@ export function Editor({ folder, onClose }: { folder: string; onClose: () => voi
       <TopBar proj={proj} exporting={exporting} pct={pct} onOpenExport={() => setShowExportDialog(true)} onOpenSettings={() => setShowSettings(true)} onClose={onClose}
         onUndo={() => void undo()} onRedo={() => void redo()} canUndo={canUndo} canRedo={canRedo} brandState={brandState} />
       <div className="e-body">
-        <Rail tab={tab} onTab={(t) => { setSel(null); setAimOn(false); setTab(t); }} />
+        <Rail tab={tab} onTab={onTab} />
         <EditorPanels doc={doc} sel={sel} tab={tab} dur={dur} setSel={setSel} setTab={setTab}
-          timeMs={timeMs} running={running} aiError={aiError} aiLog={aiLog} aiProgress={director.progress} onRun={onRun} onAutoModel={onAutoModel} applyOp={applyOp} saveDocSettings={saveDocSettings}
+          timeMs={tab === "camera" ? timeMs : 0} timeMsRef={timeMsRef} running={running} exporting={exporting} aiError={aiError} aiLog={aiLog} aiProgress={director.progress} onRun={onRun} onAutoModel={onAutoModel} applyOp={applyOp} saveDocSettings={saveDocSettings}
           moveMode={moveMode} requestMoveMode={onMoveMode} camDraftRef={camDraftRef} osCursorInVideo={osCursor}
-          aimMode={aimMode} onAimMode={setAimOn}
+          aimMode={aimMode} onAimMode={setAimOn} onSeek={onSeek}
           addZoom={addZoom} addSpotlight={addSpotlight} addCameraMove={addCameraMove} />
-        {/* Relative-positioned wrapper so the undo/redo Toast can sit bottom-center of the stage
-            without Stage.tsx (already at the file line limit) needing to own toast state itself. */}
+        {/* Relative wrapper so the undo/redo Toast and the AI director's status pill (was
+            `position:fixed` from the viewport bottom, floating over the timeline once it grew
+            past ~74px, ux audit #17) sit bottom-center of the STAGE, not owned by Stage.tsx. */}
         <div className="e-stagetoast">
-          <Stage src={srcUrl} webcamSrc={fileSrc(`${folder}\\webcam.webm`)} track={track} layout={layout} layoutPresets={layoutPresets} layoutSegs={doc.layout} cameraMoves={doc.camera_moves} zooms={doc.zooms} zoomSettings={doc.settings.zoom} clicks={clicks} bgUrl={bgUrl} cursorSprites={cursorSpr} cursorKinds={cursorKnd} osCursorInVideo={osCursor} cursor={doc.settings.cursor} effects={doc.effects} clickfx={doc.settings.clickfx} audioSrc={audioUrl} muted={muted} volume={volume / 100} timeMs={timeMs} playing={playing} moveMode={moveMode} aimPoint={aimPoint} aimMode={aimMode} camDraftRef={camDraftRef} onTime={onTime} onDuration={setVidDurMs} onZoomAt={zoomAt} onAimAt={aimAt} onRetryMedia={retryMedia} />
+          <Stage src={srcUrl} webcamSrc={fileSrc(`${folder}\\webcam.webm`)} track={track} layout={layout} layoutPresets={layoutPresets} layoutSegs={doc.layout} cameraMoves={doc.camera_moves} zooms={doc.zooms} zoomSettings={doc.settings.zoom} clicks={clicks} bgUrl={bgUrl} cursorSprites={cursorSpr} cursorKinds={cursorKnd} osCursorInVideo={osCursor} cursor={doc.settings.cursor} effects={doc.effects} clickfx={doc.settings.clickfx} audioSrc={audioUrl} muted={muted} volume={volume / 100} timeMs={timeMs} playing={playing} moveMode={moveMode} aimPoint={aimPoint} aimMode={aimMode} camDraftRef={camDraftRef} tab={tab} onTab={onTab} aspect={doc.aspect} onAspect={onAspect} aspectLocked={exporting || dur <= 0} onTime={onTime} onDuration={setVidDurMs} onZoomAt={zoomAt} onAimAt={aimAt} onRetryMedia={retryMedia} />
           <Toast msg={toast} onDone={dismissToast} />
+          <DirectorOverlay running={running} planning={director.planning} model={doc.settings.ai_model || undefined} pointerRef={director.pointerRef} progress={director.progress} onCancel={director.requestCancel} />
         </div>
       </div>
-      <DirectorOverlay running={running} planning={director.planning} model={doc.settings.ai_model || undefined} pointerRef={director.pointerRef} progress={director.progress} onCancel={director.requestCancel} />
       <Transport
         timeMs={timeMs}
         dur={dur}
         playing={playing}
-        onPlay={() => setPlaying((p) => {
-          // Starting playback outside the trim range snaps forward to the trim-in point first,
-          // so play never starts inside a dimmed (trimmed-out) region.
-          if (!p && (timeMs < trimRange.inMs || timeMs >= trimRange.outMs)) setTimeMs(trimRange.inMs);
-          return !p;
-        })}
-        onSeek={(ms) => { setPlaying(false); setTimeMs(ms); }}
+        onPlay={onPlayToggle}
+        onSeek={onSeek}
         onAddZoom={addZoom}
         onAutoedit={onRun}
         aiRunning={running}
@@ -170,19 +179,19 @@ export function Editor({ folder, onClose }: { folder: string; onClose: () => voi
         onTrimOut={onTrimOut}
         onResetTrim={onResetTrim}
         aspect={doc.aspect}
-        onAspect={(aspect) => { void applyOp({ op: "set_aspect", aspect }); }}
+        onAspect={onAspect}
         quality={quality}
-        onQuality={() => setQuality((q) => (q === 480 ? 720 : q === 720 ? 1080 : 480))}
+        onQuality={cycleQuality}
         muted={muted}
-        onMute={() => setMuted((m) => !m)}
+        onMute={onMuteToggle}
         volume={volume}
         onVolume={setVolume}
       />
-      <Timeline doc={doc} timeMs={timeMs} dur={dur} playing={playing} onSeek={(ms) => { setPlaying(false); setTimeMs(ms); }} sel={sel} onSel={setSel} onApply={applyOp} thumbs={thumbs} waves={waves} wavesReady={wavesReady} />
+      <Timeline doc={doc} timeMs={timeMs} dur={dur} playing={playing} onSeek={onSeek} sel={sel} onSel={setSel} onApply={applyOp} thumbs={thumbs} waves={waves} wavesReady={wavesReady} hasWebcam={hasWebcamSignal(layout)} />
       {moveOffDialog}
-      <ExportDialog open={showExportDialog} exporting={exporting} pct={pct} done={exportDone} error={exportError} exportPath={exportPath}
+      <ExportDialog open={showExportDialog} exporting={exporting} pct={pct} done={exportDone} error={exportError} exportPath={exportPath} startedAt={exportStartedAt}
         onClose={() => setShowExportDialog(false)} onReset={() => { setExportDone(false); setExportError(null); setExportPath(""); }}
-        onExport={(settings) => { setExportDone(false); setExportError(null); setExportPath(""); setExporting(true); setPct(0); void exportProject(folder, settings); }} />
+        onExport={(settings) => { setExportDone(false); setExportError(null); setExportPath(""); startExport(); void exportProject(folder, settings); }} />
       <ShortcutsOverlay open={showShortcuts} onClose={() => setShowShortcuts(false)} />
       <EditorSettingsDialog open={showSettings} settings={doc.settings} onClose={() => setShowSettings(false)}
         onSaveSettings={saveDocSettings} onOpenShortcuts={() => { setShowSettings(false); setShowShortcuts(true); }} />

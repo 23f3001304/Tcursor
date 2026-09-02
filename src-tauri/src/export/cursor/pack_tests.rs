@@ -20,14 +20,50 @@ fn temp_pack_dir(name: &str) -> PathBuf {
 }
 
 #[test]
-fn default_pack_id_resolves_to_builtin_sprites_verbatim() {
+fn default_pack_id_resolves_to_builtin_sprites_verbatim_except_busy() {
     let rows = sprite_sources(DEFAULT_PACK_ID);
     assert_eq!(rows.len(), SPRITES.len());
+    let arrow = SPRITES.iter().find(|&&(k, ..)| k == CursorType::Arrow).unwrap();
     for ((kind, bytes, hot), &(sk, spng, shot)) in rows.iter().zip(SPRITES.iter()) {
         assert_eq!(*kind, sk);
-        assert_eq!(bytes.as_slice(), spng);
-        assert_eq!(*hot, shot);
+        if sk == CursorType::Busy {
+            // Busy is remapped to Arrow's bytes/hotspot (busy_as_arrow) - not its own builtin PNG.
+            assert_eq!(bytes.as_slice(), arrow.1);
+            assert_eq!(*hot, arrow.2);
+        } else {
+            assert_eq!(bytes.as_slice(), spng);
+            assert_eq!(*hot, shot);
+        }
     }
+}
+
+#[test]
+fn busy_resolves_to_arrow_bytes_and_hotspot_for_the_builtin_pack() {
+    let rows = sprite_sources(DEFAULT_PACK_ID);
+    let (_, arrow_bytes, arrow_hot) = rows.iter().find(|(k, ..)| *k == CursorType::Arrow).unwrap();
+    let (_, busy_bytes, busy_hot) = rows.iter().find(|(k, ..)| *k == CursorType::Busy).unwrap();
+    assert_eq!(busy_bytes, arrow_bytes);
+    assert_eq!(busy_hot, arrow_hot);
+    // And it's NOT the raw builtin pinwheel asset anymore.
+    let builtin_busy = SPRITES.iter().find(|&&(k, ..)| k == CursorType::Busy).unwrap();
+    assert_ne!(busy_bytes.as_slice(), builtin_busy.1);
+}
+
+#[test]
+fn busy_resolves_to_arrow_even_when_a_custom_pack_overrides_arrow() {
+    let dir = temp_pack_dir("busy_follows_custom_arrow");
+    std::fs::write(dir.join("arrow.png"), TINY_PNG).unwrap();
+    let rows = sprite_sources_from_dir(&dir);
+    // sprite_sources_from_dir alone does NOT apply busy_as_arrow (that's sprite_sources' job) -
+    // confirm the raw builtin busy bytes still come back here, then confirm the public seam fixes it up.
+    let (_, raw_busy_bytes, _) = rows.iter().find(|(k, ..)| *k == CursorType::Busy).unwrap();
+    let builtin_busy = SPRITES.iter().find(|&&(k, ..)| k == CursorType::Busy).unwrap();
+    assert_eq!(raw_busy_bytes.as_slice(), builtin_busy.1);
+
+    let mut fixed = rows;
+    busy_as_arrow(&mut fixed);
+    let (_, busy_bytes, _) = fixed.iter().find(|(k, ..)| *k == CursorType::Busy).unwrap();
+    assert_eq!(busy_bytes.as_slice(), TINY_PNG);
 }
 
 #[test]

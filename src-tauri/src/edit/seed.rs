@@ -68,21 +68,13 @@ pub fn layout_from_actions(actions: &[ActionEvent], dur_ms: u32) -> Vec<LayoutSe
     segs
 }
 
-/// Return an existing `edit.json`, else build the default `EditDoc` from the recording (same
-/// auto/manual zooms, layout track, settings, clip duration the exporter uses). Older docs are
-/// migrated to `DOC_VERSION` and an always-on spotlight is lifted to an editable region here (on
-/// fresh AND older docs); writes when anything changed.
-pub fn load_or_seed(paths: &ProjectPaths) -> EditDoc {
-    let (mut doc, fresh) = match EditDoc::load(&paths.edit()) {
-        Some(d) => (d, false),
-        None => (build_default(paths), true),
-    };
-    let migrated = crate::edit::migrate::migrate(&mut doc, paths);
-    if crate::edit::ops::effects::lift_always_on_spotlight(&mut doc) || fresh || migrated {
-        let _ = doc.save(&paths.edit());
-    }
-    doc
-}
+// `load_or_seed` - the self-locking public entry point (H3, bug-sweep-2 Task 7 round 2) - lives
+// in `seed_lock` alongside the lower-level pieces (`load_or_seed_locked`, `derive_seed_inputs`)
+// that make it correct without holding the per-folder lock across a `build_timeline`/ffprobe
+// call; re-exported here so callers keep using the `seed::` path. See `seed_lock.rs`'s module
+// doc for the full design (two-phase locking, and why `edit::commands::apply_edit_op` calls
+// `load_or_seed_locked` directly instead of this function).
+pub use crate::edit::seed_lock::load_or_seed;
 
 /// PURE: recorded actions with every timestamp moved onto the output clock by `shift` (saturating
 /// at 0), kinds untouched. Both region seeders (`layout_from_actions`, `spotlight_effects`) and the
@@ -94,7 +86,8 @@ pub fn actions_on_output_clock(actions: &[ActionEvent], shift: i64) -> Vec<Actio
 /// Construct the default doc. Mirrors `exporter::export`'s input build exactly so a
 /// seeded render matches today: settings snapshot -> `ZoomConfig`, auto + manual raw
 /// zoom regions, the `SetLayout` track, and `[0, clip duration]` for the trim.
-fn build_default(paths: &ProjectPaths) -> EditDoc {
+/// `pub(crate)` so `seed_lock` (the fast-path/slow-path locking wrapper) can call it directly.
+pub(crate) fn build_default(paths: &ProjectPaths) -> EditDoc {
     let settings = crate::settings::store::record_snapshot(paths);
     let cfg = settings.zoom.to_zoom_config();
     let log = match crate::events::model::EventLog::load(&paths.events()) {

@@ -52,6 +52,16 @@ export function newSpotlightSimState(): SpotlightSimState
 
 Returns a fresh, idle `SpotlightSimState` (`driver: null`, no transition in progress, `alpha: 0`).
 
+## spotlightEffectsKey
+
+```ts
+export function spotlightEffectsKey(effects: EffectRegion[]): string
+```
+
+A cheap CONTENT signature for the spotlight-relevant fields of `effects` - `id`/`start_ms`/`end_ms`/`fade_in_ms`/`fade_out_ms`/`mode`/`dim`/`radius`/`feather` per entry, joined in array order (stable across array/object reference changes, sensitive to reordering, `layer`/`kind` not tracked). Mirrors `cameraMovesKey` (`cameraMoves.ts`) for the identical reason: `applyEditOp` round-trips the whole `EditDoc` through IPC, so `effects` gets a brand-new array reference on every edit routed through it (add a zoom, trim, an AI-director step), not just spotlight ones - keying a reset on the reference would reset on every unrelated edit.
+
+`Stage.tsx` keeps a ref of the last key and resets its `spotSimRef` (passed into `useCompositeLoop`) in a `[effects]`-deps `useEffect` when the key changes - this is "gate 2" of the fix for the M9 "spotlight freezes mid-fade" bug: a Spotlight region retimed/added/removed **while paused** doesn't move `timeMs` at all, so `useCompositeLoop`'s discontinuous-jump reset (gate 1, in its tick loop) never fires for it. Without gate 2, a driver disappearing via that paused edit arms an outgoing fade transition in `resolveSpotlight` that never advances (its `elapsed` is computed from `ms`, which is frozen), so `sim.alpha` - and the dimmed spotlight overlay - would hold on screen indefinitely.
+
 ## resolveSpotlight
 
 ```ts

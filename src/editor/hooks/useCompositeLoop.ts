@@ -7,8 +7,9 @@ import { type CamPose } from "../stage/cameraMoves";
 import { frameCamLayout } from "../stage/frameCam";
 import { drawPreview } from "../stage/previewCanvas";
 import { requestFxOverlay, type FxCamRect } from "../stage/fxOverlay";
+import { drawMirroredRipples, overlayNeedsClicks } from "../stage/ripplePreview";
 import { fxCacheKey, fxResponseAction, timeBucket } from "./fxCacheKey";
-import { resolveSpotlight, newSpotlightSimState } from "../stage/spotlightPreview";
+import { resolveSpotlight, newSpotlightSimState, type SpotlightSimState } from "../stage/spotlightPreview";
 import { layoutAt } from "../timeline/layoutTrack";
 import type { CursorSpritesState } from "./useCursorSprites";
 
@@ -30,7 +31,7 @@ export function useCompositeLoop({
   screenRef, webcamRef, audioRef, canvasRef,
   playRef, timeRef, onTimeRef,
   trackRef, layoutRef, layoutPresetsRef, layoutSegsRef, cameraMovesRef, zoomsRef, zoomSettingsRef, dragPoseRef, clicksRef, effectsRef, clickfxRef, kindsRef, cursorRef,
-  spritesRef, trailRef, dirtyRef, bgImgRef,
+  spritesRef, trailRef, dirtyRef, bgImgRef, spotSimRef,
 }: {
   screenRef: RefObject<HTMLVideoElement | null>;
   webcamRef: RefObject<HTMLVideoElement | null>;
@@ -56,6 +57,7 @@ export function useCompositeLoop({
   trailRef: RefObject<[number, number][]>;
   dirtyRef: RefObject<boolean>;
   bgImgRef: RefObject<HTMLImageElement | null>;
+  spotSimRef: RefObject<SpotlightSimState>; // owned by Stage.tsx: also reset on a paused effects-content edit (gate 2, spotEffectsKeyRef)
 }) {
   const lastReportRef = useRef(0);
   const lastFrameTRef = useRef(0);
@@ -64,7 +66,6 @@ export function useCompositeLoop({
   const fxLastTRef = useRef(""); // key of the last response actually APPLIED
   const fxWantRef = useRef(""); // key computed on the MOST RECENT tick (fires or not)
   const offscreenRef = useRef<HTMLCanvasElement | null>(null);
-  const spotSimRef = useRef(newSpotlightSimState());
 
   useEffect(() => {
     let raf = 0;
@@ -75,9 +76,9 @@ export function useCompositeLoop({
       if (sv && c && (play || dirtyRef.current)) {
         dirtyRef.current = false;
         const t = play ? sv.currentTime * 1000 : timeRef.current;
-        if (Math.abs(t - lastFrameTRef.current) > 200 || t < lastFrameTRef.current) {
-          trailRef.current.length = 0;
-        }
+        // Discontinuous jump (seek/re-sync), not natural playback advance - resets the trail AND
+        // the spotlight sim (gate 1; gate 2 is Stage.tsx's spotEffectsKeyRef, for a paused edit).
+        if (Math.abs(t - lastFrameTRef.current) > 200 || t < lastFrameTRef.current) { trailRef.current.length = 0; spotSimRef.current = newSpotlightSimState(); }
         lastFrameTRef.current = t;
         if (play) {
           // Throttle the React state update to ~16fps - it re-renders the whole editor tree. The
@@ -106,15 +107,7 @@ export function useCompositeLoop({
             if (!offscreenRef.current) offscreenRef.current = document.createElement("canvas");
             drawPreview(ctx, c.width, c.height, sv, webcamRef.current, cam,
               frameLayout, bgImgRef.current, clicksRef.current, t, cur, offscreenRef.current);
-            // Blit the cached backend FX overlay on top
-            const fxImg = fxOverlayImgRef.current;
-            if (fxImg && fxImg.complete && fxImg.naturalWidth > 0) ctx.drawImage(fxImg, 0, 0, c.width, c.height);
-            // Request a fresh FX overlay from the backend (async, non-blocking), rendered at
-            // FX_SCALE resolution - the mapping below targets that smaller canvas directly so the
-            // hit/cursor coordinates already line up with what the backend renders. This mirrors
-            // drawPreview's whole-frame zoom crop (coordmap::crop in the export) so spotlight/click
-            // positions land exactly where the zoomed base frame puts them, not where a crop of the
-            // raw screen source alone would.
+            // Panel/zoom mapping for the FX-overlay request AND the ripple draw below - mirrors drawPreview's crop.
             const fxW = Math.max(1, Math.round(c.width * FX_SCALE)), fxH = Math.max(1, Math.round(c.height * FX_SCALE));
             const lay = frameLayout, pad = Math.min(fxW, fxH) * 0.045;
             const dx = lay ? lay.screen[0] * fxW : pad, dy = lay ? lay.screen[1] * fxH : pad;
@@ -133,6 +126,12 @@ export function useCompositeLoop({
               return [(bx - cx0) * fxW / cw, (by - cy0) * fxH / ch];
             };
             const cpos = mapFn(cam.curx, cam.cury);
+            // Client-side click ripples (sweep-2, see ripplePreview.ts) - BEFORE the overlay blit
+            // below, so an active spotlight's dim composites on top of it like everything else.
+            drawMirroredRipples(ctx, clicksRef.current, t, cf.enabled, cf.style, cf.color, cf.intensity, mapFn, fxW, fxH, c.width, c.height);
+            // Blit the cached backend FX overlay (spotlight/video-fx, + clicks for an unmirrored style) on top
+            const fxImg = fxOverlayImgRef.current;
+            if (fxImg && fxImg.complete && fxImg.naturalWidth > 0) ctx.drawImage(fxImg, 0, 0, c.width, c.height);
             const spot = { effects: effectsRef.current, on: cf.spotlight,
               params: { dim: cf.spotlight_dim, radius: cf.spotlight_radius, feather: cf.spotlight_feather,
                 mode: cf.spotlight_mode, tint: cf.spotlight_tint } };
@@ -154,8 +153,10 @@ export function useCompositeLoop({
             const spotParamsStr = resolvedSpot
               ? `${resolvedSpot.dim}-${resolvedSpot.radius}-${resolvedSpot.feather}-${resolvedSpot.mode}-${resolvedSpot.tint.join(",")}-${screenScale.toFixed(3)}`
               : "off";
-            const clicksStr = clicksRef.current.map(clk => `${clk.t}-${clk.x}-${clk.y}`).join(";");
             const cursorStr = cpos ? `${Math.round(cpos[0])}-${Math.round(cpos[1])}` : "none";
+            // "" for a mirrored style (ripplePreview.ts draws it instead) - the real click list
+            // only for an unmirrored one, which still falls back to this overlay (see fxCacheKey.ts).
+            const clicksStr = overlayNeedsClicks(cf.style) ? clicksRef.current.map(clk => `${clk.t}-${clk.x}-${clk.y}`).join(";") : "";
             const fxParamsStr = `${cf.style}-${cf.color.join(",")}-${cf.intensity}-${cf.enabled}-${cf.spotlight_dim_camera}`;
             const camStr = camRect ? camRect.rect.map(v => Math.round(v)).join(",") + `-${Math.round(camRect.radius)}` : "none";
             // cursorStr alone would invalidate the cache at full 60fps during playback - timeBucket

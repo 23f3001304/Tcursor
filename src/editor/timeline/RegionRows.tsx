@@ -1,5 +1,7 @@
+import { memo } from "react";
 import { motion } from "motion/react";
 import type { Drag } from "../hooks/useRegionDrag";
+import { pillLeftPct, pillWidthPct } from "./pillGeometry";
 
 interface Region { id: string; start_ms: number; end_ms: number; layer: number }
 
@@ -7,8 +9,12 @@ interface Region { id: string; start_ms: number; end_ms: number; layer: number }
  *  layer-stacked rows, drag/hover motion, and grip-handle markup; the three lanes differ only in
  *  fill color (`blkClass`, a CSS concern), the pill's label content, and (layout only) the inline
  *  fade-ramp CSS vars, all passed in rather than triplicated here. Extracted so adding the lane
- *  label gutter (Task 36) didn't push Timeline.tsx over the file's line budget. */
-export function RegionRows<T extends Region>({ rows, regions, dur, sel, rowClass, blkClass, dragState, beginDrag, renderLabel, extraStyle }: {
+ *  label gutter (Task 36) didn't push Timeline.tsx over the file's line budget.
+ *
+ *  `React.memo`'d (render hygiene pass) - `Timeline` passes stable/memoized `regions`,
+ *  `dragState`, `beginDrag` and (module-level, not inline) `renderLabel`/`extraStyle`, so this
+ *  only re-renders when the lane's own data actually changes, not on every playhead tick. */
+function RegionRowsInner<T extends Region>({ rows, regions, dur, sel, rowClass, blkClass, dragState, beginDrag, renderLabel, extraStyle }: {
   rows: number; regions: T[]; dur: number; sel: string | null;
   rowClass: string; blkClass: string;
   dragState: Drag | null;
@@ -30,9 +36,10 @@ export function RegionRows<T extends Region>({ rows, regions, dur, sel, rowClass
             const dragging = dragState?.id === r.id;
             const s = dragging && dragState ? dragState.start : r.start_ms;
             const e = dragging && dragState ? dragState.end : r.end_ms;
+            const leftPct = pillLeftPct(s, dur);
             return (
               <motion.div key={r.id} data-region-id={r.id} className={`${blkClass}${sel === r.id ? " sel" : ""}${dragging ? " drag" : ""}`}
-                style={{ left: `${(s / dur) * 100}%`, width: `${Math.max(2.5, ((e - s) / dur) * 100)}%`, ...extraStyle?.(r, s, e) }}
+                style={{ left: `${leftPct}%`, width: `${pillWidthPct(s, e, dur, leftPct)}%`, ...extraStyle?.(r, s, e) }}
                 initial={{ opacity: 0 }} whileHover={{ scale: 1.02, transition: { duration: 0.12 } }}
                 animate={{ opacity: 1, y: dragging && dragState ? dragState.dyPx : 0, scale: 1 }}
                 transition={{ opacity: { type: "tween", duration: 0.16, ease: [0.4, 0, 0.2, 1] },
@@ -49,3 +56,7 @@ export function RegionRows<T extends Region>({ rows, regions, dur, sel, rowClass
     </>
   );
 }
+
+// `memo` doesn't preserve a generic function's type parameters on its own - the cast restores
+// `RegionRows<T>`'s real (generic) call signature for every call site.
+export const RegionRows = memo(RegionRowsInner) as typeof RegionRowsInner;

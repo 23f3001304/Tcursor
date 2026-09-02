@@ -109,3 +109,18 @@ export function overrideCamPanel(
   const scale = radiusScaleForResize(baseCam[3], newRect[3]);
   return [...newRect, baseCam[4] * scale, baseCam[5] * scale, baseCam[6], baseCam[7], baseCam[8]];
 }
+
+/** A cheap CONTENT signature for `moves` - id/t_ms/x/y/size/easing per entry, joined in array
+ *  order. Pure and unit-tested (`cameraMoves.test.ts`) so the exact "what counts as a content
+ *  change" contract is verifiable without mounting anything (review round 2, Important).
+ *
+ *  *Why this exists:* `applyEditOp` round-trips the WHOLE `EditDoc` through IPC, so `setDoc`
+ *  hands back a brand-new `camera_moves` ARRAY REFERENCE on every edit routed through it - adding
+ *  a zoom, deleting a region, trimming, an AI-director step - not just camera-move ones. A
+ *  `useEffect` keyed on `[cameraMoves]` (reference) fires on ALL of those, not just the ones that
+ *  actually changed camera-move content; comparing this key instead of the array reference lets a
+ *  caller (`CamDragHandle.tsx`) tell "an unrelated edit refreshed the doc" apart from "a
+ *  camera-move keyframe was actually added/updated/removed". */
+export function cameraMovesKey(moves: CameraMove[]): string {
+  return moves.map((m) => `${m.id}:${m.t_ms}:${m.x}:${m.y}:${m.size}:${m.easing}`).join("|");
+}

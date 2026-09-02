@@ -91,7 +91,10 @@ impl MouseTracker {
         #[cfg(windows)]
         imp::post_quit(self.thread_id);
         if let Some(t) = self.thread.take() { let _ = t.join(); }
-        SINK.lock().unwrap().take().map(|s| s.collector.take()).unwrap_or_default()
+        // Poison-tolerant like every other lock in the recording path: `hook_proc` skips a
+        // poisoned SINK silently, so a raw unwrap here would turn "stopped collecting events"
+        // into a panicked `stop_recording` command and lose the whole take's inputs.
+        SINK.lock().unwrap_or_else(|e| e.into_inner()).take().map(|s| s.collector.take()).unwrap_or_default()
     }
 }
 

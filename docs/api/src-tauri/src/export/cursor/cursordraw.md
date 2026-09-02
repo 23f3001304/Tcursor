@@ -136,7 +136,7 @@ Per-frame convenience wrapper: updates the trail deque, computes bounce and pixe
 
 - `out`, `ow`, `oh`, `spr`, `clip` - forwarded to `draw_cursor`; see above.
 - `pos_px: (f32, f32)` - current hotspot in output pixels. *Why:* pushed to `recent` before drawing so this frame's position becomes the newest trail entry.
-- `recent: &mut VecDeque<(f32,f32)>` - rolling trail history owned by `CursorPrep`. *Why mutable:* this function pops the oldest entry when the deque is full and pushes the current position.
+- `recent: &mut VecDeque<(f32,f32)>` - rolling trail history owned by `CursorPrep`. *Why mutable:* this function pops the oldest entry when the deque is full and pushes the current position. **It is forward-only state, so its owner has to rewind it:** the deque gains exactly one entry per composited frame, and a preview scrub composites exactly ONE frame per call, so a deque carried across seeks holds the last six SCRUB TARGETS and paints a faded cursor at each - which is why `FrameRenderer::reset_camera` clears it alongside the camera and cursor sims. Pinned by `a_stale_trail_point_draws_a_ghost_until_recent_is_cleared` (unit test): a stale entry paints a ghost at that point; after `recent.clear()` those pixels stay untouched.
 - `trail_cap: usize` - maximum trail length in frames. *Why:* bounds the number of blit calls and the memory the deque uses; `cursorset::draw` passes 6.
 - `click_ms: &[u32]` - forwarded to `bounce_scale`.
 - `ev_t: u32` - current frame event-time; forwarded to `bounce_scale`.

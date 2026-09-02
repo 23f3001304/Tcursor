@@ -32,6 +32,46 @@ fn screen_panel_composites_onto_background() {
     assert!(p[0] <= 3 && p[1] <= 3 && p[2] >= 250, "panel interior must be ~screen red, got {p:?}");
 }
 
+/// Crop-rect math per panel aspect: the mismatched axis is cropped, never squashed, and a
+/// matching aspect is a no-op (the whole source). These are the four shapes the layout track
+/// actually produces from ONE source-aspect decode box (`render::meta::webcam_box`).
+#[test]
+fn cover_rect_crops_the_mismatched_axis_for_every_panel_aspect() {
+    let near = |a: (f64, f64, f64, f64), b: (f64, f64, f64, f64)| assert!(
+        [a.0 - b.0, a.1 - b.1, a.2 - b.2, a.3 - b.3].iter().all(|v| v.abs() < 1e-6), "got {a:?}, want {b:?}");
+    // 16:9 source -> square panel (Camera / CameraOnly / Presenter): crop the sides.
+    near(cover_rect(1280, 720, 100, 100), (280.0, 0.0, 720.0, 720.0));
+    // 16:9 source -> 16:9 panel (a Wide bubble): the whole frame, untouched.
+    near(cover_rect(1280, 720, 448, 252), (0.0, 0.0, 1280.0, 720.0));
+    // Square source -> 16:9 panel: crop top/bottom instead.
+    near(cover_rect(720, 720, 16, 9), (0.0, 157.5, 720.0, 405.0));
+    // Portrait source -> square panel: crop top/bottom. Aspect is always preserved.
+    near(cover_rect(1080, 1920, 400, 400), (0.0, 420.0, 1080.0, 1080.0));
+    // Degenerate dims clamp instead of dividing by zero.
+    near(cover_rect(0, 0, 0, 0), (0.0, 0.0, 0.0, 0.0));
+}
+
+/// End-to-end: a wide webcam in a SQUARE panel shows the centre of the frame at its true
+/// proportions - it is not the whole frame squashed 1.78x horizontally into the square.
+#[test]
+fn a_wide_webcam_in_a_square_panel_shows_the_centre_not_a_squash() {
+    // 12x4 webcam: 4 columns blue | 4 green | 4 red. A square 4x4 panel must show only green.
+    let mut webcam = vec![0u8; 12 * 4 * 4];
+    for (i, px) in webcam.chunks_mut(4).enumerate() {
+        px.copy_from_slice(&match (i % 12) / 4 { 0 => [255, 0, 0, 255], 1 => [0, 255, 0, 255], _ => [0, 0, 255, 255] });
+    }
+    let screen = nv12_screen(4, 4, [0, 0, 0, 255]);
+    let bg = solid(8, 8, [40, 40, 40, 255]);
+    let layout = Layout { out_w: 8, out_h: 8, pad_px: 1, screen_scale: 1.0, screen_radius_px: 0.0 };
+    let scene = Scene { screen: panel(0.0, 0.0, 0.0, 0.0, 0.0), camera: panel(2.0, 2.0, 4.0, 4.0, 1.0) };
+    let cam = Camera { cx: 4.0, cy: 4.0, scale: 1.0 };
+    let mut out = Vec::new();
+    CpuCompositor.composite_into(&screen, 4, 4, Some((&webcam, 12, 4)), cam, &bg, &layout, &scene, &mut out);
+    let i = ((4 * 8 + 4) * 4) as usize; // panel centre
+    let p = &out[i..i + 4];
+    assert!(p[1] > 200 && p[0] < 60 && p[2] < 60, "square panel must show the centre (green), got {p:?}");
+}
+
 #[test]
 fn ring_paints_a_band_just_inside_the_camera_edge_and_leaves_center_alone() {
     // 20x20 square (no rounding) camera panel with a 3px ring; source is solid green.

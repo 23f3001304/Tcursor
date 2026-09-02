@@ -1,13 +1,14 @@
 import { motion } from "motion/react";
 
 // 1. iOS-style Switch component with spring animation
-export function Switch({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+export function Switch({ on, onChange, ariaLabel }: { on: boolean; onChange: (v: boolean) => void; ariaLabel?: string }) {
   return (
     <button
       type="button"
       className={`sw ${on ? "on" : ""}`}
       role="switch"
       aria-checked={on}
+      aria-label={ariaLabel}
       onClick={() => onChange(!on)}
       style={{
         width: 38,

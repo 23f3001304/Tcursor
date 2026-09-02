@@ -13,7 +13,11 @@ export function timeBucket(t: number, bucketMs: number): number {
 
 /** Name the FX-overlay request for one frame's resolved params - used both to skip a redundant
  *  in-flight request (same key = nothing would look different) and, in `.then`, to tell whether
- *  the response that just landed is still wanted. */
+ *  the response that just landed is still wanted. `clicksStr` (sweep-2): the caller passes `""`
+ *  for a `stylesMirrored` style (`ripplePreview.ts`) - those clicks never reach this request at
+ *  all, so a varying component for them would be dead weight - and the real click list only for
+ *  an unmirrored style (Pulse/Glow/Neon/Particles), which still falls back to this overlay and so
+ *  still needs its cache key to invalidate when the click list changes. */
 export function fxCacheKey(
   tBucket: number, cursorStr: string, spotParamsStr: string,
   clicksStr: string, fxParamsStr: string, camStr: string,

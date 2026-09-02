@@ -1,62 +1,91 @@
 # src-tauri/src/session/record/pause_clock.rs
 
-Shared paused-time accumulator used by both capture paths (`gpu_record::Cap` and `recording_session::RecordingSession`). VFR capture only ticks on frame arrival - there is no dedicated "check for resume" moment - so the accumulator works purely from a stream of per-frame `(now, paused)` samples, unlike `session::pacing::run_paced`'s tight 2ms poll loop which can read the clock at the exact instant it notices a resume.
+The video paths' view of the exact-span paused-time ledger (`PauseTotals`), which is stamped at the real pause/resume instants under the recorder lock. Both capture paths ask it, once per arriving frame, where that frame sits on the ONE recording clock: the `sync.json` timestamp and the encoder PTS come out of a SINGLE ledger read, so `video.mp4`'s own timeline and `sync.json` - and therefore the audio WAVs, cursor, actions and zoom streams, which subtract the same ledger - cannot disagree about how long a pause was.
+
+**What changed (sweep-2, findings C1 + H2).** This module used to own a `paused_ms` accumulator that inferred the paused span from the gap between consecutive PAUSED frame arrivals. WGC delivers frames on content change (`MinimumUpdateIntervalSettings` is a floor on the rate, not a heartbeat), so a pause over a static desktop produced at most one paused sample and removed 0% of the pause, while a pause over a busy desktop removed ~100% of it - the recording's reported duration was a function of what the screen happened to be doing, and that number sets `full_dur_ms`, `clip_ms` and `trim.out_ms`. It also only shifted the `sync.json` timestamps, never the video's own PTS.
+
+## HNS_PER_MS
+
+```rust
+const HNS_PER_MS: i64 = 10_000;
+```
+
+100-nanosecond units per millisecond - the Media Foundation encoder's timestamp unit, and the only unit conversion in the module.
+
+## FrameTick
+
+```rust
+pub struct FrameTick {
+    pub sync_ms: u64,
+    pub pts_100ns: i64,
+}
+```
+
+Where one arriving frame sits on the recording clock. Both fields come from one `PauseClock::tick` call, i.e. one ledger read, on purpose: computing them from two separate reads would let a pause/resume land in between and put the two clocks back out of step.
+
+- `sync_ms: u64` - capture time with every paused span removed; the value appended to `sync.json`'s `frames[]`.
+- `pts_100ns: i64` - the same instant expressed as an encoder PTS, in 100ns units, zero at the first ENCODED frame (not at clock zero, so a take whose first frames arrive late - or during a leading pause - still starts at 0).
 
 ## PauseClock
 
 ```rust
-#[derive(Default)]
 pub struct PauseClock {
-    paused_ms: u64,
-    last_paused_at: Option<u64>,
+    totals: Arc<PauseTotals>,
+    base_ms: Option<u64>,
+    last_ms: Option<u64>,
 }
 ```
 
-Accumulates paused wall-clock time from a stream of per-frame `(now, paused)` samples and shifts capture timestamps to exclude it, so a pause leaves no gap between `sync.json` and `video.mp4`.
-
-- `paused_ms: u64` - total paused time accumulated so far, subtracted from every timestamp recorded while not paused.
-- `last_paused_at: Option<u64>` - the previous paused sample's `now`, or `None` if the last `observe` call was unpaused (or this is the first call). *Why needed:* consecutive paused samples measure elapsed time as a delta against each other, not against a fixed pause-start; this field is the "other end" of that delta.
+- `totals: Arc<PauseTotals>` - the shared ledger, the same `Arc` every input tracker holds. *Why shared rather than a private accumulator:* it is stamped at the pause/resume toggles under the recorder lock, so its span is exact regardless of frame arrivals.
+- `base_ms: Option<u64>` - `sync_ms` of the first encoded frame; the origin `pts_100ns` is measured from. `None` until that frame arrives.
+- `last_ms: Option<u64>` - `sync_ms` of the previous encoded frame, used to refuse a non-advancing tick.
 
 ### Used by
 
-- `src-tauri/src/session/record/gpu_record.rs` - `Cap` holds one instance, calling `observe` once per `on_frame_arrived`.
-- `src-tauri/src/session/record/recording_session.rs` - `RecordingSession` holds one instance, calling `observe` from both `pump_once` and `run`'s paused-discard branch.
+- `src-tauri/src/session/record/gpu_frames.rs` - `Cap` holds one, calling `tick` once per `on_frame_arrived`.
+- `src-tauri/src/session/record/recording_session.rs` - `RecordingSession` holds one, calling `tick` from `pump_once`.
 
 ## PauseClock::new
 
 ```rust
-pub fn new() -> Self
+pub fn new(totals: Arc<PauseTotals>) -> Self
 ```
 
-Returns a fresh `PauseClock` with zero accumulated paused time.
+A clock over the given ledger, with no frames seen yet.
 
-## PauseClock::observe
+## PauseClock::tick
 
 ```rust
-pub fn observe(&mut self, now: u64, paused: bool) -> Option<u64>
+pub fn tick(&mut self, now_ms: u64, paused: bool) -> Option<FrameTick>
 ```
 
-Observe one frame-arrival tick at time `now` (ms).
+Place the frame that arrived at wall-clock `now_ms`.
 
 ### Inputs
 
-- `now: u64` - the current wall-clock time, read at frame arrival (from `Clock::now_ms()` in the GPU path, or the frame's own already-clock-derived `ts.0` in the legacy path). *Why not always a fresh clock read:* the legacy path's `Frame::ts` is already the wall-clock time the frame was captured, so reusing it avoids passing an extra `Clock` through `RecordingSession::run`.
+- `now_ms: u64` - the wall-clock reading at frame arrival (from `Clock::now_ms()` in the GPU path, or the frame's own already-clock-derived `ts.0` in the legacy path). *Why not always a fresh clock read:* the legacy path's `Frame::ts` is already the wall-clock time the frame was captured, so reusing it avoids threading an extra `Clock` through `RecordingSession`.
 - `paused: bool` - whether capture is currently paused for this tick.
 
 ### Returns
 
-- While `paused`: always `None` (the frame should be dropped). If there is a previous paused sample (`last_paused_at`), the elapsed time since it is added to `paused_ms` - this is how the accumulator measures real paused duration from a stream of ticks rather than a single start/end pair. A lone paused sample (no predecessor yet) contributes no duration by itself. `last_paused_at` is then set to `now`.
-- While not `paused`: `Some(now - paused_ms)`, the timestamp to record (saturating subtraction). `last_paused_at` is reset to `None` so the next pause episode starts its own delta chain.
+`None` means "drop this frame" - either capture is `paused`, or the pause-compressed time did not advance past the last encoded frame. The second case is reachable when a whole pause/resume lands between reading the clock and reading the pause flag; encoding it would hand the encoder a non-increasing PTS and put a duplicate timestamp in `sync.json`.
+
+Otherwise `Some(FrameTick)` with the `sync.json` timestamp and the matching encoder PTS.
 
 ### Implementation
 
-1. If `paused`: add `now - last_paused_at` to `paused_ms` when `last_paused_at` is `Some`; set `last_paused_at = Some(now)`; return `None`.
-2. If not `paused`: set `last_paused_at = None`; return `Some(now.saturating_sub(paused_ms))`.
+1. `paused` -> `None`.
+2. `sync_ms = totals.stamp_ms(now_ms)` - one ledger read, serving both outputs.
+3. If `sync_ms <= last_ms` -> `None`; otherwise record it as the new `last_ms`.
+4. `base_ms` is initialised to this `sync_ms` on first use; `pts_100ns = (sync_ms - base) * HNS_PER_MS`.
 
 ### Behaviors
 
-- `unpaused_tick_before_any_pause_is_unadjusted`: `observe(1000, false)` on a fresh clock returns `Some(1000)`.
-- `paused_ticks_return_none_and_drop_the_frame`: two consecutive paused calls both return `None`.
-- `push_after_pause_excludes_the_paused_span`: push@1000, paused 1000..3000 (observed at both ends), push@3100 -> `Some(1100)` - the 2000ms pause is subtracted. This is the required scenario from the task brief.
-- `accumulates_across_multiple_pause_episodes`: two separate pause episodes (200ms then 150ms) both contribute to `paused_ms`, giving a final adjusted ts of `700 - 350 = 350`.
-- `single_paused_sample_contributes_no_duration_yet`: a single paused tick with no predecessor adds nothing to `paused_ms`; the very next unpaused tick is unadjusted.
+- `first_tick_is_unadjusted_and_starts_the_pts_at_zero`: an unpaused tick at 1000 with an untouched ledger gives `sync_ms 1000`, `pts_100ns 0`.
+- `paused_ticks_are_dropped`: consecutive paused ticks all return `None`.
+- `pause_with_no_frames_at_all_is_still_fully_removed`: ledger paused 1000..3000 with ZERO frames in between (the static-desktop case the old accumulator scored as 0 ms); a frame at 3100 lands at 1100.
+- `accumulates_across_multiple_pause_episodes`: two episodes (200 ms then 150 ms) both count; a frame at 700 lands at 350.
+- `tick_during_an_open_pause_is_dropped`: a mid-pause tick returns `None`, so the encoder never sees the paused span.
+- `encoder_pts_is_exactly_the_sync_timestamp_rebased`: across a 30 s pause no frame observed, `pts_100ns == (sync_ms - first sync_ms) * 10_000` for every encoded frame. This is the C1 seam.
+- `pts_is_relative_to_the_first_encoded_frame`: a pause that ends before any frame arrives still produces `pts_100ns == 0` for the first frame.
+- `non_advancing_tick_is_dropped`: a short pause/resume that compresses a later arrival back onto an earlier instant yields `None` rather than a duplicate timestamp.

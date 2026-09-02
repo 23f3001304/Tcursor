@@ -31,6 +31,50 @@ Converts a resolved trim range (ms, from `Trim::resolve`) to INCLUSIVE output-fr
 - `trim_frame_bounds_never_collapses_to_empty` - an equal in/out still yields `k_last >= k_in`.
 - `untrimmed_last_index_matches_the_old_total_out_formula` - `trim_frame_bounds(0, full_dur_ms, fps)` reproduces the pre-trim `total_out = dur*fps/1000` bound exactly.
 
+## audio_shift_ms
+
+```rust
+pub fn audio_shift_ms(track_ms: Option<u64>, video_start: u64, trim_in_q_ms: u64) -> i64
+```
+
+The mux shift (ms, negative = start the track later) for ONE audio track: where its own first sample sits relative to the exported video's frame 0.
+
+### Inputs
+
+- `track_ms: Option<u64>` - the track's own start timestamp on the capture clock (`Timeline.mic_ms` / `system_ms`), `None` when that track was not recorded. *Why an Option:* a missing track yields a `0` base rather than a special case at the call site; the trim term still applies so the two tracks stay consistent.
+- `video_start: u64` - the first captured video frame's timestamp. *Why:* it is the origin the exported file's frame 0 is aligned to.
+- `trim_in_q_ms: u64` - the FRAME-FLOORED trim-in, i.e. `k_in * 1000 / out_fps` where `k_in` comes from `trim_frame_bounds`. **Not** the raw `trim_in_ms`. *Why this is the whole point of the function:* `trim_frame_bounds` FLOORS the trim point to a frame index, so exported frame 0 shows the source content at `trim_in_q_ms`, which is `<= trim_in_ms`. Subtracting the unquantised `trim_in_ms` therefore advanced the audio further than the picture by up to a full frame - 16.7 ms at 60 fps, 33 ms at `Fps::F30` - as a constant lip-sync lead across the entire export.
+
+### Returns
+
+`i64` - `(track_ms - video_start) - trim_in_q_ms`, ready for `audio_mux::mux`'s `-itsoffset`. The mic call site adds `Settings.audio_offset_ms` (the user's manual nudge) on top.
+
+### Behaviors worth knowing
+
+- `audio_shift_uses_the_frame_floored_trim_in` (unit test): a 1234 ms trim-in at 30 fps floors to frame 37 = 1233 ms, and the shift uses 1233; a frame-aligned trim-in and the untrimmed case are both unchanged from the old formula.
+
+## webcam_warning
+
+```rust
+pub fn webcam_warning(had_webcam: bool, fail: Option<&str>, frames: u64) -> Option<String>
+```
+
+How the webcam decode ended, as a user-facing warning string (`None` = nothing to say). `exporter::export` returns it and `run_export` emits it as an `export-warning`.
+
+### Inputs
+
+- `had_webcam: bool` - whether a `WebcamPipe` was spawned at all. *Why:* with no webcam file there is nothing to warn about, and the camera panel is legitimately absent.
+- `fail: Option<&str>` - the first webcam decode error seen, from the composite loop OR from `WebcamPipe::join` after it. *Why not an `Err` return in the exporter:* the screen is the deliverable and the camera is one panel of it; by the time either error is known the file is fully composited and encoded, so failing the export would throw away good work for a partial defect.
+- `frames: u64` - webcam frames actually decoded. *Why it is the deciding input:* it separates the two shapes of failure, which produce DIFFERENT files. With zero frames the camera panel is ABSENT for the whole export. With some frames, `exporter`'s `last_webcam` hold keeps rendering the last decoded frame, so the panel is present but FROZEN from that point - telling the user it was "exported without the camera panel" would send them looking for a missing panel that is on screen.
+
+### Returns
+
+`Option<String>`: `None` for no webcam and for a healthy decode; otherwise one of three messages - "no frames … without the camera panel", "failed before any frame … without the camera panel: <err>", or "failed after N frames - the camera panel is frozen from that point on: <err>".
+
+### Behaviors worth knowing
+
+- `webcam_warning_separates_zero_frames_from_a_partial_failure` (unit test): pins all five branches, including that the partial-failure message must NOT claim the panel is absent.
+
 ## ScreenPipe
 
 ```rust
@@ -99,7 +143,7 @@ Spawns the webcam `RawDecoder` (at `out_fps`, seeked to `video_start`, cover-cro
 
 - `webcam: &Path` - the webcam recording. *Why:* the decode input for the picture-in-picture panel.*
 - `video_start: u64` - ms offset to seek the webcam to, aligning it with the screen timeline. *Why:* the two streams start at different wall-clock offsets.*
-- `dims: (u32, u32)` - the `(w, h)` box the webcam is cover-cropped to (`RenderMeta::webcam_w`/`webcam_h`). *Why a pair, not a square side:* the compositor stretches this buffer across the camera panel, so it must be decoded at the PANEL's aspect - a `CamAspect::Wide` panel is 16:9 and a square decode came out 1.78x too wide. Held on the pipe (not resent per frame) since it is fixed for the whole export.*
+- `dims: (u32, u32)` - the `(w, h)` box the webcam is cover-cropped to (`RenderMeta::webcam_w`/`webcam_h`, from `render::meta::webcam_box`). *Why a pair, not a square side:* it is ONE box for the whole export carrying the SOURCE video's own aspect, which the compositors then cover-crop to each panel's aspect per frame - decoding at any single PANEL's aspect (or at a square) discards pixels that a differently-shaped panel later in the layout track still needs. Held on the pipe (not resent per frame) since it is fixed for the whole export.*
 - `wc_bytes: usize` - bytes per webcam frame (`dims.0 * dims.1 * 4`). *Why:* sizes the pooled buffers and the decoder assertion.*
 - `depth: usize` - channel + pool depth, as for `ScreenPipe`.
 - `out_fps: u64` - the export's resolved output frame rate (`exporter::export`'s own `out_fps`, from `ExportSettings.fps`). *Why threaded in rather than using the `OUT_FPS` constant:* the webcam decode cadence must match whatever rate the composite loop and encoder actually run at, not always exactly 60 - previously this was hardcoded to the `OUT_FPS` constant regardless of the (formerly fixed) export rate.

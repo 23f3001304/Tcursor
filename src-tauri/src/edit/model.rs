@@ -150,24 +150,11 @@ impl EditDoc {
         match serde_json::from_slice(&bytes) {
             Ok(doc) => Some(doc),
             Err(e) => {
-                let corrupt = corrupt_sibling(path);
-                let _ = std::fs::remove_file(&corrupt); // clear a stale corrupt from a prior crash
-                if let Err(re) = std::fs::rename(path, &corrupt) {
-                    eprintln!("edit.json parse failed ({e}) and could not be preserved at {corrupt:?}: {re}");
-                } else {
-                    eprintln!("edit.json parse failed ({e}); original preserved at {corrupt:?}");
-                }
+                crate::win::sys::proc::preserve_corrupt(path, &e);
                 None
             }
         }
     }
-}
-
-/// `<path>.corrupt`, same directory - where `load` preserves an unparseable file so a reseed
-/// never silently destroys it.
-fn corrupt_sibling(path: &std::path::Path) -> std::path::PathBuf {
-    let name = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    path.with_file_name(format!("{name}.corrupt"))
 }
 
 #[cfg(test)]

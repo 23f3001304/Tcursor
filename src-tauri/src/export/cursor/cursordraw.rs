@@ -176,6 +176,20 @@ mod tests {
         draw_cursor(&mut out, w, h, &spr(), (20.0, 20.0), &[], 8.0, 0.0, 1.0, (0, 0, w as i32, h as i32));
         assert!(out.iter().any(|&b| b > 0), "cursor blit wrote visible pixels");
     }
+    /// The ghost-cursor mechanism `FrameRenderer::reset_camera` now clears: a stale `recent` entry
+    /// (a PREVIOUS scrub target) blits a faded sprite THERE. Clearing it removes the ghost.
+    #[test]
+    fn a_stale_trail_point_draws_a_ghost_until_recent_is_cleared() {
+        let mut recent = std::collections::VecDeque::from(vec![(4.0f32, 4.0f32)]);
+        let ghost_alpha = |r: &mut std::collections::VecDeque<(f32, f32)>| {
+            let mut out = vec![0u8; 40 * 40 * 4];
+            apply_enhanced(&mut out, 40, 40, &spr(), (30.0, 30.0), r, 6, &[], 0, 1.0, 0.9, false, 0.5, 1.0, (0, 0, 40, 40));
+            out[(4 * 40 + 4) * 4 + 3]
+        };
+        assert!(ghost_alpha(&mut recent) > 0, "a stale trail point paints a ghost cursor at (4,4)");
+        recent.clear();
+        assert_eq!(ghost_alpha(&mut recent), 0, "a cleared trail leaves no ghost");
+    }
     #[test]
     fn offscreen_position_is_safe_noop() {
         let (w, h) = (40u32, 40u32);

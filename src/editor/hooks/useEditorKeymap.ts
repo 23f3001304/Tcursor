@@ -1,12 +1,14 @@
 import { useEffect } from "react";
 import type { EditDoc, EditOp } from "../../lib/edit";
-import { keyAction } from "./keymap";
+import { resolveKeyAction, type TargetLike } from "./keymap";
 
 // Global keyboard shortcuts for the editor: Delete/Backspace removes the selected
 // zoom/effect/layout segment, Z/S add a zoom/spotlight at the playhead, Space toggles play,
-// ? opens the shortcuts overlay. Skipped while an input/textarea/contenteditable is focused.
-// The actual key->action decision is `keyAction` (`keymap.ts`, unit-tested) - this hook just
-// switches on its result and performs the corresponding op.
+// ? opens (or, while it's the current modal, closes) the shortcuts overlay. Inert while typing in
+// a field, while a modal is open (`modalOpen`), or - for Space specifically - while the focused
+// element owns Space itself (a button, or a custom control like Switch/Picker that manages its
+// own keydown; M4). The actual decision is `resolveKeyAction` (`keymap.ts`, unit-tested) - this
+// hook just gathers the DOM context and switches on its result.
 export function useEditorKeymap(opts: {
   sel: string | null;
   doc: EditDoc | null;
@@ -17,15 +19,19 @@ export function useEditorKeymap(opts: {
   addZoom: () => Promise<void>;
   addSpotlight: () => Promise<void>;
   onOverlay: () => void;
+  modalOpen: boolean;
+  /** Whether `ShortcutsOverlay` itself is the (or a) currently-open modal - lets `resolveKeyAction`
+   *  still let `?` through to toggle it CLOSED even while `modalOpen` is true because of it. */
+  shortcutsOpen: boolean;
 }) {
-  const { sel, doc, timeMs, setSel, setPlaying, applyOp, addZoom, addSpotlight, onOverlay } = opts;
+  const { sel, doc, timeMs, setSel, setPlaying, applyOp, addZoom, addSpotlight, onOverlay, modalOpen, shortcutsOpen } = opts;
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeEl = document.activeElement;
-      if (activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA" || activeEl.getAttribute("contenteditable") === "true")) {
-        return;
-      }
-      switch (keyAction(e, !!sel)) {
+      const target: TargetLike = activeEl
+        ? { tagName: activeEl.tagName, role: activeEl.getAttribute("role"), isContentEditable: (activeEl as HTMLElement).isContentEditable === true }
+        : { tagName: "", role: null, isContentEditable: false };
+      switch (resolveKeyAction(e, { hasSel: !!sel, modalOpen, shortcutsOpen, target })) {
         case "delete": {
           if (!sel) break;
           const isZoom = doc?.zooms.some((z) => z.id === sel);
@@ -48,5 +54,5 @@ export function useEditorKeymap(opts: {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [sel, doc, timeMs]);
+  }, [sel, doc, timeMs, modalOpen, shortcutsOpen]);
 }

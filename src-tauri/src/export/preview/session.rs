@@ -29,6 +29,12 @@ impl<T> WarmSlot<T> {
     /// Run `work` on the cached entry: `reuse` gets the cached entry (if any) and returns it
     /// refreshed, or `None` to discard it; `make` builds a replacement. Only `cell` is a cache
     /// lock and it is never held while `reuse`/`make`/`work` run.
+    ///
+    /// LOCK ORDERING: `reuse`/`make` (`reuse`/`build` below) call `edit::seed::load_or_seed`,
+    /// which internally takes `edit::lock::doc_lock` for the span of any `edit.json` write it
+    /// makes - so this establishes `gate -> doc_lock` ordering. See `edit::lock::doc_lock`'s doc
+    /// comment for why the reverse never occurs (nothing under that lock ever touches `gate`,
+    /// `cell`, or `generate_once`).
     pub(crate) fn with<R>(&self, reuse: impl FnOnce(T) -> Option<T>, make: impl FnOnce() -> Result<T, String>,
         work: impl FnOnce(&mut T) -> Result<R, String>) -> Result<R, String> {
         let _gate = self.gate.lock().unwrap_or_else(|e| e.into_inner());

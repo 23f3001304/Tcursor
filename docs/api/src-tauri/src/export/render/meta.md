@@ -1,6 +1,6 @@
 # src-tauri/src/export/render/meta.rs
 
-Small data-only types returned by `FrameRenderer`, split out of `mod.rs` (which was at the 200-line budget) purely for size. `RenderMeta`/`FramePose` are re-exported as `render::RenderMeta`/`render::FramePose` (`pub use meta::{FramePose, RenderMeta};` in `mod.rs`) so existing callers are unaffected by the split; `webcam_dims` (the one small function here) sits with the field it fills in.
+Small data-only types returned by `FrameRenderer`, split out of `mod.rs` (which was at the 200-line budget) purely for size. `RenderMeta`/`FramePose` are re-exported as `render::RenderMeta`/`render::FramePose` (`pub use meta::{FramePose, RenderMeta};` in `mod.rs`) so existing callers are unaffected by the split; `webcam_box` (the one small function here) sits with the field it fills in.
 
 ## RenderMeta
 
@@ -24,7 +24,7 @@ All information the export (or preview) loop needs to set up its raw decoders an
 - `out_w: u32`, `out_h: u32` - output canvas dimensions in pixels. *Why:* `FrameRenderer` owns the layout after `new()`, so the caller gets these from meta rather than re-reading the layout struct.
 - `sw: u32`, `sh: u32` - raw screen capture dimensions (probe result). *Why:* needed to allocate the `screen_bytes`-sized decode buffer.
 - `screen_bytes: usize` - `sw * sh * 3 / 2`: exact NV12 buffer size for the screen decoder (Y plane + half-res interleaved UV - cheaper to decode/pipe than BGRA; the compositor converts to BGRA internally). *Why:* pre-computed to avoid re-doing the multiply at every `RawDecoder::spawn` call.
-- `webcam_w: u32`, `webcam_h: u32` - the webcam decode box in pixels (`webcam_dims` below), height capped to 1440. *Why a pair and not one square side:* the decoder cover-crops the webcam to exactly these dims and the compositor then stretches that buffer across the camera panel, so the two must share an aspect - a `CamAspect::Wide` panel is 16:9 (`width_px = size_px * 16/9`) and a square decode was being stretched 1.78x across it. `RawDecoder::spawn` takes the pair as its `cover_scale` argument; `exporter`/`preview` allocate `webcam_w * webcam_h * 4` to match.
+- `webcam_w: u32`, `webcam_h: u32` - the webcam decode box in pixels (`webcam_box` below): the SOURCE video's own aspect, big enough for the largest camera panel, height capped to 1440 and to the source's own height. *Why the source's aspect and not a panel's:* one decode box serves the whole export, but the layout track can put a `CamAspect::Wide` (16:9) bubble and a square big-cam in the SAME export, so no panel-shaped box is right for all of them - whichever panel lost was stretched (or squashed) 1.78x for its whole segment. The compositors now cover-crop this box to each panel's aspect per frame (`gpu::compositor::cover_rect` / `shader.wgsl`'s `cover_uv`), which only works if the box still holds the full source frame. `RawDecoder::spawn` takes the pair as its `cover_scale` argument; `exporter`/`preview` allocate `webcam_w * webcam_h * 4` to match.
 - `audio_offset_ms: i32` - the user's manual mic-sync nudge from settings. *Why:* carried here so `exporter.rs` does not need to reload the edit doc a second time after `new()`.
 - `trim: crate::edit::model::Trim` - the doc's trim window, unresolved (see `Trim::resolve`). *Why:* `exporter::export` resolves it against its own `video_end - video_start` and gates the frame loop (`pipeline::trim_frame_bounds`), again avoiding a second doc load.
 - `mic_volume: f32`, `sys_volume: f32` - linear gain multipliers from `Settings.audio_mic_volume`/`audio_sys_volume` (0 = muted, 1 = unchanged, up to 1.5). *Why carried here rather than reloaded in `exporter.rs`:* same reasoning as `audio_offset_ms` - `FrameRenderer::new` already loaded settings once; `exporter::export` passes both straight through to `audio_mux::mux`.
@@ -53,29 +53,31 @@ The resolved camera and scene for one output frame, returned by `step_camera` an
 
 `composite_at` reads all four fields. The preview engine (Task 2) will inspect `cam` and `scene` to derive the zoom level for display.
 
-## webcam_dims
+## webcam_box
 
 ```rust
-pub fn webcam_dims(ov: &crate::export::types::OverlayLayout, cap: u32) -> (u32, u32)
+pub fn webcam_box(panels: &[crate::export::types::OverlayLayout], src: Option<(u32, u32)>, cap: u32) -> (u32, u32)
 ```
 
-The webcam decode box for one resolved camera-panel overlay: its own aspect, capped in height, rounded to even dims.
+The ONE webcam decode box for a whole export/preview: the source video's own aspect, sized to cover the largest camera panel on both axes.
 
 ### Inputs
 
-- `ov: &OverlayLayout` - the resolved overlay (`settings::appearance::overlay_for`) of the LARGEST camera panel across all layout presets. *Why the largest:* one decode box serves the whole export, so it must have enough pixels for the biggest panel any preset resolves to; `FrameRenderer::new` picks it with `max_by_key((size_px, width_px))`, so a size tie prefers the wider (Wide) panel and never under-samples.
-- `cap: u32` - maximum decode HEIGHT in pixels (1440 in practice). *Why height and not area:* `size_px` is the height-driven knob (`cam_size * oh`) that every preset shares; width re-derives from the aspect afterwards, so capping can never skew the box.
+- `panels: &[OverlayLayout]` - every layout preset's resolved overlay (`settings::appearance::overlay_for` for all five `LayoutId`s). *Why all of them and not the biggest:* the box has to cover whichever panel the layout track happens to be showing at any moment, so it is sized against the maximum over the whole set - `width_px.max(size_px)` for the needed WIDTH (bubble modes draw `width_px` wide, the big-camera modes a `size_px` square) and `size_px` for the needed HEIGHT.
+- `src: Option<(u32, u32)>` - the webcam file's own pixel dims (`ffio::probe_dims`), or `None` when there is no webcam / it could not be probed. *Why the source shape drives the box:* every panel cover-crops this box at composite time, and a crop can only ever remove pixels - decoding a square (the old behaviour) has already thrown the sides of a 16:9 webcam away, so a Wide panel could then only get a zoomed-in band instead of the full frame. `None` falls back to a square box (the historical shape).
+- `cap: u32` - maximum decode HEIGHT in pixels (1440 in practice). *Why a height cap:* `size_px` is the height-driven knob (`cam_size * oh`) every preset shares; width re-derives from the source aspect afterwards, so capping can never skew the box.
 
 ### Returns
 
-`(w, h)` where `h = size_px` clamped to `[2, cap]` and `w = round(h * width_px / size_px)`, both rounded DOWN to even numbers (min 2). *Why even:* keeps the dims safe for any decoder/filter that assumes chroma-aligned sizes. `CamAspect::Square` (`width_px == size_px`) reproduces the old square exactly.
+`(w, h)`: `h = max(needed_h, ceil(needed_w / src_aspect))` clamped to `cap` AND to the source's own height, `w = round(h * src_aspect)`, both rounded DOWN to even numbers (min 2). *Why clamp to the source height:* decoding above the source resolution only makes ffmpeg upscale with `fast_bilinear` where the compositor (Lanczos3 on CPU, the sampler on GPU) does it at least as well - and it keeps the per-frame webcam byte cost at or below what the old square box moved.
 
 ### Behaviors worth knowing
 
-- `wide_panel_decodes_at_sixteen_by_nine` (unit test): a Wide panel `252px` tall yields `(448, 252)` - the same `scale=448:252` box `decode_args` emits, not `252x252`.
-- `square_panel_stays_square_and_even` (unit test): a Square panel is unchanged, and an odd `269` height rounds down to `268`.
-- `cap_bounds_height_without_skewing_the_aspect` (unit test): a Wide panel taller than `cap` clamps to `cap` in height and still comes out 16:9, because width is derived AFTER the clamp.
+- `the_box_takes_the_sources_aspect_not_a_panels` (unit test): a 1280x720 webcam decodes as the whole 1280x720 frame whether the bubble panels are Square or Wide; a 640x480 webcam stays 4:3.
+- `the_box_is_clamped_by_the_source_and_the_cap` (unit test): a 4K export's 1920px-tall big-cam panel still decodes at most `cap` (1440) tall, and a 320x240 webcam is never upscaled by the decoder.
+- `the_box_covers_the_widest_panel_on_a_tall_source` (unit test): a 9:16 portrait webcam grows in HEIGHT until the box is wide enough for the widest panel, and the source aspect survives that growth.
+- `no_source_falls_back_to_a_square_box` (unit test): `None` gives a square, even-dimensioned box; an empty panel list gives the historical `(420, 420)`.
 
 ### Used by
 
-- `src-tauri/src/export/render/mod.rs` - `FrameRenderer::new` fills `RenderMeta.webcam_w`/`webcam_h` with it.
+- `src-tauri/src/export/render/mod.rs` - `FrameRenderer::new` fills `RenderMeta.webcam_w`/`webcam_h` with it (probing the webcam only when the file exists).

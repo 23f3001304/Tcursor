@@ -26,7 +26,9 @@ Renders a trigger button (Monitor icon + the selected target's cleaned title) an
 
 ### Behavior
 
-**Grouping.** `targets` is split into `screens` (`kind !== "window"`) and `windows` (`kind === "window"`) while preserving each target's original array index (needed for `parseTarget`'s primary check), then rendered as `screens` followed by a `.tp-divider` header and `windows` - only when `windows.length > 0`.
+**Self-filtering.** Rows are computed as `targets.map((t, i) => ({ t, meta: parseTarget(t, i) })).filter((r) => !isOwnProcessWindow(r.t))` (`src/hud/devices/selectDevices.ts`) - `parseTarget` runs first against the raw (unfiltered) index so `primary` stays correct, then this process's own phantom window (see `isOwnProcessWindow`) is dropped from what actually renders. The app never lists itself as a capture target.
+
+**Grouping.** The filtered rows are split into `screens` (`kind !== "window"`) and `windows` (`kind === "window"`), then rendered as `screens` followed by a `.tp-divider` header and `windows` - only when `windows.length > 0`.
 
 **Row decoration.** Each row calls `parseTarget(t, index)` (`src/hud/devices/selectDevices.ts`) to split the backend's baked-in label into a clean `title`, an optional `resolution` sub-line, and a `primary` flag. A row renders `title` + `resolution` (if present) on the left (`.tp-main`), and a "Primary" badge (if `primary`) plus the selected-row `<Check>` on the right (`.tp-trail`).
 
@@ -37,6 +39,7 @@ Renders a trigger button (Monitor icon + the selected target's cleaned title) an
 - Holds no local open state - identical contract to `Dropdown`, so `Hud`'s existing `menu`/`tg()` single-open-dropdown pattern works unchanged.
 - The trigger's icon is always `<Monitor>`, even when the current selection is a window - matching the plain dropdown's prior behavior (no per-kind icon).
 - Styled in `src/hud/hud.css` under the `tp-*` classes, layered on top of the shared `.dd`/`.dd-trigger`/`.dd-menu`/`.dd-item` rules `Dropdown` also uses, so both pickers stay visually consistent.
+- Motion is identical to `Dropdown` too (design/premium-pass D6): the trigger gets the app-wide press spring (scale .96), and the menu fades/slides in on mount (opacity + `y: -4 -> 0`, 0.14s) - enter-only, same reason as `Dropdown` (see its doc): an animated exit would race `useHudWindowSize` shrinking the OS window underneath it.
 
 ### Used by
 

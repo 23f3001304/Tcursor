@@ -26,8 +26,8 @@ export function ScreenSection({ value, onChange }: {
         </button>
       </div>
       <div className="e-field" style={{ marginBottom: 0 }}>
-        <span className="e-fl">Screen size <b>{Math.round(value.screen_size * 100)}%</b></span>
-        <Slider min={0.6} max={1} step={0.01} value={value.screen_size} onChange={setSize} ariaLabel="Screen size" />
+        <Slider min={0.6} max={1} step={0.01} value={value.screen_size} onChange={setSize} ariaLabel="Screen size"
+          label="Screen size" formatValue={(v) => `${Math.round(v * 100)}%`} />
       </div>
     </div>
   );

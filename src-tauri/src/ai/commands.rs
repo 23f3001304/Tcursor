@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use crate::edit::model::{EditDoc, Trim};
+use crate::edit::model::EditDoc;
 use crate::edit::ops::api::EditOp;
 use crate::events::model::EventLog;
 use crate::session::paths::ProjectPaths;
@@ -37,11 +37,11 @@ fn pick_model(requested: Option<String>, installed: &[String]) -> Result<String,
 
 /// Shared LLM pass: load the recording, serialize it to a transcript, pick an actually-installed
 /// chat model, and parse the model's JSON into edit ops. Returns the current doc + ops + event log
-/// (for narration) + true clip length. Both `ai_autoedit` and `ai_plan` build on this. Blocking
-/// (file I/O + `ollama::chat`'s network call) - callers MUST run this inside `spawn_blocking`,
-/// never directly on a command's async task.
+/// (for narration) + true clip length + the event-to-output clock shift (also for narration -
+/// M1). `ai_plan` builds on this. Blocking (file I/O + `ollama::chat`'s network call) - callers
+/// MUST run this inside `spawn_blocking`, never directly on a command's async task.
 fn build_plan(paths: &ProjectPaths, model: Option<String>)
-    -> Result<(EditDoc, Vec<EditOp>, EventLog, u32), String> {
+    -> Result<(EditDoc, Vec<EditOp>, EventLog, u32, i64), String> {
     let doc = crate::edit::seed::load_or_seed(paths);
     // TRUE length - NOT doc.trim.out_ms, which is 0 after a trim reset (0 == "whole clip"), which
     // would otherwise feed the AI a zero-length timeline.
@@ -52,44 +52,26 @@ fn build_plan(paths: &ProjectPaths, model: Option<String>)
     let typing = crate::events::track::typing::TypingLog::load(&paths.typing()).ms;
     // Same shift `edit::seed`/`edit::migrate` use to put seeded regions on the output clock - the
     // director's ops are applied as output-time zooms, so its transcript must reason on that same
-    // clock (reused, not re-derived, so the two can never disagree).
+    // clock (reused, not re-derived, so the two can never disagree). Threaded back out to the
+    // caller (M1) so narration can correlate an output-clock op against these same raw logs.
     let shift = crate::edit::seed::output_shift(paths);
     let transcript = crate::ai::backend::timeline::serialize(&log, &actions, &cursor, &typing, dur_ms, shift);
     let installed = crate::ai::backend::ollama::list_models();
     let model_name = pick_model(model, &installed)?;
     let raw = crate::ai::backend::ollama::chat(&model_name, &crate::ai::backend::prompt::system_prompt(), &transcript)?;
     let ops = crate::ai::backend::plan::ops_from_json(&raw, dur_ms)?;
-    Ok((doc, ops, log, dur_ms))
-}
-
-/// One-shot: apply the whole AI plan and return the final doc (non-agentic path). `async` +
-/// `spawn_blocking` for the same reason as `list_ollama_models` above - `build_plan`'s Ollama call
-/// can take minutes on a first-run model load, and a sync command would freeze the app for all of
-/// it.
-#[tauri::command]
-pub async fn ai_autoedit(folder: String, model: Option<String>) -> Result<EditDoc, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let paths = ProjectPaths { folder: PathBuf::from(folder) };
-        let (mut doc, ops, _log, dur_ms) = build_plan(&paths, model)?;
-        doc.zooms.clear();
-        doc.trim = Trim { in_ms: 0, out_ms: dur_ms };
-        for op in ops { crate::edit::ops::api::apply(&mut doc, op); }
-        doc.save(&paths.edit()).map_err(|e| e.to_string())?;
-        Ok(doc)
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    Ok((doc, ops, log, dur_ms, shift))
 }
 
 /// Agentic: return the plan as ordered, labeled steps WITHOUT applying anything. The frontend
 /// applies them one-at-a-time (each via `apply_edit_op`) to reveal the edit like a live agent.
-/// `async` + `spawn_blocking` - see `list_ollama_models`/`ai_autoedit` above; the frontend's
-/// `useDirector` treats this fetch as its own cancellable "planning" phase (`Editor.md`).
+/// `async` + `spawn_blocking` - see `list_ollama_models` above; the frontend's `useDirector` treats
+/// this fetch as its own cancellable "planning" phase (`Editor.md`).
 #[tauri::command]
 pub async fn ai_plan(folder: String, model: Option<String>) -> Result<Vec<AiStep>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let paths = ProjectPaths { folder: PathBuf::from(folder) };
-        let (doc, ops, log, dur_ms) = build_plan(&paths, model)?;
+        let (doc, ops, log, dur_ms, shift) = build_plan(&paths, model)?;
         let mut steps = Vec::new();
         // Open by clearing the mechanical auto-zooms (only when there are any) so the reveal
         // shows them giving way to the smart ones.
@@ -97,7 +79,7 @@ pub async fn ai_plan(folder: String, model: Option<String>) -> Result<Vec<AiStep
             steps.push(AiStep { op: EditOp::ClearZooms, label: "Rethinking your zooms…".into() });
         }
         for op in ops {
-            let label = crate::ai::backend::narrate::label_for(&op, &log, dur_ms);
+            let label = crate::ai::backend::narrate::label_for(&op, &log, dur_ms, shift);
             steps.push(AiStep { op, label });
         }
         Ok(steps)

@@ -64,15 +64,28 @@ export function CameraPanel({
   // instead of jumping to frame-centre. The live layout pose isn't available in this panel.
   const kfRange = camKfRange(doc.camera_moves);
   const nearestPose = kfRange ? camMoveAt(doc.camera_moves, Math.min(Math.max(timeMs, kfRange[0]), kfRange[1])) : null;
+  // Deliberately does NOT clear `camDraftRef` (review round 2, Important - unlike
+  // `addKeyframeHere` below): this fires on every slider tick while dragging "Webcam size", and
+  // reads `camDraftRef.current` each time to preserve a PENDING drag's x/y across the whole slider
+  // gesture. Clearing it after the first tick would drop that x/y (falling back to `nearestPose`/
+  // 0.5 on the very next tick, mid-slider-drag) - worse than the known, narrower gap this leaves:
+  // `camDraftRef.current`'s `size` can go stale relative to what a slider commit just wrote, so a
+  // PiP drag started right after (`CamDragHandle.tsx`'s `onHandlePointerDown`) seeds `start.size`
+  // from that stale value instead of the size just committed here. Pre-existing, not introduced by
+  // M6's fix; not a one-liner to close without the regression above, so left as-is.
   const setKfSize = (v: number) => {
     const d = camDraftRef.current;
     void commitCamKeyframe(doc.camera_moves, timeMs, d ? { x: d.x, y: d.y, size: v } : { size: v },
       { x: d?.x ?? nearestPose?.x ?? 0.5, y: d?.y ?? nearestPose?.y ?? 0.5, size: v }, applyOp);
   };
   // Save the current drafted (dragged) pose - or the sampled pose if nothing was dragged - as a
-  // keyframe at the playhead. This is the ONLY thing that commits; a bare drag never does.
+  // keyframe at the playhead. This is the ONLY thing that commits; a bare drag never does. Clears
+  // camDraftRef itself once used (M6, review round 1 Important 3) - the draft's whole point is
+  // to survive playback ticks until this explicit action consumes it; leaving it behind afterward
+  // would let a STALE pose silently get reused as the seed for the NEXT drag/keyframe instead.
   const addKeyframeHere = () => {
     const p = camDraftRef.current ?? kfPose ?? nearestPose ?? { x: 0.5, y: 0.5, size: ma.cam_size };
+    camDraftRef.current = null;
     void commitCamKeyframe(doc.camera_moves, timeMs, { x: p.x, y: p.y, size: p.size }, p, applyOp);
   };
 
@@ -93,9 +106,8 @@ export function CameraPanel({
           <p className="e-lede">Drag the webcam in the preview to reposition it freely - nothing is saved until you press the button below, and moving the playhead discards an un-saved drag.</p>
 
           <div className="e-field" style={{ marginBottom: 0 }}>
-            <span className="e-fl">Webcam size <b>{pct(kfSize)}</b></span>
             <Slider min={SLIDERS.cam_size.min} max={SLIDERS.cam_size.max} step={SLIDERS.cam_size.step}
-              value={kfSize} onChange={setKfSize} ariaLabel="Webcam size" />
+              value={kfSize} onChange={setKfSize} ariaLabel="Webcam size" label="Webcam size" formatValue={pct} />
           </div>
 
           <button type="button" className="e-ghostbtn" style={{ marginTop: 16 }} onClick={addKeyframeHere}>
@@ -109,8 +121,8 @@ export function CameraPanel({
             const spec = SLIDERS[k];
             return (
               <div className="e-field" key={k} style={{ marginBottom: 0 }}>
-                <span className="e-fl">{spec.label} <b>{pct(ma[k])}</b></span>
-                <Slider min={spec.min} max={spec.max} step={spec.step} value={ma[k]} onChange={(v) => set(k, v)} ariaLabel={spec.label} />
+                <Slider min={spec.min} max={spec.max} step={spec.step} value={ma[k]} onChange={(v) => set(k, v)} ariaLabel={spec.label}
+                  label={spec.label} formatValue={pct} />
               </div>
             );
           })}
@@ -132,9 +144,9 @@ export function CameraPanel({
       )}
       {MODE_HAS_SHAPE[mode] && ma.cam_shape === "rounded" && (
         <div className="e-field">
-          <span className="e-fl">Corner Roundness <b>{pct(ma.cam_radius)}</b></span>
           <Slider min={SLIDERS.cam_radius.min} max={SLIDERS.cam_radius.max} step={SLIDERS.cam_radius.step}
-            value={ma.cam_radius} onChange={(v) => set("cam_radius", v)} ariaLabel="Corner Roundness" />
+            value={ma.cam_radius} onChange={(v) => set("cam_radius", v)} ariaLabel="Corner Roundness"
+            label="Corner Roundness" formatValue={pct} />
         </div>
       )}
       <div className="e-field" style={{ marginTop: 16 }}>

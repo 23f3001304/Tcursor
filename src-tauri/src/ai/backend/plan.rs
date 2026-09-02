@@ -21,12 +21,30 @@ fn extract_json(raw: &str) -> Option<&str> {
         let body = &after[body_start..];
         if let Some(end) = body.find("```") { &body[..end] } else { body }
     } else { raw };
-    // Balance-count braces from first '{'
+    // Balance-count braces from first '{', STRING-AWARE (M4): a `}`/`{` inside a JSON string
+    // value (e.g. a chatty model's `"note"` field) is not structure and must not move `depth` -
+    // `format: "json"` only constrains the reply to be valid JSON, not to this schema, so a
+    // model is free to put brace characters in its own prose fields. Track whether we're inside a
+    // string, toggling on an unescaped `"` and skipping the character right after a `\` so an
+    // escaped quote can't end the string early.
     let start = s.find('{')?;
     let mut depth = 0i32;
     let mut end = start;
+    let mut in_string = false;
+    let mut escaped = false;
     for (i, c) in s[start..].char_indices() {
-        match c { '{' => depth += 1, '}' => { depth -= 1; if depth == 0 { end = start + i; break; } } _ => {} }
+        if in_string {
+            if escaped { escaped = false; }
+            else if c == '\\' { escaped = true; }
+            else if c == '"' { in_string = false; }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            '{' => depth += 1,
+            '}' => { depth -= 1; if depth == 0 { end = start + i; break; } }
+            _ => {}
+        }
     }
     if depth != 0 { return None; }
     Some(&s[start..=end])
@@ -100,6 +118,34 @@ mod tests {
     #[test]
     fn garbage_returns_err() {
         assert!(ops_from_json("hello world no json here", CLIP).is_err());
+    }
+
+    /// M4: a `}` inside a JSON string value (a chatty model explaining itself in a `"note"` field)
+    /// must not be counted as the object's closing brace - the OUTER `}` at the very end is the
+    /// real one.
+    #[test]
+    fn brace_inside_a_string_value_does_not_truncate_the_object() {
+        let raw = r#"{"note":"skipping the idle stretch} at the start","zooms":[{"at_ms":500,"dur_ms":1200}]}"#;
+        let ops = ops_from_json(raw, CLIP).unwrap();
+        assert_eq!(ops.len(), 1);
+        assert!(matches!(&ops[0], EditOp::AddZoomFull { at_ms: 500, dur_ms: 1200, .. }), "{:?}", ops);
+    }
+
+    /// The mirror case: an unmatched `{` inside a string must not imbalance `depth` either -
+    /// without string-awareness this would drive `depth` to never return to 0, yielding
+    /// `Err("no JSON object found")` for perfectly valid JSON.
+    #[test]
+    fn unmatched_brace_inside_a_string_does_not_imbalance_depth() {
+        let raw = r#"{"note":"a { without a match","zooms":[{"at_ms":0,"dur_ms":500}]}"#;
+        let ops = ops_from_json(raw, CLIP).unwrap();
+        assert_eq!(ops.len(), 1);
+    }
+
+    #[test]
+    fn escaped_quote_inside_a_string_does_not_end_the_string_early() {
+        let raw = r#"{"note":"a \" quote } inside","zooms":[{"at_ms":0,"dur_ms":500}]}"#;
+        let ops = ops_from_json(raw, CLIP).unwrap();
+        assert_eq!(ops.len(), 1);
     }
 
     #[test]

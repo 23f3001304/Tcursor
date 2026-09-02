@@ -6,9 +6,26 @@ use crate::export::gpu::gpu_uniforms::Uniforms;
 use crate::export::gpu::Gpu;
 use super::CompositorResources;
 
+/// A cheap change key for the background buffer: its length plus an FNV-1a over ~4k evenly
+/// strided 4-byte samples. `FrameRenderer::reload_edit` rebuilds `bg` at the SAME dimensions,
+/// so the resource-rebuild check (`sw/sh/ww/wh`) can never see a background edit and the warm
+/// preview kept sampling a stale `bg_tex`; hashing all ~8 MB every frame would cost more than
+/// the upload it saves, and a background (fill, gradient, blur, wallpaper) that changes at all
+/// changes it across the whole frame, so a strided sample sees it.
+pub(super) fn bg_key(bg: &[u8]) -> u64 {
+    const FNV: u64 = 0x100000001b3;
+    let mut h = (0xcbf29ce484222325u64 ^ bg.len() as u64).wrapping_mul(FNV);
+    let words = bg.len() / 4;
+    for i in (0..words).step_by((words / 4096).max(1)) {
+        let w = u32::from_le_bytes([bg[i * 4], bg[i * 4 + 1], bg[i * 4 + 2], bg[i * 4 + 3]]);
+        h = (h ^ w as u64).wrapping_mul(FNV);
+    }
+    h
+}
+
 /// Build the screen/webcam/bg textures, the uniform buffer, and the bind group for one
 /// `(sw, sh, ww, wh)` size combination. Called only when `composite_into` detects a
-/// size change (or on the first frame) - `bg_uploaded` always starts `false` so the
+/// size change (or on the first frame) - `bg_key` always starts `None` so the
 /// caller re-uploads the background into the freshly created `bg_tex`.
 pub(super) fn build_resources(
     g: &Gpu, sw: u32, sh: u32, ww: u32, wh: u32, ow: u32, oh: u32, u: &Uniforms,
@@ -38,5 +55,23 @@ pub(super) fn build_resources(
             wgpu::BindGroupEntry { binding: 5, resource: ubuf.as_entire_binding() },
         ],
     });
-    CompositorResources { sw, sh, ww, wh, screen_y_tex, screen_uv_tex, webcam_tex, bg_tex, ubuf, bind, bg_uploaded: false }
+    CompositorResources { sw, sh, ww, wh, screen_y_tex, screen_uv_tex, webcam_tex, bg_tex, ubuf, bind, bg_key: None }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bg_key;
+
+    /// The key must move when the background's PIXELS move (an edit rebuilds `bg` at the same
+    /// dimensions, so length alone can never tell) and must be stable for an identical buffer.
+    #[test]
+    fn bg_key_tracks_content_not_just_length() {
+        let a = vec![7u8; 1920 * 1080 * 4];
+        assert_eq!(bg_key(&a), bg_key(&vec![7u8; 1920 * 1080 * 4]));
+        let mut b = a.clone();
+        for px in b.chunks_mut(4) { px[1] = 9; } // a colour/gradient/blur change touches every pixel
+        assert_ne!(bg_key(&a), bg_key(&b));
+        assert_ne!(bg_key(&a), bg_key(&a[..a.len() - 4])); // different size, different key
+        assert_eq!(bg_key(&[]), bg_key(&[])); // degenerate: no panic, stable
+    }
 }

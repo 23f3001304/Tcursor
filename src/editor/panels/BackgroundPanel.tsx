@@ -84,8 +84,13 @@ export function BackgroundPanel({
       </div>
 
       {tab === "default" && (
+        // No "Presets" header here (unlike the color/gradient tabs below) - `mesh` is a single
+        // bundled image (`BackgroundKind::Mesh` in Rust, see `settings.ts`'s doc comment), not a
+        // data-driven set like COLOR_PRESETS/GRADIENT_PRESETS that backgroundPresets.ts could
+        // expand, so a section label over the one swatch just restated the tab name for no
+        // reason. The swatch itself still renders at the same size/position every other preset
+        // tab uses, via the shared `.e-preset-grid`/`.e-preset-circle` classes.
         <div className="e-field">
-          <span className="e-sechead">Presets</span>
           <div className="e-preset-grid">
             <button type="button" className={`e-preset-circle ${bg.kind === "mesh" ? "on" : ""}`}
               title="Default" style={{ background: "linear-gradient(135deg, #242938, #58406f)" }}
@@ -121,18 +126,18 @@ export function BackgroundPanel({
 
       {/* Custom Sliders */}
       <div className="e-field">
-        <span className="e-fl">Background Blur <b>{Math.round(bg.blur * 100)}%</b></span>
-        <Slider min={0} max={100} step={5} value={Math.round(bg.blur * 100)} onChange={(v) => setBg({ blur: v / 100 })} ariaLabel="Background Blur" />
+        <Slider min={0} max={100} step={5} value={Math.round(bg.blur * 100)} onChange={(v) => setBg({ blur: v / 100 })} ariaLabel="Background Blur"
+          label="Background Blur" formatValue={(v) => `${Math.round(v)}%`} />
       </div>
 
       <div className="e-field">
-        <span className="e-fl">Corner Radius <b>{radiusPx}px</b></span>
-        <Slider min={0} max={80} step={1} value={radiusPx} onChange={setRadius} ariaLabel="Corner Radius" />
+        <Slider min={0} max={80} step={1} value={radiusPx} onChange={setRadius} ariaLabel="Corner Radius"
+          label="Corner Radius" formatValue={(v) => `${Math.round(v)}px`} />
       </div>
 
       <div className="e-field">
-        <span className="e-fl">Padding <b>{padPct}%</b></span>
-        <Slider min={0} max={25} step={1} value={padPct} onChange={setPad} ariaLabel="Padding" />
+        <Slider min={0} max={25} step={1} value={padPct} onChange={setPad} ariaLabel="Padding"
+          label="Padding" formatValue={(v) => `${Math.round(v)}%`} />
       </div>
     </div>
   );

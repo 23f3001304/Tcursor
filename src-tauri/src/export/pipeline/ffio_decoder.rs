@@ -4,16 +4,25 @@
 // every existing import path (`crate::export::pipeline::ffio::RawDecoder`) still
 // resolves unchanged.
 use anyhow::{anyhow, Context, Result};
-use std::io::{ErrorKind, Read};
+use std::io::{BufRead, BufReader, ErrorKind, Read};
 use std::path::Path;
-use std::process::{Child, ChildStdout, Stdio};
+use std::process::{Child, ChildStderr, ChildStdout, Stdio};
+use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 use crate::win::sys::proc::ffcmd;
+
+/// Retained ffmpeg stderr (bytes). Enough for a filtergraph rejection or a decoder error;
+/// once full the whole buffer is dropped rather than sliced (never splits a char boundary).
+const TAIL_CAP: usize = 2000;
 
 /// A spawned ffmpeg decoder emitting raw BGRA frames of a fixed byte size.
 pub struct RawDecoder {
     child: Child,
     stdout: ChildStdout,
     frame_bytes: usize,
+    stderr: Arc<Mutex<String>>,
+    drain: Option<JoinHandle<()>>,
+    frames: u64,
 }
 
 /// Build the `ffmpeg` CLI args for `RawDecoder::spawn`, pure (no process spawn) so the
@@ -34,8 +43,10 @@ fn decode_args(
     if let Some((w, h)) = target_dims {
         args.push("-vf".into()); args.push(format!("scale={w}:{h}:flags=fast_bilinear"));
     } else if let Some((w, h)) = cover_scale {
-        // Cover-crop to a centered `w`x`h` so the decoded webcam already has the PANEL's aspect
-        // (a Wide panel is 16:9); decoding a square here made the compositor stretch it 1.78x.
+        // Cover-crop to a centered `w`x`h`. For the webcam that box carries the SOURCE's own
+        // aspect (`render::meta::webcam_box`), so this is effectively a scale-to-fit and the
+        // full frame survives for the compositors to crop per panel; forcing any one panel's
+        // aspect here threw away pixels a differently-shaped panel later needed.
         // NOTE: `flags` is a `scale` option, NOT a `crop` option - putting it on `crop` makes
         // newer ffmpeg reject the whole filtergraph ("Option not found"), which silently zeroed
         // the webcam decode and dropped the camera from every export. The global `-sws_flags
@@ -53,6 +64,31 @@ fn decode_args(
     args
 }
 
+/// Drain ffmpeg's stderr into a rolling tail on its own thread. A THREAD, not a read after
+/// EOF: ffmpeg blocks once the ~64 KB stderr pipe fills and then stops writing stdout too, so
+/// a reader waiting on the next frame would deadlock against the very message it is waiting for.
+fn drain_stderr(pipe: ChildStderr, sink: Arc<Mutex<String>>) -> JoinHandle<()> {
+    std::thread::spawn(move || {
+        for line in BufReader::new(pipe).lines().map_while(Result::ok) {
+            let mut t = sink.lock().unwrap_or_else(|e| e.into_inner());
+            if t.len() + line.len() > TAIL_CAP { t.clear(); }
+            t.push_str(&line);
+            t.push('\n');
+        }
+    })
+}
+
+/// What a closed decoder stdout means. ffmpeg closes the pipe identically whether it finished
+/// the file or died on it (unreadable/corrupt input, a rejected filtergraph, a missing codec),
+/// so the EXIT STATUS decides: `Ok(false)` is a clean end of stream; a failure is an `Err`
+/// carrying ffmpeg's own stderr tail, so the export aborts instead of silently compositing a
+/// whole file of black frames over a decode that never produced anything.
+fn classify_end(success: bool, status: &str, frames: u64, tail: &str) -> Result<bool> {
+    if success { return Ok(false); }
+    let why = if tail.is_empty() { "no stderr output" } else { tail };
+    Err(anyhow!("ffmpeg decode failed ({status}) after {frames} frame(s): {why}"))
+}
+
 impl RawDecoder {
     /// Spawn `ffmpeg` decoding `video` to rawvideo BGRA. `rate <= 0` decodes at
     /// the native frame rate (used when the caller places frames by timestamp);
@@ -67,21 +103,34 @@ impl RawDecoder {
         let mut child = ffcmd("ffmpeg")
             .args(&args)
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped()) // captured, not discarded: it is the only account of WHY a decode died
             .spawn()
             .context("spawn ffmpeg decoder")?;
         let stdout = child.stdout.take().ok_or_else(|| anyhow!("decoder stdout missing"))?;
-        Ok(Self { child, stdout, frame_bytes })
+        let stderr = Arc::new(Mutex::new(String::new()));
+        let drain = child.stderr.take().map(|p| drain_stderr(p, stderr.clone()));
+        Ok(Self { child, stdout, frame_bytes, stderr, drain, frames: 0 })
     }
 
-    /// Read exactly one frame into `buf`. Returns Ok(false) at end-of-stream.
+    /// Read exactly one frame into `buf`. `Ok(false)` is a CLEAN end-of-stream only - a failed
+    /// decode returns `Err` (see `classify_end`), never a silently-short stream.
     pub fn read_frame(&mut self, buf: &mut [u8]) -> Result<bool> {
         debug_assert_eq!(buf.len(), self.frame_bytes);
         match self.stdout.read_exact(buf) {
-            Ok(()) => Ok(true),
-            Err(e) if e.kind() == ErrorKind::UnexpectedEof => Ok(false),
+            Ok(()) => { self.frames += 1; Ok(true) }
+            Err(e) if e.kind() == ErrorKind::UnexpectedEof => self.end_of_stream(),
             Err(e) => Err(anyhow!("decoder read failed: {e}")),
         }
+    }
+
+    /// Reap the process and classify the stream end. Joins the stderr drain first - the pipe
+    /// hits EOF the moment ffmpeg exits, so this returns at once and the tail is complete
+    /// rather than racing the exit.
+    fn end_of_stream(&mut self) -> Result<bool> {
+        let st = self.child.wait().context("wait ffmpeg decoder")?;
+        if let Some(h) = self.drain.take() { let _ = h.join(); }
+        let tail = self.stderr.lock().unwrap_or_else(|e| e.into_inner()).trim().to_string();
+        classify_end(st.success(), &st.to_string(), self.frames, &tail)
     }
 }
 
@@ -94,53 +143,5 @@ impl Drop for RawDecoder {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::decode_args;
-    use std::path::Path;
-
-    /// The screen decode's post-fix call shape (`rate = out_fps as f64`, `input_rate =
-    /// false`): the output `-r <out_fps>` must be present, placed AFTER `-i`, so the decode
-    /// is rate-converted to the export fps instead of running at the source's native rate.
-    #[test]
-    fn positive_output_rate_emits_r_after_i() {
-        let args = decode_args(Path::new("v.mp4"), 30.0, false, None, None, None, "nv12");
-        let i = args.iter().position(|a| a == "-i").unwrap();
-        let r = args.iter().position(|a| a == "-r").unwrap();
-        assert!(r > i, "-r must come after -i for an output rate: {args:?}");
-        assert_eq!(args[r + 1], "30.0000");
-    }
-
-    /// `input_rate = true` places `-r` BEFORE `-i` instead (the webcam's alternate mode).
-    #[test]
-    fn positive_input_rate_emits_r_before_i() {
-        let args = decode_args(Path::new("v.mp4"), 60.0, true, None, None, None, "bgra");
-        let i = args.iter().position(|a| a == "-i").unwrap();
-        let r = args.iter().position(|a| a == "-r").unwrap();
-        assert!(r < i, "-r must come before -i for an input rate: {args:?}");
-    }
-
-    /// `rate <= 0` decodes at the source's native rate: no `-r` at all (the pre-fix screen
-    /// behavior, still used by callers that want native-rate decode e.g. seek-one-frame).
-    #[test]
-    fn non_positive_rate_omits_r_entirely() {
-        let args = decode_args(Path::new("v.mp4"), 0.0, false, None, None, None, "nv12");
-        assert!(!args.iter().any(|a| a == "-r"), "unexpected -r in {args:?}");
-    }
-
-    /// A Wide (16:9) webcam panel must cover-crop to W:H, not to a square that the
-    /// compositor then stretches 1.78x across the panel.
-    #[test]
-    fn cover_scale_emits_the_panels_own_w_h() {
-        let args = decode_args(Path::new("w.mp4"), 60.0, false, None, Some((448, 252)), None, "bgra");
-        let vf = args.iter().position(|a| a == "-vf").expect("no -vf");
-        assert_eq!(args[vf + 1], "scale=448:252:force_original_aspect_ratio=increase,crop=448:252");
-    }
-
-    /// A Square panel keeps the exact filter it always had (no behavior change).
-    #[test]
-    fn cover_scale_of_equal_dims_is_the_old_square_filter() {
-        let args = decode_args(Path::new("w.mp4"), 60.0, false, None, Some((420, 420)), None, "bgra");
-        let vf = args.iter().position(|a| a == "-vf").expect("no -vf");
-        assert_eq!(args[vf + 1], "scale=420:420:force_original_aspect_ratio=increase,crop=420:420");
-    }
-}
+#[path = "ffio_decoder_tests.rs"]
+mod tests;

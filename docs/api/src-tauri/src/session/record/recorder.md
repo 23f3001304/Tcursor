@@ -1,86 +1,119 @@
 # src-tauri/src/session/record/recorder.rs
 
-Top-level recording controller. Owns one `Mutex<Option<Running>>` shared with Tauri as managed state; each command locks it briefly and returns, so the mutex is never held during blocking I/O. The actual video encoding, mic capture, and system-audio loopback each run on their own `std::thread`.
+Recording state plus the Start/Pause/Resume commands. Owns one `Mutex<Option<Running>>` shared with Tauri as managed state; each command locks it briefly and returns, so the mutex is never held during blocking I/O. The actual video encoding, mic capture, and system-audio loopback each run on their own `std::thread`. The Stop command lives in `recorder_stop.rs` (see `recorder_stop.md`).
 
 ## Running
 
 ```rust
-struct Running {
-    stop: Arc<AtomicBool>,
-    paused: Arc<AtomicBool>,
-    paused_totals: Arc<PauseTotals>,
-    clock: Arc<dyn Clock>,
-    video: VideoSink,
-    mic_thread: Option<JoinHandle<()>>,
-    system_thread: Option<JoinHandle<()>>,
-    mouse: Option<MouseTracker>,
-    keyboard: Option<KeyboardTracker>,
-    cursor: Option<CursorTypeTracker>,
-    events_path: PathBuf,
-    actions_path: PathBuf,
-    typing_path: PathBuf,
-    cursor_path: PathBuf,
-    screen: ScreenInfo,
-    started_unix_ms: u64,
-    events_ms: u64,
-    mic_start: Arc<AtomicU64>,
-    system_start: Arc<AtomicU64>,
-    folder: String,
+pub(super) struct Running {
+    pub stop: Arc<AtomicBool>,
+    pub paused: Arc<AtomicBool>,
+    pub paused_totals: Arc<PauseTotals>,
+    pub clock: Arc<dyn Clock>,
+    pub video: VideoSink,
+    pub mic_thread: Option<JoinHandle<()>>,
+    pub system_thread: Option<JoinHandle<()>>,
+    pub mouse: Option<MouseTracker>,
+    pub keyboard: Option<KeyboardTracker>,
+    pub cursor: Option<CursorTypeTracker>,
+    pub events_path: PathBuf,
+    pub actions_path: PathBuf,
+    pub typing_path: PathBuf,
+    pub cursor_path: PathBuf,
+    pub screen: ScreenInfo,
+    pub started_unix_ms: u64,
+    pub events_ms: u64,
+    pub mic_start: Arc<AtomicU64>,
+    pub system_start: Arc<AtomicU64>,
+    pub folder: String,
 }
 ```
 
-Private struct holding every live resource for one recording. Consumed in full by `stop_recording`.
+Holds every live resource for one recording. Consumed in full by `recorder_stop::stop_blocking`. `pub(super)` with `pub` fields so that sibling module can consume it while nothing outside `record` can see it.
 
-- `stop: Arc<AtomicBool>` - shared shutdown flag polled by the video, mic, and system-audio threads. *Why Arc:* each thread clone needs ownership; SeqCst writes in `stop_recording` ensure all threads see the flag before `join`.
+- `stop: Arc<AtomicBool>` - shared shutdown flag polled by the video, mic, and system-audio threads. *Why Arc:* each thread clone needs ownership; SeqCst writes in `stop_blocking` ensure all threads see the flag before `join`. Also read by the ffmpeg video thread to tell a user Stop apart from the OS ending the capture.
 - `paused: Arc<AtomicBool>` - shared pause flag. *Why separate from stop:* pause is reversible; stop is terminal. The video encoding and audio threads both check this flag independently.
-- `paused_totals: Arc<PauseTotals>` - the exact-span paused-time ledger (see `pause_totals.rs`), shared with every input tracker (mouse, keyboard, cursor-type). *Why separate from `paused`:* the `bool` flag is what capture threads poll; the ledger additionally records the exact ms each pause/resume happened, which those threads' own raw elapsed-time readings can't reconstruct on their own.
+- `paused_totals: Arc<PauseTotals>` - the exact-span paused-time ledger (see `pause_totals.rs`), shared with every input tracker (mouse, keyboard, cursor-type) AND, since the C1 fix, with both capture paths through `PauseClock`. *Why separate from `paused`:* the `bool` flag is what capture threads poll; the ledger additionally records the exact ms each pause/resume happened, which those threads' own frame-arrival readings cannot reconstruct.
 - `clock: Arc<dyn Clock>` - the same `Clock` used to derive `events_ms` and start the video/audio threads. *Why stored:* `pause_recording` / `resume_recording` need it to stamp `paused_totals` at the exact instant `paused` flips.
-- `video: VideoSink` - the live recording video pipeline: GPU-native Media Foundation by default (no readback), else the legacy ffmpeg fallback (see `video_sink.rs`). *Why an enum:* `stop_recording` stops + finalizes it uniformly via `stop_and_collect`, which returns the frame count + per-frame capture timestamps regardless of which path ran.
+- `video: VideoSink` - the live recording video pipeline: GPU-native Media Foundation by default (no readback), else the legacy ffmpeg fallback (see `video_sink.rs`). *Why an enum:* the stop path finalizes it uniformly via `stop_and_collect`, which returns a `VideoStopped` regardless of which path ran.
 - `mic_thread / system_thread: Option<JoinHandle<()>>` - `None` when mic/system-audio is off. *Why Option:* join is skipped cheaply for the disabled case.
 - `mouse / keyboard / cursor: Option<...>` - active input trackers; `None` when not started. `cursor` is only `Some` for `CursorStyle::Enhanced`. *Why Option:* the `save_inputs` helper skips each absent tracker individually.
 - `events_path / actions_path / typing_path / cursor_path: PathBuf` - destination paths passed to `save_inputs`. *Why stored here not in paths:* `Running` outlives the local `ProjectPaths` variable in `start_recording`.
 - `screen: ScreenInfo` - capture dimensions and origin, needed by `EventLog`. *Why captured at start:* display resolution could change after recording begins; the log must reflect the resolution actually used.
 - `started_unix_ms: u64` - Unix epoch time (ms) when recording started. *Why:* stored in `EventLog` so exports can correlate events to wall-clock time.
 - `events_ms: u64` - clock value (ms) at the moment `MouseTracker` was started. *Why:* mouse event `t` values are relative to this origin; `sync.json` records it so the exporter can realign events.
-- `mic_start / system_start: Arc<AtomicU64>` - stamped by each audio thread at their first real sample. *Why AtomicU64:* read back in `stop_recording` from the main thread without a lock; SeqCst load ensures the written value is visible.
+- `mic_start / system_start: Arc<AtomicU64>` - stamped by each audio thread at their first real sample. *Why AtomicU64:* read back in the stop path without a lock; SeqCst load ensures the written value is visible.
 - `folder: String` - project folder path, returned in `RecordingResult` and used to write `sync.json`.
 
 ### Used by
 
-- `src-tauri/src/session/record/recorder.rs` (only) - created in `start_recording`, read in `pause_recording` / `resume_recording`, consumed in `stop_recording`.
+- `src-tauri/src/session/record/recorder.rs` - created in `start_recording`, read in `pause_recording` / `resume_recording`.
+- `src-tauri/src/session/record/recorder_stop.rs` - consumed in `stop_blocking`.
 
 ## Recorder
 
 ```rust
 #[derive(Default)]
 pub struct Recorder {
-    inner: Mutex<Option<Running>>,
+    pub(super) inner: Mutex<Option<Running>>,
+    pub(super) stopping: AtomicBool,
 }
 ```
 
 Tauri managed-state singleton. `Default` is implemented so Tauri's `manage` call requires no manual construction.
 
-- `inner: Mutex<Option<Running>>` - `None` when idle; `Some(Running)` between a successful `start_recording` and `stop_recording`. *Why Mutex:* the three Tauri commands share this state across the Tauri thread pool; the mutex prevents concurrent starts or a stop racing a pause.
+- `inner: Mutex<Option<Running>>` - `None` when idle; `Some(Running)` between a successful `start_recording` and the stop path taking it. *Why Mutex:* the four Tauri commands share this state across the Tauri thread pool; the mutex prevents concurrent starts or a stop racing a pause.
+- `stopping: AtomicBool` - `true` while `stop_blocking` is tearing a session down. *Why needed at all:* the teardown runs OUTSIDE the lock (it joins threads and finalizes a possibly multi-GB MP4 - holding the recorder lock across that would block Pause/Resume on the main thread), and `Running` has already been taken by then, so `inner.is_some()` alone would wave a concurrent `start_recording` straight through. `MouseTracker`'s hook sink is a process-global (`events::track::tracker::SINK`) that a start overwrites unconditionally, so that interleave writes the finished take's `events.json` from the NEW empty collector and leaves the new take's hook with no sink at all - zero mouse events, so no cursor, no click FX and no auto-zoom for its whole duration. *Why an atomic rather than a second mutex:* it is only ever read and written while holding `inner`'s lock, so it is effectively part of that guarded state and cannot introduce a lock-order cycle.
 
 ### Used by
 
-- `src-tauri/src/lib.rs` - registered as managed state via `.manage(Recorder::default())`.
+- `src-tauri/src/lib.rs` - registered as managed state via `.manage(Recorder::default())`; its `CloseRequested` guard also calls `is_busy` directly on the `State` it resolves.
+- `src-tauri/src/session/record/recorder_stop.rs` - resolved from the `AppHandle` in `stop_blocking`.
+- `src-tauri/src/session/record/close_guard.rs` - `finish_and_close` calls `is_recording` and `is_busy`.
 
-## RecordingResult
+## Recorder::is_recording
 
 ```rust
-#[derive(Serialize)]
-pub struct RecordingResult { pub folder: String, pub frames: u64 }
+pub fn is_recording(&self) -> bool
 ```
 
-Returned by `stop_recording` to the frontend.
+True while a take is actively recording (`inner` is `Some`) - i.e. nobody has started stopping it yet.
 
-- `folder: String` - absolute path to the project directory. *Why:* the frontend passes this path back to `export_project` and the editor commands.
-- `frames: u64` - total successfully encoded video frames. *Why:* informational for the UI; also useful when diagnosing a drop in frame count.
+### Returns
+
+`self.inner.lock().is_some()` (poison-tolerant, same `unwrap_or_else(|e| e.into_inner())` pattern as every other lock site in this file).
 
 ### Used by
 
-- `src-tauri/src/session/record/recorder.rs` - constructed and returned by `stop_recording`.
+- `src-tauri/src/lib.rs` - the `CloseRequested` guard's `is_busy()` check folds this in.
+- `src-tauri/src/session/record/close_guard.rs` - `finish_and_close` uses this to decide whether IT must run `stop_recording`, versus someone else already owning the stop.
+
+## Recorder::is_busy
+
+```rust
+pub fn is_busy(&self) -> bool
+```
+
+True while a take is recording OR its stop is still finalizing.
+
+### Returns
+
+`is_recording() || stopping.load(SeqCst)`. *Why both:* `stop_blocking` takes `Running` out of `inner` (making `is_recording()` false) well before the finalize it then runs - joining audio threads, writing the video's `moov` atom, `sync.json`, the manifest - actually completes; `stopping` covers exactly that window (same flag `start_recording` already checks to keep a new start out of a stop's teardown - see `Recorder::stopping` above).
+
+### Used by
+
+- `src-tauri/src/lib.rs` - the `CloseRequested` guard: a close request landing anywhere in `is_busy()`'s window is prevented and handed to `close_guard::finish_and_close`, so the process can never exit mid-finalize (task-6 (a) / ruling R6).
+- `src-tauri/src/session/record/close_guard.rs` - the wait loop when someone else already owns the stop.
+
+## emitter
+
+```rust
+fn emitter(app: &tauri::AppHandle, event: &'static str) -> Notify
+```
+
+Wraps an `AppHandle` in a `record::Notify` that forwards its reason string to the frontend as `event`. Recording threads hold one of these instead of an `AppHandle`, so nothing below this file needs to know about Tauri and the capture/encode pipeline stays constructible in tests.
+
+Two are built per recording: `record-warning` (handed to both audio threads - a degraded but still-running take) and `record-ended-early` (handed to both capture paths - the OS ended the capture, see `CAPTURE_CLOSED`). The HUD listens for both in `src/hud/hooks/useRecordingFlow.ts`.
 
 ## start_recording
 
@@ -106,23 +139,25 @@ Creates the project folder, starts all input trackers and audio threads, spawns 
 - `target_id: Option<String>` - which display/window to capture, or `None` for the default target. Forwarded to `video_sink::start_video`.
 - `system_audio: bool` - whether to capture loopback audio. *Why bool not Option:* simple on/off; no device selection is needed for loopback.
 - `game_mode: bool` - if true, runs the video thread via the legacy ffmpeg fallback path (the compatibility toggle) instead of the GPU-native one. *Why separate flag:* an explicit user choice for setups where the GPU path has issues.
-- `recorder: tauri::State<'_, Recorder>` - the singleton managed state. *Why State injection:* Tauri resolves it from the app's managed-state registry, avoiding global variables.
-- `app: tauri::AppHandle` (Task 39) - resolves the main window to swap in the REC-lit icon once recording actually starts (`win::sys::brand_icon::set_recording`). Brand flair only - never fails the command.
+- `recorder: tauri::State<'_, Recorder>` - the singleton managed state.
+- `app: tauri::AppHandle` - source of the two `Notify` emitters (see `emitter`), and resolves the main window to swap in the REC-lit icon once recording actually starts (`win::sys::brand_icon::set_recording`). The icon is brand flair only - never fails the command.
 
 ### Returns
 
-`Ok(String)` (the project folder) on success. `Err(String)` for: already recording, folder creation failure, `WgcFrameSource` init failure, or ffmpeg encoder spawn failure. On any `start_video` error, the mic/system-audio threads spawned earlier in this call are stopped and joined first (see step 6), so a failed start never leaks an open audio device or a running thread. The returned folder lets the HUD stream the webcam into it during recording.
+`Ok(String)` (the project folder) on success. `Err(String)` for: already recording (including the tail of a stop still in progress - see `Recorder::stopping`), folder creation failure, `WgcFrameSource` init failure, or ffmpeg encoder spawn failure. On any `start_video` error, the mic/system-audio threads spawned earlier in this call are stopped and joined first (see step 6), so a failed start never leaks an open audio device or a running thread. The returned folder lets the HUD stream the webcam into it during recording.
+
+An audio input that fails to OPEN is not an error here - the take is still worth having - so it arrives as a `record-warning` event instead; see `recorder_threads::audio_warning`.
 
 ### Implementation
 
-1. Lock `recorder.inner`. Return `Err("already recording")` if `Some`. *Why check before any I/O:* prevents double-start from a fast frontend double-click with no wasted setup.
+1. Lock `recorder.inner`. Return `Err("already recording")` if `Some` **or** if `stopping` is set. *Why check before any I/O:* prevents double-start from a fast frontend double-click with no wasted setup, and keeps a start out of the window where a previous stop is still detaching the global input hooks.
 2. Resolve `base = dirs_next::video_dir() / "TCursor"`. Create `ProjectPaths`, call `ensure()`. *Why `dirs_next::video_dir`:* platform-native; falls back to `temp_dir` so recording never fails for lack of a video directory.
 3. Snapshot settings via `settings::store::load` and write to `paths.settings()`. *Why snapshot at start:* the user might change settings mid-session; the export always uses the settings active at record time, ensuring reproducibility.
 4. Query `primary_refresh_hz`, capped to 60. *Why cap:* 60fps is the practical ceiling for current targets; higher refresh rates would waste encoder bandwidth.
-5. Create the `paused_totals: Arc<PauseTotals>` ledger. Start `MouseTracker`, `KeyboardTracker`, and (if Enhanced style) `CursorTypeTracker`, each given a clone so their stamp sites can pause-adjust their raw elapsed-ms readings. Start `spawn_mic_thread` and `spawn_system_thread`. *Why before the video pipeline:* building the encoder (first ffmpeg probe / Media Foundation setup) can take a moment. Starting inputs first ensures they capture from t=0 and do not miss that startup gap.
-6. Call `video_sink::start_video(game_mode, .., target_id.as_deref(), ..)` - the slow part - wrapped in a `match` (not `?`). It builds the GPU-native `GpuRecorder` (Media Foundation, no readback) by default, or the legacy ffmpeg pipe when `game_mode` (the compatibility toggle) is set or the GPU encoder fails to init. Returns the `VideoSink` and the captured `(w, h, origin_x, origin_y)`. *Why after inputs:* see step 5; the slow part is intentionally last. *Why `match` not `?`:* on `Err`, `stop` is stored `true` (`SeqCst`) and `mic_thread`/`system_thread` are joined before returning the error - otherwise those threads' 50ms poll loops would never see a stop signal (it is only ever set from `Running`, which is never constructed on this path) and would run forever, leaking the thread and leaving the mic/loopback device open with its WAV never finalized. `mouse`/`keyboard`/`cursor` need no equivalent handling: they are plain locals at this point (not yet moved into `Running`), so returning early drops them, and their `Drop` impls already stop the underlying hooks.
-7. Build `ScreenInfo` from `(w, h, origin_x, origin_y)`, stamp `started_unix_ms`, and store everything in `Running` (including `video: VideoSink`); assign to `*guard`.
-8. Call `brand_icon::set_recording(&app, true)` (Task 39) - swaps the main window's icon to the REC-lit variant. After the guard is set, so it only fires on an actual successful start.
+5. Create the `paused_totals: Arc<PauseTotals>` ledger and the `record-warning` emitter. Start `MouseTracker`, `KeyboardTracker`, and (if Enhanced style) `CursorTypeTracker`, each given a ledger clone so their stamp sites can pause-adjust their raw elapsed-ms readings. Start `spawn_mic_thread` and `spawn_system_thread`, each given the warning emitter. *Why before the video pipeline:* building the encoder (first ffmpeg probe / Media Foundation setup) can take a moment. Starting inputs first ensures they capture from t=0 and do not miss that startup gap.
+6. Build a `VideoStart` (including the SAME `paused_totals` and a `record-ended-early` emitter) and call `video_sink::start_video` - the slow part - wrapped in a `match` (not `?`). It builds the GPU-native `GpuRecorder` (Media Foundation, no readback) by default, or the legacy ffmpeg pipe when `game_mode` is set or the GPU encoder fails to init. Returns the `VideoSink` and the captured `(w, h, origin_x, origin_y)`. *Why the ledger goes to the video too:* that is the C1 fix - the encoded video's own PTS is compressed by the same ledger the input streams subtract, so `video.mp4` and `sync.json` share one clock. *Why `match` not `?`:* on `Err`, `stop` is stored `true` (`SeqCst`) and `mic_thread`/`system_thread` are joined before returning the error - otherwise those threads' 50ms poll loops would never see a stop signal (it is only ever set from `Running`, which is never constructed on this path) and would run forever, leaking the thread and leaving the mic/loopback device open with its WAV never finalized. `mouse`/`keyboard`/`cursor` need no equivalent handling: they are plain locals at this point, so returning early drops them, and their `Drop` impls already stop the underlying hooks.
+7. Build `ScreenInfo` from `(w, h, origin_x, origin_y)`, stamp `started_unix_ms`, and store everything in `Running`; assign to `*guard`.
+8. Call `brand_icon::set_recording(&app, true)` - swaps the main window's icon to the REC-lit variant. After the guard is set, so it only fires on an actual successful start.
 
 ## pause_recording
 
@@ -144,7 +179,7 @@ Stamps `paused_totals` with the pause instant, then sets the shared `paused` fla
 ### Implementation
 
 1. Lock `recorder.inner`. Return error if `None`.
-2. Call `r.paused_totals.pause(r.clock.now_ms())`. *Why before the flag flip, under the same lock:* the ledger and the flag must agree on the exact pause instant; reading the clock here (rather than inside each tracker thread) is what makes this an exact-span model instead of the tick-based `PauseClock`.
+2. Call `r.paused_totals.pause(r.clock.now_ms())`. *Why before the flag flip, under the same lock:* the ledger and the flag must agree on the exact pause instant. Since C1/H2 this single reading is what BOTH the input streams and the video's own PTS are compressed by, so the whole recording removes exactly the same span.
 3. Store `true` into `r.paused` with `Ordering::SeqCst`. *Why SeqCst:* ensures the video, mic, and system-audio threads observe the flag before the next iteration of their respective sleep loops (2-50ms latency is acceptable; SeqCst removes any reorder uncertainty).
 
 ## resume_recording
@@ -167,45 +202,5 @@ Closes the in-progress span on `paused_totals`, then clears the shared `paused` 
 ### Implementation
 
 1. Lock `recorder.inner`. Return error if `None`.
-2. Call `r.paused_totals.resume(r.clock.now_ms())`. *Why:* folds the just-ended pause span into the ledger's accumulated total before any tracker reads `elapsed_paused` again.
+2. Call `r.paused_totals.resume(r.clock.now_ms())`. *Why:* folds the just-ended pause span into the ledger's accumulated total before any tracker - or either capture path - reads `elapsed_paused` again.
 3. Store `false` into `r.paused` with `Ordering::SeqCst`. *Why SeqCst:* same reasoning as `pause_recording`; the clearing write must be globally visible before the threads' next reads.
-
-## stop_recording
-
-```rust
-#[tauri::command]
-pub async fn stop_recording(app: tauri::AppHandle) -> Result<RecordingResult, String>
-```
-
-Signals all threads to stop, joins them in dependency order, persists input data, `sync.json`, and `project.tcursor`, and returns the `RecordingResult`. A thin `async` wrapper: the work is `stop_blocking`, below.
-
-**Off the main thread (sweep-2 Task 1).** `async fn` + `spawn_blocking`, the same conversion `ai::commands`, `thumbs.rs` and `preview_track.rs` already had. As a sync `#[tauri::command] fn` this ran on the whole app's main thread while it joined the mic and system-audio threads (each a 50 ms poll loop plus a WAV-header finalize), gzip-compressed and wrote the entire mouse-event log, and then joined the video pipeline - which waits for the encoder to close its pipe and write the `moov` atom of a potentially multi-GB MP4. On a long 4K recording that froze the HUD outright: no repaint, no "Saving..." spinner motion, no input, for the whole finalize.
-
-`recorder: tauri::State<'_, Recorder>` is gone from the signature because a `State<'_, T>` cannot cross into `spawn_blocking` (its lifetime is not `'static`); `stop_blocking` re-derives it from the `AppHandle` instead. Both were injected params, so the JS call (`invoke("stop_recording")`) is unchanged.
-
-### Inputs
-
-- `app: tauri::AppHandle` - resolves the `Recorder` managed state inside the blocking closure, and (Task 39) the main window whose icon is swapped back to normal. The icon swap is brand flair only - never fails the command.
-
-### Returns
-
-`Ok(RecordingResult)` with the project folder and frame count. `Err(String)` if the video thread panicked, `stop_and_finalize` failed, or the `spawn_blocking` task itself failed to join.
-
-## stop_blocking
-
-```rust
-fn stop_blocking(app: &tauri::AppHandle) -> Result<RecordingResult, String>
-```
-
-The whole body of `stop_recording`, split out so the command itself is just the `spawn_blocking` hop (and so `recorder.rs` stays under the line cap). Runs on a blocking-pool thread. Every handle it touches is thread-agnostic by construction: `MouseTracker::stop` and `CaptureControl::stop` post `WM_QUIT` to a *stored* thread id and then join, `KeyboardTracker`/`CursorTypeTracker` are an atomic flag plus a join, and `windows-capture`'s `VideoEncoder` is declared `Send` and does its muxing on its own transcode thread.
-
-### Implementation
-
-1. `app.state::<Recorder>()`, lock `inner` and `take` the `Running`. Return `Err("not recording")` if `None`. *Why `take`:* consumes the `Running`, making the state `None` so a subsequent `start_recording` is permitted.
-2. Call `brand_icon::set_recording(&app, false)` (Task 39) - only reached once step 1 confirms a recording was actually taken, so a redundant Stop (already-idle) never touches the icon.
-3. Set `stop = true` (SeqCst) - signals the audio threads (the video pipeline is stopped below).
-4. Join `mic_thread` and `system_thread`. *Why audio first:* lightweight (50ms loop), they finish quickly.
-5. Call `save_inputs`. *Why before the video stop:* if finalizing the video errors, the `?` would skip `save_inputs` and lose the events/actions; saving first guarantees they persist.
-6. `running.video.stop_and_collect()` - stop + finalize the video pipeline (GPU: end capture + `encoder.finish()`; ffmpeg: set halt + WM_QUIT to unblock the WGC thread + join), returning `(frames, frame_ts)`. Propagate errors as `Err(String)`.
-7. Call `recorder_threads::save_session_files` with `frame_ts`, `events_ms`, the atomic audio start times (0 treated as absent) and `running.screen` - it writes `sync.json`, `project.tcursor` and the recents entry, all best-effort. *Why after the video stop:* `frame_ts` is only complete once the pipeline has finalized. Split into `recorder_threads.rs` alongside `save_inputs` so this file stays under the line cap; see `recorder_threads.md` for the `preprocessed: false` rationale.
-8. Return `RecordingResult { folder, frames }`.

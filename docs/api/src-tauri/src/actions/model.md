@@ -93,7 +93,7 @@ Container for all `ActionEvent` values from one recording session, with JSON per
 ### Used by
 
 - `src-tauri/src/session/record/recorder_threads.rs` - constructs `ActionLog { actions }` and calls `save(actions_path)` when a recording ends.
-- `src-tauri/src/ai/commands.rs` - `ai_autoedit` calls `ActionLog::load` to read the session's hotkey log for the AI timeline.
+- `src-tauri/src/ai/commands.rs` - `build_plan` (the shared LLM pass behind `ai_plan`) calls `ActionLog::load` to read the session's hotkey log for the AI timeline.
 - `src-tauri/src/export/pipeline/exporter.rs` - loads `ActionLog` to feed the export pipeline.
 
 ## ActionLog::save

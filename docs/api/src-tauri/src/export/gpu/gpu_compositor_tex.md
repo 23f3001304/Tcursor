@@ -1,6 +1,6 @@
 # src-tauri/src/export/gpu/gpu_compositor_tex.rs
 
-Texture and bind-group construction for `GpuCompositor::composite_into`, split out of `gpu_compositor.rs` so that file stays under the size limit. Pure builder - identical to the inline block it replaced when it was factored out, no behavior change of its own.
+Texture and bind-group construction for `GpuCompositor::composite_into`, split out of `gpu_compositor.rs` so that file stays under the size limit, plus `bg_key` (the background's change key, which lives here because it is about the freshness of a resource this file builds).
 
 ## build_resources
 
@@ -22,7 +22,7 @@ Builds every texture, the uniform buffer, and the bind group for one `(sw, sh, w
 
 ### Returns
 
-A `CompositorResources` with `bg_uploaded: false`. *Why:* the caller (`composite_into`) is responsible for uploading the background into the freshly-created `bg_tex` on the same call that triggered the rebuild; returning the bundle with the flag already `false` is what makes that upload happen exactly once per rebuild.
+A `CompositorResources` with `bg_key: None`. *Why:* the caller (`composite_into`) is responsible for uploading the background into the freshly-created `bg_tex` on the same call that triggered the rebuild; returning the bundle with no key recorded is what makes that upload happen on the very next comparison.
 
 ### Implementation
 
@@ -31,8 +31,24 @@ A `CompositorResources` with `bg_uploaded: false`. *Why:* the caller (`composite
 3. Create the uniform buffer `ubuf` via `wgpu::util::DeviceExt::create_buffer_init`, seeded with `bytemuck::bytes_of(u)`, usage `UNIFORM | COPY_DST`.
 4. Create a texture view for each of the four textures (Y, UV, bg, webcam).
 5. Build the bind group against `g.bind_layout`: binding 0 = bg view, 1 = screen Y view, 2 = screen UV view, 3 = webcam view, 4 = `g.sampler`, 5 = `ubuf.as_entire_binding()`.
-6. Return `CompositorResources { sw, sh, ww, wh, screen_y_tex, screen_uv_tex, webcam_tex, bg_tex, ubuf, bind, bg_uploaded: false }`.
+6. Return `CompositorResources { sw, sh, ww, wh, screen_y_tex, screen_uv_tex, webcam_tex, bg_tex, ubuf, bind, bg_key: None }`.
 
 ### Used by
 
 - `src-tauri/src/export/gpu/gpu_compositor.rs` - `GpuCompositor::composite_into` calls this exactly when `(sw, sh, ww, wh)` differs from the cached `CompositorResources` (or there is no cached bundle yet).
+
+## bg_key
+
+```rust
+pub(super) fn bg_key(bg: &[u8]) -> u64
+```
+
+A cheap CONTENT key for the background buffer: FNV-1a seeded with `bg.len()` and folded over ~4096 evenly strided 4-byte samples. `GpuCompositor::composite_into` re-uploads `bg_tex` exactly when this key changes.
+
+### Why a hash and not a dimension check or a full compare
+
+`FrameRenderer::reload_edit` rebuilds `bg` in place at the SAME `out_w x out_h` whenever the background settings change, so the resource-rebuild condition (`sw/sh/ww/wh`) never fires for a background edit - the old `bg_uploaded` flag stayed `true`, every rebuilt buffer was discarded, and the warm preview kept rendering the previous background until something forced a full `build_renderer` (a folder or aspect change). A full hash (or memcmp) of an ~8 MB BGRA buffer every frame would cost more than the upload it saves; a background that changes at all - fill colour, gradient, blur radius, wallpaper - changes across the whole frame, so a strided sample sees it.
+
+### Behaviors worth knowing
+
+- `bg_key_tracks_content_not_just_length` (unit test): identical buffers key identically; a one-channel change across every pixel changes the key; a different length changes the key; an empty slice is stable and does not panic.

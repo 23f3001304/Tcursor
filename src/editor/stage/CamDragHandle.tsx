@@ -1,13 +1,20 @@
-import { useEffect, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import type { LayoutPresets, PreviewLayout } from "../../lib/ipc";
 import type { CameraMove, LayoutSeg } from "../../lib/edit";
-import { camAspect, camMoveAt, rectFromCenter, type CamPose } from "./cameraMoves";
+import { camAspect, cameraMovesKey, camMoveAt, rectFromCenter, type CamPose } from "./cameraMoves";
 import { mapPointerToCamFraction } from "./camDragMapper";
 import { layoutAt } from "../timeline/layoutTrack";
+import { isNaturalPlaybackTick } from "./playbackTick";
+import { attachPointerGesture } from "./pointerGesture";
+import { pastDragThreshold } from "../hooks/dragThreshold";
 
-export function CamDragHandle({ layout, layoutPresets, layoutSegs, cameraMoves, timeMs, canvasW, canvasH, canvasRef, camDraftRef, dirtyRef }: {
+export function CamDragHandle({ layout, layoutPresets, layoutSegs, cameraMoves, timeMs, playing, canvasW, canvasH, canvasRef, camDraftRef, dirtyRef }: {
   layout: PreviewLayout | null; layoutPresets: LayoutPresets | null; layoutSegs: LayoutSeg[];
-  cameraMoves: CameraMove[]; timeMs: number; canvasW: number; canvasH: number;
+  cameraMoves: CameraMove[]; timeMs: number;
+  /** `Stage`'s own `playing` prop, passed straight through - needed to tell an ordinary playback
+   *  tick apart from a real seek (`isNaturalPlaybackTick`, M6) for the `[timeMs]` effect below. */
+  playing: boolean;
+  canvasW: number; canvasH: number;
   canvasRef: RefObject<HTMLCanvasElement | null>;
   camDraftRef: RefObject<CamPose | null>; dirtyRef: RefObject<boolean>;
 }) {
@@ -15,9 +22,37 @@ export function CamDragHandle({ layout, layoutPresets, layoutSegs, cameraMoves, 
   // the ref. Stage clears the ref when the playhead moves, and this component unmounts with Move
   // mode, so the local state can never outlive the draft it mirrors.
   const [dragPose, setDragPose] = useState<CamPose | null>(null);
-  // Moving the playhead discards the unsaved draft - the PiP resets to its sampled pose. (Stage
-  // owns the matching `camDraftRef` reset, which must happen even with Move mode off.)
-  useEffect(() => { setDragPose(null); }, [timeMs]);
+  const detachRef = useRef<(() => void) | null>(null);
+  const playingRef = useRef(playing); playingRef.current = playing; // read fresh inside the [timeMs]-only effect below
+  const lastMsRef = useRef(timeMs);
+  // Moving the playhead discards the unsaved draft - the PiP resets to its sampled pose - UNLESS
+  // this `timeMs` change is just an ordinary playback tick, not a real seek/scrub (M6, review
+  // round 1 Important 3 - mirrors Stage.tsx's matching effect over `camDraftRef`; see its comment).
+  useEffect(() => {
+    if (!isNaturalPlaybackTick(lastMsRef.current, timeMs, playingRef.current)) setDragPose(null);
+    lastMsRef.current = timeMs;
+  }, [timeMs]);
+  // The OTHER clear trigger: an explicit action (CameraPanel's "Add keyframe" button) consuming
+  // the draft, which writes a real `camera_moves` entry - CameraPanel clears `camDraftRef` itself
+  // (the rAF loop's copy) when it does; this clears the LOCAL mirror driving the handle's own CSS
+  // position. Gated on `cameraMovesKey` (a CONTENT signature), NOT the `cameraMoves` reference
+  // itself (review round 2, Important): `applyEditOp` hands back a brand-new `camera_moves` array
+  // reference on EVERY edit routed through it - add a zoom, delete, trim, an AI step - not just
+  // camera-move ones, so keying on the reference cleared the mirror on totally unrelated edits
+  // too. Repro that fixed: Move-mode drag the PiP (draft uncommitted), press Z to add a zoom - the
+  // reference-keyed effect nulled `dragPose`, snapping the drag-handle overlay to `sampledPose`
+  // while the composited canvas (still reading the un-cleared `camDraftRef.current`) kept drawing
+  // the actual drag position - two on-screen elements visibly disagreeing.
+  const cameraMovesKeyRef = useRef(cameraMovesKey(cameraMoves));
+  useEffect(() => {
+    const key = cameraMovesKey(cameraMoves);
+    if (key !== cameraMovesKeyRef.current) setDragPose(null);
+    cameraMovesKeyRef.current = key;
+  }, [cameraMoves]);
+  // Release this drag's window listeners if the handle unmounts mid-gesture (Move mode toggled
+  // off) - the old code only ever removed them from its own `up` callback, so an unmount here
+  // left `pointermove`/`pointerup`/`pointercancel` bound to `window` forever (L4).
+  useEffect(() => () => detachRef.current?.(), []);
 
   const baseLayout = layoutAt(layoutSegs, layoutPresets, timeMs, [canvasW, canvasH]) ?? layout;
   // The LIVE (un-overridden, layout-resolved) PiP pose the keyframe track eases to and from at
@@ -39,9 +74,10 @@ export function CamDragHandle({ layout, layoutPresets, layoutSegs, cameraMoves, 
   // Move-mode drag: a pointerdown on the handle records the start but does NOT move or commit
   // anything - the PiP only follows (and a keyframe is only written) once the pointer actually
   // drags past a small threshold. So a plain click on the preview, or scrubbing the playhead,
-  // never adds/updates a keyframe - the PiP just shows its sampled pose at the playhead. Window
-  // listeners (not React pointer capture) keep the drag alive past the handle; live feedback goes
-  // into camDraftRef (read by the rAF loop each frame), dragPose (state) drives the handle's CSS.
+  // never adds/updates a keyframe - the PiP just shows its sampled pose at the playhead.
+  // `attachPointerGesture` (pointercancel + unmount-safe via `detachRef`, L4) keeps the drag alive
+  // past the handle; live feedback goes into camDraftRef (read by the rAF loop each frame),
+  // dragPose (state) drives the handle's CSS.
   const onHandlePointerDown = (e: React.PointerEvent) => {
     e.stopPropagation();
     const c = canvasRef.current; if (!c) return;
@@ -50,18 +86,16 @@ export function CamDragHandle({ layout, layoutPresets, layoutSegs, cameraMoves, 
     const start = { x: e.clientX, y: e.clientY, size: (camDraftRef.current ?? sampledPose ?? livePose)?.size ?? 0.25 };
     let moved = false;
     const move = (ev: PointerEvent) => {
-      if (!moved && Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 4) return; // ignore a click
-      moved = true;
+      if (!moved) {
+        if (!pastDragThreshold(ev.clientX - start.x, ev.clientY - start.y, 4)) return; // ignore a click
+        moved = true;
+      }
       const [x, y] = mapPointerToCamFraction({ clientX: ev.clientX, clientY: ev.clientY, canvasElement: c });
-      // Update the live draft only - NO commit. Saving is the Camera panel's Update/Add button.
+      // Update the live draft only - NO commit. Saving is the Camera panel's Update/Add button,
+      // which also clears camDraftRef itself once it does (CameraPanel.tsx's addKeyframeHere).
       camDraftRef.current = { x, y, size: start.size }; setDragPose({ x, y, size: start.size }); dirtyRef.current = true;
     };
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    detachRef.current = attachPointerGesture(move, () => { detachRef.current = null; });
   };
 
   if (!pipRect) return null;

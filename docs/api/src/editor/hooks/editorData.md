@@ -39,3 +39,23 @@ Decides what the proxy-source effect should do this run: show the raw capture im
 ### Used by
 
 `useEditorData` (`src/editor/hooks/useEditorData.ts`) - the proxy-source effect, gated on `manifest.ready` before calling this.
+
+## hasWebcamSignal
+
+```ts
+export function hasWebcamSignal(layout: PreviewLayout | null): boolean
+```
+
+Whether this recording likely has a webcam at all - gate finding: the Camera lane's empty-state hint (`CameraLane.md`) invited keyframing a webcam a screen-only recording never had. No new IPC: the backend's real file-exists check (`PreviewSession::has_webcam`, `src-tauri/src/export/preview/session.rs`) is server-side only, used to gate the export/preview FX camera-exclusion hole - never surfaced to the frontend as its own field.
+
+### Inputs
+
+- `layout: PreviewLayout | null` - the already-fetched static preview layout (`previewLayout` IPC call, `Editor`'s `layout` state from `useEditorData`) - evaluated once at the recording's very start, refetched only on doc edits (`rev`), not on scrub.
+
+### Returns
+
+`layout != null && layout.cam != null`. A recording that never captured a webcam never gets a camera-visible layout segment anywhere in its `doc.layout` (nothing to show there), so `layout.cam` reads `null` at the start for exactly that case. Trade-off: a webcam recording that happens to OPEN on a screen-only intro is a false negative - acceptable for gating a discoverability hint (worst case the hint stays hidden), not worth a second IPC round-trip to close.
+
+### Used by
+
+`Editor` (`src/editor/Editor.tsx`) - `hasWebcamSignal(layout)` passed to `Timeline` as `hasWebcam`, threaded straight to `CameraLane`.

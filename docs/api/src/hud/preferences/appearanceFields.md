@@ -22,7 +22,7 @@ Union of the five layout modes the HUD can be in. Used as `Record` keys througho
 ```ts
 export const MODES: [ModeKey, string][] = [
   ["screen", "Screen"], ["camera", "Camera"], ["presenter", "Presenter"],
-  ["screen_only", "S-only"], ["camera_only", "C-only"],
+  ["screen_only", "Screen only"], ["camera_only", "Camera only"],
 ]
 ```
 

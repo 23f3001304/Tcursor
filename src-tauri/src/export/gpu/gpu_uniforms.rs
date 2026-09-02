@@ -16,14 +16,19 @@ pub struct Uniforms {
     screen_a: f32, camera_a: f32,
     screen_w: f32, screen_h: f32,
     cam_w: f32, cam_h: f32,
-    _pad: f32,
+    wc_aspect: f32, // decoded webcam w/h (was `_pad`) - the shader cover-crops it to the panel
     ring: [f32; 4], // x = ring width (px), yzw = ring color 0..1; x == 0 -> no ring
 }
 
 /// Build the uniform: both panel rects (UV), the screen panel's radius/size/alpha,
 /// the camera panel's radius/size/alpha, the whole-scene zoom (center + 1/scale),
 /// and the optional camera-panel ring (width px + color 0..1) carried on `scene.camera`.
-pub fn build_uniforms(scene: &Scene, cam: Camera, layout: &Layout, has_webcam: bool) -> Uniforms {
+///
+/// `webcam` is the DECODED frame's `(w, h)` (`None` = no webcam): one decode box serves every
+/// layout, so the shader needs its aspect to cover-crop it to whatever aspect the camera panel
+/// has this frame (`shader.wgsl`, mirroring `compositor::cover_rect` on the CPU path). 1.0 when
+/// there is no webcam - the panel is not drawn at all then (`camera_a` 0).
+pub fn build_uniforms(scene: &Scene, cam: Camera, layout: &Layout, webcam: Option<(u32, u32)>) -> Uniforms {
     let (ow, oh) = (layout.out_w as f32, layout.out_h as f32);
     let uv = |r: RectF| ([r.x / ow, r.y / oh], [(r.x + r.w) / ow, (r.y + r.h) / oh]);
     let (smin, smax) = uv(scene.screen.rect);
@@ -38,10 +43,10 @@ pub fn build_uniforms(scene: &Scene, cam: Camera, layout: &Layout, has_webcam: b
         inv_scale: 1.0 / cam.scale.max(0.01),
         screen_r: scene.screen.radius, camera_r: scene.camera.radius,
         screen_a: scene.screen.alpha,
-        camera_a: if has_webcam { scene.camera.alpha } else { 0.0 },
+        camera_a: if webcam.is_some() { scene.camera.alpha } else { 0.0 },
         screen_w: scene.screen.rect.w, screen_h: scene.screen.rect.h,
         cam_w: scene.camera.rect.w, cam_h: scene.camera.rect.h,
-        _pad: 0.0,
+        wc_aspect: webcam.map(|(w, h)| w.max(1) as f32 / h.max(1) as f32).unwrap_or(1.0),
         ring,
     }
 }
@@ -62,14 +67,26 @@ mod tests {
     #[test]
     fn no_ring_is_all_zero() {
         let s = scene_with_ring(0.0, [255, 255, 255]);
-        let u = build_uniforms(&s, Camera { cx: 0.0, cy: 0.0, scale: 1.0 }, &Layout::default(), true);
+        let u = build_uniforms(&s, Camera { cx: 0.0, cy: 0.0, scale: 1.0 }, &Layout::default(), Some((16, 16)));
         assert_eq!(u.ring, [0.0, 0.0, 0.0, 0.0]);
+    }
+
+    /// The shader crops the webcam to the panel, so it needs the DECODED frame's aspect - and a
+    /// missing webcam must not leave a 0 (or a NaN) in a field the shader divides by.
+    #[test]
+    fn wc_aspect_is_the_decoded_frames_own_ratio() {
+        let s = scene_with_ring(0.0, [0, 0, 0]);
+        let (cam, l) = (Camera { cx: 0.0, cy: 0.0, scale: 1.0 }, Layout::default());
+        assert!((build_uniforms(&s, cam, &l, Some((1280, 720))).wc_aspect - 16.0 / 9.0).abs() < 1e-6);
+        assert_eq!(build_uniforms(&s, cam, &l, Some((720, 720))).wc_aspect, 1.0);
+        let none = build_uniforms(&s, cam, &l, None);
+        assert_eq!((none.wc_aspect, none.camera_a), (1.0, 0.0));
     }
 
     #[test]
     fn ring_packs_width_and_normalized_color() {
         let s = scene_with_ring(6.0, [255, 128, 0]);
-        let u = build_uniforms(&s, Camera { cx: 0.0, cy: 0.0, scale: 1.0 }, &Layout::default(), true);
+        let u = build_uniforms(&s, Camera { cx: 0.0, cy: 0.0, scale: 1.0 }, &Layout::default(), Some((16, 16)));
         assert_eq!(u.ring[0], 6.0);
         assert_eq!(u.ring[1], 1.0);
         assert!((u.ring[2] - 128.0 / 255.0).abs() < 1e-6);

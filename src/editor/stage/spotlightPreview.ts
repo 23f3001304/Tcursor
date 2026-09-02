@@ -35,6 +35,21 @@ export function newSpotlightSimState(): SpotlightSimState {
   return { driver: null, transitionFrom: null, transitionStart: null, transitionDur: null, alpha: 0 };
 }
 
+/** A cheap CONTENT signature for the spotlight-relevant fields of `effects` - id/start/end/fade
+ *  in/out/mode/dim/radius/feather per entry, joined in array order. Pure and unit-tested, mirroring
+ *  `cameraMovesKey` (cameraMoves.ts) for the identical reason: `applyEditOp` round-trips the whole
+ *  `EditDoc` through IPC, so `effects` gets a brand-new ARRAY REFERENCE on every edit routed through
+ *  it (add a zoom, trim, an AI-director step), not just spotlight ones - a caller keying a sim reset
+ *  on the reference would reset on every unrelated edit. Comparing this key instead lets it reset
+ *  only when a region that could actually be `sim.driver` was added/removed/retimed/restyled - see
+ *  `Stage.tsx`'s `spotEffectsKeyRef` effect, the fix for the "spotlight freezes mid-fade after a
+ *  paused retime" bug (a driver disappearing via an EDIT, not playback, arms a transition that
+ *  never advances because paused media time is frozen - `useCompositeLoop`'s discontinuous-jump
+ *  reset only catches a moving `t`, not this). */
+export function spotlightEffectsKey(effects: EffectRegion[]): string {
+  return effects.map(e => `${e.id}:${e.start_ms}:${e.end_ms}:${e.fade_in_ms}:${e.fade_out_ms}:${e.mode}:${e.dim}:${e.radius}:${e.feather}`).join("|");
+}
+
 function regionAlpha(e: EffectRegion, ms: number): number {
   if (ms < e.start_ms || ms >= e.end_ms) return 0;
   const inn = (ms - e.start_ms) / Math.max(1, e.fade_in_ms);

@@ -1,6 +1,16 @@
 import { useEffect, useRef } from "react";
+import { motion } from "motion/react";
 import { Chevron, Check, Monitor } from "../components/icons";
-import { parseTarget, type DisplayInfo } from "./selectDevices";
+import { parseTarget, isOwnProcessWindow, type DisplayInfo } from "./selectDevices";
+
+// design/premium-pass D6: same trigger press spring + menu mount-in as Dropdown.tsx (this
+// component is a `Dropdown`-alike, see the doc comment below) - kept local rather than shared to
+// match how PLAY_SPRING/PRESS_TAP are hoisted per-file elsewhere in this pass. Deliberately
+// enter-ONLY (no AnimatePresence): see Dropdown.tsx's comment for why an exit animation here would
+// race `useHudWindowSize` shrinking the actual OS window the instant `menu` goes null.
+const PRESS_TAP = { scale: 0.96 };
+const PRESS_SPRING = { type: "spring" as const, stiffness: 500, damping: 30 };
+const MENU_MOTION = { initial: { opacity: 0, y: -4 }, animate: { opacity: 1, y: 0 }, transition: { duration: 0.14 } };
 
 /** Capture-target picker: a `Dropdown`-alike for `listDisplays()` results, but decorates each
  *  row with its resolution and a "Primary" badge for the main display, and groups `kind:
@@ -23,7 +33,10 @@ export function TargetPicker({ targets, value, open, onToggle, onPick }: {
     return () => document.removeEventListener("mousedown", close);
   }, [open, onToggle]);
 
-  const rows = targets.map((t, i) => ({ t, meta: parseTarget(t, i) }));
+  // `index` is computed against the RAW (unfiltered) list first - parseTarget's `primary` flag is
+  // keyed off raw index 0, always a display - then this process's own phantom window (see
+  // `isOwnProcessWindow`) is dropped from the rendered rows.
+  const rows = targets.map((t, i) => ({ t, meta: parseTarget(t, i) })).filter((r) => !isOwnProcessWindow(r.t));
   const screens = rows.filter((r) => r.t.kind !== "window");
   const windows = rows.filter((r) => r.t.kind === "window");
   const selected = rows.find((r) => r.t.id === value);
@@ -43,17 +56,17 @@ export function TargetPicker({ targets, value, open, onToggle, onPick }: {
 
   return (
     <div className={`dd ${open ? "open" : ""}`} ref={ref}>
-      <button className="dd-trigger" onClick={onToggle}>
+      <motion.button className="dd-trigger" onClick={onToggle} whileTap={PRESS_TAP} transition={PRESS_SPRING}>
         <span className="ico"><Monitor /></span>
         <span className="dd-label">{selected?.meta.title ?? "—"}</span>
         <span className="chev"><Chevron /></span>
-      </button>
+      </motion.button>
       {open && (
-        <div className="dd-menu tp-menu">
+        <motion.div className="dd-menu tp-menu" {...MENU_MOTION}>
           {screens.map(row)}
           {windows.length > 0 && <div className="tp-divider">Windows</div>}
           {windows.map(row)}
-        </div>
+        </motion.div>
       )}
     </div>
   );

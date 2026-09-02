@@ -8,7 +8,7 @@ use crate::domain::time::Timestamp;
 use crate::encode::ffmpeg_encoder::FfmpegFrameSink;
 use crate::encode::frame_sink::FrameSink;
 use crate::export::pipeline::audio_mux::mux;
-use crate::export::pipeline::{trim_frame_bounds, ScreenPipe, WebcamPipe};
+use crate::export::pipeline::{audio_shift_ms, trim_frame_bounds, webcam_warning, ScreenPipe, WebcamPipe};
 use crate::export::gpu::pool::BufPool;
 use crate::export::render::FrameRenderer;
 use crate::export::settings::ExportSettings;
@@ -19,7 +19,13 @@ use crate::session::paths::ProjectPaths;
 /// `on_progress` receives 0..=100 as frames are encoded. `settings` resolves the output
 /// resolution (combined with the doc's own `Aspect`), frame rate, quality, and container -
 /// `ExportSettings::default()` reproduces today's export exactly (Source/60fps/CRF 24/MP4).
-pub fn export(paths: &ProjectPaths, settings: ExportSettings, on_progress: impl Fn(u8)) -> Result<()> {
+///
+/// Returns the export's non-fatal WARNINGS (`run_export` emits each as an `export-warning`):
+/// things that produced a real file but not the one the user expected, and which used to be
+/// swallowed entirely - today that is a webcam that failed to decode or decoded zero frames.
+/// A failure that makes the file worthless (the screen decode dying, or producing nothing at
+/// all) is an `Err` instead.
+pub fn export(paths: &ProjectPaths, settings: ExportSettings, on_progress: impl Fn(u8)) -> Result<Vec<String>> {
     // The SAME display-refresh-derived value the old unconditional formula used, both as
     // `FrameRenderer::new`'s capture-rate fallback (`build_timeline`, unchanged meaning) and as
     // `Fps::Source`'s own fallback (`resolve_hz`) - so `Source` reproduces the old formula
@@ -30,7 +36,7 @@ pub fn export(paths: &ProjectPaths, settings: ExportSettings, on_progress: impl 
     let (mut r, meta) = FrameRenderer::new(paths, layout, capture_fps, settings.resolution, None)?;
 
     let screen_bytes = meta.screen_bytes;
-    let wc_dims = (meta.webcam_w, meta.webcam_h); // panel-aspect decode box, not a square
+    let wc_dims = (meta.webcam_w, meta.webcam_h); // source-aspect decode box; panels crop it at composite time
     let wc_bytes = (wc_dims.0 * wc_dims.1 * 4) as usize;
 
     let (out_w, out_h) = (meta.out_w, meta.out_h);
@@ -59,10 +65,6 @@ pub fn export(paths: &ProjectPaths, settings: ExportSettings, on_progress: impl 
     let mut wpipe = if paths.webcam().exists() {
         Some(WebcamPipe::spawn(&paths.webcam(), meta.video_start, wc_dims, wc_bytes, depth, out_fps)?)
     } else { None };
-    // Zero-frame fallback as a black nv12 frame (Y=16, U=V=128); a zeroed buffer would decode to a
-    // green tint through the color convert. Only used if the screen decode yields nothing.
-    let mut empty = vec![16u8; screen_bytes];
-    for b in &mut empty[(meta.sw as usize * meta.sh as usize)..] { *b = 128; }
 
     // Trim gates which output frames are actually composited/encoded: `[k_in, k_last]` (inclusive
     // frame indices at `out_fps`) is the resolved trim range (`out_ms == 0` = whole clip, see
@@ -86,15 +88,31 @@ pub fn export(paths: &ProjectPaths, settings: ExportSettings, on_progress: impl 
     // and the PiP would vanish early - instead we freeze it on the last decoded frame. Buffers are
     // pooled (depth 6), so keeping one held out of the pool costs nothing.
     let mut last_webcam: Option<(Vec<u8>, u32, u32)> = None;
+    let mut wc_fail: Option<String> = None; // first webcam decode error, if any (non-fatal, see below)
+    let mut wc_frames = 0u64; // webcam frames actually decoded - tells "absent" from "frozen"
     for k in 0..=k_full_last {
         let t = meta.video_start + k * 1000 / out_fps;
         let d0 = std::time::Instant::now();
-        let screen = spipe.next()?.unwrap_or(&empty); // decoded at -r out_fps, so output frame k IS decoded frame k at any export rate
+        // Decoded at -r out_fps, so output frame k IS decoded frame k at any export rate. `None`
+        // means the decode delivered NOTHING (only reachable on k = 0; EOF holds the last frame):
+        // that used to fall back to a black nv12 frame for every frame of the export and still
+        // report success. A file with no picture is not a deliverable - fail honestly instead.
+        let screen = spipe.next()?.ok_or_else(|| anyhow!(
+            "screen decode produced no frames from {:?} - the recording's video is unreadable", paths.video()))?;
         if let Some(w) = &mut wpipe {
-            if let Some(next) = w.next()? {
-                if let Some((old, _, _)) = last_webcam.take() { w.recycle(old); }
-                last_webcam = Some(next);
-            } // else: webcam EOF - keep last_webcam and hold it for the rest of the export
+            match w.next() {
+                Ok(Some(next)) => {
+                    if let Some((old, _, _)) = last_webcam.take() { w.recycle(old); }
+                    last_webcam = Some(next);
+                    wc_frames += 1;
+                }
+                Ok(None) => {} // webcam EOF - keep last_webcam and hold it for the rest of the export
+                // A webcam decode FAILURE must not kill an otherwise-good export: the screen is the
+                // deliverable and the camera is one panel of it. It becomes a warning below (the
+                // silence was the bug, not the continuing). `take_err` clears the stored error, so
+                // later calls just return EOF and the last frame is held as usual.
+                Err(e) => { if wc_fail.is_none() { wc_fail = Some(e.to_string()); } }
+            }
         }
         t_dec += d0.elapsed().as_micros();
         let pose = r.step_camera(t); // always advance camera/cursor state, even outside the trim range
@@ -123,26 +141,41 @@ pub fn export(paths: &ProjectPaths, settings: ExportSettings, on_progress: impl 
             last_pct = pct;
         }
     }
+    let had_webcam = wpipe.is_some();
     if let (Some(w), Some((buf, _, _))) = (wpipe.as_ref(), last_webcam) { w.recycle(buf); }
 
     drop(tx);
     spipe.join()?;
-    if let Some(w) = wpipe { w.join()?; }
+    // A webcam error that only surfaces at JOIN (the decode thread stored it after the composite
+    // loop had already moved past it) is the same non-fatal case as one seen mid-loop, and must
+    // not turn a finished export into a failure: every frame is composited and encoded by here.
+    if let Some(w) = wpipe {
+        if let Err(e) = w.join() { if wc_fail.is_none() { wc_fail = Some(e.to_string()); } }
+    }
     encoder.join().map_err(|_| anyhow!("encoder thread panicked"))??;
+    // A webcam that failed, or decoded NOTHING (a container this ffmpeg build cannot open, a
+    // zero-byte file from an interrupted `append_webcam`), still produced a file - just not the
+    // one that was asked for, and it used to say so nowhere. See `webcam_warning` for why the
+    // zero-frame and part-way cases have to read differently.
+    let warning = webcam_warning(had_webcam, wc_fail.as_deref(), wc_frames);
+    if let Some(w) = &warning { eprintln!("[EXPORT] WARNING: {w} (webcam: {:?})", paths.webcam()); }
     let secs = export_start.elapsed().as_secs_f64().max(0.001);
     eprintln!("[EXPORT] Finished render: {} frames in {:.2}s ({:.1} FPS)", total_out, secs, total_out as f64 / secs);
     let _ = std::fs::write(std::env::temp_dir().join("tcursor-export-timing.txt"), format!(
         "frames={} total={:.2}s fps={:.1} decode={}ms composite={}ms encode_wait={}ms\n",
         total_out, secs, total_out as f64 / secs, t_dec / 1000, t_comp / 1000, t_send / 1000));
-    // Audio aligns to the video's own frame 0; once trimmed, that frame sits at `trim_in_ms`
-    // into the original capture, so both tracks shift earlier by the same amount to stay in sync.
-    let shift = |a: Option<u64>| a.map(|m| m as i64 - meta.video_start as i64).unwrap_or(0) - trim_in_ms as i64;
+    // Audio aligns to the video's own frame 0; once trimmed, that frame sits `trim_in_q` into the
+    // original capture, so both tracks shift earlier by the same amount to stay in sync. `trim_in_q`
+    // is the FRAME-FLOORED trim-in (what frame 0 actually shows), not the raw ms trim point - see
+    // `audio_shift_ms`.
+    let trim_in_q = k_in * 1000 / out_fps;
+    let shift = |a: Option<u64>| audio_shift_ms(a, meta.video_start, trim_in_q);
     let mic_shift = shift(meta.tl.mic_ms) + meta.audio_offset_ms as i64;
     // Cap the muxed audio to the trimmed video's own duration, so a trim-out doesn't leave a
     // longer source audio file playing past the video's frozen last frame.
     let out_dur_ms = (total_out * 1000) / out_fps;
     mux(&tmp, paths, settings.format, mic_shift, shift(meta.tl.system_ms), meta.mic_volume, meta.sys_volume, out_dur_ms)?;
-    Ok(())
+    Ok(warning.into_iter().collect())
 }
 
 #[cfg(test)]

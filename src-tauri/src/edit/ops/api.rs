@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use crate::edit::model::{CameraMove, Cut, EditDoc, Speed, Trim, Zoom, ZoomTarget};
-use crate::edit::ops::region::{auto_layer, dur_bound, valid_easing, valid_layout};
+use crate::edit::ops::region::{auto_layer, clamp_order, dur_bound, valid_easing, valid_layout};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "snake_case", tag = "op")]
@@ -90,6 +90,7 @@ pub fn apply(doc: &mut EditDoc, op: EditOp) {
             if let Some(z) = doc.zooms.iter_mut().find(|z| z.id == id) {
                 if let Some(v) = start_ms { z.start_ms = v.min(dur); }
                 if let Some(v) = end_ms { z.end_ms = v.min(dur); }
+                clamp_order(&mut z.start_ms, &mut z.end_ms, start_ms.is_some());
                 if let Some(v) = scale { z.scale = v; }
                 if let Some(v) = target { z.target = v; }
                 if let Some(v) = easing { z.easing = valid_easing(&v); }
@@ -132,6 +133,7 @@ pub fn apply(doc: &mut EditDoc, op: EditOp) {
             if let Some(s) = doc.layout.iter_mut().find(|s| s.id == id) {
                 if let Some(v) = start_ms { s.start_ms = v.min(dur); }
                 if let Some(v) = end_ms { s.end_ms = v.min(dur); }
+                clamp_order(&mut s.start_ms, &mut s.end_ms, start_ms.is_some());
                 if let Some(v) = layout { s.layout = valid_layout(&v); }
                 if let Some(v) = transition_ms { s.transition_ms = v; }
                 if let Some(v) = easing { s.easing = valid_easing(&v); }

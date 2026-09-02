@@ -42,4 +42,4 @@ A `String` containing the complete system prompt. It defines: the LLM's role as 
 
 ### Used by
 
-- `src-tauri/src/ai/commands.rs` - `ai_autoedit` calls `system_prompt()` and passes the result as the `system` argument to `ai::ollama::chat`.
+- `src-tauri/src/ai/commands.rs` - `build_plan` (the shared LLM pass behind `ai_plan`) calls `system_prompt()` and passes the result as the `system` argument to `ai::ollama::chat`.

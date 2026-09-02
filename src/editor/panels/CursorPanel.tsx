@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { IconFolderPlus } from "@tabler/icons-react";
 import { PanelHeader } from "./PanelHeader";
@@ -11,6 +12,9 @@ import { Shimmer } from "../timeline/Shimmer";
 // Loading-skeleton tile count for the pack grid (`.e-pack-grid` is `repeat(5, 1fr)`, so 5 fills
 // exactly one row - close enough to what a real pack list looks like without over-committing).
 const PACK_SKELETON_COUNT = 5;
+// design/premium-pass D6: the two hint/error rows below pop with a style-picker choice or an
+// import attempt - a cheap opacity/y-4 tween, consistent with the existing dialog enters.
+const HINT_MOTION = { initial: { opacity: 0, y: -4 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -4 }, transition: { duration: 0.14 } };
 
 // System keeps the OS cursor already baked into the recording; Enhanced redraws a smooth synthetic
 // pointer (from the recorded cursor path, captured for every style); Hidden shows none. Having all
@@ -95,9 +99,13 @@ export function CursorPanel({
         <Picker value={settings.style} options={STYLE_OPTS} onChange={(style) => set("style", style)} ariaLabel="Cursor style" />
       </div>
       {/* Honesty hint: this recording has no OS cursor in its pixels, so System is re-created. */}
-      {settings.style === "system" && !osCursorInVideo && (
-        <p className="e-lede" style={{ margin: "-2px 0 0" }}>Re-created from the recorded path — this clip was recorded without the system cursor.</p>
-      )}
+      <AnimatePresence>
+        {settings.style === "system" && !osCursorInVideo && (
+          <motion.p className="e-lede" style={{ margin: "-2px 0 0" }} {...HINT_MOTION}>
+            Re-created from the recorded path — this clip was recorded without the system cursor.
+          </motion.p>
+        )}
+      </AnimatePresence>
 
       {settings.style === "enhanced" && (
         <>
@@ -138,33 +146,35 @@ export function CursorPanel({
             <button type="button" className="e-upload-dashed" onClick={handleImport} disabled={importing}>
               <IconFolderPlus size={14} /> {importing ? "Importing..." : "Import pack..."}
             </button>
-            {importErr && <p className="e-errline">{importErr}</p>}
+            <AnimatePresence>
+              {importErr && <motion.p className="e-errline" {...HINT_MOTION}>{importErr}</motion.p>}
+            </AnimatePresence>
           </div>
 
           {/* Sliders */}
           <div className="e-field">
-            <span className="e-fl">Cursor Size <b>{settings.size.toFixed(2)}x</b></span>
-            <Slider min={0.4} max={3.0} step={0.1} value={settings.size} onChange={(v) => set("size", v)} ariaLabel="Cursor Size" />
+            <Slider min={0.4} max={3.0} step={0.1} value={settings.size} onChange={(v) => set("size", v)} ariaLabel="Cursor Size"
+              label="Cursor Size" formatValue={(v) => `${v.toFixed(2)}x`} />
           </div>
 
           <div className="e-field">
-            <span className="e-fl">Cursor Smoothness <b>{settings.smoothness.toFixed(2)}</b></span>
-            <Slider min={0.0} max={1.0} step={0.05} value={settings.smoothness} onChange={(v) => set("smoothness", v)} ariaLabel="Cursor Smoothness" />
+            <Slider min={0.0} max={1.0} step={0.05} value={settings.smoothness} onChange={(v) => set("smoothness", v)} ariaLabel="Cursor Smoothness"
+              label="Cursor Smoothness" formatValue={(v) => v.toFixed(2)} />
           </div>
 
           <div className="e-field">
-            <span className="e-fl">Path Idealization <b>{settings.path_idealize.toFixed(2)}</b></span>
-            <Slider min={0.0} max={1.0} step={0.05} value={settings.path_idealize} onChange={(v) => set("path_idealize", v)} ariaLabel="Path Idealization" />
+            <Slider min={0.0} max={1.0} step={0.05} value={settings.path_idealize} onChange={(v) => set("path_idealize", v)} ariaLabel="Path Idealization"
+              label="Path Idealization" formatValue={(v) => v.toFixed(2)} />
           </div>
 
           <div className="e-field">
-            <span className="e-fl">Motion Trail Blur <b>{settings.motion_blur.toFixed(2)}x</b></span>
-            <Slider min={0.0} max={1.0} step={0.05} value={settings.motion_blur} onChange={(v) => set("motion_blur", v)} ariaLabel="Motion Trail Blur" />
+            <Slider min={0.0} max={1.0} step={0.05} value={settings.motion_blur} onChange={(v) => set("motion_blur", v)} ariaLabel="Motion Trail Blur"
+              label="Motion Trail Blur" formatValue={(v) => `${v.toFixed(2)}x`} />
           </div>
 
           <div className="e-field">
-            <span className="e-fl">Click Bounce Intensity <b>{settings.bounce_intensity.toFixed(2)}x</b></span>
-            <Slider min={0.1} max={1.0} step={0.05} value={settings.bounce_intensity} onChange={(v) => set("bounce_intensity", v)} ariaLabel="Click Bounce Intensity" />
+            <Slider min={0.1} max={1.0} step={0.05} value={settings.bounce_intensity} onChange={(v) => set("bounce_intensity", v)} ariaLabel="Click Bounce Intensity"
+              label="Click Bounce Intensity" formatValue={(v) => `${v.toFixed(2)}x`} />
           </div>
         </>
       )}

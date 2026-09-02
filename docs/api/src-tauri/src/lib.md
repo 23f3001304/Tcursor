@@ -23,19 +23,20 @@ None. All configuration is sourced from `tauri::generate_context!()` (the `tauri
 1. `tauri::Builder::default()` - start the builder.
 2. `.plugin(tauri_plugin_opener::init())` - register the opener plugin for OS-level file and URL opening. `.plugin(tauri_plugin_dialog::init())` - register the dialog plugin for native file/save dialogs.
 3. `.manage(session::record::recorder::Recorder::default())` - register the shared `Recorder` state. *Why a single managed instance:* the recorder is stateful (tracks recording lifecycle) and must be accessible from any IPC command handler without passing it explicitly. `.manage(export::preview::PreviewSession::default())` - register the warm preview-renderer cache (`PreviewSession`) so the preview/editor commands share one `FrameRenderer` instead of rebuilding it per call.
-4. `.invoke_handler(tauri::generate_handler![...])` - register all IPC command handlers, including (among many others) `start_recording`/`stop_recording`, `export_project`, `get_settings`/`set_settings`, the `edit`/`ai`/`export::preview`/`export::cursor` command groups, and `session::project::commands::open_project` / `list_recent_projects` / `get_launch_project`.
-5. `.setup(|app| { ... Ok(()) })` - run startup side effects:
+4. `.on_window_event(|window, event| { ... })` - registered for all windows (there is only "main"). On `WindowEvent::CloseRequested`, checks `Recorder::is_busy()`; if a take is recording or its stop is still finalizing, calls `api.prevent_close()` and (once per close attempt, guarded by the module-level `CLOSING` static) spawns `session::record::close_guard::finish_and_close` to finalize the take and then close the window itself. *Why here, not left to the frontend alone:* this is the R6 fix for the Critical finding that closing the HUD mid-recording silently destroyed the take - it must hold even if the renderer is hung or the window is closed via the OS chrome / Alt+F4, neither of which run any HUD JS at all. See `close_guard.md`.
+5. `.invoke_handler(tauri::generate_handler![...])` - register all IPC command handlers, including (among many others) `start_recording`/`stop_recording`, `export_project`, `get_settings`/`set_settings`, the `edit`/`ai`/`export::preview`/`export::cursor` command groups, and `session::project::commands::open_project` / `list_recent_projects` / `get_launch_project`.
+6. `.setup(|app| { ... Ok(()) })` - run startup side effects:
    a. `app.manage(session::project::commands::LaunchProject(session::project::commands::launch_project_from_argv(std::env::args())))` - resolve the cold-start file-association argv (a `.tcursor` path from a Windows double-click) into a project folder, if any, and register it as managed state read once by the frontend via `get_launch_project`. *Why here, first:* cheap and side-effect-free; must run before the frontend's first invoke.
    b. Call `win::sys::proc::init_ffmpeg(app.path().resource_dir().ok())` to locate the bundled ffmpeg/ffprobe and store the directory in `FFMPEG_DIR`. Write the diagnostic log to `%TEMP%/tcursor-ffmpeg.log`. *Why write a log:* any "ffmpeg not available" failure on a user machine is explainable without attaching a debugger.
    c. `std::thread::spawn(encode::ffmpeg_encoder::prewarm)` - warm up the encoder off the main thread. *Why at startup:* audio capture must not stall behind the latency of the first ffmpeg process launch; prewarming ensures the encoder is ready before the user starts recording.
    d. (Windows only, when `CAPTURE_EXCLUDE = true`) Retrieve the main webview window's HWND and call `win::sys::capture_exclusion::set_capture_exclusion(hwnd, true)`. Logs `"capture exclusion applied"` to stdout on success, or a warning to stderr on failure. The compile-time constant `CAPTURE_EXCLUDE` can be set to `false` during design work to allow screenshotting the HUD.
-6. `.run(tauri::generate_context!()).expect(...)` - start the event loop.
+7. `.run(tauri::generate_context!()).expect(...)` - start the event loop.
 
 ## ai
 
 The AI Director: local-LLM auto-editing. Serializes the recording's semantic events to a transcript, asks a local model (Ollama) for zooms/trim, clamps the untrusted reply, and applies it to edit.json. This is the trust boundary for model output.
 
-Key items: `commands::ai_autoedit` (the one-shot command), `timeline::serialize` (events -> transcript), `ollama::chat` (HTTP to localhost:11434), `plan::ops_from_json` (parse + clamp -> `EditOp`s), `prompt::system_prompt`.
+Key items: `commands::ai_plan` (the agentic command - returns labeled steps without applying them; the one-shot `ai_autoedit` command was removed as dead command-surface, sweep-2 Task 7g: no frontend caller ever invoked it), `timeline::serialize` (events -> transcript), `ollama::chat` (HTTP to localhost:11434), `plan::ops_from_json` (parse + clamp -> `EditOp`s), `prompt::system_prompt`.
 
 ## domain
 
@@ -65,7 +66,7 @@ Key items: `audio_source::AudioSource`, `cpal_mic::CpalMic` (`open`, `default_in
 
 Recording orchestration and lifecycle: the Tauri `Recorder` state, the start/pause/resume/stop commands, the per-frame capture loop, project paths, and the A/V sync log. This is the heart of "record".
 
-Key items: `record::recorder::Recorder` with `start_recording` / `pause_recording` / `resume_recording` / `stop_recording`, `record::recording_session::RecordingSession` (`run`, `run_paced`), `paths::ProjectPaths`, `sync::SyncLog`, `pacing` (CFR game mode), `record::recorder_threads::save_inputs`, `project` (the `.tcursor` manifest, recents list, and `open_project`/file-association commands).
+Key items: `record::recorder::Recorder` with `start_recording` / `pause_recording` / `resume_recording` / `stop_recording` / `is_recording` / `is_busy` (the latter two read by `lib.rs`'s `CloseRequested` guard and `record::close_guard::finish_and_close`), `record::recording_session::RecordingSession` (`run`, `run_paced`), `paths::ProjectPaths`, `sync::SyncLog`, `pacing` (CFR game mode), `record::recorder_threads::save_inputs`, `project` (the `.tcursor` manifest, recents list, and `open_project`/file-association commands).
 
 ## win
 

@@ -25,7 +25,6 @@ export function CameraRingField({ ring, onChange }: { ring: CamRing | null; onCh
       {ring && (
         <>
           <div className="e-field">
-            <span className="e-fl">Ring Width <b>{pct(ring.width)}</b></span>
             <Slider
               min={RING_WIDTH_SLIDER.min}
               max={RING_WIDTH_SLIDER.max}
@@ -33,6 +32,8 @@ export function CameraRingField({ ring, onChange }: { ring: CamRing | null; onCh
               value={ring.width}
               onChange={(v) => onChange({ ...ring, width: v })}
               ariaLabel="Ring Width"
+              label="Ring Width"
+              formatValue={pct}
             />
           </div>
           <div className="e-field">

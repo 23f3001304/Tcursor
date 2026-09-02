@@ -24,9 +24,9 @@ Loads display and microphone lists over IPC, initializes default selections, and
 
 ### Behavior
 
-- Fires a single `Promise.all([listDisplays(), listAudioInputs()])` inside a `useEffect` with an empty dependency array, so it runs exactly once on mount.
-- On resolution, calls `setDisplays`, `setMics`, and `setSel(pickDefaults(d, m))` in one synchronous batch.
-- No cleanup: the IPC calls are fire-and-forget reads; there are no subscriptions or streams to release.
+- A `refresh` function fires `Promise.all([listDisplays(), listAudioInputs()])`, then calls `setDisplays`, `setMics`, and `setSel(resolveSelection(prev, d, m))` (see `selectDevices.md`) in one synchronous batch. `resolveSelection` keeps the current pick if it is still present in the fresh list, or falls back to the first available device - on the very first call `prev` is `{ displayId: null, micId: null }`, which resolves identically to `pickDefaults`.
+- `refresh()` is called once inside a `useEffect` with an empty dependency array (mount), AND registered as a `navigator.mediaDevices` `"devicechange"` listener (task-6 (d)) - so plugging/unplugging a display or mic re-enumerates and swaps out a selection that just went stale, instead of leaving `sel` pointing at a device that will only fail once Record is pressed (surfaced today via a `record-warning` event from `spawn_mic_thread`/`spawn_system_thread`, but only at that later point).
+- A `cancelled` flag (closed over by `refresh`) guards the mount-time call's `setState`s in case the component unmounts before the first `Promise.all` resolves; the `devicechange` listener is removed on cleanup.
 - Errors from IPC are not caught here; Tauri surfaces them as rejected promises that will be unhandled. The caller can wrap the hook in an error boundary if needed.
 
 ### Used by

@@ -41,4 +41,4 @@ No new undo machinery. A drag is one op; repeated drags and arrow nudges land in
 
 ### Styling
 
-`.e-curve-card.wide` (grid-column `1 / -1`, taller SVG, default cursor), `.e-curve-arm` (dashed control arm), `.e-curve-h` (the handle, with `:hover`, `:focus-visible` and `.grab` states). Tokens only; no Motion - the curve must track the pointer exactly, and a spring on a handle reads as input lag.
+`.e-curve-card.wide` (grid-column `1 / -1`, taller SVG, default cursor), `.e-curve-arm` (dashed control arm), `.e-curve-h` (the handle, with `:hover`, `:focus-visible` and `.grab` states). Tokens only; no Motion - the curve must track the pointer exactly, and a spring on a handle reads as input lag. The un-selected (non-`.wide`) cards get a plain-CSS hover-lift (design/premium-pass D6: `translateY(-1px)` + a shadow step, 0.14s, matching `.e-pack-card`'s identical mechanism) - `.wide` is excluded since it's the expanded live editor, not a hoverable pick.

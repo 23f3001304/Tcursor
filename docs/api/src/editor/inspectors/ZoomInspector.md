@@ -56,10 +56,26 @@ export function targetForMode(mode: TargetMode, current: ZoomTarget): ZoomTarget
 
 The target to write when the user picks `mode`. Switching **to** Region keeps whatever point is already stored, so toggling Follow cursor -> Region -> Follow cursor never silently discards an aim the user placed on the stage; a zoom that has only ever followed the cursor starts at frame centre (`{ fixed: { x: 0.5, y: 0.5 } }`).
 
+## zoomScopedSeekMs
+
+```ts
+export function zoomScopedSeekMs(nowMs: number, startMs: number, endMs: number): number | null
+```
+
+Discoverability fix for a gate finding ("none of these settings work" - live debug traced the wiring as correct; the Target and "Webcam during zoom" controls simply have no visible effect while the playhead sits outside the zoom's own span). `null` while `nowMs` is already inside `[startMs, endMs]` (inclusive both ends - the same span `camZoomAction.resolveCamAction` treats as active, so this never disagrees with what the preview is actually doing); otherwise the span's midpoint, so seeking there puts the just-changed control on screen.
+
+### Behaviors
+
+- `zoomScopedSeekMs (gate finding...)` in `ZoomInspector.test.ts` - no-seek at both inclusive boundaries and mid-span; midpoint (rounded) before/after the span.
+
+### Used by
+
+- `ZoomInspector`'s `seekIntoSpan` - called after every Target/`set_zoom_cam_action` click.
+
 ## ZoomInspector
 
 ```tsx
-export function ZoomInspector({ zoom, dur, onApply, onClose, aimMode, moveMode, onAimMode }): JSX.Element
+export function ZoomInspector({ zoom, dur, onApply, onClose, aimMode, moveMode, onAimMode, timeMsRef, onSeek }): JSX.Element
 ```
 
 ### Aim-mode props
@@ -69,6 +85,13 @@ export function ZoomInspector({ zoom, dur, onApply, onClose, aimMode, moveMode, 
 - `onAimMode: (on: boolean) => void` - toggles aim mode. Also called with `false` when the user picks **Follow cursor**, since a cursor-following zoom has no point to aim.
 
 The "Aim on stage" button only renders while the target is Region - there is nothing to place otherwise.
+
+### Scoped-controls discoverability props
+
+- `timeMsRef: RefObject<number>` - the live playhead, read at click time (not a render prop, matching `EditorPanels`' render-hygiene convention - see its own doc). Feeds `zoomScopedSeekMs`.
+- `onSeek: (ms: number) => void` - `Editor`'s `onSeek` (the same path `Timeline`/`Transport` seek through), called by `seekIntoSpan` whenever `zoomScopedSeekMs` returns non-null.
+- A one-line `.e-sec-hint` ("Applies while this zoom is active - scrub inside it to preview.") renders above the Target section, ahead of both scoped control groups.
+- Every Target button (Follow cursor/Region) and every "Webcam during zoom" option button calls `seekIntoSpan()` after applying its op, jumping the playhead to the zoom's midpoint if it was outside `[start_ms, end_ms]`.
 
 ### Transition Curve
 

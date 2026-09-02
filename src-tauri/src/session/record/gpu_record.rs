@@ -1,23 +1,25 @@
 //! GPU-native recording: feed each WGC frame's D3D11 surface straight into the windows-capture
 //! Media Foundation `VideoEncoder` (no GPU->CPU readback), curing game-recording lag. The
 //! recorded `video.mp4` is the raw full-res intermediate the export re-composites; per-frame
-//! capture timestamps still go to `sync.json` (collected here, written by `recorder.rs`).
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-use windows_capture::capture::{CaptureControl, Context, GraphicsCaptureApiHandler};
+//! capture timestamps still go to `sync.json` (collected here, written by `recorder_stop.rs`).
+//! The frame callback itself lives in `gpu_frames.rs`.
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
+use windows_capture::capture::{CaptureControl, GraphicsCaptureApiHandler};
 use windows_capture::encoder::{
     AudioSettingsBuilder, ContainerSettingsBuilder, VideoEncoder, VideoSettingsBuilder,
     VideoSettingsSubType,
 };
-use windows_capture::frame::Frame;
-use windows_capture::graphics_capture_api::InternalCaptureControl;
 use windows_capture::monitor::Monitor;
 use windows_capture::settings::{
     ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings,
     MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings,
 };
 use crate::domain::time::Clock;
-use super::pause_clock::PauseClock;
+use super::gpu_frames::{Cap, CapFlags, FrameTimes};
+use super::pause_totals::PauseTotals;
+use super::video_sink::VideoStopped;
+use super::Notify;
 
 /// Target H.264 bitrate (bits/s) for the raw recording intermediate at `w`x`h`: scaled by pixel
 /// count and clamped to a sane range. Deliberately generous (the export re-encodes this, so we
@@ -34,48 +36,15 @@ fn video_settings(w: u32, h: u32, fps: u32) -> VideoSettingsBuilder {
         .frame_rate(fps)
 }
 
-type FrameTimes = Arc<Mutex<Vec<u64>>>;
-
-/// The WGC capture handler that hardware-encodes each frame on the GPU (no readback) and records
-/// its capture time. The encoder is finalized by `GpuRecorder::stop` (or in `on_closed` if the OS
-/// closes the capture).
-struct Cap {
-    encoder: Option<VideoEncoder>,
-    clock: Arc<dyn Clock>,
-    frame_ts: FrameTimes,
-    paused: Arc<AtomicBool>,
-    pause_clock: PauseClock,
-}
-
-impl GraphicsCaptureApiHandler for Cap {
-    type Flags = (VideoEncoder, Arc<dyn Clock>, FrameTimes, Arc<AtomicBool>);
-    type Error = anyhow::Error;
-
-    fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
-        let (encoder, clock, frame_ts, paused) = ctx.flags;
-        Ok(Self { encoder: Some(encoder), clock, frame_ts, paused, pause_clock: PauseClock::new() })
-    }
-
-    fn on_frame_arrived(&mut self, frame: &mut Frame, _ctl: InternalCaptureControl) -> Result<(), Self::Error> {
-        // Skip frames while paused (matches the ffmpeg path), and shift the recorded ts by
-        // accumulated paused time (PauseClock) so a pause leaves no gap between sync.json and
-        // video.mp4. The ts is pushed BEFORE send_frame: a send error aborts capture and stop()
-        // surfaces it, so an orphan ts never reaches sync.json.
-        let now = self.clock.now_ms();
-        let paused = self.paused.load(Ordering::SeqCst);
-        if let Some(ts) = self.pause_clock.observe(now, paused) {
-            self.frame_ts.lock().unwrap_or_else(|e| e.into_inner()).push(ts);
-            if let Some(e) = self.encoder.as_mut() { e.send_frame(frame)?; }
-        }
-        Ok(())
-    }
-
-    // Runs only when the OS closes the capture (not on a WM_QUIT stop, where GpuRecorder::stop
-    // finalizes); finalize here too so an OS-close still writes a valid MP4.
-    fn on_closed(&mut self) -> Result<(), Self::Error> {
-        if let Some(e) = self.encoder.take() { e.finish()?; }
-        Ok(())
-    }
+/// The MP4 encoder for a `w`x`h`@`fps` capture writing `video_path`. Audio is disabled - the
+/// mic and system-audio WAVs are captured separately and muxed at export.
+fn encoder(w: u32, h: u32, fps: u32, video_path: &str) -> anyhow::Result<VideoEncoder> {
+    Ok(VideoEncoder::new(
+        video_settings(w, h, fps),
+        AudioSettingsBuilder::default().disabled(true),
+        ContainerSettingsBuilder::default(),
+        video_path,
+    )?)
 }
 
 /// A live GPU-native recording. The capture+encode runs on the crate's own thread; `stop` ends
@@ -85,15 +54,30 @@ pub struct GpuRecorder {
     frame_ts: FrameTimes,
 }
 
+/// Everything `start` needs that isn't the capture target itself, so the three target branches
+/// below stay one line each.
+pub struct GpuStart {
+    pub clock: Arc<dyn Clock>,
+    pub paused: Arc<AtomicBool>,
+    pub totals: Arc<PauseTotals>,
+    pub ended: Notify,
+    pub fps: u32,
+    pub with_cursor: bool,
+}
+
 impl GpuRecorder {
-    /// Start GPU-native capture+encode of the specified monitor or application window to `video_path` (H.264 MP4).
-    /// Returns the recorder plus the captured `(w, h)`. Audio is disabled (recorded separately).
-    pub fn start(clock: Arc<dyn Clock>, paused: Arc<AtomicBool>, fps: u32, with_cursor: bool, target_id: Option<&str>, video_path: &str) -> anyhow::Result<(Self, u32, u32)> {
+    /// Start GPU-native capture+encode of the specified monitor or application window to
+    /// `video_path` (H.264 MP4). Returns the recorder plus the captured `(w, h)`.
+    pub fn start(cfg: GpuStart, target_id: Option<&str>, video_path: &str) -> anyhow::Result<(Self, u32, u32)> {
         use windows_capture::window::Window;
 
-        let cursor_setting = if with_cursor { CursorCaptureSettings::WithCursor } else { CursorCaptureSettings::WithoutCursor };
-        let interval_setting = MinimumUpdateIntervalSettings::Custom(std::time::Duration::from_micros(1_000_000 / fps.max(1) as u64));
-        let frame_ts: FrameTimes = Arc::new(Mutex::new(Vec::new()));
+        let cursor_setting = if cfg.with_cursor { CursorCaptureSettings::WithCursor } else { CursorCaptureSettings::WithoutCursor };
+        let interval_setting = MinimumUpdateIntervalSettings::Custom(std::time::Duration::from_micros(1_000_000 / cfg.fps.max(1) as u64));
+        let frame_ts: FrameTimes = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let flags = |enc: VideoEncoder, dims: (u32, u32)| CapFlags {
+            encoder: enc, clock: cfg.clock.clone(), frame_ts: frame_ts.clone(),
+            paused: cfg.paused.clone(), totals: cfg.totals.clone(), ended: cfg.ended.clone(), dims,
+        };
 
         if let Some(tid) = target_id {
             if let Some(hex) = tid.strip_prefix("window:0x") {
@@ -106,12 +90,6 @@ impl GpuRecorder {
                     } else {
                         (1920, 1080)
                     };
-                    let encoder = VideoEncoder::new(
-                        video_settings(w, h, fps),
-                        AudioSettingsBuilder::default().disabled(true),
-                        ContainerSettingsBuilder::default(),
-                        video_path,
-                    )?;
                     let settings = Settings::new(
                         win,
                         cursor_setting,
@@ -120,7 +98,7 @@ impl GpuRecorder {
                         interval_setting,
                         DirtyRegionSettings::Default,
                         ColorFormat::Bgra8,
-                        (encoder, clock, frame_ts.clone(), paused),
+                        flags(encoder(w, h, cfg.fps, video_path)?, (w, h)),
                     );
                     return Ok((Self { control: Cap::start_free_threaded(settings)?, frame_ts }, w, h));
                 }
@@ -129,12 +107,6 @@ impl GpuRecorder {
                     if let Ok(mon) = Monitor::from_index(idx) {
                         let w = mon.width().unwrap_or(1920);
                         let h = mon.height().unwrap_or(1080);
-                        let encoder = VideoEncoder::new(
-                            video_settings(w, h, fps),
-                            AudioSettingsBuilder::default().disabled(true),
-                            ContainerSettingsBuilder::default(),
-                            video_path,
-                        )?;
                         let settings = Settings::new(
                             mon,
                             cursor_setting,
@@ -143,7 +115,7 @@ impl GpuRecorder {
                             interval_setting,
                             DirtyRegionSettings::Default,
                             ColorFormat::Bgra8,
-                            (encoder, clock, frame_ts.clone(), paused),
+                            flags(encoder(w, h, cfg.fps, video_path)?, (w, h)),
                         );
                         return Ok((Self { control: Cap::start_free_threaded(settings)?, frame_ts }, w, h));
                     }
@@ -153,12 +125,6 @@ impl GpuRecorder {
 
         let monitor = Monitor::primary()?;
         let (w, h) = (monitor.width()?, monitor.height()?);
-        let encoder = VideoEncoder::new(
-            video_settings(w, h, fps),
-            AudioSettingsBuilder::default().disabled(true),
-            ContainerSettingsBuilder::default(),
-            video_path,
-        )?;
         let settings = Settings::new(
             monitor,
             cursor_setting,
@@ -167,22 +133,28 @@ impl GpuRecorder {
             interval_setting,
             DirtyRegionSettings::Default,
             ColorFormat::Bgra8,
-            (encoder, clock, frame_ts.clone(), paused),
+            flags(encoder(w, h, cfg.fps, video_path)?, (w, h)),
         );
         Ok((Self { control: Cap::start_free_threaded(settings)?, frame_ts }, w, h))
     }
 
-    /// Stop capture and finalize the MP4, returning the per-frame capture timestamps for
-    /// `sync.json`. `CaptureControl::stop` posts WM_QUIT and joins the capture thread; the crate
-    /// runs `on_closed` only on an OS-initiated close, NOT on a WM_QUIT stop, so the encoder is
-    /// finalized explicitly here and its finalize error surfaced - relying on the encoder's `Drop`
-    /// would silently swallow a tail encode/mux failure on the (unrecoverable) master.
-    pub fn stop(self) -> Result<Vec<u64>, String> {
-        let cap = self.control.callback(); // Arc<Mutex<Cap>> - grab before stop() consumes control
-        self.control.stop().map_err(|e| format!("gpu capture stop: {e:?}"))?;
+    /// Stop capture and finalize the MP4. `CaptureControl::stop` posts WM_QUIT and joins the
+    /// capture thread; the crate runs `on_closed` only on an OS-initiated close, NOT on a
+    /// WM_QUIT stop, so the encoder is finalized explicitly here and its finalize error
+    /// surfaced - relying on the encoder's `Drop` would silently swallow a tail encode/mux
+    /// failure on the (unrecoverable) master. The frame timestamps come back either way: they
+    /// live in their own `Arc`, so a finalize failure still leaves `stop_recording` able to
+    /// write a truthful `sync.json` for whatever the file did capture.
+    pub fn stop(self) -> VideoStopped {
+        let Self { control, frame_ts } = self;
+        let cap = control.callback(); // Arc<Mutex<Cap>> - grab before stop() consumes control
+        let mut error = control.stop().err().map(|e| format!("gpu capture stop: {e:?}"));
         let enc = cap.lock().encoder.take(); // crate's callback() is a parking_lot Mutex (no poison)
-        if let Some(e) = enc { e.finish().map_err(|e| format!("gpu encode finalize: {e:?}"))?; }
-        Ok(self.frame_ts.lock().unwrap_or_else(|e| e.into_inner()).clone())
+        if let Some(e) = enc {
+            if let Err(e) = e.finish() { error.get_or_insert(format!("gpu encode finalize: {e:?}")); }
+        }
+        let frame_ts = frame_ts.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        VideoStopped { frames: frame_ts.len() as u64, frame_ts, error }
     }
 }
 

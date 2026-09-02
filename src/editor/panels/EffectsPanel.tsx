@@ -97,9 +97,8 @@ export function EffectsPanel({
           </div>
 
           <div className="e-field">
-            <span className="e-fl">Intensity <b>{Math.round(settings.intensity * 100)}%</b></span>
             <Slider min={0.2} max={1.0} step={0.05} value={settings.intensity} disabled={styleless}
-              onChange={(v) => set("intensity", v)} ariaLabel="Intensity" />
+              onChange={(v) => set("intensity", v)} ariaLabel="Intensity" label="Intensity" formatValue={(v) => `${Math.round(v * 100)}%`} />
           </div>
         </>
       )}
@@ -126,21 +125,18 @@ export function EffectsPanel({
           </div>
 
           <div className="e-field">
-            <span className="e-fl">Dim Override <b>{Math.round(settings.spotlight_dim * 100)}%</b></span>
             <Slider min={0.2} max={0.9} step={0.05} value={settings.spotlight_dim}
-              onChange={(v) => set("spotlight_dim", v)} ariaLabel="Dim Override" />
+              onChange={(v) => set("spotlight_dim", v)} ariaLabel="Dim Override" label="Dim Override" formatValue={(v) => `${Math.round(v * 100)}%`} />
           </div>
 
           <div className="e-field">
-            <span className="e-fl">Radius Override <b>{Math.round(settings.spotlight_radius * 100)}%</b></span>
             <Slider min={0.05} max={0.3} step={0.01} value={settings.spotlight_radius}
-              onChange={(v) => set("spotlight_radius", v)} ariaLabel="Radius Override" />
+              onChange={(v) => set("spotlight_radius", v)} ariaLabel="Radius Override" label="Radius Override" formatValue={(v) => `${Math.round(v * 100)}%`} />
           </div>
 
           <div className="e-field">
-            <span className="e-fl">Feather <b>{Math.round(settings.spotlight_feather * 100)}%</b></span>
             <Slider min={0.02} max={0.25} step={0.01} value={settings.spotlight_feather}
-              onChange={(v) => set("spotlight_feather", v)} ariaLabel="Feather" />
+              onChange={(v) => set("spotlight_feather", v)} ariaLabel="Feather" label="Feather" formatValue={(v) => `${Math.round(v * 100)}%`} />
           </div>
 
           <div className="e-switchrow">

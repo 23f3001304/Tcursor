@@ -7,6 +7,11 @@ import type { ExportSettings, ExportResolution, ExportFps, ExportFormat } from "
 import { DEFAULT_EXPORT_SETTINGS } from "../../lib/ipc";
 import { ExportProgress } from "./ExportProgress";
 
+// design/premium-pass D6: the app-wide press spring, for the primary CTA only (`.e-modal-btn`
+// without `.primary` stays quiet, matching ConfirmDialog/ExportProgress).
+const PRESS_TAP = { scale: 0.96 };
+const PRESS_SPRING = { type: "spring" as const, stiffness: 500, damping: 30 };
+
 const RESOLUTIONS: { value: ExportResolution; label: string }[] = [
   { value: "source", label: "Source (recording size)" },
   { value: "p720", label: "720p" },
@@ -31,8 +36,11 @@ const FORMATS: { value: ExportFormat; label: string }[] = [
  *  state (from `useEditorData`), so this component stays a view over that state and swaps its
  *  own body between the settings form and `ExportProgress` once an export is running, has
  *  finished, or has failed. */
-export function ExportDialog({ open, exporting, pct, done, error, exportPath, onClose, onExport, onReset }: {
+export function ExportDialog({ open, exporting, pct, done, error, exportPath, startedAt, onClose, onExport, onReset }: {
   open: boolean; exporting: boolean; pct: number; done: boolean; error: string | null; exportPath: string;
+  /** Wall-clock ms the current export began (Editor.tsx's useExportState) - passed through so
+   *  ExportProgress's ETA baseline survives this dialog being closed/reopened mid-export. */
+  startedAt: number | null;
   onClose: () => void; onExport: (settings: ExportSettings) => void; onReset: () => void;
 }) {
   const [settings, setSettings] = useState<ExportSettings>(DEFAULT_EXPORT_SETTINGS);
@@ -65,7 +73,7 @@ export function ExportDialog({ open, exporting, pct, done, error, exportPath, on
             </div>
 
             {showProgress ? (
-              <ExportProgress exporting={exporting} pct={pct} done={done} error={error} exportPath={exportPath} onReset={onReset} onClose={handleClose} />
+              <ExportProgress exporting={exporting} pct={pct} done={done} error={error} exportPath={exportPath} startedAt={startedAt} onReset={onReset} onClose={handleClose} />
             ) : (
               <>
                 <div className="e-export-row">
@@ -93,9 +101,10 @@ export function ExportDialog({ open, exporting, pct, done, error, exportPath, on
                 </div>
                 <div className="e-modal-actions">
                   <button type="button" className="e-modal-btn" onClick={handleClose}>Cancel</button>
-                  <button type="button" className="e-modal-btn primary" onClick={() => onExport(settings)}>
+                  <motion.button type="button" className="e-modal-btn primary" onClick={() => onExport(settings)}
+                    whileTap={PRESS_TAP} transition={PRESS_SPRING}>
                     <IconDownload size={14} />Export
-                  </button>
+                  </motion.button>
                 </div>
               </>
             )}

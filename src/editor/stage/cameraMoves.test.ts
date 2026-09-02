@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { CameraMove } from "../../lib/edit";
 import { ease } from "../timeline/layoutTrack";
-import { camMoveAt, radiusScaleForResize, rectFromCenter } from "./cameraMoves";
+import { camMoveAt, cameraMovesKey, radiusScaleForResize, rectFromCenter } from "./cameraMoves";
 
 // Mirrors src-tauri/src/export/camera/moves_tests.rs - the Rust authority's cases,
 // re-asserted in TS so the two never silently diverge. The Task 27 SPAN semantics (what the
 // keyframes own, and the two blends at its edges) live in camMoveSpan.test.ts, mirroring the
 // Rust split into moves_tests.rs / moves_span_tests.rs.
-const kf = (t_ms: number, x: number, y: number, size: number, easing: string): CameraMove =>
-  ({ id: "k", t_ms, x, y, size, easing });
+const kf = (t_ms: number, x: number, y: number, size: number, easing: string, id = "k"): CameraMove =>
+  ({ id, t_ms, x, y, size, easing });
 
 describe("camMoveAt", () => {
   it("empty track samples to null", () => {
@@ -125,5 +125,54 @@ describe("radiusScaleForResize", () => {
     const ow = 1920, oh = 1080;
     const [, , w, h] = rectFromCenter({ x: 0.3, y: 0.7, size: 0.2 }, ow, oh, 1);
     expect(w * ow).toBeCloseTo(h * oh, 6); // square in PIXELS even though ow != oh
+  });
+});
+
+// Review round 2, Important: CamDragHandle.tsx used to key a mirror-clear effect on the
+// `camera_moves` ARRAY REFERENCE, which `applyEditOp` replaces on every edit (not just camera-move
+// ones) since it round-trips the whole EditDoc through IPC. `cameraMovesKey` exists so the caller
+// can compare CONTENT instead - these tests pin the exact "what counts as a change" contract.
+describe("cameraMovesKey", () => {
+  it("is stable for content-identical arrays even with a different array/object reference", () => {
+    const a = [kf(1000, 0.1, 0.2, 0.3, "smooth", "k1"), kf(2000, 0.4, 0.5, 0.6, "linear", "k2")];
+    // A fresh array of fresh objects, same values - exactly what a REFERENCE-only edit (e.g. a
+    // new EditDoc from an unrelated applyEditOp call) hands back when nothing camera-move-related
+    // actually changed.
+    const b = [kf(1000, 0.1, 0.2, 0.3, "smooth", "k1"), kf(2000, 0.4, 0.5, 0.6, "linear", "k2")];
+    expect(a).not.toBe(b);
+    expect(cameraMovesKey(a)).toBe(cameraMovesKey(b));
+  });
+
+  it("is empty-but-deterministic for an empty track", () => {
+    expect(cameraMovesKey([])).toBe(cameraMovesKey([]));
+  });
+
+  it("changes when a keyframe is added", () => {
+    const before = [kf(1000, 0.1, 0.1, 0.1, "linear")];
+    const after = [...before, kf(2000, 0.9, 0.9, 0.9, "linear", "k2")];
+    expect(cameraMovesKey(before)).not.toBe(cameraMovesKey(after));
+  });
+
+  it("changes when a keyframe is removed", () => {
+    const before = [kf(1000, 0.1, 0.1, 0.1, "linear", "k1"), kf(2000, 0.9, 0.9, 0.9, "linear", "k2")];
+    const after = before.slice(0, 1);
+    expect(cameraMovesKey(before)).not.toBe(cameraMovesKey(after));
+  });
+
+  it("changes when any single field of one keyframe changes (t_ms, x, y, size, easing, id)", () => {
+    const base = kf(1000, 0.1, 0.2, 0.3, "smooth", "k1");
+    const baseKey = cameraMovesKey([base]);
+    expect(cameraMovesKey([{ ...base, t_ms: 1001 }])).not.toBe(baseKey);
+    expect(cameraMovesKey([{ ...base, x: 0.11 }])).not.toBe(baseKey);
+    expect(cameraMovesKey([{ ...base, y: 0.21 }])).not.toBe(baseKey);
+    expect(cameraMovesKey([{ ...base, size: 0.31 }])).not.toBe(baseKey);
+    expect(cameraMovesKey([{ ...base, easing: "linear" }])).not.toBe(baseKey);
+    expect(cameraMovesKey([{ ...base, id: "k2" }])).not.toBe(baseKey);
+  });
+
+  it("is sensitive to array order (a same-set reorder still counts as a change)", () => {
+    const a = [kf(1000, 0.1, 0.1, 0.1, "linear", "k1"), kf(2000, 0.9, 0.9, 0.9, "linear", "k2")];
+    const b = [a[1], a[0]];
+    expect(cameraMovesKey(a)).not.toBe(cameraMovesKey(b));
   });
 });

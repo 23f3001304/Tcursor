@@ -106,13 +106,13 @@ Mutates `doc` in place by dispatching on `op`. The single write point for all `E
 ### Implementation
 
 1. **AddZoom / AddZoomFull** - generate id via `next_zoom_id` (finds the max numeric suffix among existing `z`-prefixed ids, increments by 1, falls back to `len`). Push `Zoom` with `target=Cursor`, `easing="smooth"`, and `scale=2.0` (`AddZoom`) or the caller-supplied scale (`AddZoomFull`). `saturating_add` guards the `end_ms` against u32 overflow. Both `start_ms`/`end_ms` clamp to `region::dur_bound(doc)` - the TRUE clip length (`doc.clip_ms`) when known, not the possibly-earlier `trim.out_ms`, so adding a region past where the clip is currently trimmed to no longer collapses it to the trim point.
-2. **UpdateZoom** - linear scan by `id`; write only the `Some` fields into the found entry, with `start_ms`/`end_ms` clamped to the clip and `easing` passed through `valid_easing` (now in `edit::ops::region` - see `region.md`; an unrecognized name becomes `"smooth"`, a well-formed `cubic(x1,y1,x2,y2)` is kept in canonical form, matching `UpdateLayoutSeg` and `UpdateCameraMove` - it used to be the one easing setter that wrote the caller's string verbatim, so a typo'd or stale name reached the renderer). *Why linear scan:* zoom lists are short (typically fewer than 20 entries) so a map would cost more in bookkeeping than it saves in lookup.
+2. **UpdateZoom** - linear scan by `id`; write only the `Some` fields into the found entry, with `start_ms`/`end_ms` clamped to the clip, then run through `region::clamp_order(&mut start_ms, &mut end_ms, start_ms_was_set)` (M5) so a partial update can never leave the zoom inverted - whichever handle this call actually set wins, the untouched partner is pulled to match it instead of persisting `start > end`. `easing` is passed through `valid_easing` (now in `edit::ops::region` - see `region.md`; an unrecognized name becomes `"smooth"`, a well-formed `cubic(x1,y1,x2,y2)` is kept in canonical form, matching `UpdateLayoutSeg` and `UpdateCameraMove` - it used to be the one easing setter that wrote the caller's string verbatim, so a typo'd or stale name reached the renderer). *Why linear scan:* zoom lists are short (typically fewer than 20 entries) so a map would cost more in bookkeeping than it saves in lookup.
 3. **RemoveZoom** - single `retain` pass; no reindexing of remaining zooms.
 4. **ClearZooms** - `doc.zooms.clear()`; drops every zoom in one call with no per-id lookup, unlike the single-target `RemoveZoom`.
 5. **SetTrim** - full field replacement; `Trim` has two fields that are always logically coupled.
 6. **AddCut** - push; no overlap check here since overlap rendering is a display concern.
 7. **SetSpeed** - generate id via `next_speed_id` (same max-suffix strategy, prefix `s`), push `Speed`. The caller supplies ordering.
-8. **SetLayoutSeg** - linear scan by `id`; mutates only the `layout` string. Layout segment structure is fixed by the seed.
+8. **UpdateLayoutSeg** - linear scan by `id`; writes only the `Some` fields (`start_ms`/`end_ms` clamped to the clip, `layout`/`easing`/`easing_out` validated same as above), then also runs `region::clamp_order` on `start_ms`/`end_ms` (M5), same as `UpdateZoom`.
 
 ### Behaviors
 
@@ -127,6 +127,8 @@ Mutates `doc` in place by dispatching on `op`. The single write point for all `E
 - `add_zoom_full_uses_given_scale` - scale is preserved, not overridden to 2.0.
 - `set_layout_seg_noop_unknown` - unknown segment id is silently ignored.
 - `add_zoom_bounds_to_clip_ms_not_the_trim_point` (`api_tests.rs`) - `clip_ms=60_000` with an earlier `trim.out_ms=10_000`: a zoom added at `at_ms=30_000` is NOT collapsed to the trim point.
+- `update_zoom_start_past_end_pulls_end_to_match` / `update_zoom_end_before_start_pulls_start_to_match` - M5: dragging one handle past the other pulls the untouched handle to meet it rather than persisting an inverted region.
+- `update_layout_seg_start_past_end_pulls_end_to_match` - same M5 guarantee for `UpdateLayoutSeg`.
 
 ## metrics
 

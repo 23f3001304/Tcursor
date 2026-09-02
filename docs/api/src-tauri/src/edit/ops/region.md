@@ -10,6 +10,27 @@ pub(crate) fn dur_bound(doc: &EditDoc) -> u32
 
 The document's known upper time bound for PLACING a new or moved region. `clip_ms` (the true recording length) wins when known, so trimming the clip does not collapse a region added past the trim point; `trim.out_ms` is the fallback for a doc predating `clip_ms`; `u32::MAX` is the last resort for a not-yet-seeded doc (which `edit::seed` should always prevent).
 
+## clamp_order
+
+```rust
+pub(crate) fn clamp_order(start: &mut u32, end: &mut u32, start_was_set: bool)
+```
+
+After a partial `start_ms`/`end_ms` update leaves a region inverted (`*start > *end`), pulls the field the caller did NOT just set to match the one they did, so an inversion never persists to disk. `start_was_set` picks the winner: `true` pulls `end` up to `start` (the caller just dragged the start handle past the end); `false` pulls `start` down to `end`. No-op when already ordered.
+
+**Why (M5):** `UpdateZoom`, `UpdateLayoutSeg`, `UpdateEffect` each clamp `start_ms`/`end_ms` independently against the clip's upper bound but never related the two fields to each other - a client sending `start_ms: 8000` on a region whose `end_ms` is 5000 used to persist `{start: 8000, end: 5000}` verbatim. Both real consumers (`CameraSim::winner`, `spotlight_sim`) are underflow-safe against this (an inverted range is simply never selected), so it never crashed - but the region kept rendering as a live, editable timeline pill that silently did nothing, with no way for the user to tell why.
+
+### Behaviors
+
+- `clamp_order_pulls_end_to_a_start_dragged_past_it` - `(8000, 5000)` with `start_was_set=true` -> `(8000, 8000)`.
+- `clamp_order_pulls_start_to_an_end_dragged_before_it` - `(5000, 1000)` with `start_was_set=false` -> `(1000, 1000)`.
+- `clamp_order_is_a_noop_when_already_ordered` - `(100, 200)` is unchanged either way.
+
+### Used by
+
+- `src-tauri/src/edit/ops/api.rs` - `UpdateZoom`, `UpdateLayoutSeg`
+- `src-tauri/src/edit/ops/effects.rs` - `UpdateEffect`
+
 ## auto_layer
 
 ```rust

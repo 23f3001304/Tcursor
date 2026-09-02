@@ -24,6 +24,32 @@ pub fn trim_frame_bounds(trim_in_ms: u32, trim_out_ms: u32, out_fps: u64) -> (u6
     (k_in, k_last)
 }
 
+/// The mux shift (ms, negative = start later) for one audio track: its own start relative to
+/// the exported video's frame 0. `trim_in_q_ms` MUST be the FRAME-FLOORED trim-in
+/// (`k_in * 1000 / out_fps`, from `trim_frame_bounds`), NOT the raw `trim_in_ms`: exported frame
+/// 0 shows the source content at that floored instant, so subtracting the unquantised ms value
+/// advanced the audio ahead of the video by up to a full frame (33 ms at 30 fps).
+pub fn audio_shift_ms(track_ms: Option<u64>, video_start: u64, trim_in_q_ms: u64) -> i64 {
+    track_ms.map(|m| m as i64 - video_start as i64).unwrap_or(0) - trim_in_q_ms as i64
+}
+
+/// How the webcam decode ended, as a user-facing warning (`None` = nothing to say). The camera
+/// is one panel of a deliverable whose picture is the screen, so none of these fail the export -
+/// but each leaves a file that is not what was asked for, and all of them used to be silent.
+/// `frames` (webcam frames actually composited) is what separates the two shapes of failure:
+/// with none, the panel is ABSENT for the whole export; with some, it renders FROZEN on the last
+/// decoded frame from that point on (`exporter`'s `last_webcam` hold), which looks like a stall
+/// rather than a missing panel and needs saying differently.
+pub fn webcam_warning(had_webcam: bool, fail: Option<&str>, frames: u64) -> Option<String> {
+    match (had_webcam, fail, frames) {
+        (false, _, _) => None,
+        (_, Some(e), 0) => Some(format!("webcam decode failed before any frame, exported without the camera panel: {e}")),
+        (_, Some(e), n) => Some(format!("webcam decode failed after {n} frames - the camera panel is frozen from that point on: {e}")),
+        (_, None, 0) => Some("webcam decode produced no frames - exported without the camera panel".into()),
+        (_, None, _) => None,
+    }
+}
+
 /// Take (and clear) a stored decode-thread error, or `Ok` if none. Distinguishes a real
 /// decode failure (surface it) from a clean EOF (channel closed, no error stored).
 fn take_err(err: &Mutex<Option<Error>>) -> Result<()> {
@@ -96,8 +122,9 @@ pub struct WebcamPipe {
 impl WebcamPipe {
     /// Spawn the webcam `RawDecoder` (at `out_fps` - the export's resolved output frame rate,
     /// from `ExportSettings.fps` - seeked to `video_start`, cover-cropped to `dims`) and its
-    /// decode thread. `depth` sizes the channel and the buffer pool. `dims` is the PANEL's
-    /// `(w, h)`, so a Wide (16:9) webcam panel decodes 16:9 instead of a stretched square.
+    /// decode thread. `depth` sizes the channel and the buffer pool. `dims` is the SOURCE-aspect
+    /// decode box (`render::meta::webcam_box`) - ONE box for the whole export, which each panel
+    /// cover-crops to its own aspect at composite time; it is not any panel's own `(w, h)`.
     pub fn spawn(webcam: &Path, video_start: u64, dims: (u32, u32), wc_bytes: usize, depth: usize, out_fps: u64) -> Result<WebcamPipe> {
         let dec = RawDecoder::spawn(webcam, out_fps as f64, false, Some(video_start), Some(dims), None, "bgra", wc_bytes)?;
         let pool = BufPool::new(depth, wc_bytes);
@@ -131,31 +158,8 @@ impl WebcamPipe {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::trim_frame_bounds;
-    #[test]
-    fn trim_frame_bounds_converts_ms_to_inclusive_frame_indices() {
-        assert_eq!(trim_frame_bounds(0, 10_000, 60), (0, 600));
-        assert_eq!(trim_frame_bounds(2_000, 8_000, 60), (120, 480));
-    }
-
-    #[test]
-    fn trim_frame_bounds_never_collapses_to_empty() {
-        let (k_in, k_last) = trim_frame_bounds(5_000, 5_000, 60);
-        assert!(k_last >= k_in);
-    }
-
-    /// Back-compat: an untrimmed clip (`trim_out_ms == full_dur_ms`, the seeded default) must
-    /// yield the exact same last frame index the old `total_out = dur*fps/1000` bound computed,
-    /// so the export loop's frame count is unchanged when nothing is actually trimmed.
-    #[test]
-    fn untrimmed_last_index_matches_the_old_total_out_formula() {
-        let full_dur_ms = 12_345u32;
-        let old_total_out = (full_dur_ms as u64 * 60) / 1000;
-        let (k_in, k_last) = trim_frame_bounds(0, full_dur_ms, 60);
-        assert_eq!((k_in, k_last), (0, old_total_out));
-    }
-}
+#[path = "mod_tests.rs"]
+mod tests;
 
 pub mod pipeline_decode;
 pub mod exporter;

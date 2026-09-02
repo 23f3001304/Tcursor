@@ -1,6 +1,7 @@
 use crate::actions::model::{ActionEvent, ActionKind};
 use crate::events::track::cursortype::{CursorTrack, CursorType};
 use crate::events::model::{EventKind, EventLog};
+use crate::export::coordmap::to_frame;
 
 pub(crate) fn region(x: i32, y: i32, w: u32, h: u32) -> &'static str {
     let col = if x < (w / 3) as i32 { 0 } else if x < (2 * w / 3) as i32 { 1 } else { 2 };
@@ -19,8 +20,10 @@ fn mo(t_ms: u32, line: String) -> Moment { Moment { t_ms, line } }
 /// Ms to ADD to an event-clock timestamp to land on the OUTPUT clock, saturating at 0 - the same
 /// shape as `edit::migrate::output_shift`'s recipe (this fn takes the already-computed shift
 /// rather than a `ProjectPaths`, since `ai::commands::build_plan` derives it once and this module
-/// has no path/IO concerns of its own).
-fn sh(t: u32, shift: i64) -> u32 { (t as i64 + shift).max(0) as u32 }
+/// has no path/IO concerns of its own). `pub(crate)` so `narrate::zoom_label` can put a click's
+/// timestamp on the SAME output clock its `at_ms` is already on (M1) instead of comparing against
+/// the raw event clock.
+pub(crate) fn sh(t: u32, shift: i64) -> u32 { (t as i64 + shift).max(0) as u32 }
 
 pub fn serialize(
     log: &EventLog, actions: &[ActionEvent], cursor: &CursorTrack,
@@ -32,7 +35,13 @@ pub fn serialize(
     for ev in &log.events {
         if ev.kind == EventKind::Down {
             let t = sh(ev.t, shift);
-            m.push(mo(t, format!("{}s click ({},{}) {}", fmt(t), ev.x, ev.y, region(ev.x, ev.y, w, h))));
+            // H1: `ev.x`/`ev.y` are virtual-DESKTOP coordinates (the raw `WH_MOUSE_LL` hook
+            // position), not screen-local - on any monitor placed off-origin (anything but the
+            // primary) they're wildly outside `[0, w) x [0, h)`. `to_frame` is the same
+            // origin-subtraction every other renderer path (`Cursor`, `fx_state`) already applies
+            // before touching a screen-sized box; region()/the printed coordinate must too.
+            let p = to_frame(&log.screen, ev.x, ev.y);
+            m.push(mo(t, format!("{}s click ({},{}) {}", fmt(t), p.x, p.y, region(p.x, p.y, w, h))));
         }
     }
 
@@ -93,105 +102,5 @@ pub fn serialize(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::actions::model::{ActionEvent, ActionKind, LayoutId};
-    use crate::events::track::cursortype::{CursorTrack, CursorType};
-    use crate::events::model::{EventKind, EventLog, MouseEvent, ScreenInfo};
-
-    fn scr() -> ScreenInfo { ScreenInfo { w: 1920, h: 1080, origin_x: 0, origin_y: 0 } }
-    fn ev(t: u32, kind: EventKind, x: i32, y: i32) -> MouseEvent {
-        MouseEvent { t, kind, x, y, button: None }
-    }
-    fn make_log() -> EventLog {
-        EventLog { started_unix_ms: 0, screen: scr(), events: vec![
-            ev(500, EventKind::Down, 100, 100), ev(500, EventKind::Move, 100, 100),
-            ev(3500, EventKind::Down, 960, 540), ev(3500, EventKind::Move, 960, 540),
-        ]}
-    }
-
-    #[test]
-    fn region_corners_and_center() {
-        assert_eq!(region(0, 0, 1920, 1080), "top-left");
-        assert_eq!(region(1919, 0, 1920, 1080), "top-right");
-        assert_eq!(region(0, 1079, 1920, 1080), "bottom-left");
-        assert_eq!(region(1919, 1079, 1920, 1080), "bottom-right");
-        assert_eq!(region(960, 540, 1920, 1080), "center");
-        assert_eq!(region(0, 540, 1920, 1080), "left");
-        assert_eq!(region(1919, 540, 1920, 1080), "right");
-        assert_eq!(region(960, 0, 1920, 1080), "top");
-        assert_eq!(region(960, 1079, 1920, 1080), "bottom");
-    }
-
-    #[test]
-    fn serialize_contains_expected_lines() {
-        let out = serialize(&make_log(),
-            &[ActionEvent { t: 2000, kind: ActionKind::SetLayout(LayoutId::Camera) }],
-            &CursorTrack::default(), &[1000u32, 1200, 1400], 5000, 0);
-        assert!(out.starts_with("clip 5.0s, screen 1920x1080"), "{}", out);
-        assert!(out.contains("0.5s click (100,100) top-left"), "{}", out);
-        assert!(out.contains("3.5s click (960,540) center"), "{}", out);
-        assert!(out.contains("layout -> camera"), "{}", out);
-        assert!(out.contains("1.0-1.4s typing"), "{}", out);
-        assert!(out.contains("0.5-3.5s idle"), "{}", out);
-    }
-
-    #[test]
-    fn time_ordered() {
-        let out = serialize(&make_log(),
-            &[ActionEvent { t: 2000, kind: ActionKind::SetLayout(LayoutId::Screen) }],
-            &CursorTrack::default(), &[1000u32, 1100], 5000, 0);
-        let times: Vec<f64> = out.lines().skip(1).filter_map(|l|
-            l.split('s').next().and_then(|s| s.split('-').next()?.parse().ok())
-        ).collect();
-        let mut sorted = times.clone();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        assert_eq!(times, sorted);
-    }
-
-    #[test]
-    fn deterministic() {
-        let (log, actions, cursor, typing) = (make_log(),
-            vec![ActionEvent { t: 2000, kind: ActionKind::SetLayout(LayoutId::Camera) }],
-            CursorTrack::default(), vec![1000u32, 1200]);
-        assert_eq!(serialize(&log, &actions, &cursor, &typing, 5000, -800),
-                   serialize(&log, &actions, &cursor, &typing, 5000, -800));
-    }
-
-    #[test]
-    fn ibeam_span_emitted() {
-        let log = EventLog { started_unix_ms: 0, screen: scr(), events: vec![] };
-        let cursor = CursorTrack { samples: vec![(1000, CursorType::IBeam), (2000, CursorType::Arrow)] };
-        let out = serialize(&log, &[], &cursor, &[], 5000, 0);
-        assert!(out.contains("text field"), "{}", out);
-    }
-
-    /// The whole point of the task: with `events_ms=0, video_start=800` (`shift=-800`, the
-    /// ~0.8s real-recording offset), a click recorded at raw event t=3100 must serialize at
-    /// its OUTPUT-clock time (2.3s), not its raw event-clock time (3.1s) - the director's ops
-    /// land as output-time zooms, so its transcript must reason on that same clock.
-    #[test]
-    fn click_timestamps_shift_onto_the_output_clock() {
-        let log = EventLog { started_unix_ms: 0, screen: scr(),
-            events: vec![ev(3100, EventKind::Down, 100, 100), ev(3100, EventKind::Move, 100, 100)] };
-        let out = serialize(&log, &[], &CursorTrack::default(), &[], 5000, -800);
-        assert!(out.contains("2.3s click"), "{}", out);
-        assert!(!out.contains("3.1s click"), "{}", out);
-    }
-
-    /// Layout switches, typing spans and idle windows all shift by the SAME amount as clicks -
-    /// every timestamp in the transcript must agree on one clock. The clip duration line does
-    /// NOT shift: the caller already passes the true output-clock duration.
-    #[test]
-    fn layout_typing_and_idle_timestamps_shift_identically() {
-        let out = serialize(&make_log(),
-            &[ActionEvent { t: 2000, kind: ActionKind::SetLayout(LayoutId::Camera) }],
-            &CursorTrack::default(), &[1000u32, 1200, 1400], 5000, -800);
-        assert!(out.starts_with("clip 5.0s"), "duration line must not shift: {}", out);
-        assert!(out.contains("0.0s click (100,100) top-left"), "500ms - 800ms clamps to 0: {}", out);
-        assert!(out.contains("2.7s click (960,540) center"), "{}", out);
-        assert!(out.contains("1.2s layout -> camera"), "{}", out);
-        assert!(out.contains("0.2-0.6s typing"), "{}", out);
-        assert!(out.contains("0.0-2.7s idle"), "{}", out);
-    }
-}
+#[path = "timeline_tests.rs"]
+mod tests;

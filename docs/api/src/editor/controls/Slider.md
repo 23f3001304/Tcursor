@@ -28,9 +28,10 @@ passed through `snapToStep`.
 ## Slider
 
 ```tsx
-export function Slider({ value, min, max, step, onChange, disabled, accentColor, ariaLabel }: {
+export function Slider({ value, min, max, step, onChange, disabled, accentColor, ariaLabel, label, formatValue }: {
   value: number; min: number; max: number; step?: number; onChange: (v: number) => void;
   disabled?: boolean; accentColor?: string; ariaLabel?: string;
+  label?: string; formatValue?: (v: number) => string;
 }): JSX.Element
 ```
 
@@ -38,11 +39,79 @@ export function Slider({ value, min, max, step, onChange, disabled, accentColor,
 
 - `ariaLabel?: string` - (Task 26) sets `aria-label` on the `role="slider"` track. Every call
   site in the codebase passes this - a screen reader otherwise has no name for a bare slider.
+- `label?: string` / `formatValue?: (v: number) => string` (render hygiene pass) - an optional
+  `.e-fl` readout rendered ABOVE the track, as a sibling (via a `<>` Fragment - no extra wrapper
+  DOM node, so it's layout-identical to the hand-rolled `<span className="e-fl">` markup every
+  call site used before this prop existed). Sourced from the LIVE `shown` value (see "Commit
+  debounce" below), not the committed `value` prop, so the number updates at full pointer rate
+  during a drag instead of stepping at the (now debounced) commit rate - see "Optimistic local
+  value" below for why that gap exists at all. `formatValue` renders `shown`; omitted, `shown` is
+  shown raw. Omit `label` entirely to render nothing here (the caller keeps rendering its own
+  label from `value`, as most non-numeric-readout callers still do - see "Not converted" below).
 
 ### Behavior (Task 26 additions)
 
 The track div is `role="slider"`, `tabIndex={disabled ? -1 : 0}`, with `aria-valuemin`/
-`aria-valuemax`/`aria-valuenow` mirroring the numeric props, and an `onKeyDown` that calls
-`sliderKeyValue` and, on a non-null result, `onChange`s straight to it. Focus is shown via
-`.e-slider-track:focus-visible` (`editor.css`), a `--e-focus`-colored outline - the same token
-used across the editor's other focus rings, not a new color.
+`aria-valuemax` mirroring the numeric props. Focus is shown via `.e-slider-track:focus-visible`
+(`editor.css`), a `--e-focus`-colored outline - the same token used across the editor's other
+focus rings, not a new color.
+
+### Commit debounce + optimistic UI (render hygiene pass)
+
+Most `onChange` callers ultimately fire an `apply_edit_op`/`save_edit` IPC round trip (often
+cascading into further refetches - see `useEditorData.md`'s `previewBg`). Calling `onChange` on
+every `pointermove` - as this component used to - turned a single slider drag into 60-144
+IPC round trips a second (perf sweep F#2/#5/#6). `Slider` now debounces the COMMIT while keeping
+the visible thumb fully responsive:
+
+- **Optimistic local value.** A pointer interaction sets local state `dragValue` immediately; the
+  thumb/fill/`aria-valuenow`/`label` readout are all computed from `shown = dragValue ?? value`,
+  so the UI tracks the pointer at full rate regardless of how slow `onChange`'s own round trip is.
+- **Clear-on-change, not clear-on-equality (fix round 1).** `dragValue` clears via the shared
+  `shouldClearOverride` (`../hooks/overrideClear.ts`) once the `value` PROP changes away from
+  `settledValueRef.current` (a snapshot taken at the moment the current gesture - a drag or a
+  keypress - began), not once it happens to land back on the EXACT value `dragValue` holds. The
+  original exact-equality version could get stuck showing a value the doc doesn't hold forever:
+  it could never resolve a commit the backend clamped or rejected outright (`value` would simply
+  never equal `dragValue`), and was deaf to an undo/Reset landing mid-wait (that changes `value`
+  to something else entirely, which equality against `dragValue` never recognized as "stale now"
+  either). See `overrideClear.md` for the shared predicate's full reasoning (including its one
+  structural limit: a commit that fails so silently `value` never changes AT ALL still can't
+  self-resolve - there's no external signal for that case to key off of).
+- **Debounced commit, `flush()` on release.** The actual `onChange(v)` call is wrapped in
+  `debounce(...)` (`../hooks/debounce.ts`, `COMMIT_DEBOUNCE_MS = 80`) - a drag calls the debounced
+  wrapper on every move, but it only actually invokes `onChange` at most once every 80ms. Release
+  (`endDrag`, wired to `pointerup`/`pointercancel`/`lostpointercapture` - see below) `flush()`es
+  immediately, so the drag's FINAL value always lands without waiting out the trailing window.
+  `onChange` itself is read through a ref (`onChangeRef`), so the debounced wrapper never needs
+  recreating just because the caller passed a fresh inline arrow (as most callers do).
+- **`pointercancel`/`lostpointercapture` also end the gesture (fix round 1).** `endDrag` is wired
+  to all three of `onPointerUp`/`onPointerCancel`/`onLostPointerCapture`, not just `onPointerUp` -
+  a cancelled sequence (palm rejection, a system gesture stealing the pointer) or a lost-capture
+  notification never fires `pointerup` at all, which previously left `dragging` stuck `true`
+  forever and permanently blocked the clear-on-change effect from ever running again for that
+  slider. `endDrag` is idempotent, so it's safe that `lostpointercapture` also fires right after a
+  normal release's own `releasePointerCapture` call.
+- **Keyboard bypasses the debounce.** `sliderKeyValue`'s result commits immediately (`cancel()`s
+  any pending debounce, calls `onChange` directly) - a discrete key press has nothing to coalesce.
+- **Unmount safety.** A pending commit still `flush()`es on unmount (switching panels,
+  deselecting mid-drag), so a value the user actually dragged to is never silently dropped.
+
+This mirrors the exact pattern `Stage.tsx`'s reticle drag uses for the same reason (see
+`Stage.md`'s "Reticle drag debounce") - local optimistic state + a shared `debounce()` + a
+release-time flush + the same shared `shouldClearOverride`.
+
+### Not converted to `label`/`formatValue`
+
+`ExportDialog.tsx`'s CRF slider only - it uses a different label pattern entirely (`.e-export-row`
++ a plain `<label>`, not `.e-fl`) with a conditional compound string (`"Quality"` vs `"Quality
+(CRF 22)"`), and is local-`useState`-only (no IPC at all), so the lag `label` fixes doesn't apply
+there in the first place.
+
+`EffectInspector.tsx`'s `OverrideField` (fix round 2) and `AudioPanel.tsx`'s Mic Sync Offset
+slider (fix round 2) WERE initially left unconverted for a structural reason - a value readout
+that needed to sit somewhere other than immediately above the track (a `.e-switchrow` alongside a
+`Switch`, and a `.e-hintrow` respectively) - but both are now converted anyway, with a small
+supporting layout change each (see `EffectInspector.md`'s `OverrideField` section and
+`AudioPanel.md`'s "Live readout" note) rather than staying unconverted, since leaving the lag in
+place wasn't an acceptable fix for those findings.

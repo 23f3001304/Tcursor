@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { CAM_ACTION_OPTIONS, isCamActionSelected, targetForMode, targetMode } from "./ZoomInspector";
+import { CAM_ACTION_OPTIONS, isCamActionSelected, targetForMode, targetMode, zoomScopedSeekMs } from "./ZoomInspector";
 import type { EditOp } from "../../lib/edit";
 
 describe("zoom target modes (T31 - Region targets)", () => {
@@ -62,5 +62,25 @@ describe("isCamActionSelected", () => {
     expect(isCamActionSelected({ shrink: { to: 0.62 } }, { shrink: { to: 0.62 } })).toBe(true);
     expect(isCamActionSelected({ shrink: { to: 0.4 } }, { shrink: { to: 0.62 } })).toBe(true);
     expect(isCamActionSelected("stay", { shrink: { to: 0.62 } })).toBe(false);
+  });
+});
+
+describe("zoomScopedSeekMs (gate finding - zoom-scoped controls seek discoverability)", () => {
+  it("does not seek when the playhead is already inside the span (inclusive both ends)", () => {
+    expect(zoomScopedSeekMs(1000, 1000, 2000)).toBeNull(); // exactly at start
+    expect(zoomScopedSeekMs(2000, 1000, 2000)).toBeNull(); // exactly at end
+    expect(zoomScopedSeekMs(1500, 1000, 2000)).toBeNull(); // middle
+  });
+
+  it("seeks to the midpoint when the playhead is before the span", () => {
+    expect(zoomScopedSeekMs(0, 1000, 2000)).toBe(1500);
+  });
+
+  it("seeks to the midpoint when the playhead is after the span", () => {
+    expect(zoomScopedSeekMs(5000, 1000, 2000)).toBe(1500);
+  });
+
+  it("rounds a non-integer midpoint to the nearest ms", () => {
+    expect(zoomScopedSeekMs(0, 1000, 2001)).toBe(1501); // (1000+2001)/2 = 1500.5 -> 1501
   });
 });

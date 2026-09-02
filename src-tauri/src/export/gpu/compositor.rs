@@ -42,13 +42,15 @@ impl Compositor for CpuCompositor {
             return;
         }
         let mut base = bg.to_vec();
-        draw_panel(&mut base, ow, oh, screen, sw, sh, scene.screen);
+        // The screen panel is built from the source's own aspect (`inset_rect`/`Presenter`), so it
+        // is drawn whole; only the webcam needs the cover-crop (its panel's aspect is a setting).
+        draw_panel(&mut base, ow, oh, screen, sw, sh, scene.screen, false);
         let (cx0, cy0, cw, ch) = crate::export::coordmap::crop(cam, ow, oh);
         let resized = resize_crop(&base, ow, oh, cx0 as f64, cy0 as f64, cw as f64, ch as f64, ow, oh);
         out.clear();
         out.extend_from_slice(&resized);
         if let Some((wc, ww, wh)) = webcam {
-            draw_panel(out, ow, oh, wc, ww, wh, scene.camera);
+            draw_panel(out, ow, oh, wc, ww, wh, scene.camera, true);
         }
     }
 }
@@ -72,15 +74,31 @@ fn rrect_sd_px(tx: u32, ty: u32, pw: u32, ph: u32, r: f32) -> f32 {
     qx.max(qy).min(0.0) + outside - r
 }
 
+/// The largest centred sub-rect of a `sw`x`sh` source that has a `pw`x`ph` panel's aspect
+/// (`(x, y, w, h)`, source px). Cover-fit: the mismatched axis is CROPPED, never squashed -
+/// the same framing `previewCanvas.ts`'s `coverDraw` gives the editor's live PiP, and the
+/// reason the one source-aspect webcam decode box serves every panel shape (`webcam_box`).
+/// Takes the panel's ROUNDED integer size (as `draw_panel` resizes to), where the shader divides
+/// the float rect - a sub-pixel aspect difference, far below the CPU/GPU filter difference.
+fn cover_rect(sw: u32, sh: u32, pw: u32, ph: u32) -> (f64, f64, f64, f64) {
+    let (sa, pa) = (sw.max(1) as f64 / sh.max(1) as f64, pw.max(1) as f64 / ph.max(1) as f64);
+    let (w, h) = if sa > pa { (sh as f64 * pa, sh as f64) } else { (sw as f64, sw as f64 / pa) };
+    ((sw as f64 - w) / 2.0, (sh as f64 - h) / 2.0, w, h)
+}
+
 /// Resize `src` (sw×sh) into `panel.rect` and blend onto `dst` with rounded-rect
 /// antialiased coverage times `panel.alpha`. No-op when invisible or degenerate.
 /// When `panel.ring_px > 0`, also blends a ring/border band just inside the panel
 /// edge (mirrors the GPU shader's post-camera-mix ring blend, same SDF/band formula).
-fn draw_panel(dst: &mut [u8], dw: u32, dh: u32, src: &[u8], sw: u32, sh: u32, panel: Panel) {
+/// `cover`: centre-crop `src` to the panel's aspect first (`cover_rect`) instead of
+/// stretching the whole source across it - set for the webcam panel, whose aspect is a
+/// user setting the decode box does not follow (mirrored by `shader.wgsl`'s `cover_uv`).
+fn draw_panel(dst: &mut [u8], dw: u32, dh: u32, src: &[u8], sw: u32, sh: u32, panel: Panel, cover: bool) {
     if panel.alpha <= 0.0 { return; }
     let (pw, ph) = (panel.rect.w.round() as u32, panel.rect.h.round() as u32);
     if pw == 0 || ph == 0 { return; }
-    let resized = resize_crop(src, sw, sh, 0.0, 0.0, sw as f64, sh as f64, pw, ph);
+    let (cx, cy, cw, ch) = if cover { cover_rect(sw, sh, pw, ph) } else { (0.0, 0.0, sw as f64, sh as f64) };
+    let resized = resize_crop(src, sw, sh, cx, cy, cw, ch, pw, ph);
     let r = panel.radius.clamp(0.0, pw.min(ph) as f32 / 2.0);
     let a = panel.alpha.clamp(0.0, 1.0);
     // For a fully-opaque panel, pixels safely inside the rounded corners always

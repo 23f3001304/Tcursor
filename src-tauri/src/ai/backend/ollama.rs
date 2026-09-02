@@ -23,8 +23,8 @@ struct TagsResp { models: Vec<TagEntry> }
 struct TagEntry { name: String }
 
 /// List locally-installed CHAT model names (`GET /api/tags`, embedding models filtered out), for
-/// the AI panel's engine picker and as `ai_autoedit`'s default-model source. Returns an empty list
-/// - never an error - when Ollama is unreachable or the response doesn't parse.
+/// the AI panel's engine picker and as `ai::commands::build_plan`'s default-model source. Returns
+/// an empty list - never an error - when Ollama is unreachable or the response doesn't parse.
 pub fn list_models() -> Vec<String> {
     let agent = ureq::AgentBuilder::new().timeout_connect(std::time::Duration::from_secs(2)).build();
     let resp = match agent.get("http://localhost:11434/api/tags").call() {

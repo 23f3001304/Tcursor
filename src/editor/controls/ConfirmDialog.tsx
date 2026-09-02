@@ -2,6 +2,11 @@ import { useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { IconCheck } from "@tabler/icons-react";
 
+// design/premium-pass D6: the app-wide press spring, applied to the primary CTA - Cancel stays
+// quiet (no press feedback), same "hero gets the spring, quiet chrome doesn't" split as Transport.
+const PRESS_TAP = { scale: 0.96 };
+const PRESS_SPRING = { type: "spring" as const, stiffness: 500, damping: 30 };
+
 /** A small modal confirm with an optional "don't ask again" checkbox. Reusable across the editor;
  *  the scrim click and Cancel both dismiss without confirming. `onConfirm` receives the checkbox
  *  state so the caller can persist the suppression itself. */
@@ -35,7 +40,8 @@ export function ConfirmDialog({ open, title, body, confirmLabel, danger, dontAsk
             )}
             <div className="e-modal-actions">
               <button type="button" className="e-modal-btn" onClick={onCancel}>Cancel</button>
-              <button type="button" className={`e-modal-btn primary${danger ? " danger" : ""}`} onClick={() => onConfirm(dontAsk)}>{confirmLabel}</button>
+              <motion.button type="button" className={`e-modal-btn primary${danger ? " danger" : ""}`} onClick={() => onConfirm(dontAsk)}
+                whileTap={PRESS_TAP} transition={PRESS_SPRING}>{confirmLabel}</motion.button>
             </div>
           </motion.div>
         </motion.div>

@@ -23,7 +23,7 @@ Edits the `ui` group of `Settings`.
 
 ### Behavior
 
-Renders `<section className="sec">` with heading "Interface". Four `Field` sections in order:
+Renders `<section className="sec">` with heading "Interface". Three `Field` sections plus one plain (non-`Field`) row, in order:
 
 1. **App theme** - `.seg`/`.seg-btn` segmented control. Three options from `THEME_OPTS`:
    - `"light"` - Light
@@ -43,7 +43,7 @@ Renders `<section className="sec">` with heading "Interface". Four `Field` secti
 
 3. **Animated brand** (Task 39) - a `Switch` bound to `value.animated_brand`, hint text "Flowing wave + REC pulse". Writes `value.animated_brand` (`boolean`). *Why here:* the fake-polish rule is every feel knob is a setting; this is the one UI control for `InterfaceSettings.animated_brand` (see `settings.md`), which gates whether `TcursorMark` flows/pulses at all in both the HUD titlebar and the editor's `TopBar`.
 
-4. **Language** - a single `.seg-btn` with label "English" that is `disabled` and has `cursor: default`. No settings field is written. *Why rendered:* it signals that i18n is planned without requiring partially implemented locale switching.
+4. **Language** - a plain `.sf`/`.sf-row` label+value row (`"Language"` / `"English"`), not a `Field`+control. No settings field is written. *Why a plain row and not a disabled control:* a disabled full-width `.seg-btn` read as a broken/placeholder button rather than "there is only one option today" - a quiet value row is the honest rendering until a second language exists, at which point this reverts to a real `Field` like App theme/Accent above.
 
 ### Notes
 

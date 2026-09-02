@@ -65,14 +65,16 @@ impl FrameRenderer {
         let video_end = (*tl.frames.last().unwrap_or(&video_start)).max(video_start + 1);
         let es = EditState::load(paths, &actions, &layout, sw, sh, tl.events_ms as i64 - video_start as i64);
         let screen_bytes = (sw as usize * sh as usize) * 3 / 2; // nv12: Y plane + half-res interleaved UV
-        // Decode the webcam at the LARGEST panel's own aspect (ties -> the wider one), so a Wide
-        // 16:9 panel isn't fed a square the compositor then stretches 1.78x across it.
-        let big_cam = [LayoutId::Screen, LayoutId::Camera, LayoutId::Presenter, LayoutId::ScreenOnly, LayoutId::CameraOnly]
-            .iter().map(|&id| crate::settings::appearance::overlay_for(
-                es.settings.appearance.for_id(id), layout.out_w, layout.out_h, true))
-            .max_by_key(|o| (o.size_px, o.width_px));
-        let (webcam_w, webcam_h) = big_cam.map(|o| meta::webcam_dims(&o, 1440)).unwrap_or((420, 420));
+        // ONE webcam decode box for the whole export, at the SOURCE's own aspect and big enough
+        // for every mode's panel; each panel cover-crops it to its own aspect at composite time
+        // (`webcam_box`). Picking any single PANEL's aspect here (the old `max_by_key`) stretched
+        // the webcam in every layout that disagreed with the winner - and one always did.
         let has_webcam = paths.webcam().exists();
+        let panels: Vec<_> = [LayoutId::Screen, LayoutId::Camera, LayoutId::Presenter, LayoutId::ScreenOnly, LayoutId::CameraOnly]
+            .iter().map(|&id| crate::settings::appearance::overlay_for(
+                es.settings.appearance.for_id(id), layout.out_w, layout.out_h, true)).collect();
+        let wc_src = has_webcam.then(|| probe_dims(&paths.webcam()).ok()).flatten();
+        let (webcam_w, webcam_h) = meta::webcam_box(&panels, wc_src, 1440);
         let bg = background::build(&es.settings.background, BG_MESH, layout.out_w, layout.out_h);
         let compositor = select_compositor(&layout);
         let fx = fx_state::select_fx(layout.out_w, layout.out_h);
@@ -116,6 +118,11 @@ impl FrameRenderer {
     pub fn reset_camera(&mut self) {
         (self.sim, self.spot_sim) = (CameraSim::new(self.layout.out_w, self.layout.out_h), fx_state::SpotlightSim::new());
         self.cursor.reset();
+        // The motion-trail history is forward-only state too: it gains one entry per
+        // `composite_at`, and a preview scrub composites exactly ONE frame per call - so without
+        // this the trail accumulates the last six SCRUB TARGETS and draws ghost cursors at those
+        // unrelated points (default `motion_blur` 0.35 makes them visible).
+        if let Some(cp) = &mut self.cprep { cp.recent.clear(); }
     }
 
     /// Advance the camera sim to capture-clock time `t` (ms) and return the full pose. Cheap: math only, no

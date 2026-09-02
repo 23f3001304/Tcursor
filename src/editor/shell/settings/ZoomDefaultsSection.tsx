@@ -69,8 +69,8 @@ export function ZoomDefaultsSection({ value, onChange }: {
       </div></div>
 
       <div className="e-field">
-        <span className="e-fl">Zoom amount <b>{value.target_scale.toFixed(1)}x</b></span>
-        <Slider min={1.2} max={4} step={0.1} value={value.target_scale} onChange={(v) => set("target_scale", v)} ariaLabel="Zoom amount" />
+        <Slider min={1.2} max={4} step={0.1} value={value.target_scale} onChange={(v) => set("target_scale", v)} ariaLabel="Zoom amount"
+          label="Zoom amount" formatValue={(v) => `${v.toFixed(1)}x`} />
       </div>
 
       <div className="e-field">
@@ -79,8 +79,8 @@ export function ZoomDefaultsSection({ value, onChange }: {
       </div>
 
       <div className="e-field">
-        <span className="e-fl">Smoothness <b>{value.smoothness.toFixed(2)}</b></span>
-        <Slider min={0.04} max={0.3} step={0.01} value={value.smoothness} onChange={(v) => set("smoothness", v)} ariaLabel="Smoothness" />
+        <Slider min={0.04} max={0.3} step={0.01} value={value.smoothness} onChange={(v) => set("smoothness", v)} ariaLabel="Smoothness"
+          label="Smoothness" formatValue={(v) => v.toFixed(2)} />
       </div>
 
       <div className="e-field">
@@ -96,8 +96,8 @@ export function ZoomDefaultsSection({ value, onChange }: {
 
       {value.camera_shrink && (
         <div className="e-field">
-          <span className="e-fl">Min camera size <b>{Math.round(value.camera_shrink_min * 100)}%</b></span>
-          <Slider min={0.3} max={1} step={0.02} value={value.camera_shrink_min} onChange={(v) => set("camera_shrink_min", v)} ariaLabel="Min camera size" />
+          <Slider min={0.3} max={1} step={0.02} value={value.camera_shrink_min} onChange={(v) => set("camera_shrink_min", v)} ariaLabel="Min camera size"
+            label="Min camera size" formatValue={(v) => `${Math.round(v * 100)}%`} />
         </div>
       )}
 

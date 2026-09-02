@@ -26,7 +26,7 @@ Renders the vertical icon rail with one button per `Tab`.
 ### Behavior
 
 **Button rendering.**
-The local `TABS` array is the single source of truth for order, icon, and label. Each entry is `{ id: Tab; icon: ComponentType<{ size?: number }>; label: string }`. `TABS.map` produces one `<button>` per entry; no conditional rendering. The active button gets `.e-ric.on`; additionally, when `id === "ai"` the button gets `.e-ric.ai` regardless of whether it is active, so the AI icon always carries its violet accent color.
+The local `TABS` array is the single source of truth for order, icon, and label. Each entry is `{ id: Tab; icon: ComponentType<{ size?: number }>; label: string }`. `TABS.map` produces one `motion.button` per entry (design/premium-pass D6: the app-wide press spring, scale .96); no conditional rendering. The active button gets `.e-ric.on`; additionally, when `id === "ai"` the button gets `.e-ric.ai` regardless of whether it is active, so the AI icon always carries its violet accent color.
 
 **Tooltip.**
 Each button's `title` attribute is the full label (e.g. "AI Director", "Background") for native tooltip display.

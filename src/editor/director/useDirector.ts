@@ -1,4 +1,4 @@
-import { useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
+import { useCallback, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import type { EditDoc } from "../../lib/edit";
 import { resolveTrim } from "../../lib/edit";
 import { aiPlan, applyEditOp, type AiStep } from "../../lib/ipc";
@@ -51,22 +51,27 @@ export function useDirector() {
   // "asking the model" state distinct from the step-by-step reveal's "step k/N".
   const [planning, setPlanning] = useState(false);
 
-  const requestCancel = () => { cancelRef.current = true; };
+  // `useCallback`'d (render hygiene pass, all the way down to `aimAndPress`) so `run`'s own
+  // identity is stable across renders - `Editor.tsx`'s `onRun` wraps it directly, and `onRun` is
+  // handed to `Transport`/`EditorPanels` (both `React.memo`'d). Every dependency below bottoms out
+  // in a ref or a `useState` setter, both permanently stable, so this chain holds across every
+  // render, not just ticks.
+  const requestCancel = useCallback(() => { cancelRef.current = true; }, []);
 
   // Per-step choreography: aim, dwell, and (when the plan calls for it) press, all BEFORE the
   // step's real op is applied - unchanged call order from before this task, just wrapped.
-  const aimAndPress = async (track: HTMLElement, dur: number, ms: number, lane: Lane, dwellMs: number, press: boolean) => {
+  const aimAndPress = useCallback(async (track: HTMLElement, dur: number, ms: number, lane: Lane, dwellMs: number, press: boolean) => {
     const pt = timelinePointForMs(track, ms, dur, lane);
     await pointerRef.current?.moveTo(pt.x, pt.y);
     await sleep(dwellMs);
     if (press) await pointerRef.current?.press();
-  };
+  }, []);
 
   /** Reveals one already-fetched plan, choreographing `pointerRef` around each step's real
    *  `applyStep` (identical to the old inline loop's body - apply, `setDoc`, `rev`, narrate,
    *  scrub). Returns the number of steps actually applied (< `steps.length` iff cancelled
    *  mid-run) - the CURRENT step always finishes; cancel only skips the ones after it. */
-  const reveal = async (
+  const reveal = useCallback(async (
     steps: AiStep[], dur: number, docBefore: EditDoc, applyStep: (step: AiStep) => Promise<EditDoc>,
   ): Promise<number> => {
     // NOT reset here - `run` resets it once, before the planning fetch, so a cancel that lands
@@ -128,12 +133,12 @@ export function useDirector() {
       setProgress({ step: i + 1, total: steps.length });
     }
     return steps.length;
-  };
+  }, [aimAndPress]);
 
   /** Fetches the plan and reveals it - the whole thing is meant to run inside Editor's single
    *  `enqueue(...)` call (see the module doc above); `record`/`setDoc`/etc. are handed in rather
    *  than imported so this hook never touches Editor's state directly. */
-  const run = async (
+  const run = useCallback(async (
     folder: string, docRef: RefObject<EditDoc | null>, record: (d: EditDoc) => void, dur: number,
     setDoc: (d: EditDoc) => void, setRev: Dispatch<SetStateAction<number>>, setAiLog: Dispatch<SetStateAction<string[]>>,
     setAiError: (e: string | null) => void, setPlaying: (p: boolean) => void, setTimeMs: (ms: number) => void,
@@ -166,7 +171,7 @@ export function useDirector() {
     try {
       const kept = await reveal(steps, dur, doc0, async (step) => {
         const d = await applyEditOp(folder, step.op); // raw apply - the ONE record() above covers the whole pass
-        setDoc(d); setRev((r) => r + 1);
+        setDoc(d); docRef.current = d; setRev((r) => r + 1); // (review round 1, Important 2) - see Editor.md's M1 note
         setAiLog((l) => [...l, step.label]);
         if (step.op.op === "add_zoom_full") { setPlaying(false); setTimeMs(step.op.at_ms); }
         return d;
@@ -177,7 +182,7 @@ export function useDirector() {
         setAiLog((l) => [...l, `✓ Done · ${zoomN} zoom${zoomN === 1 ? "" : "s"}`]);
       }
     } catch (e) { setAiError(String(e)); }
-  };
+  }, [reveal]);
 
   return { pointerRef, progress, planning, cancelRef, requestCancel, run };
 }

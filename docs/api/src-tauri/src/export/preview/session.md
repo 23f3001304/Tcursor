@@ -52,6 +52,10 @@ Runs `work` on the cached entry.
 4. Run `work` on `&mut entry`.
 5. Lock `cell` again and put the entry back.
 
+### Lock ordering vs. `edit::lock::doc_lock` (bug-sweep-2 Task 7 round 2)
+
+`reuse` and `build` (below) both call `edit::seed::load_or_seed`, which internally takes `edit::lock::doc_lock` for the span of any `edit.json` write it makes - so this establishes `gate -> doc_lock` ordering (never `cell -> doc_lock`, since `cell` is never held while `reuse`/`make`/`work` run - see above). The reverse (`doc_lock -> gate`) never occurs: nothing reachable from inside `doc_lock`'s critical section (`edit::seed`, `edit::seed_lock`, `edit::migrate`, `edit::ops::effects`) ever touches `WarmSlot`, `PreviewSession`, or `win::sys::proc::generate_once`'s lock. See `docs/api/src-tauri/src/edit/lock.md` for the full analysis.
+
 ### Panic behaviour (and why every lock recovers rather than unwraps)
 
 Both locks use `unwrap_or_else(|e| e.into_inner())`, matching `with_fx`/`recorder.rs`. The two mutexes sit on opposite sides of that line, and it is worth being exact about which one the recovery is actually load-bearing for:

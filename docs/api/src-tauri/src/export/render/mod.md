@@ -79,7 +79,17 @@ Loads the edit doc and event log, resolves all per-export setup, and returns bot
 
 ### Implementation
 
-Follows the same sequence as the original `exporter::export` setup block (lines ~32-107), with the encoder/sink and the `RawDecoder::spawn` calls excluded. `build_timeline` runs BEFORE `EditState::load`, because `EditState` needs `events_ms - video_start` for its recorded-action layout fallback. Peeks `edit::seed::load_or_seed(paths)` once, up front, for `seed.aspect` (resolves `layout` together with the caller's `resolution`) and `seed.trim` (carried into `RenderMeta.trim` unresolved). The webcam decode box is computed here and returned as `RenderMeta.webcam_w`/`webcam_h` so the exporter does not need to repeat it: the LARGEST camera panel across all layout modes (`max_by_key((size_px, width_px))`, so a size tie prefers the wider one) run through `meta::webcam_dims(&ov, 1440)`, which keeps that panel's own aspect instead of forcing a square - a `CamAspect::Wide` panel is 16:9 and a square decode was being stretched 1.78x across it by the compositor. `has_webcam = paths.webcam().exists()` is also computed here (a plain filesystem check, not a probe) and stored on `self` for `composite_at` to pass to `fx_state::render`.
+Follows the same sequence as the original `exporter::export` setup block (lines ~32-107), with the encoder/sink and the `RawDecoder::spawn` calls excluded. `build_timeline` runs BEFORE `EditState::load`, because `EditState` needs `events_ms - video_start` for its recorded-action layout fallback. Peeks `edit::seed::load_or_seed(paths)` once, up front, for `seed.aspect` (resolves `layout` together with the caller's `resolution`) and `seed.trim` (carried into `RenderMeta.trim` unresolved). The webcam decode box is computed here and returned as `RenderMeta.webcam_w`/`webcam_h` so the exporter does not need to repeat it: every layout mode's resolved overlay plus the webcam file's own probed dims go through `meta::webcam_box(&panels, wc_src, 1440)`, which gives ONE box at the SOURCE's aspect that each panel cover-crops at composite time. It replaced a box picked from the largest PANEL (`max_by_key((size_px, width_px))`): with a single panel-shaped box, every layout whose aspect disagreed with the winner was stretched (a square fed to a 16:9 bubble) or squashed (16:9 fed to the square big-cam) by 1.78x for its whole segment, and since the bubble and big-camera families never agree, one of them always lost. `has_webcam = paths.webcam().exists()` is also computed here (a plain filesystem check) and stored on `self` for `composite_at` to pass to `fx_state::render`; it also gates the one extra `probe_dims` subprocess (no webcam file, no probe).
+
+## FrameRenderer::reset_camera
+
+```rust
+pub fn reset_camera(&mut self)
+```
+
+Rewinds every piece of FORWARD-ONLY per-frame state so a cached (warm) renderer can be re-used to preview an arbitrary time T by fast-forwarding `step_camera` from the start: a fresh `CameraSim` and `SpotlightSim`, `Cursor::reset()`, and `cprep.recent.clear()`.
+
+**Why the trail history is in that list:** `CursorPrep.recent` is a 6-deep `VecDeque` that gains exactly ONE entry per `composite_at`, and `preview::render_frame` composites exactly ONE frame per call - so without clearing it, a scrub session accumulated the cursor positions of the last six SCRUB TARGETS (arbitrary, unrelated points) and `cursordraw::draw_cursor` blitted a faded sprite at each of them whenever `motion_blur > 0` (0.35 by default). Scrubbing 0:03 -> 0:40 -> 0:12 showed the real cursor plus up to five ghosts. The export is unaffected either way (it appends once per real output frame, in order) - this is a preview-only correction.
 
 ## FrameRenderer::step_camera
 

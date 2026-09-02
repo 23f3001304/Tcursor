@@ -50,14 +50,19 @@ fn render_frame(renderer: &mut FrameRenderer, meta: &RenderMeta, paths: &Project
     drop(screen_dec);
 
     // Seek-decode one webcam frame if present (export pre-seeks webcam by video_start).
-    let wc_dims = (meta.webcam_w, meta.webcam_h); // panel-aspect decode box, matching the export
+    let wc_dims = (meta.webcam_w, meta.webcam_h); // source-aspect decode box, matching the export
     let wc_bytes = (wc_dims.0 * wc_dims.1 * 4) as usize;
     let webcam: Option<(Vec<u8>, u32, u32)> = if paths.webcam().exists() {
         let mut buf = vec![0u8; wc_bytes];
         let mut wc_dec = RawDecoder::spawn(
             &paths.webcam(), OUT_FPS as f64, false,
             Some(meta.video_start + time_ms as u64), Some(wc_dims), None, "bgra", wc_bytes)?;
-        wc_dec.read_frame(&mut buf)?;
+        // A missing or unreadable webcam frame at THIS instant must not fail the whole preview:
+        // `webcam.webm` routinely ends before `video.mp4`, so an `-ss` past its end is an everyday
+        // scrub near the clip end. Both EOF and a hard decode failure leave `buf` untouched, which
+        // is exactly what happened before failures became distinguishable from EOF. Only the
+        // EXPORT (a deliverable) turns a decode failure into an error/warning.
+        if let Err(e) = wc_dec.read_frame(&mut buf) { eprintln!("[PREVIEW] webcam frame at {time_ms}ms: {e}"); }
         drop(wc_dec);
         Some((buf, wc_dims.0, wc_dims.1))
     } else {

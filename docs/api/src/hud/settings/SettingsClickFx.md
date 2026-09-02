@@ -23,7 +23,7 @@ Edits the `clickfx` group of `Settings`.
 
 ### Behavior
 
-Renders `<section className="sec">` with heading "Effects". Three inline uppercase-label headers divide the controls:
+Renders `<section className="sec">` with no top-level heading (removed - it sat directly above the first inline group's own "Click effects" label with nothing between them, reading as a duplicated, empty header; the "FX" settings tab pill is title enough). Three inline uppercase-label headers divide the controls:
 
 **Click effects**
 

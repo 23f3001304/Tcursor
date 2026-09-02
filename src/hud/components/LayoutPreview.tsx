@@ -27,8 +27,12 @@ function compose(mode: ModeKey, ma: ModeAppearance): [Box | null, Box | null] {
 
     if (mode === "screen_only") return [screen, null];
 
-    // Cam bubble: cam_size as fraction of stage height; convert to both axes
-    const cs = clamp(ma.cam_size, 0.05, 0.4); // height-frac
+    // Cam bubble: cam_size as fraction of stage height; convert to both axes. Clamped only to the
+    // safe [0,1] range - matching the slider's own 0.08-1.0 bounds and the real export math
+    // (`overlay_for` in appearance.rs), which applies cam_size directly with no extra clamp. The
+    // old 0.05-0.4 clamp here was preview-only and silently disagreed with what actually rendered
+    // once cam_size passed 40% (L4) - the slider kept moving, the preview box froze.
+    const cs = clamp(ma.cam_size, 0, 1); // height-frac
     const cw = cs * (9 / 16); // width-frac (narrower on 16:9 stage)
     const ch = cs;
     const mx = ma.cam_margin_x;

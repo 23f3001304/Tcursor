@@ -5,8 +5,10 @@ One audio track row: the source's waveform image (from `ensureWaveform`) as a qu
 ## AudioTrack
 
 ```tsx
-export function AudioTrack({ src, kind, loading }: { src: string; kind: "system" | "mic"; loading: boolean }): JSX.Element | null
+export const AudioTrack: React.MemoExoticComponent<(props: { src: string; kind: "system" | "mic"; loading: boolean }) => JSX.Element | null>
 ```
+
+`React.memo`'d - `src`/`loading` are set once per project load and never change on a playhead tick or an unrelated edit.
 
 ### Props
 

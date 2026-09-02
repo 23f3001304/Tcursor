@@ -21,7 +21,7 @@ export function NumberField({ value, min = 0, max, step = 0.1, unit = "s", onCha
 
 ### Behavior
 
-Renders a `.e-soft`/`.e-border` pill: a decrement `IconMinus` button, a centered read-only value display (`{value}{unit}`, tabular-nums), and an increment `IconPlus` button. Both buttons use the shared `.e-numstep` look (`editor.css`) for hover/active/disabled states.
+Renders a `.e-numfield` pill (design/premium-pass D4: `--e-raised` background, hairline border, `--e-inset-hi` top-light, `--e-line-strong` on hover - the border doctrine's full raised-control treatment): a decrement `IconMinus` button, a centered read-only value display (`{value}{unit}`, tabular-nums), and an increment `IconPlus` button. Both buttons use the shared `.e-numstep` look (`editor.css`) for hover/active/disabled states.
 
 ### Used by
 

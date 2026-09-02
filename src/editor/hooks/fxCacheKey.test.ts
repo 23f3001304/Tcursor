@@ -21,6 +21,7 @@ describe("fxCacheKey", () => {
     expect(fxCacheKey(80, "10-20", "off", "", "fx", "none")).not.toBe(base);
     expect(fxCacheKey(40, "11-20", "off", "", "fx", "none")).not.toBe(base);
     expect(fxCacheKey(40, "10-20", "on", "", "fx", "none")).not.toBe(base);
+    expect(fxCacheKey(40, "10-20", "off", "1-2-3", "fx", "none")).not.toBe(base);
   });
 });
 

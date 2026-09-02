@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use serde::Serialize;
+use tauri::Emitter;
 
 use crate::domain::time::{Clock, SystemClock};
 use crate::events::track::cursortracker::CursorTypeTracker;
@@ -12,39 +12,71 @@ use crate::actions::keyboard::KeyboardTracker;
 use crate::actions::matcher::arming_from_settings;
 use crate::session::paths::ProjectPaths;
 use crate::session::record::pause_totals::PauseTotals;
-use crate::session::record::recorder_threads::{save_inputs, save_session_files, spawn_mic_thread, spawn_system_thread};
-use crate::session::record::video_sink::{start_video, VideoSink};
+use crate::session::record::recorder_threads::{spawn_mic_thread, spawn_system_thread};
+use crate::session::record::video_sink::{start_video, VideoSink, VideoStart};
+use crate::session::record::Notify;
 
-struct Running {
-    stop: Arc<AtomicBool>,
-    paused: Arc<AtomicBool>,
-    paused_totals: Arc<PauseTotals>,
-    clock: Arc<dyn Clock>,
-    video: VideoSink,
-    mic_thread: Option<JoinHandle<()>>,
-    system_thread: Option<JoinHandle<()>>,
-    mouse: Option<MouseTracker>,
-    keyboard: Option<KeyboardTracker>,
-    cursor: Option<CursorTypeTracker>,
-    events_path: PathBuf,
-    actions_path: PathBuf,
-    typing_path: PathBuf,
-    cursor_path: PathBuf,
-    screen: ScreenInfo,
-    started_unix_ms: u64,
-    events_ms: u64,
-    mic_start: Arc<AtomicU64>,
-    system_start: Arc<AtomicU64>,
-    folder: String,
+pub(super) struct Running {
+    pub stop: Arc<AtomicBool>,
+    pub paused: Arc<AtomicBool>,
+    pub paused_totals: Arc<PauseTotals>,
+    pub clock: Arc<dyn Clock>,
+    pub video: VideoSink,
+    pub mic_thread: Option<JoinHandle<()>>,
+    pub system_thread: Option<JoinHandle<()>>,
+    pub mouse: Option<MouseTracker>,
+    pub keyboard: Option<KeyboardTracker>,
+    pub cursor: Option<CursorTypeTracker>,
+    pub events_path: PathBuf,
+    pub actions_path: PathBuf,
+    pub typing_path: PathBuf,
+    pub cursor_path: PathBuf,
+    pub screen: ScreenInfo,
+    pub started_unix_ms: u64,
+    pub events_ms: u64,
+    pub mic_start: Arc<AtomicU64>,
+    pub system_start: Arc<AtomicU64>,
+    pub folder: String,
 }
 
 #[derive(Default)]
 pub struct Recorder {
-    inner: Mutex<Option<Running>>,
+    pub(super) inner: Mutex<Option<Running>>,
+    /// Set while `stop_recording` is tearing the session down. `Running` has already been taken
+    /// out of `inner` by then, so `inner.is_some()` alone would let a start racing the tail of a
+    /// stop through - and the new `MouseTracker` would overwrite the process-global hook sink
+    /// before the old stop reads it (finished take gets the new empty collector; new take
+    /// records zero mouse events, so no cursor, no click FX, no auto-zoom). Read and written
+    /// only while holding `inner`'s lock, so it is effectively part of that guarded state.
+    pub(super) stopping: AtomicBool,
 }
 
-#[derive(Serialize)]
-pub struct RecordingResult { pub folder: String, pub frames: u64 }
+impl Recorder {
+    /// True while a take is actively recording (`inner` is `Some`) - i.e. nobody has started
+    /// stopping it yet. Used by `lib.rs`'s `CloseRequested` guard to decide whether IT is the one
+    /// that must run `stop_recording`, versus someone else already owning the stop.
+    pub fn is_recording(&self) -> bool {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner()).is_some()
+    }
+
+    /// True while a take is recording OR its stop is still finalizing - `is_recording()` OR
+    /// `stopping`. *Why both:* `stop_blocking` takes `Running` out of `inner` (making
+    /// `is_recording()` false) well before the finalize it then runs (joining audio threads,
+    /// writing the video's `moov` atom, `sync.json`, the manifest) actually completes - `stopping`
+    /// covers exactly that window. The `CloseRequested` guard in `lib.rs` uses THIS (not just
+    /// `is_recording()`) so a close request landing in that gap can't slip through and let the
+    /// process exit mid-finalize; see `close_guard::finish_and_close`.
+    pub fn is_busy(&self) -> bool {
+        self.is_recording() || self.stopping.load(Ordering::SeqCst)
+    }
+}
+
+/// A `Notify` that forwards its reason to the frontend as `event`. Recording threads hold these
+/// instead of an `AppHandle`, so nothing below this file needs to know about Tauri.
+fn emitter(app: &tauri::AppHandle, event: &'static str) -> Notify {
+    let app = app.clone();
+    Arc::new(move |reason: &str| { let _ = app.emit(event, reason.to_string()); })
+}
 
 #[tauri::command]
 pub fn start_recording(
@@ -57,7 +89,7 @@ pub fn start_recording(
     app: tauri::AppHandle,
 ) -> Result<String, String> {
     let mut guard = recorder.inner.lock().unwrap_or_else(|e| e.into_inner());
-    if guard.is_some() { return Err("already recording".into()); }
+    if guard.is_some() || recorder.stopping.load(Ordering::SeqCst) { return Err("already recording".into()); }
 
     let base = dirs_next::video_dir().unwrap_or_else(std::env::temp_dir).join("TCursor");
     let paths = ProjectPaths::new(&base, &project_name);
@@ -82,25 +114,30 @@ pub fn start_recording(
     let mic_start = Arc::new(AtomicU64::new(0));
     let system_start = Arc::new(AtomicU64::new(0));
     let events_ms = clock.now_ms();
+    let warn = emitter(&app, "record-warning");
     let mouse = Some(MouseTracker::start(8, paused_totals.clone()));
     let keyboard = Some(KeyboardTracker::start(arming_from_settings(&snap.hotkeys), paused_totals.clone()));
     // Only track cursor shape when Enhanced (System/Hidden don't draw a synthetic cursor).
     let cursor = (snap.cursor.style == crate::settings::model::CursorStyle::Enhanced).then(|| CursorTypeTracker::start(paused_totals.clone()));
     let mic_thread = spawn_mic_thread(
         mic_id, paths.mic().to_string_lossy().into_owned(),
-        stop.clone(), paused.clone(), clock.clone(), mic_start.clone(),
+        stop.clone(), paused.clone(), clock.clone(), mic_start.clone(), warn.clone(),
     );
     let system_thread = spawn_system_thread(
         system_audio, paths.system().to_string_lossy().into_owned(),
-        stop.clone(), paused.clone(), clock.clone(), system_start.clone(),
+        stop.clone(), paused.clone(), clock.clone(), system_start.clone(), warn,
     );
 
     // Slow part - the screen video pipeline - while the inputs above already run. GPU-native
     // (Media Foundation, no readback) by default; the compatibility toggle (game_mode) or a
     // GPU-encoder init failure falls back to the legacy ffmpeg path. Returns the captured (w, h).
     let video_path = paths.video().to_string_lossy().into_owned();
-    let (video, w, h, origin_x, origin_y) = match start_video(game_mode, clock.clone(), stop.clone(), paused.clone(),
-        fps, snap.cursor.style.captures_os_cursor(), target_id.as_deref(), &video_path) {
+    let cfg = VideoStart {
+        legacy: game_mode, clock: clock.clone(), stop: stop.clone(), paused: paused.clone(),
+        totals: paused_totals.clone(), ended: emitter(&app, "record-ended-early"),
+        fps, with_cursor: snap.cursor.style.captures_os_cursor(),
+    };
+    let (video, w, h, origin_x, origin_y) = match start_video(cfg, target_id.as_deref(), &video_path) {
         Ok(v) => v,
         Err(e) => {
             // start_video failed after the mic/system-audio threads were already spawned
@@ -137,7 +174,8 @@ pub fn pause_recording(recorder: tauri::State<'_, Recorder>) -> Result<(), Strin
     let guard = recorder.inner.lock().unwrap_or_else(|e| e.into_inner());
     match guard.as_ref() {
         // Ledger stamped under this same lock, from this same clock, beside the flag flip -
-        // the exact span every input tracker's `elapsed_paused` subtracts at its stamp site.
+        // the exact span every input tracker's `elapsed_paused` subtracts at its stamp site,
+        // and (since C1) the span both capture paths remove from the video's own timeline.
         Some(r) => { r.paused_totals.pause(r.clock.now_ms()); r.paused.store(true, Ordering::SeqCst); Ok(()) }
         None => Err("not recording".into()),
     }
@@ -152,41 +190,6 @@ pub fn resume_recording(recorder: tauri::State<'_, Recorder>) -> Result<(), Stri
     }
 }
 
-/// `async` + `spawn_blocking`: this command joins the mic/system-audio threads, gzips and writes
-/// the whole input log, and then joins the video pipeline - which in both paths waits for the
-/// encoder to write the `moov` atom of a potentially multi-GB MP4. As a sync command all of that
-/// ran on the main thread, so Stop froze the HUD (no repaint, no spinner motion) for the entire
-/// finalize. Same conversion `ai::commands`, `thumbs.rs` and `preview_track.rs` already had.
-#[tauri::command]
-pub async fn stop_recording(app: tauri::AppHandle) -> Result<RecordingResult, String> {
-    tauri::async_runtime::spawn_blocking(move || stop_blocking(&app))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
-fn stop_blocking(app: &tauri::AppHandle) -> Result<RecordingResult, String> {
-    use tauri::Manager;
-    let running = app.state::<Recorder>().inner.lock().unwrap_or_else(|e| e.into_inner())
-        .take().ok_or("not recording")?;
-    crate::win::sys::brand_icon::set_recording(app, false); // brand flair only - never fails the stop
-
-    // Signal the audio threads to stop; the video pipeline is stopped below.
-    running.stop.store(true, Ordering::SeqCst);
-    if let Some(t) = running.mic_thread { let _ = t.join(); }
-    if let Some(t) = running.system_thread { let _ = t.join(); }
-
-    // Save inputs before the video stop's ?-propagation so they survive a finalize error.
-    save_inputs(running.mouse, running.keyboard, running.cursor,
-        &running.events_path, &running.actions_path, &running.typing_path, &running.cursor_path,
-        running.screen, running.started_unix_ms);
-
-    // Stop + finalize the video pipeline (GPU: end capture + finish the MP4; ffmpeg: WM_QUIT + join).
-    let (frames, frame_ts) = running.video.stop_and_collect()?;
-
-    // Persist sync.json + the .tcursor manifest + the recents entry (all best-effort).
-    let pick = |c: &AtomicU64| { let v = c.load(Ordering::SeqCst); (v > 0).then_some(v) };
-    save_session_files(&running.folder, frame_ts, running.events_ms,
-        pick(&running.mic_start), pick(&running.system_start), running.screen);
-
-    Ok(RecordingResult { folder: running.folder, frames })
-}
+#[cfg(test)]
+#[path = "recorder_tests.rs"]
+mod tests;

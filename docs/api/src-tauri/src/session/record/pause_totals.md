@@ -1,6 +1,8 @@
 # src-tauri/src/session/record/pause_totals.rs
 
-Exact-span paused-time ledger shared by the recorder's pause/resume commands and every input tracker (mouse, keyboard actions, typing, cursor-type). Complements `pause_clock.rs`: that accumulator is tick-based (inferred from a stream of frame-arrival samples, correct for the video path); this one is stamped directly by the same code path that flips the recorder's `paused` flag, because the recorder knows the exact wall-clock instant the toggle happens.
+Exact-span paused-time ledger for the WHOLE recording: the recorder's pause/resume commands stamp it, every input tracker (mouse, keyboard actions, typing, cursor-type) reads it through `stamp`, and since the C1/H2 fix both capture paths read it through `pause_clock.rs`. One ledger means `sync.json`, `video.mp4`'s own PTS, the audio WAVs and every event stream are compressed by exactly the same number and cannot drift apart.
+
+It is stamped directly by the code path that flips the recorder's `paused` flag, because that path knows the exact wall-clock instant the toggle happens. `PauseClock` used to infer the span from the gaps between *paused frame arrivals* instead; since WGC only delivers frames on content change, that measured a pause over a static desktop as 0 ms and one over a busy desktop as ~100%, making the take's reported duration a function of what the screen happened to be doing (finding H2).
 
 ## PauseState
 
@@ -24,7 +26,7 @@ pub struct PauseTotals {
 }
 ```
 
-Accumulates paused wall-clock time from exact pause/resume instants (as opposed to `PauseClock`, which infers it from a sample stream) and exposes the elapsed-paused span so a tracker's stamp site can subtract it from a raw timestamp. `pause`, `resume`, and `elapsed_paused` each take the lock once per call and observe/mutate the pair together; the lock is uncontended except right at a pause/resume boundary, so a hook callback taking it briefly is fine (`MouseTracker`'s hook already locks a `Mutex` per event for `SINK`).
+Accumulates paused wall-clock time from the exact pause/resume instants and exposes the elapsed-paused span, so a tracker's stamp site - or `PauseClock`, on behalf of either capture path - can subtract it from a raw timestamp. `pause`, `resume`, and `elapsed_paused` each take the lock once per call and observe/mutate the pair together; the lock is uncontended except right at a pause/resume boundary, so a hook callback taking it briefly is fine (`MouseTracker`'s hook already locks a `Mutex` per event for `SINK`).
 
 - `state: Mutex<PauseState>` - the combined-state contract described above.
 
@@ -87,13 +89,29 @@ The total paused span as of `now_ms`: every closed episode plus, if a pause is c
 
 `paused_ms` if not currently paused; otherwise `paused_ms + (now_ms - pause_started)` (saturating). Both fields are read from a single lock acquisition, so this always sees a consistent pair - never a `pause_started` from one moment paired with a `paused_ms` from another.
 
+## PauseTotals::stamp_ms
+
+```rust
+pub fn stamp_ms(&self, raw_ms: u64) -> u64
+```
+
+Pause-adjust a raw wall-clock reading: `raw_ms.saturating_sub(elapsed_paused(raw_ms))`. The single place the "a pause never happened" rule lives - the input trackers reach it through `stamp`, and both capture paths reach it through `PauseClock::tick` - so `sync.json`, `video.mp4`'s own PTS and every event stream are compressed by exactly the same number. Before the C1 fix the video paths had their own frame-arrival-based accumulator, which is how the video kept a paused span the rest of the recording had dropped.
+
+### Inputs
+
+- `raw_ms: u64` - a raw wall-clock reading in the recorder clock's domain (a `Clock::now_ms()` value, or a frame's already-clock-derived `ts`).
+
+### Returns
+
+The same instant with all paused time removed. Saturating, so a reading from before the ledger's first pause can never underflow.
+
 ## PauseTotals::stamp
 
 ```rust
 pub fn stamp(&self, raw_ms: u64) -> u32
 ```
 
-Pause-adjust a tracker's raw elapsed-ms reading. Every input tracker calls this at its stamp site instead of using the raw value directly, so recorded events land in the same (pause-compressed) timeline as the video and audio clocks.
+`stamp_ms` in the input trackers' narrower `t` type (ms since tracker start). Every input tracker calls this at its stamp site instead of using the raw value directly, so recorded events land in the same (pause-compressed) timeline as the video and audio clocks.
 
 ### Inputs
 
@@ -101,7 +119,7 @@ Pause-adjust a tracker's raw elapsed-ms reading. Every input tracker calls this 
 
 ### Returns
 
-`raw_ms.saturating_sub(elapsed_paused(raw_ms))`, cast to `u32`. Events that arrive DURING a pause are not dropped - they collapse onto the pause boundary rather than landing at their true (parked) offset, which is an accepted behavior per the task brief (dropping would be a separate behavior change).
+`stamp_ms(raw_ms)` cast to `u32`. Events that arrive DURING a pause are not dropped - they collapse onto the pause boundary rather than landing at their true (parked) offset, which is an accepted behavior per the task brief (dropping would be a separate behavior change).
 
 ### Behaviors
 

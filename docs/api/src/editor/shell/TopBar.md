@@ -31,7 +31,7 @@ Renders the editor top bar with navigation, branding, and export controls.
 Title "Return to the recorder" (Task 36 copy pass - reads as a sentence rather than a label). Calls `onClose`. No confirmation -- unsaved edits and ongoing exports are the caller's responsibility to handle.
 
 **Export button.**
-`motion.button.e-export` (Task 36 - `whileHover: scale 1.03`, `whileTap: scale 0.97`, `0.12s` tween, both omitted while `exporting` since a disabled button shouldn't invite a press; the CSS `:hover`/`:active` `transform` this used to carry was removed so Motion's inline transform is the only one setting it).
+`motion.button.e-export` (`whileHover: scale 1.03`, `whileTap: scale 0.97`, both omitted while `exporting` since a disabled button shouldn't invite a press; the CSS `:hover`/`:active` `transform` this used to carry was removed so Motion's inline transform is the only one setting it). design/premium-pass D3 switched the transition from a `0.12s` tween to a spring (`type: "spring", stiffness: 500, damping: 30` - the same spring `Transport`'s Play button uses, `PLAY_SPRING`) for a consistent press feel across the app's two hero buttons, and added `--e-inset-hi` to `.e-export`'s box-shadow (both at rest and on hover) in place of a bespoke inset value.
 When `exporting` is false: renders `IconDownload` + "Export" text and calls `onOpenExport` on click.
 When `exporting` is true: renders `<Spin size={15}>` + `{pct}%` and is `disabled`. *Why disabled during export:* `exportProject` is a one-at-a-time pipeline; a second concurrent call is not supported.
 

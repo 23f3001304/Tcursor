@@ -58,11 +58,15 @@ export function SettingsInterface({ value, onChange }: {
         <Switch on={value.animated_brand} onChange={(animated_brand) => onChange({ ...value, animated_brand })} />
       </Field>
 
-      <Field label="Language">
-        <button type="button" className="seg-btn on" style={{ cursor: "default" }} disabled>
-          English
-        </button>
-      </Field>
+      {/* Plain label+value row, not a control - a disabled full-width button read as a broken
+          placeholder rather than "there's nothing to pick yet". Reverts to a real Field (matching
+          App theme/Accent above) once a second language exists. */}
+      <div className="sf">
+        <div className="sf-row">
+          <span className="sf-label">Language</span>
+          <span className="sf-hint">English</span>
+        </div>
+      </div>
     </section>
   );
 }

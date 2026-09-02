@@ -21,9 +21,11 @@ export function fxCacheKey(
 
 Joins the bucketed time and every resolved-FX component into one string key. Used both to skip a redundant in-flight request (same key = nothing would look different) and, in `useCompositeLoop`'s response handler, as the value compared against `fxWantRef.current` to detect staleness.
 
+`clicksStr` (sweep-2): the caller passes `""` for a `stylesMirrored` style (`ripplePreview.ts`) - those clicks never reach the FX-overlay request at all (see `fxOverlay.ts`), so a varying component for them would be dead weight - and the real click-list string only for an unmirrored style (Pulse/Glow/Neon/Particles), which still falls back to the overlay and so still needs its cache key to invalidate when the click list changes (`overlayNeedsClicks`, `ripplePreview.ts`).
+
 ### Used by
 
-`useCompositeLoop` (`src/editor/hooks/useCompositeLoop.ts`) - builds the key each tick from the zoom-projected cursor position, the resolved spotlight params, the click track, the click-FX settings, and the camera-exclusion rect.
+`useCompositeLoop` (`src/editor/hooks/useCompositeLoop.ts`) - builds the key each tick from the zoom-projected cursor position, the resolved spotlight params, the (conditional) click list, the click-FX settings, and the camera-exclusion rect.
 
 ## isStaleFxResponse
 

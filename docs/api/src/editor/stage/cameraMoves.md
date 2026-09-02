@@ -192,3 +192,23 @@ A new 9-tuple: `rectFromCenter(p, ow, oh, camAspect(baseCam, ow, oh))`'s `[x,y,w
 ### Used by
 
 - `src/editor/hooks/useCompositeLoop.ts` - replaces `baseLayout.cam` with `overrideCamPanel(baseLayout.cam, cp, c.width, c.height)` when a camera_moves/drag pose is active and a camera panel is resolved this frame, so the preview's PiP rect, radius, AND ring stay in parity with the export's `override_camera` after a keyframe resize.
+
+## cameraMovesKey
+
+```ts
+export function cameraMovesKey(moves: CameraMove[]): string
+```
+
+A cheap CONTENT signature for `moves` - `id:t_ms:x:y:size:easing` per entry, joined with `|` in array order. Added bug-sweep-2 Task 8 review round 2 (Important).
+
+### Why this exists
+
+`applyEditOp` round-trips the WHOLE `EditDoc` through IPC, so every call - add a zoom, delete a region, trim, an AI-director step, not just a camera-move edit - hands `setDoc` a brand-new `EditDoc`, and therefore a brand-new `camera_moves` ARRAY REFERENCE, even when its content is byte-identical to before. A consumer that needs to react to camera_moves actually CHANGING (not merely "the doc changed, for any reason") cannot key a `useEffect` on `[cameraMoves]` directly - that fires on every single edit. `cameraMovesKey` gives such a consumer something to diff instead: compute it before and after, and treat a differing key as "camera_moves actually changed."
+
+### Returns
+
+A string built from every field two `CameraMove`s could differ in (`id`, `t_ms`, `x`, `y`, `size`, `easing`) - two calls return the same string iff every entry, in the same array order, has identical values in all six fields. Order-sensitive: a same-set reorder still counts as a change (deliberate - see `cameraMoves.test.ts`; in practice this is fine because `add_camera_move`'s server-side sort makes order a function of `t_ms`, so a genuine reorder only happens alongside a real content change anyway). Deterministic and pure - no hashing, just string concatenation, cheap enough to call on every render of a small `camera_moves` array.
+
+### Used by
+
+`src/editor/stage/CamDragHandle.tsx` - gates its Move-mode-draft mirror-clear effect (`useEffect(() => {...}, [cameraMoves])`) on this instead of the raw reference: stores the key in a ref, recomputes it whenever the effect fires (which is still every edit, since the effect itself is still keyed on the reference), and only calls `setDragPose(null)` when the key actually differs from what it stored last. Fixes the exact repro the review caught: Move-mode drag the PiP (an uncommitted draft), press Z to add a zoom - the OLD reference-keyed effect nulled the local `dragPose` mirror on that unrelated edit, snapping the drag-handle overlay to `sampledPose` while the composited canvas (still reading the un-cleared `camDraftRef.current`) kept drawing the actual drag position, two on-screen elements visibly disagreeing. See `CamDragHandle.md`.

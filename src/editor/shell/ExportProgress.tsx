@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { IconCheck, IconAlertTriangle, IconFolderOpen } from "@tabler/icons-react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
@@ -6,26 +6,27 @@ import { Spin } from "../controls/Spin";
 import { fmt } from "../timeline/time";
 import { estimateEtaMs } from "./exportEta";
 
+// design/premium-pass D6: the app-wide press spring, for the primary CTA only.
+const PRESS_TAP = { scale: 0.96 };
+const PRESS_SPRING = { type: "spring" as const, stiffness: 500, damping: 30 };
+
 /** The export progress/outcome view inside `ExportDialog`: a live bar with %/ETA while exporting,
- *  then a done checkmark or an error banner. Owns the "when did this export start" clock (reset
- *  whenever `exporting` flips false -> true) so the ETA has an elapsed baseline without the
- *  caller needing to track wall-clock time itself. */
-export function ExportProgress({ exporting, pct, done, error, exportPath, onReset, onClose }: {
+ *  then a done checkmark or an error banner. `startedAt` (the export's own start time) is owned
+ *  by the caller (Editor.tsx's useExportState), not tracked locally here - this used to reset its
+ *  own `useRef` clock on mount, which meant closing and reopening the dialog mid-export (a
+ *  supported flow) unmounted/remounted this component and silently reset the ETA baseline back to
+ *  "just started" (D Low). */
+export function ExportProgress({ exporting, pct, done, error, exportPath, startedAt, onReset, onClose }: {
   exporting: boolean; pct: number; done: boolean; error: string | null; exportPath: string;
+  startedAt: number | null;
   onReset: () => void; onClose: () => void;
 }) {
-  const startRef = useRef<number | null>(null);
   const [etaMs, setEtaMs] = useState<number | null>(null);
 
   useEffect(() => {
-    if (exporting && startRef.current === null) startRef.current = Date.now();
-    if (!exporting) startRef.current = null;
-  }, [exporting]);
-
-  useEffect(() => {
-    if (!exporting || startRef.current === null) { setEtaMs(null); return; }
-    setEtaMs(estimateEtaMs(Date.now() - startRef.current, pct));
-  }, [exporting, pct]);
+    if (!exporting || startedAt === null) { setEtaMs(null); return; }
+    setEtaMs(estimateEtaMs(Date.now() - startedAt, pct));
+  }, [exporting, pct, startedAt]);
 
   if (error) {
     return (
@@ -35,7 +36,8 @@ export function ExportProgress({ exporting, pct, done, error, exportPath, onRese
         <p className="e-export-outcome-body">{error}</p>
         <div className="e-modal-actions">
           <button type="button" className="e-modal-btn" onClick={onClose}>Close</button>
-          <button type="button" className="e-modal-btn primary" onClick={onReset}>Try again</button>
+          <motion.button type="button" className="e-modal-btn primary" onClick={onReset}
+            whileTap={PRESS_TAP} transition={PRESS_SPRING}>Try again</motion.button>
         </div>
       </div>
     );
@@ -53,7 +55,8 @@ export function ExportProgress({ exporting, pct, done, error, exportPath, onRese
               <IconFolderOpen size={14} />Show in folder
             </button>
           )}
-          <button type="button" className="e-modal-btn primary" onClick={onClose}>Done</button>
+          <motion.button type="button" className="e-modal-btn primary" onClick={onClose}
+            whileTap={PRESS_TAP} transition={PRESS_SPRING}>Done</motion.button>
         </div>
       </div>
     );

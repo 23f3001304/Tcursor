@@ -3,7 +3,7 @@
 // effect ops here.
 use crate::edit::ops::api::EditOp;
 use crate::edit::model::{EditDoc, EffectKind, EffectRegion};
-use crate::edit::ops::region::{auto_layer, dur_bound};
+use crate::edit::ops::region::{auto_layer, clamp_order, dur_bound};
 
 fn next_effect_id(doc: &EditDoc) -> String {
     let n = doc.effects.iter()
@@ -17,13 +17,23 @@ fn next_effect_id(doc: &EditDoc) -> String {
 /// (`fx_state` maxes the toggle with the region alpha, and the toggle is set off here). No-op if the
 /// toggle is already off or a Spotlight region already exists. Returns whether the doc changed; the
 /// seed calls this on BOTH fresh and older docs so an always-on spotlight is always editable.
+///
+/// The span is `[0, dur_bound(doc)]` - the same clip_ms-first fallback chain every other
+/// region-placing op uses - NOT `trim.out_ms`. `trim.out_ms` is a mutable trim point (0 is its
+/// normal "no trim / whole clip" sentinel, not "clip is zero-length"), so bounding the lift by it
+/// either collapses the lifted region to a stale trim once the clip is later widened back out, or -
+/// on the very common `out_ms == 0` "no trim" doc - skips the lift entirely, leaving the toggle
+/// permanently on with no editable region at all. Only a truly unseeded doc (`dur_bound` returns
+/// `u32::MAX`, i.e. neither `clip_ms` nor `trim.out_ms` is known yet) still skips the lift, since a
+/// `[0, u32::MAX]` region would be meaningless.
 pub fn lift_always_on_spotlight(doc: &mut EditDoc) -> bool {
-    if !doc.settings.clickfx.spotlight || doc.trim.out_ms == 0
+    let dur = dur_bound(doc);
+    if !doc.settings.clickfx.spotlight || dur == u32::MAX
         || doc.effects.iter().any(|e| matches!(e.kind, EffectKind::Spotlight)) {
-        return false; // out_ms == 0 is a degenerate (no-event-log) doc: don't disable the toggle for a [0,0] region
+        return false;
     }
     let id = next_effect_id(doc);
-    doc.effects.push(EffectRegion { id, kind: EffectKind::Spotlight, start_ms: 0, end_ms: doc.trim.out_ms, fade_in_ms: 250, fade_out_ms: 250, mode: None, dim: None, radius: None, feather: None, layer: 0 });
+    doc.effects.push(EffectRegion { id, kind: EffectKind::Spotlight, start_ms: 0, end_ms: dur, fade_in_ms: 250, fade_out_ms: 250, mode: None, dim: None, radius: None, feather: None, layer: 0 });
     doc.settings.clickfx.spotlight = false;
     true
 }
@@ -45,6 +55,7 @@ pub fn apply_effect(doc: &mut EditDoc, op: EditOp) {
             if let Some(e) = doc.effects.iter_mut().find(|e| e.id == id) {
                 if let Some(v) = start_ms { e.start_ms = v.min(dur); }
                 if let Some(v) = end_ms { e.end_ms = v.min(dur); }
+                clamp_order(&mut e.start_ms, &mut e.end_ms, start_ms.is_some());
                 if let Some(v) = fade_in_ms { e.fade_in_ms = v; }
                 if let Some(v) = fade_out_ms { e.fade_out_ms = v; }
                 if let Some(s) = mode {

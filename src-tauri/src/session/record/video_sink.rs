@@ -8,9 +8,11 @@ use std::thread::JoinHandle;
 use crate::capture::frame_source::FrameSource;
 use crate::capture::windows_capture::WgcFrameSource;
 use crate::domain::time::Clock;
-use crate::encode::ffmpeg_encoder::FfmpegFrameSink;
-use crate::session::record::gpu_record::GpuRecorder;
+use crate::encode::vfr_segments::VfrSegments;
+use crate::session::record::gpu_record::{GpuRecorder, GpuStart};
+use crate::session::record::pause_totals::PauseTotals;
 use crate::session::record::recording_session::RecordingSession;
+use crate::session::record::{Notify, CAPTURE_CLOSED, DISPLAY_CHANGED};
 
 /// A live recording video pipeline.
 pub enum VideoSink {
@@ -18,10 +20,36 @@ pub enum VideoSink {
     Gpu(GpuRecorder),
     /// Legacy fallback: WGC readback -> `RecordingSession` -> ffmpeg rawvideo pipe, on a thread.
     Ffmpeg {
-        thread: JoinHandle<std::io::Result<(u64, Vec<u64>)>>,
+        thread: JoinHandle<VideoStopped>,
         halt: Arc<AtomicBool>,
         stopper: Option<Box<dyn FnOnce() + Send>>,
     },
+}
+
+/// What a stopped video pipeline leaves behind. `error` is reported separately from the
+/// timestamps ON PURPOSE: a finalize failure used to propagate before `sync.json`, the
+/// `.tcursor` manifest and the recents entry were written, so an encoder/mux tail failure
+/// (disk full on a long take) left a folder that could not even be opened. The caller writes
+/// those from `frame_ts` first and surfaces `error` after.
+pub struct VideoStopped {
+    pub frames: u64,
+    pub frame_ts: Vec<u64>,
+    pub error: Option<String>,
+}
+
+/// Everything both capture paths need to start, beside the target and the output path.
+pub struct VideoStart {
+    /// Force the legacy ffmpeg pipeline (the HUD's compatibility toggle).
+    pub legacy: bool,
+    pub clock: Arc<dyn Clock>,
+    pub stop: Arc<AtomicBool>,
+    pub paused: Arc<AtomicBool>,
+    /// The exact-span pause ledger both the video timestamps and every input stream subtract.
+    pub totals: Arc<PauseTotals>,
+    /// Called if the OS ends the capture on its own, so the app can run its normal Stop.
+    pub ended: Notify,
+    pub fps: u32,
+    pub with_cursor: bool,
 }
 
 pub fn get_target_bounds(target_id: Option<&str>) -> (u32, u32, i32, i32) {
@@ -82,49 +110,66 @@ pub fn get_target_bounds(target_id: Option<&str>) -> (u32, u32, i32, i32) {
     (1920, 1080, 0, 0)
 }
 
-/// Start the video pipeline writing `video_path`. GPU-native unless `legacy` is set; on a
+/// Start the video pipeline writing `video_path`. GPU-native unless `cfg.legacy` is set; on a
 /// GPU-encoder init error it logs and falls back to ffmpeg, so recording never simply fails.
 /// Returns the sink plus the captured `(w, h, origin_x, origin_y)`.
-pub fn start_video(legacy: bool, clock: Arc<dyn Clock>, stop: Arc<AtomicBool>, paused: Arc<AtomicBool>, fps: u32, with_cursor: bool, target_id: Option<&str>, video_path: &str) -> Result<(VideoSink, u32, u32, i32, i32), String> {
+pub fn start_video(cfg: VideoStart, target_id: Option<&str>, video_path: &str) -> Result<(VideoSink, u32, u32, i32, i32), String> {
     let (_, _, ox, oy) = get_target_bounds(target_id);
-    if !legacy {
-        match GpuRecorder::start(clock.clone(), paused.clone(), fps, with_cursor, target_id, video_path) {
+    if !cfg.legacy {
+        let gpu = GpuStart {
+            clock: cfg.clock.clone(), paused: cfg.paused.clone(), totals: cfg.totals.clone(),
+            ended: cfg.ended.clone(), fps: cfg.fps, with_cursor: cfg.with_cursor,
+        };
+        match GpuRecorder::start(gpu, target_id, video_path) {
             Ok((r, w, h)) => return Ok((VideoSink::Gpu(r), w, h, ox, oy)),
             Err(e) => eprintln!("GPU encoder unavailable ({e}); falling back to ffmpeg"),
         }
     }
-    start_ffmpeg(clock, stop, paused, fps, with_cursor, target_id, video_path, ox, oy)
+    start_ffmpeg(cfg, target_id, video_path, ox, oy)
 }
 
-/// The legacy ffmpeg path: WGC readback -> `RecordingSession::run` (VFR) -> `FfmpegFrameSink`.
-fn start_ffmpeg(clock: Arc<dyn Clock>, stop: Arc<AtomicBool>, paused: Arc<AtomicBool>, fps: u32, with_cursor: bool, target_id: Option<&str>, video_path: &str, ox: i32, oy: i32) -> Result<(VideoSink, u32, u32, i32, i32), String> {
-    let mut source = WgcFrameSource::for_target(clock, fps, with_cursor, target_id).map_err(|e| format!("screen capture init: {e}"))?;
+/// The legacy ffmpeg path: WGC readback -> `RecordingSession::run` (VFR) -> `VfrSegments`.
+fn start_ffmpeg(cfg: VideoStart, target_id: Option<&str>, video_path: &str, ox: i32, oy: i32) -> Result<(VideoSink, u32, u32, i32, i32), String> {
+    let mut source = WgcFrameSource::for_target(cfg.clock, cfg.fps, cfg.with_cursor, target_id).map_err(|e| format!("screen capture init: {e}"))?;
     let (w, h) = source.dimensions();
-    let sink = FfmpegFrameSink::new_vfr(video_path, w, h).map_err(|e| format!("video encoder spawn: {e}"))?;
+    let sink = VfrSegments::new(video_path, w, h).map_err(|e| format!("video encoder spawn: {e}"))?;
     let halt = source.halt_handle();
     let stopper = source.take_stopper();
+    let (stop, paused, totals, ended) = (cfg.stop, cfg.paused, cfg.totals, cfg.ended);
     let thread = std::thread::Builder::new().name("video".into()).spawn(move || {
-        let mut session = RecordingSession::new(Box::new(source), Box::new(sink));
+        let mut session = RecordingSession::new(Box::new(source), Box::new(sink), totals);
         session.run(&stop, &paused);
-        let frame_ts = session.frame_timestamps().to_vec();
-        let n = session.stop_and_finalize()?;
-        Ok((n, frame_ts))
+        // `run` returned on its own (not via the `stop` flag a user Stop sets - that reaches
+        // the same loop exit through the halt flag and the WM_QUIT stopper, and must not be
+        // reported as an early end). Two different things can cause that: the frame source ran
+        // dry because WGC closed the capture (recorded window closed, display unplugged), or
+        // `pump_once` latched a dimension mismatch (H1: window resize/maximize, display
+        // resolution/rotation change, dock/undock) and stopped pumping on purpose. Without this
+        // either way the video is quietly sealed here while the HUD keeps counting and the mic
+        // keeps taking narration.
+        if !stop.load(Ordering::SeqCst) {
+            if session.dimension_mismatch() { ended(DISPLAY_CHANGED); } else { ended(CAPTURE_CLOSED); }
+        }
+        let (frames, frame_ts) = (session.frames_written(), session.frame_timestamps().to_vec());
+        let error = session.stop_and_finalize().err().map(|e| e.to_string());
+        VideoStopped { frames, frame_ts, error }
     }).map_err(|e| e.to_string())?;
     Ok((VideoSink::Ffmpeg { thread, halt, stopper }, w, h, ox, oy))
 }
 
 impl VideoSink {
-    /// Stop the pipeline, finalize `video.mp4`, and return `(frame count, per-frame capture ms)`.
-    pub fn stop_and_collect(self) -> Result<(u64, Vec<u64>), String> {
+    /// Stop the pipeline and finalize `video.mp4`. A finalize failure comes back inside
+    /// `VideoStopped::error` rather than replacing the result, so the caller can still write
+    /// `sync.json` for the frames that did make it.
+    pub fn stop_and_collect(self) -> VideoStopped {
         match self {
-            VideoSink::Gpu(r) => {
-                let ts = r.stop()?;
-                Ok((ts.len() as u64, ts))
-            }
+            VideoSink::Gpu(r) => r.stop(),
             VideoSink::Ffmpeg { thread, halt, stopper } => {
                 halt.store(true, Ordering::SeqCst);
                 if let Some(s) = stopper { s(); } // WM_QUIT -> WGC thread exits -> channel closes -> run() ends
-                thread.join().map_err(|_| "video thread panicked".to_string())?.map_err(|e| e.to_string())
+                thread.join().unwrap_or(VideoStopped {
+                    frames: 0, frame_ts: Vec::new(), error: Some("video thread panicked".into()),
+                })
             }
         }
     }

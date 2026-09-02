@@ -1,6 +1,6 @@
 # src/editor/hooks/useEditorData.ts
 
-All the editor's preview/timeline data fetching: the `EditDoc` itself, the camera/layout/click tracks, cursor sprites, background image, timeline media (thumbnails/waveforms/preview audio), the video/proxy source, and export-progress event subscriptions. Split out of `Editor` so the component itself only holds render + mutation logic - `Editor` composes this hook's return value with `useEditHistory`/`useTrimActions`/`useMoveModeGuard` and its own local UI state.
+All the editor's preview/timeline data fetching: the `EditDoc` itself, the camera/layout/click tracks, cursor sprites, background image, timeline media (thumbnails/waveforms/preview audio), and the video/proxy source. Split out of `Editor` so the component itself only holds render + mutation logic - `Editor` composes this hook's return value with `useExportState`/`useEditHistory`/`useTrimActions`/`useMoveModeGuard` and its own local UI state. Export-run state (`exporting`/`pct`/`exportDone`/`exportError`/`exportPath` + the `export-*` IPC listeners) moved out to the sibling `useExportState.ts` (Task 11 - this file was already at its own line budget); `Editor.tsx` calls both hooks separately.
 
 ## useEditorData
 
@@ -12,11 +12,6 @@ export function useEditorData(folder: string, rev: number, quality: number): {
   cursorSpr: CursorSpriteDto[]; cursorKnd: CursorKindSample[]; osCursor: boolean;
   thumbs: string[]; waves: { system: string; mic: string }; wavesReady: boolean; audioUrl: string; srcUrl: string;
   playing: boolean; setPlaying: (p: boolean) => void;
-  exporting: boolean; setExporting: (e: boolean) => void;
-  pct: number; setPct: (p: number) => void;
-  exportDone: boolean; setExportDone: (d: boolean) => void;
-  exportError: string | null; setExportError: (e: string | null) => void;
-  exportPath: string; setExportPath: (p: string) => void;
   retryMedia: () => void;
 }
 ```
@@ -29,7 +24,7 @@ export function useEditorData(folder: string, rev: number, quality: number): {
 
 ### Returns
 
-A flat object of state + setters that `Editor` destructures and threads down to `Stage`/`Transport`/`Timeline`/`EditorPanels`. Most are plain `useState` pairs (`doc`/`setDoc`, `playing`/`setPlaying`, `exporting`/`setExporting`, `pct`/`setPct`, `exportDone`/`setExportDone`, `exportError`/`setExportError`, `exportPath`/`setExportPath`); the rest (`track`, `layout`, `layoutPresets`, `clicks`, `bgUrl`, `cursorSpr`, `cursorKnd`, `osCursor`, `thumbs`, `waves`, `wavesReady`, `audioUrl`, `srcUrl`) are read-only, populated by the effects below. `retryMedia` is a function, not paired state - see Behavior.
+A flat object of state + setters that `Editor` destructures and threads down to `Stage`/`Transport`/`Timeline`/`EditorPanels`. Most are plain `useState` pairs (`doc`/`setDoc`, `playing`/`setPlaying`); the rest (`track`, `layout`, `layoutPresets`, `clicks`, `bgUrl`, `cursorSpr`, `cursorKnd`, `osCursor`, `thumbs`, `waves`, `wavesReady`, `audioUrl`, `srcUrl`) are read-only, populated by the effects below. `retryMedia` is a function, not paired state - see Behavior.
 
 ### Behavior
 
@@ -41,7 +36,9 @@ A flat object of state + setters that `Editor` destructures and threads down to 
 
 **Timeline-independent tracks (`[folder]`).** `clickTrack` -> `clicks`, `cursorKinds` -> `cursorKnd` and `osCursorInVideo` -> `osCursor` are immutable per recording, so they fetch once per folder rather than on every `rev` bump (refetching them on every edit was part of the earlier add-effect lag). `osCursor` starts at `true` - "the video already has the OS cursor", the answer that preserves today's behavior while the fetch is in flight - and tells `Stage`/`CursorPanel` whether the `System` cursor style has to be re-created from the recorded path.
 
-**Background (`[folder, JSON.stringify(doc?.settings.background)]`).** `previewBg` -> `bgUrl` refetches only when the doc's own `background` settings change - the only kind of edit that can actually alter what `preview_bg` returns.
+**Background (`[folder, JSON.stringify(doc?.settings.background)]`).** `previewBg` -> `bgUrl` refetches only when the doc's own `background` settings change - the only kind of edit that can actually alter what `preview_bg` returns. **Debounced (render hygiene pass, `PREVIEW_BG_DEBOUNCE_MS = 80`, trailing):** a background-panel slider drag changes this dependency at up to the `Slider` component's own commit rate (itself now debounced - see `Slider.md`), and `preview_bg` re-encodes/base64s the full preview background on every call - not something to redo dozens of times a second. The actual `previewBg(folder)` call is wrapped in a LAZILY-INITIALIZED `debounce(...)` singleton (`fetchBgRef` - `if (!fetchBgRef.current) fetchBgRef.current = debounce(...)`, NOT `useRef(debounce(...))`, which still calls `debounce(...)` fresh every render just to discard the result - a closure allocated once per frame during playback for nothing) so a burst of dependency changes collapses into ONE fetch instead of one per change. Because this fetch can now outlive any single effect run (the debounce defers it), the usual per-effect `live` cleanup-token guard (see the note below) can't gate it by itself - `bgSeqRef`/`bgLiveRef` reproduce the same "discard a stale response" guarantee across debounce windows: `bgSeqRef` is bumped every time the debounced function actually FIRES, and a resolved response is only applied if no newer fire has happened since.
+
+`bgLiveRef` is reset `true` at the TOP of its own effect (`useEffect(() => { bgLiveRef.current = true; return () => { bgLiveRef.current = false; ... }; }, [])`), not just once via `useRef(true)`'s initial value (fix round 1) - React 19 StrictMode (`main.tsx`) double-invokes effects in dev (mount -> cleanup -> mount, all on the same fiber), so without this reset the dev-only cleanup pass permanently flips `bgLiveRef` false and every `previewBg` response is discarded for the rest of the session - `bgUrl` never leaves `""` in a dev build, only ever manifesting outside StrictMode (i.e. production).
 
 **Cursor sprites (`[folder, doc?.settings.cursor.pack]`).** `cursorSprites` -> `cursorSpr` refetches only when the selected pack changes (picking a different pack, or importing one, in `CursorPanel`) - not on generic `rev` bumps, so unrelated edits don't re-decode sprites.
 
@@ -49,12 +46,10 @@ A flat object of state + setters that `Editor` destructures and threads down to 
 
 **Proxy source (`[folder, quality, manifest, reloadTick]`).** Pauses playback first (`setPlaying(false)`) so a `src` remount can't restart playback from 0, and resets an internal "proxy ready" ref when `folder` itself changes. Waits for `manifest.ready` before doing anything, so a preprocessed project never briefly loads raw 4K. The actual branching (raw fast-path vs. known-proxy-path vs. `ensureProxy` fetch) is `planProxySrc` (`editorData.ts`), a pure helper the effect just applies: an `immediate` filename sets `srcUrl` right away as a fast-load placeholder, a `known` filename IS the final source (no transcode - guaranteed already on disk), and `fetch: true` calls `ensureProxy(folder, quality)` and hot-swaps `srcUrl` once it resolves.
 
-**`retryMedia` / `reloadTick`.** `retryMedia = () => setReloadTick((t) => t + 1)`; `reloadTick` is in the proxy effect's own deps, so calling `retryMedia` re-runs it even though `folder`/`quality`/`manifest` haven't changed - useful on the `fetch` branch (a genuinely fresh `ensureProxy` attempt: the case a corrupted/still-writing proxy file could plausibly resolve on a second try). On the `immediate`/`known` branches, `planProxySrc` resolves to the exact same filename every time, so re-running the effect alone does NOT force a reload (`setSrcUrl` with an unchanged string is a React no-op) - `Stage`'s Retry handler additionally calls `screen.current?.load()` directly on the `<video>` element to cover that case (see `Stage.md`).
+**`retryMedia` / `reloadTick`.** `retryMedia = useCallback(() => setReloadTick((t) => t + 1), [])` - `useCallback`'d (render hygiene pass; `setReloadTick` is a `useState` setter, permanently stable, so this holds forever) so `Stage`'s `onRetryMedia` prop (`React.memo`'d) stays stable across renders. `reloadTick` is in the proxy effect's own deps, so calling `retryMedia` re-runs it even though `folder`/`quality`/`manifest` haven't changed - useful on the `fetch` branch (a genuinely fresh `ensureProxy` attempt: the case a corrupted/still-writing proxy file could plausibly resolve on a second try). On the `immediate`/`known` branches, `planProxySrc` resolves to the exact same filename every time, so re-running the effect alone does NOT force a reload (`setSrcUrl` with an unchanged string is a React no-op) - `Stage`'s Retry handler additionally calls `screen.current?.load()` directly on the `<video>` element to cover that case (see `Stage.md`).
 
 **Every IPC-driven effect above uses the standard cleanup-token guard** (`let live = true; ...then((v) => { if (live) setX(v); }); return () => { live = false; };`) so a fetch whose effect has since been superseded (folder/rev/quality changed again, or the component unmounted, before the response landed) cannot clobber newer state - without it, rapid slider drags or a fast folder switch could apply whichever IPC response happened to land LAST over the network/IPC boundary, not whichever was requested most recently.
 
-**Export events (`[]`).** Subscribes once to `export-progress`/`export-done`/`export-error`, updating `pct`/`exporting`/`exportDone`/`exportError`; unsubscribes on unmount. `export-done`'s payload is the exported file's own absolute path (`<folder>/final.<ext>` - see `run.rs`), stored into `exportPath` so `ExportDialog`/`ExportProgress` can offer "Show in folder" without re-deriving the output filename.
-
 ### Used by
 
-`Editor` (`src/editor/Editor.tsx`) - the sole caller; every returned field is destructured and either rendered directly or threaded into `Stage`/`Transport`/`Timeline`/`EditorPanels`/`ExportDialog`.
+`Editor` (`src/editor/Editor.tsx`) - one of two callers alongside `useExportState` (Task 11); every returned field is destructured and either rendered directly or threaded into `Stage`/`Transport`/`Timeline`/`EditorPanels`.

@@ -17,8 +17,7 @@ fn add_zoom_clamps_end_to_trim_duration() {
 
 #[test]
 fn update_zoom_clamps_end_to_trim_duration() {
-    let mut doc = empty();
-    doc.trim.out_ms = 1000;
+    let mut doc = empty(); doc.trim.out_ms = 1000;
     apply(&mut doc, EditOp::AddZoom { at_ms: 0, dur_ms: 500 });
     let id = doc.zooms[0].id.clone();
     apply(&mut doc, EditOp::UpdateZoom { id, start_ms: None, end_ms: Some(5000), scale: None,
@@ -194,6 +193,8 @@ fn remove_layout_seg_drops_by_id() {
     assert_eq!(doc.layout.len(), before - 1);
 }
 
-// Camera-move op tests live in their own file - api_tests.rs was at the 200-line budget.
+// Camera-move + M5 clamp op tests live in their own files - api_tests.rs was at the 200-line budget.
 #[path = "api_camera_tests.rs"]
 mod camera_tests;
+#[path = "api_clamp_tests.rs"]
+mod clamp_tests;

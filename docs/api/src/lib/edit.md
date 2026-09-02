@@ -68,7 +68,7 @@ A time range to remove from the exported video.
 ### Used by
 
 - `src/lib/edit.ts` - field `EditDoc.cuts`.
-- `src/lib/ipc.ts` - present in `EditDoc` returned by `getEdit`, `applyEditOp`, and `aiAutoedit`.
+- `src/lib/ipc.ts` - present in `EditDoc` returned by `getEdit` and `applyEditOp`.
 
 ## Speed
 
@@ -194,7 +194,7 @@ The complete editable state for one recording session. Loaded from `edit.json` i
 
 ### Used by
 
-- `src/lib/ipc.ts` - return type of `getEdit`, `applyEditOp`, `aiAutoedit`; parameter type of `saveEdit`.
+- `src/lib/ipc.ts` - return type of `getEdit`, `applyEditOp`; parameter type of `saveEdit`.
 
 ## EditOp
 

@@ -2,7 +2,7 @@ import type { PreviewLayout } from "../../lib/ipc";
 import type { CameraMove, Zoom } from "../../lib/edit";
 import type { ZoomSettings } from "../../hud/settings/settings";
 import { camMoveAt, overrideCamPanel, type CamPose } from "./cameraMoves";
-import { applyCamZoomAction, resolveCamAction, resolvedCamDefault } from "./camZoomAction";
+import { applyCamZoomAction, camZoomAlpha, resolveCamAction, resolvedCamDefault } from "./camZoomAction";
 
 /** The webcam PiP panel for one frame, mirroring `FrameRenderer::step_camera`'s ORDERING - the
  *  single place the preview decides what drives the PiP, so it cannot drift from the export:
@@ -30,5 +30,12 @@ export function frameCamLayout(
   if (cp) return { ...base, cam: overrideCamPanel(base.cam, cp, ow, oh) };
   if (base.cam[2] >= base.screen[2]) return base;
   const [action, targetScale] = resolveCamAction(zooms, t, resolvedCamDefault(zoom), zoom.target_scale);
-  return { ...base, cam: applyCamZoomAction(base.cam, action, scale, targetScale) };
+  // `applyCamZoomAction` only ever touches geometry; the alpha half (a pure multiplier, matching
+  // Rust's `panel.alpha * (1 - smoothstep(...))`) has to be applied here too, or "Hide" fades the
+  // PiP in the export while the preview keeps it fully opaque (see camZoomAlpha's own doc comment).
+  return {
+    ...base,
+    cam: applyCamZoomAction(base.cam, action, scale, targetScale),
+    camAlpha: (base.camAlpha ?? 1) * camZoomAlpha(action, scale, targetScale),
+  };
 }

@@ -26,13 +26,15 @@ Acquires a `getUserMedia` video stream for the given device and attaches it to a
 
 ### Behavior
 
-Effect runs when `deviceId` or `enabled` changes:
+Acquire effect runs when `deviceId`, `enabled`, or the internal `retry` counter changes:
 - If `!enabled`: sets `on` to `false` and returns; no stream is acquired.
 - Otherwise: sets `cancelled = false`, then calls `getUserMedia` with the appropriate video constraint.
-- On success: if `cancelled` is still `false`, stores the stream in `streamRef.current`, assigns it to `elRef.current.srcObject` if the element exists, and sets `on` to `true`.
+- On success: if `cancelled` is still `false`, stores the stream in `streamRef.current`, assigns it to `elRef.current.srcObject` if the element exists, sets `on` to `true`, and attaches `track.onended` to every track (sets `on` back to `false` if the device dies mid-preview - M4).
 - On failure (permission denied, device busy, etc.): sets `on` to `false`.
 
 Cleanup:
 - Sets `cancelled = true` so any in-flight `getUserMedia` promise stops its tracks and does not attach to the element.
 - Stops all tracks on `streamRef.current`.
 - Clears `streamRef.current` to `null`.
+
+**Recovery effect (`devicechange`, M4).** A second effect (deps `[enabled, on]`) adds a `navigator.mediaDevices` `devicechange` listener while `enabled`; on any device change, if `on` is currently `false` it bumps an internal `retry` counter, which is in the acquire effect's dependency array and so re-runs it. *Why needed at all:* re-plugging a camera changes neither `deviceId` nor `enabled`, so without this the acquire effect never re-runs on its own and a hot-unplugged preview stayed dead until the app restarted. Only retries while a preview is actually wanted (`enabled`) and currently isn't showing one (`!on`), so an unrelated device event (e.g. a mic being plugged in) while the camera is already live is a no-op.

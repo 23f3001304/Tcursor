@@ -22,7 +22,10 @@ pub struct CpalMicHandle {
 impl CpalMicHandle {
     pub fn stop(self) -> std::io::Result<()> {
         drop(self.stream);
-        if let Some(w) = self.writer.lock().unwrap().take() { w.finalize()?; }
+        // Poison-tolerant: this runs on the mic thread, whose join result is discarded, so a
+        // panic here is swallowed and `WavWriter::finalize` never runs - leaving mic.wav with
+        // hound's placeholder RIFF/data sizes, i.e. an unreadable recording.
+        if let Some(w) = self.writer.lock().unwrap_or_else(|e| e.into_inner()).take() { w.finalize()?; }
         Ok(())
     }
 }

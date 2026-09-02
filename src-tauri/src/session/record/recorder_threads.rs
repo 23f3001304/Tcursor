@@ -13,6 +13,15 @@ use crate::events::track::cursortracker::CursorTypeTracker;
 use crate::events::track::cursortype::CursorTrack;
 use crate::events::model::{EventLog, ScreenInfo};
 use crate::events::track::tracker::MouseTracker;
+use crate::session::record::Notify;
+
+/// The `record-warning` reason for an audio input that would not open (the selected mic held
+/// exclusively by another app, or unplugged between the device list and pressing Record). The
+/// take keeps running - this is not fatal - but it will be silent, and the user must not find
+/// that out only when the editor opens on a twenty-minute walkthrough with no narration.
+fn audio_warning(kind: &str, e: &impl std::fmt::Display) -> String {
+    format!("No {kind} audio: that input could not be opened ({e}).")
+}
 
 /// Persist the recorded inputs (mouse events, keyboard actions/typing, cursor-type
 /// timeline) to disk. Split out of `stop_recording` so that file stays under the cap.
@@ -74,6 +83,7 @@ pub fn spawn_mic_thread(
     paused: Arc<AtomicBool>,
     clock: Arc<dyn Clock>,
     started: Arc<AtomicU64>,
+    warn: Notify,
 ) -> Option<JoinHandle<()>> {
     let id = mic_id?;
     std::thread::Builder::new()
@@ -83,7 +93,10 @@ pub fn spawn_mic_thread(
             // time (see CpalMic::open), cancelling the device input latency.
             let handle = match CpalMic::open(Some(&id), &mic_path, paused, started, clock) {
                 Ok(h) => Some(h),
-                Err(e) => { eprintln!("mic open failed (no audio): {e}"); None }
+                // The WAV is created before the input stream is built, so a failure here can
+                // leave a header-only mic.wav that `build_timeline` would treat as real audio
+                // and mux at a bogus offset. Remove it so the project is honestly silent.
+                Err(e) => { let _ = std::fs::remove_file(&mic_path); warn(&audio_warning("microphone", &e)); None }
             };
 
             while !stop.load(Ordering::SeqCst) {
@@ -103,6 +116,7 @@ pub fn spawn_system_thread(
     paused: Arc<AtomicBool>,
     clock: Arc<dyn Clock>,
     started: Arc<AtomicU64>,
+    warn: Notify,
 ) -> Option<JoinHandle<()>> {
     if !enabled { return None; }
     std::thread::Builder::new()
@@ -114,7 +128,8 @@ pub fn spawn_system_thread(
             // start arriving).
             let handle = match SystemAudio::loopback(&system_path, paused, started, clock) {
                 Ok(h) => Some(h),
-                Err(e) => { eprintln!("system-audio open failed (no loopback): {e}"); None }
+                // Same header-only-WAV cleanup as the mic thread above.
+                Err(e) => { let _ = std::fs::remove_file(&system_path); warn(&audio_warning("system", &e)); None }
             };
             while !stop.load(Ordering::SeqCst) {
                 std::thread::sleep(std::time::Duration::from_millis(50));
@@ -122,4 +137,16 @@ pub fn spawn_system_thread(
             if let Some(h) = handle { let _ = h.stop(); }
         })
         .ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn audio_warning_names_the_input_and_carries_the_cause() {
+        let msg = audio_warning("microphone", &"device in use by another app");
+        assert!(msg.contains("microphone"), "{msg}");
+        assert!(msg.contains("device in use by another app"), "{msg}");
+    }
 }

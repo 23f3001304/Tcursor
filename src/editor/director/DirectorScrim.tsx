@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { AnimatePresence, motion } from "motion/react";
+import { engineDisplayName } from "./engineName";
 
 /** Cancel surface for a running AI-director pass: a transparent, full-viewport scrim (catches ANY
  *  pointerdown) plus an Escape listener, both requesting cancel - and a small "Stop" pill
@@ -25,8 +26,11 @@ export function DirectorScrim({ running, planning, model, progress, onCancel }: 
     return () => window.removeEventListener("keydown", onKey);
   }, [running, onCancel]);
 
+  // Short derived name in the copy (ux audit #17 printed the full raw id) - the full id is still
+  // one hover away via the button's own `title`.
+  const shortModel = model ? engineDisplayName(model) : "";
   const label = planning
-    ? `Asking ${model || "the model"}… first runs can take a while — Esc to stop`
+    ? `Asking ${shortModel || "the model"}… first runs can take a while — Esc to stop`
     : progress ? `Directing · step ${progress.step}/${progress.total} — Esc to stop` : "Directing… — Esc to stop";
 
   return (
@@ -34,7 +38,7 @@ export function DirectorScrim({ running, planning, model, progress, onCancel }: 
       {running && <div className="e-director-scrim" onPointerDown={onCancel} />}
       <AnimatePresence>
         {running && (
-          <motion.div className="e-director-stop" onPointerDown={(e) => { e.stopPropagation(); onCancel(); }}
+          <motion.div className="e-director-stop" title={model} onPointerDown={(e) => { e.stopPropagation(); onCancel(); }}
             initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }}
             transition={{ type: "tween", duration: 0.16, ease: [0.4, 0, 0.2, 1] }}>
             {planning && (

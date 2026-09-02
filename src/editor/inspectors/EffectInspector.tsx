@@ -14,30 +14,36 @@ const MODE_OPTIONS = [
   { value: "vignette", label: "Vignette" },
 ];
 
-/** One overridable spotlight param: field name on the left, the current value (or "Default
- *  (X%)" when unset) grouped right next to its enable/disable switch on the right - so the
- *  value description reads next to the control it describes, not crammed against the label. */
+/** One overridable spotlight param: an enable/disable switch on its own row, then the Slider's
+ *  own `label`/`formatValue` readout ("Dim 65%" - or "Dim Default (90%)" while off) sourced from
+ *  the LIVE value, not the committed prop (fix round 2 - this used to render a static `<b>` next
+ *  to the switch instead, which never moved during a drag). The switchrow says "Override", not
+ *  `label` again - the Slider's own row already prints the field name once (fix round 3: this
+ *  used to print `label` in BOTH rows, e.g. "Dim" over "Dim 65%"); the Switch keeps the real name
+ *  via `aria-label` so it's still unambiguous non-visually. While NOT overridden, the slider
+ *  reads back its own `disabled` styling (opacity halved, thumb dims, no pointer/keyboard
+ *  interaction - see Slider.tsx) - the fix here is real disablement, not just the ambiguous
+ *  always-interactive look ux audit #22 flagged. The outer wrapper is a plain `<div>`, not a
+ *  `<label>` (fix round 4): a `<label>` forwards any click inside it to its first labelable
+ *  control, so releasing a Slider drag also fired the Switch's click handler and silently wiped
+ *  the override. Both `Switch` and `Slider` carry their own `aria-label`, so no label semantics
+ *  are lost. */
 function OverrideField({ label, value, defaultValue, min, max, step, onToggle, onChange }: {
   label: string; value: number | undefined; defaultValue: number;
   min: number; max: number; step: number;
   onToggle: (on: boolean) => void; onChange: (v: number) => void;
 }) {
+  const overridden = value !== undefined;
   return (
-    <label className="e-field">
+    <div className="e-field">
       <div className="e-switchrow" style={{ marginBottom: 4 }}>
-        <span className="e-fl">{label}</span>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 12, color: "var(--e-mut)" }}>
-            {value !== undefined
-              ? <b style={{ color: "var(--e-fg)" }}>{Math.round(value * 100)}%</b>
-              : <>Default <b style={{ color: "var(--e-fg)" }}>({Math.round(defaultValue * 100)}%)</b></>}
-          </span>
-          <Switch on={value !== undefined} onChange={onToggle} />
-        </div>
+        <span className="e-fl">Override</span>
+        <Switch on={overridden} onChange={onToggle} ariaLabel={`Override ${label}`} />
       </div>
-      <Slider min={min} max={max} step={step} value={value ?? defaultValue} disabled={value === undefined}
-        onChange={onChange} accentColor="var(--e-fx)" ariaLabel={label} />
-    </label>
+      <Slider min={min} max={max} step={step} value={value ?? defaultValue} disabled={!overridden}
+        onChange={onChange} accentColor="var(--e-fx)" ariaLabel={label}
+        label={label} formatValue={(v) => overridden ? `${Math.round(v * 100)}%` : `Default (${Math.round(v * 100)}%)`} />
+    </div>
   );
 }
 

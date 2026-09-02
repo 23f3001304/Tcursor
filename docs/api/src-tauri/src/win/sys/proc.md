@@ -1,6 +1,6 @@
 # src-tauri/src/win/sys/proc.rs
 
-Locates the bundled `ffmpeg`/`ffprobe` binaries at startup and exposes a `Command` builder that suppresses Windows console-window flicker. All higher-level encode and mux code calls `ffcmd` rather than `Command::new("ffmpeg")` directly so the binary resolution is transparent.
+Locates the bundled `ffmpeg`/`ffprobe` binaries at startup and exposes a `Command` builder that suppresses Windows console-window flicker. All higher-level encode and mux code calls `ffcmd` rather than `Command::new("ffmpeg")` directly so the binary resolution is transparent. Also the shared home for the codebase's atomic-file-write primitives (`tmp_sibling`, `corrupt_sibling`, `preserve_corrupt`) - every JSON store that writes tmp+rename and fails closed to defaults on corruption (`edit::model::EditDoc`, `settings::store`) builds on these rather than rolling its own.
 
 ## FFMPEG_DIR
 
@@ -31,6 +31,60 @@ A unique temporary path in the same directory as `out` (so a `rename` into place
 ### Used by
 
 - `src-tauri/src/export/preview/preview_track.rs` (`ensure_proxy`) and `src-tauri/src/export/preview/thumbs.rs` (`ensure_waveform`, `ensure_preview_audio`) - so an editor opening while the post-record `preprocess_project` pass is still running never loads a partial proxy/waveform/audio file.
+
+## corrupt_sibling
+
+```rust
+pub fn corrupt_sibling(path: &Path) -> PathBuf
+```
+
+`<path>.corrupt`, same directory - where `preserve_corrupt` moves an unparseable file so a reseed/reload-with-defaults never silently destroys it.
+
+### Behaviors
+
+- `corrupt_sibling_appends_the_suffix_in_the_same_directory` - `C:/proj/edit.json` -> `C:/proj/edit.json.corrupt`.
+
+### Used by
+
+- `src-tauri/src/win/sys/proc.rs` (`preserve_corrupt`) - computes the destination
+- `src-tauri/src/edit/model.rs` (`EditDoc::load`), `src-tauri/src/settings/store.rs` (`load_from`) - read this path back in their own `Behaviors` tests to assert the corrupt file landed there
+
+## preserve_corrupt
+
+```rust
+pub fn preserve_corrupt(path: &Path, parse_err: &dyn std::fmt::Display)
+```
+
+Moves an unparseable file aside to `corrupt_sibling(path)` (clearing any stale `.corrupt` left from a prior crash first) and logs the outcome, so a caller that falls back to defaults on a parse error never loses the original bytes.
+
+### Inputs
+
+- `path: &Path` - the file that failed to parse.
+- `parse_err: &dyn std::fmt::Display` - the deserialisation error, logged into the `eprintln!` message. *Why `&dyn Display` rather than a generic:* keeps this a plain (non-generic) function callable from any module without pulling in `serde_json::Error` (or whatever error type a future caller's format uses) as a dependency here.
+
+### Returns
+
+`()`. Never fails the caller: if the rename itself fails (e.g. the corrupt sibling is locked by another process), the bad bytes simply stay at `path` - still recoverable by hand, just not moved aside. Both outcomes are `eprintln!`'d.
+
+### Implementation
+
+1. Compute `corrupt = corrupt_sibling(path)`.
+2. `let _ = std::fs::remove_file(&corrupt)` - clear any stale `.corrupt` from an earlier crash so it doesn't block the rename.
+3. `std::fs::rename(path, &corrupt)` - on success, log "preserved at"; on failure, log both the original parse error and the rename error.
+
+### Why (bug-sweep-2, shared by H2's evidence trail and M3)
+
+`EditDoc::load` (`edit/model.rs`) and `settings::store::load_from` (`settings/store.rs`) both fail closed to a default value on a parse error - a reasonable recovery for corruption they can't fix automatically, but blindly discarding the bad bytes would mean a torn write from a crash has NO recovery path at all. Both used to hand-roll a slightly different copy of this same rename-and-log logic; it now lives in one place next to `tmp_sibling` (the write-side half of the same atomic-file contract).
+
+### Behaviors
+
+- `preserve_corrupt_moves_the_bad_file_aside_and_leaves_original_bytes_intact` - a bad file is moved OFF the original path, and its exact bytes land at `corrupt_sibling`.
+- `preserve_corrupt_overwrites_a_stale_corrupt_sibling_from_an_earlier_crash` - a pre-existing `.corrupt` from a prior crash doesn't block preserving the new one.
+
+### Used by
+
+- `src-tauri/src/edit/model.rs` (`EditDoc::load`) - preserves an unparseable `edit.json`
+- `src-tauri/src/settings/store.rs` (`load_from`) - preserves an unparseable `config.json`
 
 ## generate_once
 

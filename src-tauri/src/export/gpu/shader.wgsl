@@ -13,7 +13,7 @@ struct Uniforms {
     screen_a: f32, camera_a: f32,
     screen_w: f32, screen_h: f32,
     cam_w: f32, cam_h: f32,
-    _pad: f32,
+    wc_aspect: f32, // decoded webcam w/h; the camera panel cover-crops it (see fs_main)
     ring: vec4<f32>, // x = ring width (px), yzw = ring color 0..1; x == 0 -> no ring
 };
 
@@ -70,6 +70,18 @@ fn rrect_cov(p: vec2<f32>, lo: vec2<f32>, hi: vec2<f32>, w: f32, h: f32, r: f32)
     return clamp(0.5 - rrect_sd(p, lo, hi, w, h, r), 0.0, 1.0);
 }
 
+// Cover-crop panel-local UV `uv` (0..1) so a `src_a`-shaped source fills a `dst_a`-shaped panel
+// without stretching: the mismatched axis shrinks about the centre (= a centred crop of the
+// source), the matching one stays 1.0. ONE webcam decode box serves every layout, so this is
+// where a Wide bubble and a square big-cam each get their own framing. Mirrors the CPU path's
+// `compositor::cover_rect` exactly.
+fn cover_uv(uv: vec2<f32>, src_a: f32, dst_a: f32) -> vec2<f32> {
+    let sa = max(src_a, 0.0001);
+    let da = max(dst_a, 0.0001);
+    let s = vec2<f32>(min(1.0, da / sa), min(1.0, sa / da));
+    return vec2<f32>(0.5, 0.5) + (uv - vec2<f32>(0.5, 0.5)) * s;
+}
+
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let p = in.uv;
@@ -83,7 +95,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     }
     // Camera panel: fixed in OUTPUT space, on top (not zoomed).
     if (u.camera_a > 0.001 && inside(p, u.cam_min, u.cam_max)) {
-        let cuv = (p - u.cam_min) / (u.cam_max - u.cam_min);
+        let puv = (p - u.cam_min) / (u.cam_max - u.cam_min);
+        let cuv = cover_uv(puv, u.wc_aspect, u.cam_w / max(u.cam_h, 0.0001));
         let cov = rrect_cov(p, u.cam_min, u.cam_max, u.cam_w, u.cam_h, u.camera_r) * u.camera_a;
         color = mix(color, textureSample(webcam_tex, samp, cuv), cov);
         // Optional ring/border just inside the camera panel edge.

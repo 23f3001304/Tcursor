@@ -3,7 +3,7 @@ import type { CamShape, CamCorner, CamAspect } from "../settings/settings";
 export type ModeKey = "screen" | "camera" | "presenter" | "screen_only" | "camera_only";
 export const MODES: [ModeKey, string][] = [
   ["screen", "Screen"], ["camera", "Camera"], ["presenter", "Presenter"],
-  ["screen_only", "S-only"], ["camera_only", "C-only"],
+  ["screen_only", "Screen only"], ["camera_only", "Camera only"],
 ];
 
 export type Knob = "pad" | "screen_size" | "screen_radius" | "cam_size" | "cam_radius" | "cam_margin_x" | "cam_margin_y";

@@ -1,5 +1,12 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
+import { debounce } from "../hooks/debounce";
+import { shouldClearOverride } from "../hooks/overrideClear";
+
+// Trailing debounce window for committing a drag to the caller's `onChange` (which is typically
+// an `apply_edit_op`/`save_edit` IPC round trip) - see editor.md "render hygiene". A pointer
+// release always `flush()`es immediately regardless of this window, so letting go never lags.
+const COMMIT_DEBOUNCE_MS = 80;
 
 /** Snap a raw value to the nearest `step`, clamped to `[min, max]`, with output precision
  *  matching `step`'s own decimal places (so e.g. `step=0.01` never produces
@@ -38,6 +45,8 @@ export function Slider({
   disabled = false,
   accentColor = "var(--e-fg)",
   ariaLabel,
+  label,
+  formatValue,
 }: {
   value: number;
   min: number;
@@ -47,12 +56,52 @@ export function Slider({
   disabled?: boolean;
   accentColor?: string;
   ariaLabel?: string;
+  /** Optional `.e-fl` readout rendered above the track, sourced from the LIVE `shown` value (not
+   *  the committed `value` prop) so it tracks the thumb during a drag. Omit to render nothing
+   *  (the caller keeps rendering its own label from `value`, as every call site used to). */
+  label?: string;
+  /** Formats `shown` for `label` above, e.g. `(v) => \`${Math.round(v * 100)}%\`` - falls back to
+   *  the raw number when `label` is given without this. */
+  formatValue?: (v: number) => string;
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
+  // The live, pointer/keypress-derived value - drawn instead of `value` (and fed to `label`'s
+  // readout) so both track input at full rate despite the debounced `onChange` commit below (the
+  // "optimistic local UI" half of the render-hygiene fix). `null` = not overriding.
+  const [dragValue, setDragValue] = useState<number | null>(null);
+  const [dragging, setDragging] = useState(false);
+  // `value` as of the moment the CURRENT gesture began - `shouldClearOverride` (`../hooks/
+  // overrideClear.ts`) clears the override on the FIRST value the prop takes on that differs from
+  // this snapshot, not on landing back on the exact value sent - see that file for why.
+  const settledValueRef = useRef(value);
+
+  // `onChange` read through a ref so the debounced wrapper below never needs recreating just
+  // because the caller passed a fresh inline arrow (as most do).
+  const onChangeRef = useRef(onChange); onChangeRef.current = onChange;
+  const debouncedRef = useRef<ReturnType<typeof debounce<[number]>> | null>(null);
+  if (!debouncedRef.current) debouncedRef.current = debounce((v: number) => onChangeRef.current(v), COMMIT_DEBOUNCE_MS);
+
+  useEffect(() => {
+    if (shouldClearOverride(dragging, dragValue !== null, value, settledValueRef.current)) setDragValue(null);
+  }, [value, dragging, dragValue]);
+  // A pending commit must still land even if the slider unmounts mid-drag (switching panels,
+  // deselecting) - flush rather than drop it.
+  useEffect(() => () => debouncedRef.current?.flush(), []);
+
+  const updateValue = (clientX: number) => {
+    if (!trackRef.current) return;
+    const rect = trackRef.current.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const v = snapToStep(min + pct * (max - min), min, max, step);
+    setDragValue(v);
+    debouncedRef.current!(v);
+  };
 
   const handlePointerDown = (e: React.PointerEvent) => {
     if (disabled || !trackRef.current) return;
     trackRef.current.setPointerCapture(e.pointerId);
+    setDragging(true);
+    settledValueRef.current = value; // the pre-drag value - the override clears once `value` moves off of it
     updateValue(e.clientX);
   };
 
@@ -61,97 +110,71 @@ export function Slider({
     updateValue(e.clientX);
   };
 
-  const handlePointerUp = (e: React.PointerEvent) => {
-    if (trackRef.current && trackRef.current.hasPointerCapture(e.pointerId)) {
-      trackRef.current.releasePointerCapture(e.pointerId);
-    }
-  };
-
-  const updateValue = (clientX: number) => {
-    if (!trackRef.current) return;
-    const rect = trackRef.current.getBoundingClientRect();
-    const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    onChange(snapToStep(min + pct * (max - min), min, max, step));
+  // Shared end-of-gesture path: `pointerup`, `pointercancel` (palm rejection, a system gesture
+  // stealing the pointer), and `lostpointercapture` all mean "the drag is over" - wiring all
+  // three matters because a cancelled/lost-capture sequence never fires `pointerup`, which would
+  // otherwise leave `dragging` stuck `true` forever and permanently block the clear-on-change
+  // effect above. Safe to run twice per gesture (`lostpointercapture` also follows a normal
+  // release's own capture release) - every step here is idempotent.
+  const endDrag = (e: React.PointerEvent) => {
+    if (trackRef.current?.hasPointerCapture(e.pointerId)) trackRef.current.releasePointerCapture(e.pointerId);
+    setDragging(false);
+    debouncedRef.current!.flush(); // commit on release - no trailing lag survives the drag ending
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (disabled) return;
-    const next = sliderKeyValue(e.key, value, min, max, step);
+    // Steps from `shown` (not the prop `value`) so a fast key-repeat before an async `onChange`
+    // round trip resolves still steps from wherever the last keypress optimistically landed.
+    const next = sliderKeyValue(e.key, shown, min, max, step);
     if (next === null) return;
     e.preventDefault();
-    onChange(next);
+    settledValueRef.current = value; // pre-keypress value - see the ref's own comment above
+    setDragValue(next);
+    debouncedRef.current!.cancel();
+    onChangeRef.current(next); // discrete steps commit immediately - nothing to coalesce
   };
 
-  const pct = Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100));
+  const shown = dragValue ?? value;
+  const pct = Math.max(0, Math.min(100, ((shown - min) / (max - min)) * 100));
 
   return (
-    <div
-      ref={trackRef}
-      className="e-slider-track"
-      role="slider"
-      aria-label={ariaLabel}
-      aria-valuemin={min}
-      aria-valuemax={max}
-      aria-valuenow={value}
-      aria-disabled={disabled || undefined}
-      tabIndex={disabled ? -1 : 0}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onKeyDown={handleKeyDown}
-      style={{
-        position: "relative",
-        height: 20,
-        display: "flex",
-        alignItems: "center",
-        cursor: disabled ? "default" : "pointer",
-        userSelect: "none",
-        width: "100%",
-        touchAction: "none",
-        opacity: disabled ? 0.5 : 1
-      }}
-    >
-      {/* Background Track */}
+    <>
+      {label && <span className="e-fl">{label} <b>{formatValue ? formatValue(shown) : shown}</b></span>}
       <div
-        style={{
-          width: "100%",
-          height: 4,
-          borderRadius: 999,
-          background: "var(--e-soft)",
-          border: "1px solid var(--e-border2)",
-          position: "relative"
-        }}
+        ref={trackRef}
+        className="e-slider-track"
+        role="slider"
+        aria-label={ariaLabel}
+        aria-valuemin={min}
+        aria-valuemax={max}
+        aria-valuenow={shown}
+        aria-disabled={disabled || undefined}
+        tabIndex={disabled ? -1 : 0}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onLostPointerCapture={endDrag}
+        onKeyDown={handleKeyDown}
+        style={{ position: "relative", height: 20, display: "flex", alignItems: "center",
+          cursor: disabled ? "default" : "pointer", userSelect: "none", width: "100%",
+          touchAction: "none", opacity: disabled ? 0.5 : 1 }}
       >
-        {/* Fill Track */}
-        <div
-          style={{
-            position: "absolute",
-            left: 0,
-            top: 0,
-            bottom: 0,
-            width: `${pct}%`,
-            background: accentColor,
-            borderRadius: 999
-          }}
-        />
-        {/* Thumb */}
-        <motion.div
-          whileHover={disabled ? {} : { scale: 1.25 }}
-          whileTap={disabled ? {} : { scale: 0.95 }}
-          transition={{ type: "tween", duration: 0.12, ease: [0.4, 0, 0.2, 1] }}
-          style={{
-            position: "absolute",
-            left: `calc(${pct}% - 7px)`,
-            top: -6,
-            width: 14,
-            height: 14,
-            borderRadius: "50%",
-            background: "#fff",
-            border: `2px solid ${disabled ? "var(--e-dim)" : accentColor}`,
-            boxShadow: "0 2px 4px rgba(0,0,0,0.3)"
-          }}
-        />
+        {/* Rail (flat groove) + fill */}
+        <div className="e-slider-rail">
+          <div className="e-slider-fill" style={{ width: `${pct}%`, background: accentColor }} />
+          {/* Thumb - the raised interactive nub; hover grows it 14->16 via a `scale` transform
+              (not width/height), so its fixed margin-based centering never needs to recompute. */}
+          <motion.div
+            className="e-slider-thumb"
+            whileHover={disabled ? {} : { scale: 16 / 14 }}
+            whileTap={disabled ? {} : { scale: 0.92 }}
+            transition={{ type: "spring", stiffness: 500, damping: 30 }}
+            style={{ left: `${pct}%`, borderColor: disabled ? "var(--e-dim)" : undefined }}
+          />
+        </div>
       </div>
-    </div>
+    </>
   );
 }

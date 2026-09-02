@@ -178,7 +178,7 @@ pub struct Settings {
     #[serde(default = "default_volume")] pub audio_mic_volume: f32,
     /// Volume multiplier applied to the system-audio track at mux. Same range as `audio_mic_volume`.
     #[serde(default = "default_volume")] pub audio_sys_volume: f32,
-    /// Ollama model name for `ai_autoedit`. Empty = let the backend pick its own default
+    /// Ollama model name for the AI director. Empty = let the backend pick its own default
     /// (`"llama3.2"`), so configs saved before this field existed behave identically.
     pub ai_model: String,
 }

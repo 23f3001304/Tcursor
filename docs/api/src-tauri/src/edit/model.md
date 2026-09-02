@@ -257,7 +257,7 @@ Serializes the doc to pretty-printed JSON and writes it atomically to `path`: th
 pub fn load(path: &std::path::Path) -> Option<EditDoc>
 ```
 
-Reads and deserializes `edit.json` at `path`. A missing file and a corrupt (unparseable) file both return `None`, so the caller's reseed path (`load_or_seed`) runs either way - but they are NOT treated the same on disk: a read failure (no file) is left alone, while a parse failure renames the bad file aside to `<path>.corrupt` (overwriting any older `.corrupt` from a previous crash) and `eprintln!`s the parse error, so a reseed never silently destroys the user's actual edit - the original bytes survive on disk for recovery.
+Reads and deserializes `edit.json` at `path`. A missing file and a corrupt (unparseable) file both return `None`, so the caller's reseed path (`load_or_seed`) runs either way - but they are NOT treated the same on disk: a read failure (no file) is left alone, while a parse failure delegates to `win::sys::proc::preserve_corrupt(path, &e)`, which renames the bad file aside to `<path>.corrupt` (overwriting any older `.corrupt` from a previous crash) and `eprintln!`s the parse error, so a reseed never silently destroys the user's actual edit - the original bytes survive on disk for recovery. (`settings::store::load_from` shares this same helper for `config.json`, bug-sweep-2 M3.)
 
 ### Inputs
 

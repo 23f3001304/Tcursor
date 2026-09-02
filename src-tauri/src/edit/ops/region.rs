@@ -25,6 +25,18 @@ pub(crate) fn auto_layer(existing: &[(u32, u32, u32)], start_ms: u32, end_ms: u3
     }
 }
 
+/// After a partial `start_ms`/`end_ms` update leaves a region inverted (`start > end`), pulls
+/// the field the caller did NOT just set to match the one they did, rather than persisting the
+/// inversion. `start_was_set` picks the winner: whichever handle this call actually touched
+/// stays put, the untouched partner yields to it (collapsing to a zero-width region, never an
+/// inverted one). No-op when `start <= end` already. Shared by `UpdateZoom`, `UpdateLayoutSeg`
+/// (`api.rs`) and `UpdateEffect` (`effects.rs`) - the same partial-update shape recurs in all three.
+pub(crate) fn clamp_order(start: &mut u32, end: &mut u32, start_was_set: bool) {
+    if *start > *end {
+        if start_was_set { *end = *start; } else { *start = *end; }
+    }
+}
+
 /// Known layout preset wire-names; anything else falls back to "screen".
 pub(crate) fn valid_layout(s: &str) -> String {
     match s { "screen" | "camera" | "presenter" | "screen_only" | "camera_only" => s.to_string(), _ => "screen".into() }
@@ -70,5 +82,26 @@ mod tests {
         // Layer 0 has [0,1000). A new region at [2000,3000) doesn't overlap it - reuse layer 0.
         let existing = vec![(0, 1000, 0)];
         assert_eq!(auto_layer(&existing, 2000, 3000), 0);
+    }
+
+    #[test]
+    fn clamp_order_pulls_end_to_a_start_dragged_past_it() {
+        let (mut s, mut e) = (8000u32, 5000u32); // caller just set start_ms past the existing end
+        clamp_order(&mut s, &mut e, true);
+        assert_eq!((s, e), (8000, 8000));
+    }
+
+    #[test]
+    fn clamp_order_pulls_start_to_an_end_dragged_before_it() {
+        let (mut s, mut e) = (5000u32, 1000u32); // caller just set end_ms before the existing start
+        clamp_order(&mut s, &mut e, false);
+        assert_eq!((s, e), (1000, 1000));
+    }
+
+    #[test]
+    fn clamp_order_is_a_noop_when_already_ordered() {
+        let (mut s, mut e) = (100u32, 200u32);
+        clamp_order(&mut s, &mut e, true);
+        assert_eq!((s, e), (100, 200));
     }
 }

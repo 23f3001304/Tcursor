@@ -14,12 +14,17 @@ export function CaptionsPanel({
   const set = <K extends keyof ClickFxSettings>(k: K, v: ClickFxSettings[K]) => {
     onChange({ ...settings, [k]: v });
   };
+  const handleReset = () => set("captions", false); // Rust ClickFxSettings::default(): captions: false
 
   return (
     <div className="e-panel e-insp">
-      <PanelHeader title="Captions" lede="Show which hotkey was held as an on-screen caption." onClose={onClose} />
+      <PanelHeader title="Captions" lede="Show which hotkey was held as an on-screen caption."
+        onReset={handleReset} onClose={onClose} />
 
-      <div className="e-sec">
+      {/* `.e-field`, not `.e-sec` - `.e-sec` adds its own top border + margin/padding, which
+          stacked with PanelHeader's own hairline to read as an empty divider strip with nothing
+          in it. Every other panel's first group after PanelHeader uses `.e-field` directly. */}
+      <div className="e-field">
         <div className="e-switchrow">
           <span>Show keystrokes on screen</span>
           <Switch on={settings.captions} onChange={(v) => set("captions", v)} />

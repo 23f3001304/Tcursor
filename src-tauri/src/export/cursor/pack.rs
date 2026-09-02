@@ -70,12 +70,32 @@ pub fn list_cursor_packs() -> Vec<CursorPackInfo> {
 }
 
 /// Resolve a pack id to one `(CursorType, PNG bytes, hotspot)` row per built-in kind - the
-/// built-in pack returns `SPRITES` verbatim; anything else resolves against its folder.
+/// built-in pack returns `SPRITES` verbatim (Busy excepted, see `busy_as_arrow`); anything else
+/// resolves against its folder.
 pub fn sprite_sources(pack_id: &str) -> Vec<(CursorType, Vec<u8>, (f32, f32))> {
-    if pack_id.is_empty() || pack_id == DEFAULT_PACK_ID {
-        return SPRITES.iter().map(|&(kind, png, hot)| (kind, png.to_vec(), hot)).collect();
+    let mut rows = if pack_id.is_empty() || pack_id == DEFAULT_PACK_ID {
+        SPRITES.iter().map(|&(kind, png, hot)| (kind, png.to_vec(), hot)).collect()
+    } else {
+        sprite_sources_from_dir(&pack_dir(pack_id))
+    };
+    busy_as_arrow(&mut rows);
+    rows
+}
+
+/// The OS shows "busy" as the plain arrow plus a spinner overlay it draws itself; this app's
+/// only busy asset is a static multicolor pinwheel disc, which at cursor size in a dimmed preview
+/// (or baked into an export) reads as visual corruption, not "loading" - worse than no animation
+/// at all. Rather than patch the asset, resolve Busy to whatever Arrow resolved to for this pack
+/// (built-in, or a custom pack's own arrow override) at the single seam both export
+/// (`cursorset::prep`) and preview (`cursorpreview::cursor_sprites`) call through. The `Busy`
+/// variant itself, and the recorded cursor-type track, are untouched - only which sprite bytes
+/// get drawn for it.
+fn busy_as_arrow(rows: &mut [(CursorType, Vec<u8>, (f32, f32))]) {
+    let Some(arrow) = rows.iter().find(|(k, ..)| *k == CursorType::Arrow).map(|(_, b, h)| (b.clone(), *h)) else { return };
+    if let Some(busy) = rows.iter_mut().find(|(k, ..)| *k == CursorType::Busy) {
+        busy.1 = arrow.0;
+        busy.2 = arrow.1;
     }
-    sprite_sources_from_dir(&pack_dir(pack_id))
 }
 
 /// Pure core of `sprite_sources`, taking the pack folder directly so it is unit-testable against

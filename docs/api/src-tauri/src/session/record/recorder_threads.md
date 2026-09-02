@@ -75,6 +75,7 @@ pub fn spawn_mic_thread(
     paused: Arc<AtomicBool>,
     clock: Arc<dyn Clock>,
     started: Arc<AtomicU64>,
+    warn: Notify,
 ) -> Option<JoinHandle<()>>
 ```
 
@@ -87,7 +88,8 @@ Spawns a dedicated thread that owns and drives a `CpalMic` handle. Returns `None
 - `stop: Arc<AtomicBool>` - shared shutdown flag. *Why Arc:* the thread loop polls it at 50ms intervals; storing the clone inside the thread ensures the borrow never escapes.
 - `paused: Arc<AtomicBool>` - pause flag passed to `CpalMic::open` so the mic stream can gate sample capture. *Why passed at open time:* cpal callbacks run on an OS audio thread; the `Arc` is the only safe channel to communicate pause state into the callback.
 - `clock: Arc<dyn Clock>` - used inside `CpalMic::open` to stamp `started` with the first sample's capture time, cancelling device input latency. *Why Arc<dyn Clock>:* injectable for tests; `SystemClock` is the production instance.
-- `started: Arc<AtomicU64>` - written by `CpalMic` at the first captured sample. *Why AtomicU64:* read back from the main thread in `stop_recording` without a lock; SeqCst is used on both sides.
+- `started: Arc<AtomicU64>` - written by `CpalMic` at the first captured sample. *Why AtomicU64:* read back in the stop path without a lock; SeqCst is used on both sides.
+- `warn: Notify` - called with `audio_warning("microphone", e)` if the device will not open.
 
 ### Returns
 
@@ -97,7 +99,7 @@ Spawns a dedicated thread that owns and drives a `CpalMic` handle. Returns `None
 
 1. `let id = mic_id?` - short-circuits to `None` if mic is off.
 2. Spawn thread named `"mic"`.
-3. Inside the thread: open `CpalMic` with the device id, path, pause flag, started counter, and clock. Store the handle (or log the error and store `None`). *Why store `None` on error rather than abort:* a mic failure is non-fatal; recording continues without audio.
+3. Inside the thread: open `CpalMic` with the device id, path, pause flag, started counter, and clock. Store the handle, or - on failure - delete any header-only `mic.wav` the aborted open left behind, fire `warn`, and store `None`. *Why store `None` rather than abort:* a mic failure is non-fatal; recording continues without audio. *Why delete the file:* `CpalMic::open` creates the WAV before building the input stream, so a `build_input_stream` failure leaves a zero-sample `mic.wav` that `export::pipeline::timeline` would treat as real audio (`paths.mic().exists()`) and mux at a bogus offset.
 4. Loop sleeping 50ms until `stop` is set. *Why 50ms not 2ms:* audio is driven by the cpal callback, not this loop; the loop only needs to keep the handle alive and check for stop.
 5. On stop: call `handle.stop()` to flush and close the wav file.
 
@@ -111,6 +113,7 @@ pub fn spawn_system_thread(
     paused: Arc<AtomicBool>,
     clock: Arc<dyn Clock>,
     started: Arc<AtomicU64>,
+    warn: Notify,
 ) -> Option<JoinHandle<()>>
 ```
 
@@ -123,7 +126,8 @@ Spawns a dedicated thread that owns and drives a `SystemAudio` loopback handle. 
 - `stop: Arc<AtomicBool>` - shared shutdown flag, same semantics as in `spawn_mic_thread`.
 - `paused: Arc<AtomicBool>` - pause flag passed to `SystemAudio::loopback` so loopback samples are gated during pause.
 - `clock: Arc<dyn Clock>` - forwarded into `SystemAudio::loopback`, which stamps `started` from inside the data callback at the first non-empty packet - mirroring the mic's in-callback pattern (see `spawn_mic_thread`) instead of stamping at stream-open. *Why not stamp here anymore:* stream-open (config negotiation + `stream.play()`) measurably precedes when samples actually start arriving; stamping in the callback removes that gap the same way the mic path removes its device latency.
-- `started: Arc<AtomicU64>` - passed straight into `SystemAudio::loopback`, which owns the stamping. *Why SeqCst store:* read back on the main thread in `stop_recording`; must be globally visible before the `join` returns.
+- `started: Arc<AtomicU64>` - passed straight into `SystemAudio::loopback`, which owns the stamping. *Why SeqCst store:* read back in the stop path; must be globally visible before the `join` returns.
+- `warn: Notify` - called with `audio_warning("system", e)` if loopback will not open.
 
 ### Returns
 
@@ -133,6 +137,24 @@ Spawns a dedicated thread that owns and drives a `SystemAudio` loopback handle. 
 
 1. `if !enabled { return None; }`.
 2. Spawn thread named `"system-audio"`.
-3. Inside the thread: call `SystemAudio::loopback(&system_path, paused, started, clock)`, moving `started`/`clock` in directly - `loopback` itself stamps `started` at the first non-empty callback packet. On success, store the handle. On failure, log and store `None`. *Why store `None` on error:* same as mic - non-fatal; recording continues without system audio.
+3. Inside the thread: call `SystemAudio::loopback(&system_path, paused, started, clock)`, moving `started`/`clock` in directly - `loopback` itself stamps `started` at the first non-empty callback packet. On success, store the handle. On failure, delete any header-only `system.wav`, fire `warn`, and store `None`. *Why store `None` on error:* same as mic - non-fatal; recording continues without system audio.
 4. Loop sleeping 50ms until `stop` is set.
 5. Call `handle.stop()` to flush and close the wav file. *Why `SystemAudioHandle` is `!Send`:* cpal streams contain platform handles that must be released on the same thread they were created on; owning the handle in the thread that opened it satisfies this invariant.
+
+## audio_warning
+
+```rust
+fn audio_warning(kind: &str, e: &impl std::fmt::Display) -> String
+```
+
+The `record-warning` reason for an audio input that would not open - the selected mic held exclusively by another app (Teams/Zoom/OBS), or unplugged between the device enumeration that populated the dropdown and pressing Record.
+
+*Why an event at all (finding M3):* the failure used to be an `eprintln!` and nothing else. `start_recording` still returned `Ok`, the HUD showed a perfectly normal recording, and the user discovered the twenty-minute walkthrough had no narration only when the editor opened. The take is still worth having, so this is a warning on the HUD's `err` surface, not a failed start.
+
+### Returns
+
+`"No {kind} audio: that input could not be opened ({e})."` - a complete sentence, because the HUD renders the message as-is.
+
+### Behaviors
+
+- `audio_warning_names_the_input_and_carries_the_cause`: the message contains both the input name and the underlying error text.

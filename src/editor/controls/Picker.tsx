@@ -20,7 +20,9 @@ export function Picker<T extends string>({
   ariaLabel
 }: {
   value: T;
-  options: { value: T; label: string }[];
+  /** `title` is optional per-option hover text - e.g. AiPanel puts the full raw model id here
+   *  while `label` shows a short derived name (ux audit #16). */
+  options: { value: T; label: string; title?: string }[];
   onChange: (v: T) => void;
   ariaLabel?: string;
 }) {
@@ -41,7 +43,8 @@ export function Picker<T extends string>({
   }, []);
 
   const currentIndex = options.findIndex((o) => o.value === value);
-  const currentLabel = options.find((o) => o.value === value)?.label ?? value;
+  const currentOption = options.find((o) => o.value === value);
+  const currentLabel = currentOption?.label ?? value;
 
   const openMenu = () => { setOpen(true); setActiveIndex(currentIndex >= 0 ? currentIndex : 0); };
   const closeMenu = () => { setOpen(false); setActiveIndex(-1); buttonRef.current?.focus(); };
@@ -65,31 +68,14 @@ export function Picker<T extends string>({
       <button
         ref={buttonRef}
         type="button"
+        className="e-picker-btn"
+        title={currentOption?.title}
         aria-label={ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-activedescendant={open && activeIndex >= 0 ? `${uid}-opt-${activeIndex}` : undefined}
         onClick={() => (open ? closeMenu() : openMenu())}
         onKeyDown={handleKeyDown}
-        style={{
-          width: "100%",
-          height: 36,
-          background: "var(--e-soft)",
-          border: "1px solid var(--e-border)",
-          borderRadius: "var(--e-r)",
-          padding: "0 12px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          cursor: "pointer",
-          color: "var(--e-fg)",
-          fontFamily: "inherit",
-          fontSize: 13,
-          fontWeight: 500,
-          textAlign: "left",
-          outline: "none",
-          boxSizing: "border-box"
-        }}
       >
         <span>{currentLabel}</span>
         <motion.span animate={{ rotate: open ? 180 : 0 }} transition={{ duration: 0.15 }}>
@@ -129,26 +115,11 @@ export function Picker<T extends string>({
                 id={`${uid}-opt-${i}`}
                 type="button"
                 role="option"
+                title={opt.title}
                 aria-selected={value === opt.value}
                 onClick={() => { onChange(opt.value); closeMenu(); }}
-                style={{
-                  width: "100%",
-                  height: 32,
-                  padding: "0 8px",
-                  display: "flex",
-                  alignItems: "center",
-                  background: value === opt.value ? "var(--e-soft)" : "transparent",
-                  color: "var(--e-fg)",
-                  border: "none",
-                  borderRadius: "var(--e-r-sm)",
-                  cursor: "pointer",
-                  fontSize: 12.5,
-                  fontWeight: value === opt.value ? 600 : 500,
-                  textAlign: "left",
-                  outline: i === activeIndex ? "2px solid var(--e-focus)" : "none",
-                  outlineOffset: -2,
-                  transition: "background-color 0.14s ease, color 0.14s ease"
-                }}
+                className={`e-picker-opt${value === opt.value ? " on" : ""}`}
+                style={{ outline: i === activeIndex ? "2px solid var(--e-focus)" : "none", outlineOffset: -2 }}
               >
                 {opt.label}
               </button>

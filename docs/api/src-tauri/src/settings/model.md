@@ -474,7 +474,7 @@ Fields:
 - `audio_offset_ms: i32` - manual mic-vs-video sync nudge in milliseconds. Negative values pull the mic track earlier to cancel device input latency. Zero means no adjustment. Default `0`. *Why signed:* input latency is subtractive; positive values also exist to handle rare setups where the mic arrives ahead of video.
 - `background: BackgroundSettings` - background style (mesh/solid/gradient + blur). Default `BackgroundSettings::default()` (`Mesh`, today's bundled image, byte-identical to before this field existed). See `settings::background`.
 - `audio_mic_volume: f32`, `audio_sys_volume: f32` - linear gain multipliers applied to each track at mux (0 = muted, 1 = unchanged, up to 1.5). Default `1.0` for both. *Why an explicit field-level `#[serde(default = "default_volume")]` in addition to the manual `impl Default` above:* belt-and-suspenders matching `spotlight_dim_camera`'s pattern, so a config saved without this key loads full volume under either code path.
-- `ai_model: String` - Ollama model name for `ai_autoedit`. Default `""` (empty = let the backend pick its own default, `"llama3.2"`), so configs saved before this field existed behave identically.
+- `ai_model: String` - Ollama model name for the AI director. Default `""` (empty = let the backend pick its own default, `"llama3.2"`), so configs saved before this field existed behave identically.
 
 ### Used by
 
@@ -482,5 +482,5 @@ Fields:
 - `src-tauri/src/commands.rs` (`get_settings`, `set_settings`) - surfaced over IPC so the frontend can read and write settings
 - `src-tauri/src/session/record/recorder.rs` - loaded at recording start via `store::load()` to snapshot all settings for the session
 - `src-tauri/src/export/pipeline/exporter.rs` - received from the IPC call and drives every export subsystem
-- `src-tauri/src/ai/commands.rs` (`ai_autoedit`) - receives `ai_model` (via the frontend passing `doc.settings.ai_model || undefined`)
+- `src-tauri/src/ai/commands.rs` (`ai_plan`) - receives `ai_model` (via the frontend passing `doc.settings.ai_model || undefined`)
 - `src-tauri/src/export/pipeline/audio_mux.rs` (`mux`) - receives `audio_mic_volume`/`audio_sys_volume` via `RenderMeta`

@@ -1,3 +1,4 @@
+import type { RefObject } from "react";
 import { IconCrosshair, IconTrash } from "@tabler/icons-react";
 import { PanelHeader } from "../panels/PanelHeader";
 import type { CamZoomAction, EditDoc, EditOp, Zoom, ZoomTarget } from "../../lib/edit";
@@ -36,6 +37,17 @@ export function isCamActionSelected(current: CamZoomAction | null | undefined, o
   return typeof current === "object" && current !== null && "shrink" in current;
 }
 
+/** The Target and "Webcam during zoom" controls only have a visible effect while the playhead is
+ *  inside the zoom's own span - changing them elsewhere leaves the preview looking unchanged,
+ *  which reads as "this setting doesn't work" (gate finding, live debug). `null` while `nowMs` is
+ *  already inside `[startMs, endMs]` (same inclusive span `camZoomAction.resolveCamAction` uses -
+ *  the change is already visible, no seek needed); otherwise the span's midpoint, so the very
+ *  change the user just made becomes visible without them having to go hunt for the zoom. */
+export function zoomScopedSeekMs(nowMs: number, startMs: number, endMs: number): number | null {
+  if (nowMs >= startMs && nowMs <= endMs) return null;
+  return Math.round((startMs + endMs) / 2);
+}
+
 const PRESETS = [
   { name: "Subtle", scale: 1.6, zoom_in_ms: 400, zoom_out_ms: 500, easing: "smooth" },
   { name: "Balanced", scale: 2.2, zoom_in_ms: 350, zoom_out_ms: 450, easing: "smooth" },
@@ -57,24 +69,34 @@ const activePreset = (z: Zoom) => {
  *  (or `remove_zoom`) op via `onApply`, which persists the doc and bumps the preview - so
  *  edits are reflected in the live preview immediately. Shown in the left panel in place
  *  of the tab content while a zoom is selected. */
-export function ZoomInspector({ zoom, dur, onApply, onClose, aimMode, moveMode, onAimMode }: {
+export function ZoomInspector({ zoom, dur, onApply, onClose, aimMode, moveMode, onAimMode, timeMsRef, onSeek }: {
   zoom: Zoom; dur: number; onApply: (op: EditOp) => Promise<EditDoc | null>; onClose: () => void;
   aimMode: boolean; moveMode: boolean; onAimMode: (on: boolean) => void;
+  /** Live playhead, read at click time (ref, not a prop) - matches EditorPanels' render-hygiene
+   *  convention (see its doc comment) so this component doesn't need the ticking value as a prop. */
+  timeMsRef: RefObject<number>; onSeek: (ms: number) => void;
 }) {
   const upd = (patch: Partial<Omit<Extract<EditOp, { op: "update_zoom" }>, "op" | "id">>) =>
     void onApply({ op: "update_zoom", id: zoom.id, ...patch });
   const sec = (ms: number) => +(ms / 1000).toFixed(2);
   const mode = targetMode(zoom.target);
   const curPreset = activePreset(zoom);
+  // Discoverability fix (live debug: "none of these settings work" was wiring working but
+  // invisible outside the span) - jump the playhead into the zoom whenever a scoped control
+  // changes while scrubbed outside it, so the effect is on screen immediately.
+  const seekIntoSpan = () => {
+    const target = zoomScopedSeekMs(timeMsRef.current, zoom.start_ms, zoom.end_ms);
+    if (target !== null) onSeek(target);
+  };
 
   return (
     <div className="e-panel e-insp">
       <PanelHeader title="Zoom" lede="Edits preview live. Drag the block on the timeline to move it." closeTitle="Deselect" onClose={onClose} />
 
       <label className="e-field">
-        <span className="e-fl">Scale <b>{zoom.scale.toFixed(1)}x</b></span>
         <Slider min={1} max={4} step={0.1} value={zoom.scale}
-          onChange={(v) => upd({ scale: v })} accentColor="var(--e-zoom)" ariaLabel="Scale" />
+          onChange={(v) => upd({ scale: v })} accentColor="var(--e-zoom)" ariaLabel="Scale"
+          label="Scale" formatValue={(v) => `${v.toFixed(1)}x`} />
       </label>
 
       <div className="e-field2">
@@ -108,13 +130,15 @@ export function ZoomInspector({ zoom, dur, onApply, onClose, aimMode, moveMode, 
 
       <CurveEditor value={zoom.easing} onChange={(easing) => upd({ easing })} />
 
+      <p className="e-sec-hint">Applies while this zoom is active - scrub inside it to preview.</p>
+
       <div className="e-field">
         <span className="e-fl">Target</span>
         <div className="e-seg">
           <button className={mode === "cursor" ? "on" : ""}
-            onClick={() => { onAimMode(false); upd({ target: targetForMode("cursor", zoom.target) }); }}>Follow cursor</button>
+            onClick={() => { onAimMode(false); upd({ target: targetForMode("cursor", zoom.target) }); seekIntoSpan(); }}>Follow cursor</button>
           <button className={mode === "region" ? "on" : ""}
-            onClick={() => upd({ target: targetForMode("region", zoom.target) })}>Region</button>
+            onClick={() => { upd({ target: targetForMode("region", zoom.target) }); seekIntoSpan(); }}>Region</button>
         </div>
         {mode === "region" && (
           <button type="button" className={`e-aimbtn${aimMode ? " on" : ""}`} disabled={moveMode}
@@ -130,7 +154,7 @@ export function ZoomInspector({ zoom, dur, onApply, onClose, aimMode, moveMode, 
         <div className="e-seg" style={{ flexWrap: "wrap" }}>
           {CAM_ACTION_OPTIONS.map((opt) => (
             <button key={opt.label} type="button" className={isCamActionSelected(zoom.cam_action, opt.value) ? "on" : ""}
-              onClick={() => void onApply({ op: "set_zoom_cam_action", id: zoom.id, action: opt.value })}>
+              onClick={() => { void onApply({ op: "set_zoom_cam_action", id: zoom.id, action: opt.value }); seekIntoSpan(); }}>
               {opt.label}
             </button>
           ))}

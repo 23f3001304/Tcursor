@@ -11,4 +11,4 @@ export function ConfirmDialog({ open, title, body, confirmLabel, danger, dontAsk
 }): JSX.Element
 ```
 
-Animated with Motion (`AnimatePresence` - scrim fade + card scale). The scrim click and Cancel both call `onCancel`; the confirm button calls `onConfirm(dontAsk)` with the checkbox state so the caller decides whether to persist the suppression. `danger` styles the confirm button red for destructive actions. When `dontAskLabel` is omitted the checkbox is hidden.
+Animated with Motion (`AnimatePresence` - scrim fade + card scale). The scrim click and Cancel both call `onCancel`; the confirm button calls `onConfirm(dontAsk)` with the checkbox state so the caller decides whether to persist the suppression. `danger` styles the confirm button red for destructive actions. When `dontAskLabel` is omitted the checkbox is hidden. The confirm button is a `motion.button` carrying the app-wide press spring (design/premium-pass D6, `whileTap: { scale: 0.96 }`); Cancel stays a plain button, unmotioned, matching the "hero gets the spring, quiet chrome doesn't" split used elsewhere (`Transport`'s Play, `ExportDialog`/`ExportProgress`'s primary buttons).

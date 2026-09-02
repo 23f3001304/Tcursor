@@ -19,7 +19,7 @@ struct CompositorResources {
     bg_tex: wgpu::Texture,
     ubuf: wgpu::Buffer,
     bind: wgpu::BindGroup,
-    bg_uploaded: bool,
+    bg_key: Option<u64>, // content key of the uploaded background (None = nothing uploaded yet)
 }
 
 pub struct GpuCompositor {
@@ -50,7 +50,10 @@ impl Compositor for GpuCompositor {
         // convert (a raw passthrough would emit nv12 bytes as bgra). The GPU pass is cheap anyway.
         let g = &self.gpu;
         let (wc_data, ww, wh) = webcam.unwrap_or((&[0u8; 4], 1, 1));
-        let u = build_uniforms(scene, cam, layout, webcam.is_some());
+        let u = build_uniforms(scene, cam, layout, webcam.map(|(_, w, h)| (w, h)));
+        // Hashed BEFORE the lock: it is a strided read over the whole ~8 MB background (~0.1-0.3 ms,
+        // cache-miss bound), and nothing about it needs the cached resources.
+        let key = gpu_compositor_tex::bg_key(bg);
 
         let mut lock = self.res.lock().unwrap();
         let rebuild = match lock.as_ref() {
@@ -68,9 +71,12 @@ impl Compositor for GpuCompositor {
         g.update_tex_bpp(&r.screen_y_tex, &screen[..y_size], sw, sh, 1);
         g.update_tex_bpp(&r.screen_uv_tex, &screen[y_size..], sw / 2, sh / 2, 2);
         g.update_tex(&r.webcam_tex, wc_data, ww, wh);
-        if !r.bg_uploaded {
+        // Re-upload whenever the background's CONTENT changed, not just its dimensions: an edit
+        // (colour/blur/kind) rebuilds `bg` at the same size, and a dimension-only check threw
+        // every rebuilt buffer away, so the warm preview kept showing the old background.
+        if r.bg_key != Some(key) {
             g.update_tex(&r.bg_tex, bg, ow, oh);
-            r.bg_uploaded = true;
+            r.bg_key = Some(key);
         }
         g.queue.write_buffer(&r.ubuf, 0, bytemuck::bytes_of(&u));
 
@@ -138,62 +144,5 @@ impl Compositor for GpuCompositor {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::export::scene::{Panel, Scene};
-    use crate::export::types::{Camera, Layout, RectF};
-
-    fn solid(w: u32, h: u32, px: [u8; 4]) -> Vec<u8> {
-        let mut v = vec![0u8; (w * h * 4) as usize];
-        for c in v.chunks_mut(4) { c.copy_from_slice(&px); } v
-    }
-
-    #[test]
-    fn screen_panel_composites_onto_background() {
-        let c = match GpuCompositor::new(8, 8) { Some(c) => c, None => return };
-        let screen = crate::export::color::bgra_to_nv12(&solid(4, 4, [0, 0, 255, 255]), 4, 4);
-        let bg = solid(8, 8, [255, 0, 0, 255]);
-        let layout = Layout { out_w: 8, out_h: 8, pad_px: 1, screen_scale: 1.0, screen_radius_px: 8.0 * 0.016 };
-        let scene = Scene {
-            screen: Panel { rect: RectF { x: 2.0, y: 2.0, w: 4.0, h: 4.0 }, radius: 0.0, alpha: 1.0, ring_px: 0.0, ring_color: [0, 0, 0] },
-            camera: Panel { rect: RectF { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }, radius: 0.0, alpha: 0.0, ring_px: 0.0, ring_color: [0, 0, 0] },
-        };
-        let cam = Camera { cx: 4.0, cy: 4.0, scale: 1.0 };
-        let mut out = Vec::new();
-        c.composite_into(&screen, 4, 4, None, cam, &bg, &layout, &scene, &mut out);
-        assert_eq!(out.len(), 8 * 8 * 4);
-        assert_eq!(&out[0..4], &[255, 0, 0, 255], "corner must be bg blue");
-        let i = ((3 * 8 + 3) * 4) as usize;
-        let p = &out[i..i + 4]; // screen red through the nv12 shader convert (exact to a few LSBs)
-        assert!(p[0] <= 3 && p[1] <= 3 && p[2] >= 250, "panel interior must be ~screen red, got {p:?}");
-    }
-
-    #[test]
-    fn cpu_gpu_parity_two_panels() {
-        use crate::export::gpu::compositor::{Compositor, CpuCompositor};
-        let g = match GpuCompositor::new(64, 48) { Some(c) => c, None => return };
-        let screen = crate::export::color::bgra_to_nv12(&solid(32, 24, [10, 20, 200, 255]), 32, 24);
-        let webcam = solid(16, 16, [200, 30, 10, 255]);
-        let bg = solid(64, 48, [40, 40, 40, 255]);
-        let layout = Layout { out_w: 64, out_h: 48, pad_px: 4, screen_scale: 1.0, screen_radius_px: 48.0 * 0.016 };
-        let scene = Scene {
-            screen: Panel { rect: RectF { x: 8.0, y: 6.0, w: 30.0, h: 22.0 }, radius: 0.0, alpha: 1.0, ring_px: 0.0, ring_color: [0, 0, 0] },
-            camera: Panel { rect: RectF { x: 40.0, y: 26.0, w: 18.0, h: 18.0 }, radius: 0.0, alpha: 1.0, ring_px: 0.0, ring_color: [0, 0, 0] },
-        };
-        let cam = Camera { cx: 32.0, cy: 24.0, scale: 1.0 };
-        let mut cpu = Vec::new();
-        CpuCompositor.composite_into(&screen, 32, 24, Some((&webcam, 16, 16)), cam, &bg, &layout, &scene, &mut cpu);
-        let mut gpu = Vec::new();
-        g.composite_into(&screen, 32, 24, Some((&webcam, 16, 16)), cam, &bg, &layout, &scene, &mut gpu);
-        // Interior sample points (centers of bg / screen panel / camera panel) must match within quantization.
-        for &(x, y) in &[(2u32, 2u32), (20, 14), (48, 34)] {
-            let i = ((y * 64 + x) * 4) as usize;
-            for c in 0..4 {
-                let d = (cpu[i + c] as i32 - gpu[i + c] as i32).abs();
-                // <=3: the screen panel now goes through two independent nv12->RGB converts (CPU
-                // u8-rounded `nv12_to_bgra` vs the shader's float math), so allow one extra LSB.
-                assert!(d <= 3, "CPU/GPU mismatch at ({x},{y}) ch {c}: {} vs {}", cpu[i + c], gpu[i + c]);
-            }
-        }
-    }
-}
+#[path = "gpu_compositor_tests.rs"]
+mod tests;

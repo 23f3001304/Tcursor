@@ -12,6 +12,12 @@ pub mod export;
 pub mod settings;
 pub mod edit;
 
+/// Guards against a second close-triggered stop stacking while `close_guard::finish_and_close` is
+/// already running for an earlier `CloseRequested` (e.g. the OS delivering it again while the
+/// window is on its way down). Process-lifetime static; never reset - the app is quitting either
+/// way once this is set.
+static CLOSING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -19,13 +25,33 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(session::record::recorder::Recorder::default())
         .manage(export::preview::PreviewSession::default())
+        .on_window_event(|window, event| {
+            // R6: never lose a take to the close button. If a recording is active or its stop is
+            // still finalizing (`Recorder::is_busy`), this is the safety net for the OS close
+            // button / Alt+F4 / a wedged renderer - see `close_guard::finish_and_close`'s doc
+            // comment for why it does not depend on the frontend for correctness. The HUD's own
+            // Close button races this with a JS-side graceful stop first
+            // (`useRecordingFlow.stopForClose`): by the time that resolves and calls
+            // `window.close()`, `is_busy()` is already false and this arm never fires.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                use tauri::Manager;
+                let recorder = window.state::<session::record::recorder::Recorder>();
+                if recorder.is_busy() {
+                    api.prevent_close();
+                    if !CLOSING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                        let app = window.app_handle().clone();
+                        tauri::async_runtime::spawn(session::record::close_guard::finish_and_close(app));
+                    }
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             commands::list_displays,
             commands::list_audio_inputs,
             session::record::recorder::start_recording,
             session::record::recorder::pause_recording,
             session::record::recorder::resume_recording,
-            session::record::recorder::stop_recording,
+            session::record::recorder_stop::stop_recording,
             commands::save_webcam,
             commands::append_webcam,
             commands::export_project,
@@ -34,7 +60,6 @@ pub fn run() {
             edit::commands::get_edit,
             edit::commands::apply_edit_op,
             edit::commands::save_edit,
-            ai::commands::ai_autoedit,
             ai::commands::ai_plan,
             ai::commands::list_ollama_models,
             export::preview::preview_frame,

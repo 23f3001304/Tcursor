@@ -13,8 +13,7 @@ export function NumberField({ value, min = 0, max, step = 0.1, unit = "s", onCha
   const btn: CSSProperties = { width: 26, height: 26, borderRadius: "var(--e-r-sm)", border: "none",
     display: "flex", alignItems: "center", justifyContent: "center", color: "var(--e-fg)", flex: "none" };
   return (
-    <div style={{ display: "flex", alignItems: "center", background: "var(--e-soft)", border: "1px solid var(--e-border)",
-      borderRadius: "var(--e-r)", height: 36, padding: "0 5px", width: "100%", boxSizing: "border-box" }}>
+    <div className="e-numfield">
       <button type="button" className="e-numstep" onClick={decrement} disabled={value <= min} style={btn}><IconMinus size={13} /></button>
       <span style={{ flex: 1, minWidth: 0, textAlign: "center", color: "var(--e-fg)", fontSize: 13, fontWeight: 600,
         fontVariantNumeric: "tabular-nums", userSelect: "none" }}>

@@ -21,7 +21,7 @@ Builds a short-timeout (2s connect) `ureq::Agent` - deliberately much shorter th
 ### Used by
 
 - `src-tauri/src/ai/commands.rs` (`list_ollama_models`) - direct passthrough over Tauri IPC, populating `AiPanel.tsx`'s Engine picker.
-- `src-tauri/src/ai/commands.rs` (`build_plan`) - the shared LLM pass behind both `ai_autoedit` and `ai_plan` calls this to resolve the actually-installed model: the caller's pick if it's in the list, else the first installed chat model, else an error (no hardcoded model name is ever used).
+- `src-tauri/src/ai/commands.rs` (`build_plan`) - the shared LLM pass behind `ai_plan` calls this to resolve the actually-installed model: the caller's pick if it's in the list, else the first installed chat model, else an error (no hardcoded model name is ever used).
 
 ## chat
 
@@ -52,4 +52,4 @@ Sends a chat completion request to `http://localhost:11434/api/chat` and returns
 
 ### Used by
 
-- `src-tauri/src/ai/commands.rs` - `build_plan` (the shared LLM pass behind both `ai_autoedit` and `ai_plan`) calls `chat` after building the transcript and resolving an installed model name, and passes the raw response to `ai::backend::plan::ops_from_json`.
+- `src-tauri/src/ai/commands.rs` - `build_plan` (the shared LLM pass behind `ai_plan`) calls `chat` after building the transcript and resolving an installed model name, and passes the raw response to `ai::backend::plan::ops_from_json`.

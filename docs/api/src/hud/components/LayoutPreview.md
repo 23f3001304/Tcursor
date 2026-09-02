@@ -30,7 +30,7 @@ The component calls the private `compose(mode, ma)` function to obtain `[screenB
 
 Because the stage is 16:9, a box whose width-fraction equals its height-fraction is visually 16:9. This invariant is used throughout:
 
-- `"screen"` / `"screen_only"`: screen is centered. Width-fraction = height-fraction = `clamp((1 - 2*pad) * screen_size, 0, 1)`. In `"screen"` mode, a camera bubble is placed at the corner named by `cam_corner`, offset by `cam_margin_x` / `cam_margin_y`. `cam_size` is a height-fraction; the width-fraction is `cam_size * (9/16)` to preserve aspect ratio on the 16:9 stage.
+- `"screen"` / `"screen_only"`: screen is centered. Width-fraction = height-fraction = `clamp((1 - 2*pad) * screen_size, 0, 1)`. In `"screen"` mode, a camera bubble is placed at the corner named by `cam_corner`, offset by `cam_margin_x` / `cam_margin_y`. `cam_size` is a height-fraction, clamped only to `[0, 1]` (matching the slider's own 0.08-1.0 range and the real export math in `overlay_for`, `settings/appearance.rs`, which applies it with no extra clamp); the width-fraction is `cam_size * (9/16)` to preserve aspect ratio on the 16:9 stage.
 - `"camera"` / `"camera_only"`: camera is a large centered element; height-fraction = `clamp(cam_size, 0, 1 - 2*pad)`, width-fraction = `height * (9/16)`. In `"camera"` mode a small screen inset (width-fraction 0.28, equal height-fraction) is placed bottom-left at `pad` from the edge.
 - `"presenter"`: camera fills the left half and screen fills the right half, both inset by `pad`. Camera width-fraction is `camH * (9/16)`, centered horizontally in its half. Screen width-fraction equals its height-fraction (= `0.5 - pad*1.5`), vertically centered.
 

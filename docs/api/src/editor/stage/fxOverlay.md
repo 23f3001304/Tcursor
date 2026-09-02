@@ -1,14 +1,19 @@
 # src/editor/stage/fxOverlay.ts
 
-Builds the backend FX-overlay request (spotlight + click effects) from the current preview state and calls the `preview_fx_overlay` Tauri command, which renders it with the same renderer the export would use for that frame (`with_fx` → `select_fx`). Returning `null` early - FX disabled, or no active clicks and no active spotlight - skips the IPC round-trip entirely.
+Builds the backend FX-overlay request (spotlight + video-fx, and click ripples for an unmirrored style) from the current preview state and calls the `preview_fx_overlay` Tauri command, which renders it with the same renderer the export would use for that frame (`with_fx` → `select_fx`). Returning `null` early - FX disabled, or nothing active - skips the IPC round-trip entirely.
 
-This file holds no effect *logic*: everything it does is resolve which values to send. The one thing it must keep in step with Rust by hand is the click lifetime constant below.
+**Click ripples are conditional on the active style (sweep-2).** They used to ALWAYS be part of this request, mapped through `mapFn` and sent as `hits`, refreshed only at this call's `FX_BUCKET_MS` cadence with single-flight gating - the highest-frequency element on screen getting the coarsest, laggiest update rate. `ripplePreview.ts`'s `stylesMirrored` styles (Ripple - the default - and Shockwave) now draw straight on the preview canvas every `useCompositeLoop` tick instead, and are EXCLUDED from this request (`overlayNeedsClicks` returns `false` for them). The other four click-fx styles (Pulse/Glow/Neon/Particles) are NOT mirrored yet, so `overlayNeedsClicks` returns `true` for them and this request keeps building their `hits` exactly as before this pass - laggy at `FX_BUCKET_MS` cadence, but still visible in the live preview, not a silent regression to nothing.
+
+This file holds no effect *logic* otherwise: everything it does is resolve which spotlight/video-fx/click values to send.
 
 ### Behaviors
 
-- `uses the export's 600ms click lifetime, not 500ms` / `drops a click once it passes 600ms` - a 550ms-old click is still alive with `progress = 550/600`, and a 650ms-old one is gone. Pins `RIPPLE_MS` to the export's `LIFE_MS`.
-- `renders nothing at all when fx are disabled, spotlight included` - `clickfx.enabled: false` returns `null` and makes no IPC call, even with an active spotlight and a live click.
-- `still draws the spotlight when the click style is none` - `"none"` suppresses only the hits; the spotlight is still requested.
+- `includes click hits for an UNMIRRORED style (pulse) - falls back to the overlay exactly as before` / `drops an unmirrored-style click once it passes 600ms` - the export's 600ms lifetime (`ripplePreview.ts`'s `RIPPLE_LIFE_MS`, via `activeRippleHits`), not the old 500ms bug.
+- `excludes click hits for a MIRRORED style (ripple)` / `... (shockwave)` - `ripplePreview.ts` draws those client-side instead.
+- `excludes click hits when the style is none` / `still draws the spotlight regardless of the click style setting`.
+- `triggers a backend call from an unmirrored-style click ALONE, spotlight off` - an unmirrored style still pays the pre-sweep-2 request cost when the user clicks.
+- `returns null with no backend call for a mirrored-style click ALONE, spotlight off` - the actual win: a Ripple/Shockwave click no longer triggers this "hottest command" (`useCompositeLoop.md`) at all.
+- `returns null with no backend call when nothing is active at all` / `renders nothing at all when fx are disabled, spotlight included`.
 
 ## FxCamRect
 
@@ -41,11 +46,11 @@ export async function requestFxOverlay(
 ### Inputs
 
 - `ow`, `oh` - the overlay's render resolution (the caller may request less than the full canvas size to cut backend cost; the returned image upscales cleanly on blit).
-- `clicks`, `now` - the click track and current time; clicks within `RIPPLE_MS` of `now` become active hits. **`RIPPLE_MS` must stay equal to the export's `LIFE_MS` (600ms, `fx_state.rs`)** - a hit's `progress` is `elapsed / lifetime` and drives both ring radius and fade alpha, so when this constant was 500 every preview ring was ~20% further along than the export's at the same instant (smaller, fainter) and vanished 100ms early.
+- `clicks`, `now` - the click track and current time; used to build hits ONLY when `overlayNeedsClicks(clickfx.style)` is true (`ripplePreview.ts`) - a mirrored style's clicks never reach this function's `hits` array at all.
 - `cursorPx` - the zoom-projected cursor position in the *same* `ow`x`oh` space, or `null`.
 - `resolved` - the spotlight **already resolved** by the caller's own `resolveSpotlight(...)` call for this exact frame; `null`/inactive skips the spotlight entirely. This function does not call `resolveSpotlight` itself - `resolveSpotlight` mutates a `SpotlightSimState` in place (region handoff/transition tracking), so it must run exactly once per composite tick, not once here and once in the caller's cache-key computation (that double call used to double-advance the same stateful sim for no benefit, since both calls always used the same `now`).
 - `clickfx` - the recording's click-FX settings (style/color/intensity/enabled/`spotlight_dim_camera`).
-- `mapFn` - projects a 0..1 screen-content point into the same `ow`x`oh` pixel space as `ow`/`oh` (the caller's zoom-crop projection); used to place each click hit.
+- `mapFn` - projects a 0..1 screen-content point into the same `ow`x`oh` pixel space as `ow`/`oh` (the caller's zoom-crop projection); used to place each click hit when `overlayNeedsClicks` is true.
 - `screenScale` - the screen panel's height as a fraction of the FX render height (`= layout.screen[3]`). `spotRadius`/`spotFeather` are pre-multiplied by it so the spotlight is sized to the screen panel, matching the export's `fx_state_at` (`scene.screen.h / oh`) - without it the preview spotlight would be a fixed fraction of the whole frame (layout-agnostic).
 - `camRect: FxCamRect` - the camera panel's rect this frame, or `null` when no camera panel is shown. *Why needed even though the export derives it from `scene.camera`:* the preview has no `Scene`, so the caller must resolve and pass the equivalent rect itself.
 
@@ -56,7 +61,7 @@ export async function requestFxOverlay(
 ### Implementation
 
 0. Return `null` immediately when `clickfx.enabled` is false. *Why this is the very first check:* `enabled` is the master switch for the whole FX stack, spotlight included - the export's `fx_state::render` returns before drawing anything when it is off. Previously `enabled` only guarded the click-hit loop, so a recording with FX switched off still showed a spotlight while editing and exported without one.
-1. Build the active click `hits` (pixel position + 0..1 progress) by mapping each recent click through `mapFn`, skipping any off-crop (`mapFn` returned `null`) clicks; skipped entirely when the style is `"none"`.
+1. Build `hits` from `activeRippleHits(clicks, now)` (`ripplePreview.ts` - the export's exact 600ms lifetime/boundary math), mapping each active hit's position through `mapFn` - but ONLY when `overlayNeedsClicks(clickfx.style)` is true; otherwise `hits` stays `[]` (a mirrored style, or `"none"`).
 2. `spotActive = resolved && resolved.alpha > 0.001 && cursorPx`, from the already-resolved `resolved` param (no `resolveSpotlight` call here).
-3. If neither hits nor an active spotlight exist, return `null` without calling the backend.
-4. Otherwise assemble `FxOverlayParams` (hits + spotlight fields, with `spotRadius`/`spotFeather` scaled by `screenScale`); when `camRect` is non-null, also set `camRect`/`camRadius`/`dimCamera` (from `clickfx.spotlight_dim_camera`) on the params. `await previewFxOverlay(params)`; on an IPC error, log it (dev-only) and **rethrow** - it must surface as a rejected promise, not collapse into the same `null` that means "nothing to draw" (see Returns above).
+3. If neither `hits` nor an active spotlight exist, return `null` without calling the backend.
+4. Otherwise assemble `FxOverlayParams` (`hits` + spotlight fields, with `spotRadius`/`spotFeather` scaled by `screenScale`); when `camRect` is non-null, also set `camRect`/`camRadius`/`dimCamera` (from `clickfx.spotlight_dim_camera`) on the params. `await previewFxOverlay(params)`; on an IPC error, log it (dev-only) and **rethrow** - it must surface as a rejected promise, not collapse into the same `null` that means "nothing to draw" (see Returns above).

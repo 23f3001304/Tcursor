@@ -17,7 +17,7 @@ Extracts and validates the AI plan from a raw model response string.
 
 ### Implementation
 
-1. Call `extract_json(raw)` to strip optional markdown fences and locate the outermost `{...}` object by brace-counting. Returns `None` (and thus `Err`) if no balanced object exists.
+1. Call `extract_json(raw)` to strip optional markdown fences and locate the outermost `{...}` object by STRING-AWARE brace-counting (M4, bug-sweep-2): a private in-string/escape tracker (toggles on an unescaped `"`, skips the character right after a `\`) means a `{`/`}` appearing inside a JSON string value - e.g. a chatty model's own `"note"` field - is not counted as structure. Before this fix, `format: "json"` (which only constrains the reply to be VALID json, not to this schema) let a model emit something like `{"note":"skipping the idle stretch} at the start","zooms":[...]}`, and the naive counter cut the object off at the `}` inside `"note"` - producing a truncated, unparseable slice and a spurious "parse error" for a response the model formatted correctly. Returns `None` (and thus `Err`) if no balanced object exists.
 2. Deserialize the extracted slice into `Plan` using `serde_json::from_str`. `Plan.zooms` and `Plan.trim` both have `#[serde(default)]` so missing fields produce empty vec / `None` rather than a parse error.
 3. Convert each `PlanZoom` to `EditOp::AddZoomFull`:
    - Clamp `scale` to `[1.0, 4.0]`; default to `2.0` if absent. *Why:* prevents extreme zooms that break layout or go below 1.0 (zoom-out is not supported).
@@ -44,7 +44,10 @@ Extracts and validates the AI plan from a raw model response string.
 - `huge_dur_ms_is_dropped_not_overflow` - `dur_ms = u32::MAX` is caught by `checked_add` and dropped; the function returns `Err` rather than panicking on debug overflow checks.
 - `head_trim_with_zero_out_ms_runs_to_true_end` - `{"in_ms":2000,"out_ms":0}` produces `SetTrim { in_ms: 2000, out_ms: 0 }`, not a dropped op.
 - `zero_in_and_out_ms_trim_yields_no_trim_op` - `{"in_ms":0,"out_ms":0}` ("no trim decision") produces no `SetTrim` op.
+- `brace_inside_a_string_value_does_not_truncate_the_object` - M4: a `}` inside a `"note"` string value doesn't cut the object short; the real zoom past it still parses.
+- `unmatched_brace_inside_a_string_does_not_imbalance_depth` - an unmatched `{` inside a string doesn't leave `depth` permanently non-zero either.
+- `escaped_quote_inside_a_string_does_not_end_the_string_early` - a `\"` inside a string value doesn't toggle `in_string` off, so a `}` right after it still doesn't count as structure.
 
 ### Used by
 
-- `src-tauri/src/ai/commands.rs` - `ai_autoedit` calls `ops_from_json` after `ollama::chat` and applies the returned ops to the `EditDoc`.
+- `src-tauri/src/ai/commands.rs` - `ai_plan`'s `build_plan` calls `ops_from_json` after `ollama::chat` to turn the model's reply into `EditOp`s the frontend applies one at a time via `apply_edit_op`.

@@ -25,7 +25,7 @@ Edits the `appearance` group of `Settings` - specifically the per-mode `ModeAppe
 
 Renders `<section className="sec">` with heading "Frame appearance". Controls in source order:
 
-1. **Mode pill group** (`Pills`) - one pill per entry in `MODES` from `appearanceFields` (Screen / Camera / Presenter / S-only / C-only). Clicking a pill sets the local `mode` state only; it does not write to `value`. *Why:* the mode selector is UI navigation, not a stored preference - appearance settings exist for all modes simultaneously.
+1. **Mode pill group** (`Pills`) - one pill per entry in `MODES` from `appearanceFields` (Screen / Camera / Presenter / Screen only / Camera only). Clicking a pill sets the local `mode` state only; it does not write to `value`. *Why:* the mode selector is UI navigation, not a stored preference - appearance settings exist for all modes simultaneously.
 
 2. **`LayoutPreview`** - receives the current `mode` and the active `ModeAppearance` slice `ma = value[mode]`. Redraws live as sliders change.
 

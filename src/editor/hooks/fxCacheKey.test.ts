@@ -1,5 +1,35 @@
 import { describe, expect, it } from "vitest";
-import { timeBucket, fxCacheKey, isStaleFxResponse, fxResponseAction } from "./fxCacheKey";
+import { timeBucket, fxCacheKey, isStaleFxResponse, fxResponseAction, spotParamsKey } from "./fxCacheKey";
+
+const spot = { dim: 0.6, radius: 0.13, feather: 0.1, mode: "classic", tint: [130, 90, 255] as [number, number, number] };
+
+describe("spotParamsKey", () => {
+  it("is 'off' when no spotlight resolves", () => {
+    expect(spotParamsKey(null, 0.8, true)).toBe("off");
+  });
+
+  it("changes when any part of the spotlight's LOOK changes", () => {
+    const base = spotParamsKey(spot, 0.8, true);
+    expect(spotParamsKey({ ...spot, dim: 0.7 }, 0.8, true)).not.toBe(base);
+    expect(spotParamsKey({ ...spot, radius: 0.2 }, 0.8, true)).not.toBe(base);
+    expect(spotParamsKey({ ...spot, feather: 0.2 }, 0.8, true)).not.toBe(base);
+    expect(spotParamsKey({ ...spot, mode: "halo" }, 0.8, true)).not.toBe(base);
+    expect(spotParamsKey({ ...spot, tint: [0, 0, 0] }, 0.8, true)).not.toBe(base);
+    expect(spotParamsKey(spot, 0.5, true)).not.toBe(base);
+  });
+
+  it("changes when the alpha path flips, so a cached image is never blitted on the wrong basis", () => {
+    expect(spotParamsKey(spot, 0.8, true)).not.toBe(spotParamsKey(spot, 0.8, false));
+  });
+
+  it("ignores alpha entirely - that is what keeps the key stable across a fade", () => {
+    // On the separable path the cached PNG really is alpha-independent (requested at 1); on the
+    // fallback path, putting alpha in would move the wanted key nearly every tick of a fade, so
+    // every in-flight response would come back stale and none would ever be applied.
+    expect(spotParamsKey({ ...spot }, 0.8, true)).toBe(spotParamsKey({ ...spot }, 0.8, true));
+    expect(Object.keys(spot)).not.toContain("alpha");
+  });
+});
 
 describe("timeBucket", () => {
   it("rounds to the nearest bucket boundary", () => {

@@ -18,6 +18,7 @@ const PRESETS: LayoutPresets = {
   screen: preset(0.1, 0.1), camera: preset(0.5, 0.5), presenter: preset(0.9, 0.9),
   screen_only: preset(0.3, 0.3), camera_only: preset(0.7, 0.7),
   segs: [], // no per-segment overrides by default - every fixture segment resolves from its preset
+  inset_w: 0.8, // unused by layoutAt (cursorPanel.ts's concern) - matches the fixture screens' own width
 };
 
 const seg = (id: string, start_ms: number, end_ms: number, layout: string,
@@ -37,7 +38,7 @@ describe("layoutAt exit transitions (T33 - parity with LayoutTrack::scene_at)", 
     expect(layoutAt([seg("l0", 0, 1000, "camera")], null, 0, CANVAS)).toBeNull();
   });
 
-  it("defaults transition_out_ms to a hard cut, leaving old docs unchanged", () => {
+  it("treats a 0 transition_out_ms as a hard cut, leaving old docs unchanged", () => {
     const segs = [seg("l0", 0, 1000, "camera"), seg("l1", 2000, 3000, "presenter")];
     expect(sx(segs, 999)).toBeCloseTo(0.5, 6);  // last active ms is still fully camera
     expect(sx(segs, 1000)).toBeCloseTo(0.1, 6); // and it cuts to the gap default (screen)

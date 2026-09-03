@@ -69,6 +69,11 @@ fn next_cam_id(doc: &EditDoc) -> String {
 }
 fn clamp01(v: f32) -> f32 { v.clamp(0.0, 1.0) }
 
+/// Cross-fade duration (ms) a NEWLY CREATED layout segment gets, for BOTH its entry and its exit.
+/// Deliberately not the same thing as `LayoutSeg`'s serde default for `transition_out_ms`, which
+/// must stay `0` forever so a doc written before exit transitions existed keeps its hard cuts.
+pub const NEW_LAYOUT_TRANSITION_MS: u32 = 350;
+
 pub fn apply(doc: &mut EditDoc, op: EditOp) {
     match op {
         EditOp::AddZoom { at_ms, dur_ms } => {
@@ -128,8 +133,8 @@ pub fn apply(doc: &mut EditDoc, op: EditOp) {
             let dur = crate::edit::ops::region::dur_bound(doc);
             doc.layout.push(crate::edit::model::LayoutSeg {
                 id, start_ms: at_ms.min(dur), end_ms: at_ms.saturating_add(dur_ms).min(dur),
-                layout: valid_layout(&layout), transition_ms: 350, easing: "smooth".into(),
-                transition_out_ms: transition_out_ms.unwrap_or(0),
+                layout: valid_layout(&layout), transition_ms: NEW_LAYOUT_TRANSITION_MS, easing: "smooth".into(),
+                transition_out_ms: transition_out_ms.unwrap_or(NEW_LAYOUT_TRANSITION_MS),
                 easing_out: easing_out.map_or_else(|| "smooth".into(), |v| valid_easing(&v)), arrangement: None });
         }
         EditOp::UpdateLayoutSeg { id, start_ms, end_ms, layout, transition_ms, easing, transition_out_ms, easing_out } => {

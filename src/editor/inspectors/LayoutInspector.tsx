@@ -4,6 +4,7 @@ import type { EditDoc, EditOp, LayoutSeg } from "../../lib/edit";
 import type { LayoutPresetName, LayoutPresets } from "../../lib/ipc";
 import { NumberField, Switch } from "../controls/Controls";
 import { resolvedPanelsFor } from "../timeline/layoutTrack";
+import { LayoutThumb } from "../timeline/LayoutThumb";
 import { poseOfRect, setArrangementOp, VISIBLE_ALPHA, type PanelKind } from "../stage/arrange/arrangeMath";
 import { CurveEditor } from "./CurveEditor";
 
@@ -52,7 +53,8 @@ export function LayoutInspector({ seg, dur, presets, arrangeOn, onApply, onArran
 
   return (
     <div className="e-panel e-insp">
-      <PanelHeader title="Layout" lede="Frames the screen and webcam from here. Drag the block to move the switch point." closeTitle="Deselect" onClose={onClose} />
+      <PanelHeader title="Layout" lede="Frames the screen and webcam from here. Drag the block to move the switch point." closeTitle="Deselect" onClose={onClose}
+        thumb={<LayoutThumb panels={panels} w={48} h={28} />} />
 
       <div className="e-field">
         <span className="e-fl">Start from</span>

@@ -11,6 +11,29 @@ export function timeBucket(t: number, bucketMs: number): number {
   return Math.round(t / bucketMs) * bucketMs;
 }
 
+/** The spotlight's share of the cache key: "what would this frame's spotlight look like", built
+ *  from the RESOLVED spotlight (region overrides applied), not the raw global settings - otherwise
+ *  editing a region's dim/radius/feather/mode in the inspector never changed this string, so the
+ *  key never invalidated and the new look only showed up once something else (cursor movement, a
+ *  time-bucket change) coincidentally forced a fresh request. That is why it used to need a scrub.
+ *
+ *  `alpha` is deliberately ABSENT. On the separable path (`spotAlphaPlan`) that is now literally
+ *  true: the request is made at a reference alpha of `1` and the live alpha is applied at blit
+ *  time, so the cached PNG really is alpha-independent and the fade costs no IPC at all. On the
+ *  fallback path the request still carries the live alpha, and leaving it out of the key is what
+ *  keeps the key stable across a bucket - putting it in would move `fxWantRef` on nearly every
+ *  tick of a fade, so every response would come back "stale" and nothing would ever be applied.
+ *  `separable` IS in the key, so flipping paths (a mode or click-style change) re-requests instead
+ *  of reusing an image whose alpha basis no longer matches how it would be drawn. */
+export function spotParamsKey(
+  resolved: { dim: number; radius: number; feather: number; mode: string; tint: [number, number, number] } | null,
+  screenScale: number, separable: boolean,
+): string {
+  if (!resolved) return "off";
+  return `${resolved.dim}-${resolved.radius}-${resolved.feather}-${resolved.mode}-${resolved.tint.join(",")}`
+    + `-${screenScale.toFixed(3)}-${separable ? "sep" : "live"}`;
+}
+
 /** Name the FX-overlay request for one frame's resolved params - used both to skip a redundant
  *  in-flight request (same key = nothing would look different) and, in `.then`, to tell whether
  *  the response that just landed is still wanted. `clicksStr` (sweep-2): the caller passes `""`

@@ -38,7 +38,7 @@ export function nextArrangeMode(prev: ArrangeMode, ev: ArrangeEvent): ArrangeMod
 
 | event | result |
 |---|---|
-| `select` with an id | `{ on: true, segId }` - selecting a layout pill IS the entry gesture (binding UX), including re-selecting the same segment after an Escape |
+| `select` with an id | `{ on: true, segId }` - selecting a layout pill IS the entry gesture (binding UX), including re-selecting the same segment after an Escape. Returns `prev` UNCHANGED when it already has that segment on: one pill click fires both `useArrangeMode`'s `onSel` dispatch and its `[selSegId]` effect, and a fresh-but-equal literal for the second would defeat React's bail-out and cost an extra `Editor` render |
 | `select` with `null` | `NO_ARRANGE` - exits AND forgets the segment |
 | `arrange` | on, keeping the remembered `segId`; inert when nothing is remembered |
 | `escape` | off, REMEMBERING `segId`; a no-op (same object back) when already off |

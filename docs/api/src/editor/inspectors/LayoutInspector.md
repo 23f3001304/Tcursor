@@ -13,13 +13,14 @@ export function LayoutInspector({ seg, dur, presets, arrangeOn, onApply, onArran
 
 ### Controls
 
+- **Header thumbnail** (T34 L4) - `PanelHeader`'s `thumb` slot renders `LayoutThumb` (`../timeline/LayoutThumb.tsx`) at 48x28 from the SAME `panels` (`resolvedPanelsFor(seg, presets)`) this file already computes for the visibility switches below, so the schematic and the switches can never disagree about what's actually shown.
 - **Start from** (T34 L3, replaces the old Preset picker) - `Camera` / `Presenter` / `Screen only` / `Camera only`, as a chip row. `"screen"` stays deliberately absent for two reasons now: it IS the empty default (reached by deleting the pill or leaving a gap), and it is the one layout the timeline hides as a pill - starting from it would make the very segment being edited vanish from the track.
 - **Arrange on stage** - enters stage arrange mode for this segment (`useArrangeMode.md`). Replaced by a `--e-dim` hint line while the mode is already on, since selecting the pill enters it anyway and the button would be a no-op.
 - **Custom arrangement, based on X** + **Reset to preset** - shown only once the segment carries an `arrangement`. Reset is `clear_arrangement`, the one way back to a plain preset-driven segment.
 - **Show screen** / **Show webcam** - per-panel visibility. Re-showing restores the panel at whatever it currently RESOLVES to, which for one the arrangement hid is its provenance preset's own placement (L1: a hidden panel still resolves to a real rect, just at alpha 0). The switch for the LAST visible panel is DISABLED (`Switch`'s new `disabled` prop, with a "One panel has to stay visible" title) rather than live-but-ignored: `set_arrangement` rejects a write that would blank the frame, and a rejected op still resolves, so a switch that only early-returned would look like it worked and would leave a phantom undo step behind.
 - **Start / End** - the segment's `[start, end)` span, in seconds.
 - **Transition** + its curve - the ENTRY cross-fade, which STARTS at `start_ms`.
-- **Exit transition** + **Exit Curve** - the exit cross-fade, which COMPLETES at `end_ms`. `0` (the default) is a hard cut. The curve row only appears once the duration is non-zero, since `easing_out` means nothing at `0`.
+- **Exit transition** + **Exit Curve** - the exit cross-fade, which COMPLETES at `end_ms`. `0` is a hard cut; a segment created by `add_layout_seg` starts at 350ms, the same as its entry (`NEW_LAYOUT_TRANSITION_MS`, `api.md`), and only a doc saved before this field existed loads at `0`. The curve row only appears once the duration is non-zero, since `easing_out` means nothing at `0`.
 - **Delete layout**.
 
 ### What "Start from" actually writes

@@ -54,7 +54,7 @@ Discriminated-union command type serialized to/from the Tauri IPC channel and th
 - `SetAspect` - *replace the output frame aspect ratio (`EditDoc.aspect`); `FrameRenderer::new` re-resolves `Layout` from it on the next build (export or preview).*
 - `AddCut` - *append a cut segment; cut order and overlap resolution are rendering concerns, not enforced here.*
 - `SetSpeed` - *append a speed segment with the given `factor`; the id is auto-assigned and the caller controls ordering via the plan.*
-- `AddLayoutSeg` / `UpdateLayoutSeg` / `RemoveLayoutSeg` - *add/patch/remove a named-layout segment (`"screen"`, `"camera"`, `"presenter"`, ...), auto-id `l{n}`, clamped to the clip duration. Both carry the exit-transition pair as `Option`s: on `Add` they seed the segment (omitted = the `0`/hard-cut default, so every pre-existing caller is unchanged), on `Update` they follow the usual "only `Some` fields are written" rule. `easing_out` runs through `valid_easing` like every other easing setter.*
+- `AddLayoutSeg` / `UpdateLayoutSeg` / `RemoveLayoutSeg` - *add/patch/remove a named-layout segment (`"screen"`, `"camera"`, `"presenter"`, ...), auto-id `l{n}`, clamped to the clip duration. Both carry the exit-transition pair as `Option`s: on `Add` they seed the segment (omitted = `NEW_LAYOUT_TRANSITION_MS`, the same value the entry gets, so a new segment is symmetric - see that const), on `Update` they follow the usual "only `Some` fields are written" rule. `easing_out` runs through `valid_easing` like every other easing setter, and defaults to `"smooth"` - again the same as the entry.*
 - `SetArrangement` / `ClearArrangement` - *set/hide a segment's panel poses, or drop the arrangement so the segment resolves from its `layout` preset again (T34); dispatched to `edit::ops::arrangement::apply_arrangement`, which documents the full semantics. Each panel field is THREE-valued on the wire - key absent = "leave this panel alone", `null` = hide it, an object = that pose - which needs `arrangement::double_option` to deserialize, because plain `Option<Option<_>>` folds `null` into the outer `None` and would make "hide" indistinguishable from "don't touch". (This is the same ambiguity `SetZoomCamAction` exists to avoid; here the three-valued shape is unavoidable because two independent panels are patched by one op, so it is handled explicitly instead.)*
 - `AddEffect` / `UpdateEffect` / `RemoveEffect` - *add/patch/remove a Spotlight effect region; dispatched to `edit::ops::effects::apply_effect`.*
 - `AddCameraMove` - *append a webcam PiP keyframe at `t_ms` with center `(x, y)` and `size`, default easing `"smooth"`; auto-id `k{n}` (max existing `k`-suffix + 1); `t_ms` clamped to `[0, dur_bound(doc)]`, `x`/`y`/`size` clamped to `[0.0, 1.0]`. `doc.camera_moves` is kept sorted by `t_ms` after every add.*
@@ -65,6 +65,20 @@ Discriminated-union command type serialized to/from the Tauri IPC channel and th
 
 - `src-tauri/src/edit/commands.rs` - `apply_edit_op` Tauri command deserializes from IPC and forwards here
 - `src-tauri/src/ai/commands.rs` - AI director dispatches a sequence of `EditOp`s from a generated plan
+
+## NEW_LAYOUT_TRANSITION_MS
+
+```rust
+pub const NEW_LAYOUT_TRANSITION_MS: u32 = 350;
+```
+
+The cross-fade duration a **newly created** layout segment gets, for BOTH its entry and its exit, so `AddLayoutSeg` produces a symmetric segment. Every creation path inherits it: the Effects panel's "Layout Segment" card (`EditorPanels.tsx`), the timeline drop handler (`Timeline.tsx`), and the AI director all go through this one op, none of which passes `transition_out_ms`.
+
+*Why a named const and not two literals:* the exit used to be `transition_out_ms.unwrap_or(0)` while the entry was a hard-coded `350`, which is exactly the "layout effects animate in but hard-cut out" bug - a user-created segment faded in and then snapped. Deriving both from one const makes that asymmetry impossible to reintroduce by editing one site.
+
+*Why this is NOT the serde default:* `LayoutSeg::transition_out_ms` keeps `#[serde(default)]` (i.e. `0`), and must forever. That default is the back-compat contract for docs written before exit transitions existed - a project saved then still renders its hard cuts byte-identically, because a *missing field* means "this doc predates the feature", not "give me today's default". Two different defaults for the same field on purpose, pinned by `add_layout_seg_default_does_not_leak_into_loading_an_old_doc`.
+
+*Why `edit::seed`'s `layout_from_actions` still writes `0`:* those segments are derived from recorded `SetLayout` hotkeys and are gapless back-to-back, so every exit but the last would stand down anyway (`LayoutTrack::successor`'s `next_entry_wins`) - while the LAST one, which ends at the clip's end with no successor, would newly fade the whole frame back to the base `screen` layout over the recording's final 350ms. That is a rendering change to existing recordings for no gain, so the seed path is deliberately left alone.
 
 ## apply
 
@@ -110,5 +124,8 @@ Mutates `doc` in place by dispatching on `op`. The single write point for all `E
 - `add_zoom_bounds_to_clip_ms_not_the_trim_point` (`api_tests.rs`) - `clip_ms=60_000` with an earlier `trim.out_ms=10_000`: a zoom added at `at_ms=30_000` is NOT collapsed to the trim point.
 - `update_zoom_start_past_end_pulls_end_to_match` / `update_zoom_end_before_start_pulls_start_to_match` - M5: dragging one handle past the other pulls the untouched handle to meet it rather than persisting an inverted region.
 - `update_layout_seg_start_past_end_pulls_end_to_match` - same M5 guarantee for `UpdateLayoutSeg`.
+- `add_layout_seg_is_symmetric_by_default_entry_and_exit` (`api_layout_tests.rs`) - a new segment's `transition_out_ms`/`easing_out` equal its `transition_ms`/`easing`.
+- `add_layout_seg_explicit_exit_still_wins_over_the_default` - passing `Some(0)`/`Some("linear")` seeds those values; the default only fills an omitted field.
+- `add_layout_seg_default_does_not_leak_into_loading_an_old_doc` - a `LayoutSeg` JSON with no `transition_out_ms` key still deserializes to `0`, not `NEW_LAYOUT_TRANSITION_MS`.
 
 `Metrics` and `metrics` now live in `edit/ops/metrics.rs` (see `metrics.md`) - this file was at the size budget, and doc statistics are a separate responsibility from doc mutation.

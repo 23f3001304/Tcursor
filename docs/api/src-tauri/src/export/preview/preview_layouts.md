@@ -44,12 +44,15 @@ pub struct LayoutPresets {
     pub screen: LayoutPresetDto, pub camera: LayoutPresetDto, pub presenter: LayoutPresetDto,
     pub screen_only: LayoutPresetDto, pub camera_only: LayoutPresetDto,
     pub segs: Vec<SegRectDto>,
+    pub inset_w: f32,
 }
 ```
 
-All five `LayoutId` presets in one payload, named to match the enum (`Screen`, `Camera`, `Presenter`, `ScreenOnly`, `CameraOnly`). No `serde(rename_all)`, so the wire keys are the snake_case field names - which is what the TS side declares (`LayoutPresetName = "screen" | "camera" | "presenter" | "screen_only" | "camera_only"` in `src/lib/ipc.ts`).
+All five `LayoutId` presets in one payload, named to match the enum (`Screen`, `Camera`, `Presenter`, `ScreenOnly`, `CameraOnly`). No `serde(rename_all)`, so the wire keys are the snake_case field names - which is what the TS side declares (`LayoutPresetName = "screen" | "camera" | "presenter" | "screen_only" | "camera_only"` in `src/lib/ipcPreview.ts`).
 
 `segs: Vec<SegRectDto>` (T34 L2) - one entry per `EditDoc.layout` segment, IN DOC ORDER, not just posed ones: a lookup by id is then a single flat scan with no special-casing "this segment was never in the list" vs. "present but plain".
+
+`inset_w: f32` (fraction of `out_w`, from `FrameRenderer::inset_w_frac`, `render/accessors.md`) - the export's fixed reference width the synthetic cursor scales against (`cursorset::draw`'s `panel` factor). NOT one of the panel rects above: a baseline independent of the active preset/arrangement, so the editor preview can shrink the cursor exactly like the export does under a custom arrangement that narrows the screen panel (`src/editor/stage/cursorPanel.ts`'s `panelFactor`).
 
 ## panel_dto
 
@@ -93,10 +96,12 @@ Returns every layout preset's panel rects + alpha, plus each doc segment's own r
 
 ### Returns
 
-`Result<LayoutPresets, String>` - the five presets plus `segs`. Errors (as a string) if the renderer cannot be built; a `spawn_blocking` join failure maps to the same shape.
+`Result<LayoutPresets, String>` - the five presets plus `segs` and `inset_w`. Errors (as a string) if the renderer cannot be built; a `spawn_blocking` join failure maps to the same shape.
 
 ### Implementation
 
 Inside `with_warm`, take `(ow, oh)` from the cached `RenderMeta`, then call `renderer.resolve_layout(id)` for each of the five `LayoutId`s, run both of that scene's panels through `panel_dto`, and run the scene itself through `scene::arrangement::arrangement_of_preset` for the pose form.
 
 Then read the doc via `edit::seed::load_or_seed(paths)` - self-locking (see its own doc comment), safe to call here with no extra locking of its own even though `with_warm`'s `build`/`reuse` already called it once this same warm-up, since once the doc is current (the common, warm-cache case) it is a pure read. Map `doc.layout` through `seg_rect_dto(seg, || c.renderer.resolve_seg(seg), ow, oh)` into `segs`.
+
+Finally, `inset_w: c.renderer.inset_w_frac()` (`render/accessors.md`) - a single field read + the already-tested `inset_rect`, no scene resolve involved.

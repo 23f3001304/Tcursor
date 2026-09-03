@@ -184,8 +184,11 @@ fn remove_layout_seg_drops_by_id() {
     assert_eq!(doc.layout.len(), before - 1);
 }
 
-// Camera-move + M5 clamp op tests live in their own files - api_tests.rs was at the 200-line budget.
+// Camera-move + M5 clamp + layout-transition-default op tests live in their own files -
+// api_tests.rs was at the 200-line budget.
 #[path = "api_camera_tests.rs"]
 mod camera_tests;
+#[path = "api_layout_tests.rs"]
+mod layout_tests;
 #[path = "api_clamp_tests.rs"]
 mod clamp_tests;

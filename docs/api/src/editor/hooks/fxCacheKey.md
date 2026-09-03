@@ -60,3 +60,27 @@ Decides what to do with a resolved FX-overlay response. Stale (`isStaleFxRespons
 ### Used by
 
 `useCompositeLoop` - called from the FX-overlay request's `.then` with the cache key that was requested, `fxWantRef.current` (what's wanted now), and the resolved `url`. On `"apply"`, latches `fxLastTRef` to the requested key regardless of whether `imageUrl` is `null` or a string; on `"stale"`, does nothing (leaves the key unlatched).
+
+## spotParamsKey
+
+```ts
+export function spotParamsKey(
+  resolved: { dim: number; radius: number; feather: number; mode: string; tint: [number, number, number] } | null,
+  screenScale: number, separable: boolean,
+): string
+```
+
+The spotlight's share of the cache key: "what would this frame's spotlight look like". `"off"` when nothing resolves.
+
+Built from the **resolved** spotlight (region overrides applied), not the raw global settings - otherwise editing a region's `dim`/`radius`/`feather`/`mode` in the inspector never changed this string, so the key never invalidated and the new look only showed up once something else (cursor movement, a time-bucket change) coincidentally forced a fresh request. That is why it used to need a scrub to appear.
+
+*Why `alpha` is deliberately absent.* On the separable path (`spotAlphaPlan`, `spotlightPreview.ts`) that is now literally true: the request is made at a reference alpha of `1` and the live alpha is applied at blit time, so the cached PNG really is alpha-independent and the whole fade costs no IPC. On the fallback path the request still carries the live alpha, and leaving it out is what keeps the key stable across a bucket - putting it in would move `fxWantRef` on nearly every tick of a fade, so every in-flight response would come back `"stale"` and none would ever be applied.
+
+*Why `separable` IS in the key.* Flipping paths (a spotlight-mode change, or switching to a click-fx style whose rings land in this same PNG) must re-request rather than reuse an image whose alpha basis no longer matches how it would be drawn.
+
+### Behaviors
+
+- `is 'off' when no spotlight resolves`
+- `changes when any part of the spotlight's LOOK changes` - including `screenScale`.
+- `changes when the alpha path flips, so a cached image is never blitted on the wrong basis`
+- `ignores alpha entirely - that is what keeps the key stable across a fade`

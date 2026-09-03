@@ -14,6 +14,14 @@ describe("nextArrangeMode", () => {
     expect(nextArrangeMode(on("s1"), { kind: "select", segId: "s2" })).toEqual(on("s2"));
   });
 
+  // Both the `onSel` dispatch and the `[selSegId]` effect fire for one pill click; the second must
+  // be a real React bail-out, not a fresh-but-equal object that re-renders Editor for nothing.
+  it("re-selecting the segment it is ALREADY arranging returns the same object", () => {
+    const prev = on("s1");
+    expect(nextArrangeMode(prev, { kind: "select", segId: "s1" })).toBe(prev);
+    expect(nextArrangeMode(NO_ARRANGE, { kind: "select", segId: null })).toBe(NO_ARRANGE);
+  });
+
   it("deselecting (or selecting a zoom/effect instead) exits and forgets the segment", () => {
     expect(nextArrangeMode(on("s1"), { kind: "select", segId: null })).toEqual(NO_ARRANGE);
     expect(nextArrangeMode(off("s1"), { kind: "select", segId: null })).toEqual(NO_ARRANGE);

@@ -91,3 +91,72 @@ Resolves the spotlight at output time `ms`, or `null` when it's fully off (`alph
 ### Notes
 
 - Called once per tick from `useCompositeLoop`, which reuses the result both to build the FX-overlay cache key and (passed straight through) as `fxOverlay.ts`'s `requestFxOverlay` `resolved` param - not called from inside `requestFxOverlay` itself.
+
+## ALPHA_LINEAR_SPOT_MODES
+
+```ts
+export const ALPHA_LINEAR_SPOT_MODES: ReadonlySet<string> = new Set(["classic", "breathing", "vignette"]);
+```
+
+The spotlight modes whose rendered output is **exactly proportional** to `Spot.alpha`, on both renderers. Each of these three is a pure multiplicative dim - `color * (1 - dim*alpha * t)` (fx.wgsl's `u.b.z` is that `dim*alpha` product; `spotdraw.rs`'s `k` is the same thing) - so the recovered straight-alpha overlay rendered at `alpha = 1` has per-pixel alpha `dim*t`, and compositing THAT at `ctx.globalAlpha = a` yields `dim*t*a`: bit-for-bit what the backend would have returned had it been asked for `alpha = a`. That equivalence is the entire licence for `spotAlphaPlan`, and it is pinned on the Rust side by `classic_spotlight_overlay_alpha_is_proportional_to_spot_alpha` (`preview_fx_alpha_tests.rs`), which runs the real `select_fx` renderer.
+
+The other three are excluded because their alpha response is **not** proportional:
+
+| Mode | Why not |
+| --- | --- |
+| `halo` | adds an `intensity`-scaled ring (`color + tint*band*intensity`) that never reads alpha at all. |
+| `nebula` | the shader path never reads `u.b.z`; its dim is a fixed `1 - 0.80*t`. |
+| `blur` | mixes toward a blurred sample by `t`, with alpha only trimming that sample's brightness - so at `alpha -> 0` the blur is still nearly full strength. |
+
+Those three consequently barely fade in the **export** either, which is a real but separate renderer-side issue (see the report for 2026-09-02). Scaling them client-side would make the preview disagree with the export, so they keep the backend round-trip they have always used.
+
+## SpotAlphaPlan
+
+```ts
+export interface SpotAlphaPlan { requestAlpha: number; drawAlpha: number; separable: boolean }
+```
+
+The three-way split `spotAlphaPlan` (below) produces; see its **Returns** for what each field means.
+
+## spotAlphaPlan
+
+```ts
+export function spotAlphaPlan(resolved: ResolvedSpotlight | null, overlayHasClicks: boolean): SpotAlphaPlan
+```
+
+How one composite tick should split the spotlight's alpha between the **backend request** and the **client-side blit**.
+
+*The bug this exists for:* unlike layout/camera (drawn per-frame in TS at 60fps), the spotlight is a backend-rendered PNG overlay. `useCompositeLoop` requests it at most every `FX_BUCKET_MS` (40ms) and single-flights it, and each request costs a GPU readback + full-frame PNG encode + base64 + an `Image` decode. A 250ms fade therefore got a handful of overlay updates at best - and whenever one request outlived the fade, none at all, so the spotlight simply popped on and off. It was the one effect with no visible entry or exit animation.
+
+*The fix:* stop making the fade a round-trip. Ask for the overlay's **alpha-independent** appearance once and apply the ramp at draw time, where it costs nothing and runs at full frame rate.
+
+### Returns
+
+- `requestAlpha` - the `Spot.alpha` to ASK the backend for. `1` on the separable path, so the cached PNG is a reference image - which is what the cache key has always *claimed* it is, since `spotParamsKey` deliberately excludes alpha.
+- `drawAlpha` - the `ctx.globalAlpha` to blit a SEPARABLE cached overlay at. `1` on the fallback path.
+- `separable` - whether this frame's overlay may be faded client-side. The loop stores this **next to the cached `Image`**, not per tick: a response can land after the plan has moved on, and what matters at draw time is the basis the cached pixels were actually rendered at.
+
+### Implementation
+
+Separable requires BOTH conditions:
+
+1. **The overlay is spotlight-only.** `overlayHasClicks` is true for a click-fx style `ripplePreview.ts` does not mirror (Pulse/Glow/Neon/Particles), whose rings are baked into this same PNG - fading the layer for the spotlight would fade those too. The video-fx wash cannot appear here at all (`fxOverlay.ts` never sends `videoAlpha`/`videoT`), so the click styles are the only mixing case. The gate is the **style**, not the live hit list, so it cannot flicker on and off mid-fade as individual clicks expire.
+2. **The mode is in `ALPHA_LINEAR_SPOT_MODES`**, so the scaling is exact rather than merely plausible.
+
+Otherwise it returns today's behaviour verbatim - request at the live alpha, blit at `1` - so every non-separable case stays pixel-identical to before this change. A `null` `resolved` (nothing lit) returns `drawAlpha: 0`, so a separable cached overlay reaches true zero on the frame it should instead of waiting out one more round-trip.
+
+### Behaviors
+
+(`spotAlphaPlan.test.ts`, split from `spotlightPreview.test.ts` for the size limit)
+
+- `splits a linear-mode, spotlight-only overlay into a reference request + a live blit alpha`
+- `keeps the backend round-trip when the overlay also carries click rings`
+- `keeps the backend round-trip for a mode whose alpha response is not proportional`
+- `covers every linear mode` - and pins the set's membership.
+- `draws a separable overlay at 0 once nothing is lit, without waiting for a round-trip`
+- `clamps the blit alpha into 0..1`
+- `is a full ramp across a fade, not the two or three steps a bucketed round-trip gave` - every frame of the ramp reuses the SAME cached image (`requestAlpha` never varies).
+
+### Used by
+
+`useCompositeLoop` - once per tick, immediately after its single `resolveSpotlight` call and BEFORE the overlay blit (which is why that call moved earlier in the tick).

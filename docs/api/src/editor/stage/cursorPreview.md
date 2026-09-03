@@ -34,11 +34,12 @@ The cursor type active at output time `ms` (binary search: the last sample with 
 ```ts
 export function drawCursorSprite(
   ctx: CanvasRenderingContext2D, p: [number, number], now: number,
-  c: DrawCursor, clicks: ClickSample[], outH: number
+  c: DrawCursor, clicks: ClickSample[], outH: number,
+  panel: number, clip: [number, number, number, number],
 ): void
 ```
 
-Draws the cursor sprite at the already-projected canvas position `p`.
+Draws the cursor sprite at the already-projected canvas position `p`, scaled by `panel` and clipped to `clip` - mirrors the export's `cursorset::draw`, which scales AND clips the cursor to the screen panel (see `cursorPanel.ts`'s `panelFactor`/`panelClipRect`, the pure functions `previewCanvas.ts` derives both from).
 
 ### Inputs
 
@@ -47,7 +48,9 @@ Draws the cursor sprite at the already-projected canvas position `p`.
 - `now: number` - current output time (ms), used for the cursor-kind lookup and click-bounce timing.
 - `c: DrawCursor` - style/size/sprite inputs. Gated by `c.style !== "enhanced"` (no-op otherwise).
 - `clicks: ClickSample[]` - the click track; a click within 180ms of `now` shrinks the sprite briefly (`bounce_intensity`-scaled dip) when `c.clickBounce` is set.
-- `outH: number` - output canvas height; sprite size is `c.size * outH * 0.033`, independent of any zoom scale (matches the export, which doesn't scale cursor size with zoom either).
+- `outH: number` - output canvas height; sprite size is `c.size * outH * 0.033 * panel`, independent of any zoom scale (matches the export, which doesn't scale cursor size with zoom either - `panel` is a LAYOUT factor, not a zoom factor).
+- `panel: number` - the screen panel's scale-down factor (`cursorPanel.ts`'s `panelFactor`, 0.1..1.0) - a shrunk custom-arrangement panel shrinks the cursor with it, just like a small PiP screen does in the export.
+- `clip: [number, number, number, number]` - post-zoom canvas px `[x0, y0, x1, y1]` the cursor + trail are confined to (the screen panel's own on-screen rect, `cursorPanel.ts`'s `panelClipRect`) - so neither ever spills onto the background or the webcam. Possibly "inverted" (`x0` past `x1`) when the panel is entirely outside the current zoom crop; see Implementation.
 
 ### Returns
 
@@ -55,7 +58,8 @@ Draws the cursor sprite at the already-projected canvas position `p`.
 
 ### Implementation
 
-1. Resolve the active sprite/hotspot/canvas-height for `cursorAt(c.kinds, now)`, falling back to `"arrow"`. No-op if the sprite isn't loaded yet.
-2. Compute `sizePx`, apply the click-bounce dip if applicable, derive `scale = sizePx / canvasH`.
-3. Maintain `c.recent` (a ring of up to 6 positions), resetting it if the cursor jumped more than `outH * 0.2` in one frame (a scene cut / seek, not real motion).
-4. If `c.motionBlur > 0`, blit a fading trail from `c.recent` (oldest = most transparent) before the final blit at `p`.
+1. No-op (before touching `c.recent`) if `c.style !== "enhanced"`, or if `clip` is empty/inverted (`clip[2] <= clip[0] || clip[3] <= clip[1]`) - mirrors the export's `blit`'s `ox_start >= ox_end` guard.
+2. Resolve the active sprite/hotspot/canvas-height for `cursorAt(c.kinds, now)`, falling back to `"arrow"`. No-op if the sprite isn't loaded yet.
+3. Compute `sizePx` (scaled by `panel`), apply the click-bounce dip if applicable, derive `scale = sizePx / canvasH`.
+4. Maintain `c.recent` (a ring of up to 6 positions), resetting it if the cursor jumped more than `outH * 0.2` in one frame (a scene cut / seek, not real motion).
+5. `ctx.save()`/clip to `clip`/restore around the actual drawing: if `c.motionBlur > 0`, blit a fading trail from `c.recent` (oldest = most transparent) before the final blit at `p`.

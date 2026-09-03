@@ -1,11 +1,13 @@
 import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { motion } from "motion/react";
-import { IconZoomIn, IconBulb, IconAspectRatio } from "@tabler/icons-react";
+import { IconZoomIn, IconBulb } from "@tabler/icons-react";
 import type { EditDoc, EditOp } from "../../lib/edit";
+import type { LayoutPresets } from "../../lib/ipc";
 import { rulerTicks } from "./time";
 import { useRegionDrag } from "../hooks/useRegionDrag";
 import { useRafCoalesced } from "../hooks/useRafCoalesced";
-import { layoutRegions, transitionRampPct } from "./layers";
+import { layoutRegions } from "./layers";
+import { useLayoutLaneRegions, layoutLabel, layoutExtraStyle } from "./layoutLane";
 import { Filmstrip } from "./Filmstrip";
 import { AudioTrack } from "./AudioTrack";
 import { CameraLane } from "./CameraLane";
@@ -17,7 +19,6 @@ import { RegionRows } from "./RegionRows";
  *  audio waveforms - with a playhead spanning the clip. Selecting a pill opens the inspector;
  *  add-zoom lives in the transport. The playhead lives inside the body so it stays aligned with
  *  the ruler ticks + pills regardless of the timeline's outer padding. */
-const prettyLayout = (v: string) => v.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 
 // Row-height constants shared by the lane label gutter and `.e-tracks`' own natural row layout
 // (editor.css uses the same 32/22/6 numbers) - a lane's gutter label slot is always exactly as
@@ -25,22 +26,21 @@ const prettyLayout = (v: string) => v.replace(/_/g, " ").replace(/^./, (c) => c.
 const ROW_H = 32, AUDIO_ROW_H = 22, GAP = 6;
 const laneHeight = (rows: number, rowH: number) => (rows > 0 ? rows * rowH + (rows - 1) * GAP : 0);
 
-// `RegionRows.renderLabel` for each lane - hoisted to module scope (rather than declared inline
-// in the component body) since they're pure and close over nothing per-render: a fresh inline
-// arrow every render would be a fresh prop every render, defeating `RegionRows`' `React.memo`
-// even when the underlying region data hasn't changed.
+// `RegionRows.renderLabel` for the zoom/FX lanes - hoisted to module scope (rather than declared
+// inline in the component body) since they're pure and close over nothing per-render: a fresh
+// inline arrow every render would be a fresh prop every render, defeating `RegionRows`'
+// `React.memo` even when the underlying region data hasn't changed. The layout lane's own
+// `layoutLabel`/`layoutExtraStyle` (T34 L4: thumbnail + "Custom" label) live in `layoutLane.tsx`.
 const zoomLabel = (z: { scale: number }) => <><IconZoomIn size={12} />{z.scale.toFixed(1)}x</>;
 const fxLabel = () => <><IconBulb size={12} />Spotlight</>;
-const layoutLabel = (l: { layout: string }) => <><IconAspectRatio size={12} />{prettyLayout(l.layout)}</>;
-const layoutExtraStyle = (l: { transition_ms: number; transition_out_ms: number }, s: number, e: number) =>
-  ({ "--fin": `${transitionRampPct(l.transition_ms, e - s)}%`, "--fout": `${transitionRampPct(l.transition_out_ms, e - s)}%` } as React.CSSProperties);
 
-export const Timeline = memo(function Timeline({ doc, timeMs, dur, playing, onSeek, sel, onSel, onApply, thumbs, waves, wavesReady, hasWebcam }: {
+export const Timeline = memo(function Timeline({ doc, timeMs, dur, playing, onSeek, sel, onSel, onApply, thumbs, waves, wavesReady, hasWebcam, layoutPresets }: {
   doc: EditDoc; timeMs: number; dur: number; playing: boolean; onSeek: (ms: number) => void;
   sel: string | null; onSel: (id: string | null) => void;
   onApply: (op: EditOp) => Promise<EditDoc | null>;
   thumbs: string[]; waves: { system: string; mic: string }; wavesReady: boolean;
   hasWebcam: boolean; // threaded straight to CameraLane - see its own prop doc
+  layoutPresets: LayoutPresets | null; // T34 L4: the layout pill's thumbnail source (layoutLane.tsx)
 }) {
   const track = useRef<HTMLDivElement>(null);
   // Whether a SCRUB (a pointerdown that started on the body, not a pill/handle/keyframe bubbling
@@ -63,8 +63,7 @@ export const Timeline = memo(function Timeline({ doc, timeMs, dur, playing, onSe
   // `useRegionDrag`'s `beginDrag` and `RegionRows`' `React.memo` stay stable across e.g. a playhead tick.
   const zooms = useMemo(() => layoutRegions(doc.zooms), [doc.zooms]);
   const fx = useMemo(() => layoutRegions(doc.effects), [doc.effects]);
-  const nonScreenLayout = useMemo(() => doc.layout.filter((s) => s.layout !== "screen"), [doc.layout]);
-  const layouts = useMemo(() => layoutRegions(nonScreenLayout), [nonScreenLayout]);
+  const layouts = useLayoutLaneRegions(doc.layout, layoutPresets);
 
   // The three `onCommit` closures - `useCallback`'d (not a fresh inline arrow every render) so
   // they don't force `useRegionDrag`'s own attach/detach effect identity to churn.

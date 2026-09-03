@@ -41,23 +41,52 @@ pub fn probe_duration(video: &Path) -> Result<f64> {
     Ok(s.trim().lines().next().unwrap_or("0").trim().parse().unwrap_or(0.0))
 }
 
+/// An image staged on disk for ffmpeg to read, at a path NO other call can pick, deleted when
+/// the guard drops (including on an early `?` return, which the old inline cleanup skipped).
+///
+/// Why a per-call path: this used to write every image to one fixed `$TEMP/cursorzoom_bg_src`,
+/// and `decode_image` has two unrelated callers that run on different threads - `background::build`
+/// (the mesh wallpaper, on a cold `FrameRenderer::new` for a preview OR an export) and
+/// `decode_cursor` (every cursor-pack sprite, via the `cursor_sprites` command and `cursorset::prep`).
+/// The editor fires both within milliseconds of opening a project, so a sprite decode routinely
+/// overwrote the wallpaper's staged bytes in the window between the write and ffmpeg's read: the
+/// background came back as `resize_ns.png` stretched to the full frame (what `preview_bg` then
+/// returned, and what `composite_at` drew under every panel).
+struct StagedInput(std::path::PathBuf);
+
+impl StagedInput {
+    /// Write `bytes` to a fresh `$TEMP/cursorzoom_img_<pid>_<n>`: unique within the process by the
+    /// counter, across processes by the pid, so concurrent decodes can never share an input file.
+    fn new(bytes: &[u8]) -> Result<Self> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let n = SEQ.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!("cursorzoom_img_{}_{n}", std::process::id()));
+        std::fs::write(&path, bytes).context("write image temp")?;
+        Ok(Self(path))
+    }
+    fn path(&self) -> &Path { &self.0 }
+}
+
+impl Drop for StagedInput {
+    fn drop(&mut self) { let _ = std::fs::remove_file(&self.0); }
+}
+
 /// Decode `image` bytes (any ffmpeg-readable format) to a `w*h*4` BGRA buffer,
 /// scaled to the output size. Used for the bundled background wallpaper.
 pub fn decode_image(image: &[u8], w: u32, h: u32) -> Result<Vec<u8>> {
-    let tmp = std::env::temp_dir().join("cursorzoom_bg_src");
-    std::fs::write(&tmp, image).context("write bg temp")?;
+    let tmp = StagedInput::new(image)?;
     let out = ffcmd("ffmpeg")
-        .args(["-v", "error", "-i"]).arg(&tmp)
+        .args(["-v", "error", "-i"]).arg(tmp.path())
         .args(["-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "bgra",
             "-vf", &format!("scale={w}:{h}"), "-"])
         .stderr(Stdio::null())
         .output()
-        .context("spawn ffmpeg (bg decode)")?;
-    let _ = std::fs::remove_file(&tmp);
+        .context("spawn ffmpeg (image decode)")?;
     if out.stdout.len() == (w * h * 4) as usize {
         Ok(out.stdout)
     } else {
-        Err(anyhow!("bg decode produced {} bytes", out.stdout.len()))
+        Err(anyhow!("image decode produced {} bytes", out.stdout.len()))
     }
 }
 
@@ -137,15 +166,5 @@ pub fn probe_frame_count(video: &Path) -> Result<u64> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::crop_to_alpha;
-    #[test]
-    fn crop_trims_to_content_and_reports_origin() {
-        let mut buf = vec![0u8; 4 * 4 * 4]; // 4x4 transparent
-        let i = (2 * 4 + 1) * 4; // one opaque pixel at (x=1, y=2)
-        buf[i..i + 4].copy_from_slice(&[10, 20, 30, 255]);
-        assert_eq!(crop_to_alpha(&buf, 4, 4), Some((vec![10, 20, 30, 255], 1, 1, 1, 2)));
-        assert_eq!(crop_to_alpha(&vec![0u8; 4 * 4 * 4], 4, 4), None);
-        assert_eq!(crop_to_alpha(&[], 0, 0), None); // zero dims: None, not a panic
-    }
-}
+#[path = "ffio_tests.rs"]
+mod tests;

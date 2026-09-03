@@ -23,7 +23,12 @@ export const NO_ARRANGE: ArrangeMode = { on: false, segId: null };
  *  remembered. */
 export function nextArrangeMode(prev: ArrangeMode, ev: ArrangeEvent): ArrangeMode {
   switch (ev.kind) {
-    case "select": return ev.segId ? { on: true, segId: ev.segId } : NO_ARRANGE;
+    // Reference-stable when nothing actually changes: BOTH the `onSel` dispatch and the
+    // `[selSegId]` effect fire for one pill click, and returning a fresh `{on:true,segId}` literal
+    // for the second of them would defeat React's bail-out and cost an extra Editor render.
+    case "select":
+      if (!ev.segId) return NO_ARRANGE;
+      return prev.on && prev.segId === ev.segId ? prev : { on: true, segId: ev.segId };
     case "arrange": return prev.segId ? { on: true, segId: prev.segId } : prev;
     case "escape": return prev.on ? { on: false, segId: prev.segId } : prev;
     case "gone": return NO_ARRANGE;

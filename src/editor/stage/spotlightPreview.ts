@@ -107,3 +107,53 @@ export function resolveSpotlight(spotlight: SpotlightInput, ms: number, sim: Spo
   const feather = win?.feather !== undefined && win.feather >= 0 ? win.feather : params.feather;
   return { alpha, mode, dim, radius, feather, tint: params.tint };
 }
+
+/** Spotlight modes whose rendered output is EXACTLY proportional to `Spot.alpha`, on BOTH
+ *  renderers. Each of these three is a pure multiplicative dim - `color * (1 - dim*alpha * t)`
+ *  (fx.wgsl's `u.b.z` is `dim*alpha`; `spotdraw.rs`'s `k` is the same product) - so the recovered
+ *  straight-alpha overlay at `alpha = 1` has per-pixel alpha `dim*t`, and compositing THAT at
+ *  `globalAlpha = a` yields `dim*t*a`, i.e. bit-for-bit what the backend would have returned had it
+ *  been asked for `alpha = a`. That equivalence is the whole licence for `spotAlphaPlan` below.
+ *
+ *  The other three are excluded because their alpha response is NOT proportional: Halo adds an
+ *  `intensity`-scaled ring that ignores alpha entirely, Nebula's shader path never reads `u.b.z`
+ *  at all, and Blur mixes toward a blurred sample by `t` with alpha only trimming that sample's
+ *  brightness. (Those three consequently barely fade in the EXPORT either - a real but separate
+ *  renderer-side issue; scaling them client-side would make preview and export disagree, so they
+ *  keep the backend round-trip they have always used.) */
+export const ALPHA_LINEAR_SPOT_MODES: ReadonlySet<string> = new Set(["classic", "breathing", "vignette"]);
+
+/** How one composite tick should split the spotlight's alpha between the backend request and the
+ *  client-side blit. See `useCompositeLoop.md` - the fade used to be expressed ONLY through the
+ *  overlay round-trip (capped at `FX_BUCKET_MS` and single-flighted), so a 250ms fade got a couple
+ *  of updates at best and mostly read as the spotlight popping on and off. */
+export interface SpotAlphaPlan {
+  /** `Spot.alpha` to ASK the backend for. `1` on the separable path, so the cached PNG is a
+   *  reference, alpha-independent image (which is what the cache key has always claimed it is -
+   *  `spotParamsKey` deliberately excludes alpha). */
+  requestAlpha: number;
+  /** `ctx.globalAlpha` to blit a SEPARABLE cached overlay at. `1` on the fallback path. */
+  drawAlpha: number;
+  /** Whether this frame's overlay may be faded client-side. Rides with the cached image (the loop
+   *  stores it next to the `Image`), because a response can land after the plan has moved on. */
+  separable: boolean;
+}
+
+/** Decide that split. Separable requires BOTH:
+ *  - the overlay is spotlight-ONLY. `overlayHasClicks` is true for a click-fx style
+ *    `ripplePreview.ts` does not mirror (Pulse/Glow/Neon/Particles), whose rings are baked into
+ *    this same PNG; fading the layer would fade those too. (The video-fx wash cannot appear here -
+ *    `fxOverlay.ts` never sends `videoAlpha`/`videoT` - so the click styles are the only mixing
+ *    case.) The gate is the STYLE, not the live hit list, so it cannot flicker mid-fade.
+ *  - the mode is one of `ALPHA_LINEAR_SPOT_MODES`, so the scaling is exact rather than merely
+ *    plausible.
+ *  Otherwise it returns today's behaviour verbatim: request at the live alpha, blit at `1`.
+ *  A `null` resolved spotlight (nothing lit) draws a separable cached overlay at `0`, so the fade
+ *  reaches true zero on the frame it should instead of waiting out one more round-trip. */
+export function spotAlphaPlan(resolved: ResolvedSpotlight | null, overlayHasClicks: boolean): SpotAlphaPlan {
+  if (!resolved) return { requestAlpha: 0, drawAlpha: 0, separable: false };
+  if (overlayHasClicks || !ALPHA_LINEAR_SPOT_MODES.has(resolved.mode)) {
+    return { requestAlpha: resolved.alpha, drawAlpha: 1, separable: false };
+  }
+  return { requestAlpha: 1, drawAlpha: Math.min(Math.max(resolved.alpha, 0), 1), separable: true };
+}

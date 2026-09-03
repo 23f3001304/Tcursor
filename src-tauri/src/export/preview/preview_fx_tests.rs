@@ -162,3 +162,8 @@ fn no_hole_without_webcam_even_if_dim_camera_is_false() {
     ).unwrap();
     assert_eq!(url_no_webcam, url_plain_dim, "no webcam -> the hole must never render");
 }
+
+// The spotlight-alpha linearity pin lives in its own file - preview_fx_tests.rs was at the
+// 200-line budget.
+#[path = "preview_fx_alpha_tests.rs"]
+mod alpha_tests;

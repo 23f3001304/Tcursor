@@ -35,7 +35,7 @@ export const RegionRows = memo(RegionRowsInner) as typeof RegionRowsInner;
 - `rowClass: string` / `blkClass: string` - the row and pill CSS classes (`"e-zoomrow"`/`"e-zblk"`, `"e-fxrow"`/`"e-fxblk"`, or `"e-layrow"`/`"e-layblk"`) - the only thing distinguishing the three lanes visually.
 - `dragState: Drag | null` - the lane's own `useRegionDrag().drag` value; while a region in THIS lane is dragging, its live `start`/`end`/`dyPx` override the region's own `start_ms`/`end_ms`/render position.
 - `beginDrag` - the lane's own `useRegionDrag().beginDrag`, wired to the pill body (`"move"`) and both edge handles (`"l"`/`"r"`).
-- `renderLabel: (r: T) => React.ReactNode` - the pill's icon + text (zoom: `IconZoomIn` + `{scale}x`; FX: static `IconBulb` + "Spotlight"; layout: `IconAspectRatio` + `prettyLayout(layout)`).
+- `renderLabel: (r: T) => React.ReactNode` - the pill's icon + text (zoom: `IconZoomIn` + `{scale}x`; FX: static `IconBulb` + "Spotlight"; layout, T34 L4: a small `LayoutThumb` schematic of the segment's own resolved panels + "Custom" or `prettyLayout(layout)` - see `layoutLane.md`).
 - `extraStyle?: (r, s, e) => React.CSSProperties` - additional inline style merged onto the pill (layout only: the `--fin`/`--fout` fade-ramp CSS vars from `transitionRampPct`).
 
 ### Behavior

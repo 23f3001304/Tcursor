@@ -2,7 +2,19 @@
 
 The single place the preview decides what drives the webcam PiP on a given frame, mirroring the ORDERING inside `FrameRenderer::step_camera` (`src-tauri/src/export/render/mod.rs`).
 
-**Why it is its own module:** the ordering is the parity-critical part - a keyframe override and the smart zoom action must never both apply. Keeping the decision in one function means the preview cannot drift from the export, and it keeps `useCompositeLoop` (which was over the 200-line limit with this inline) focused on the render loop.
+**Why it is its own module:** the ordering is the parity-critical part - a keyframe override and the smart zoom action must never both apply. Keeping the decision in one function means the preview cannot drift from the export, and it keeps `useCompositeLoop` (which was over the 200-line limit with this inline) focused on the render loop. `activeCamDraft` sits here for the same reason: it is a rule about which draft outranks which, which is this module's whole subject.
+
+## activeCamDraft
+
+```ts
+export const activeCamDraft: (draft: CamPose | null, arranging: boolean) => CamPose | null
+```
+
+The Move-mode draft the composite should HONOUR this frame - the draft itself normally, `null` while stage arrange mode owns the stage. `useCompositeLoop` wraps `dragPoseRef.current` in it before handing it to `frameCamLayout` below.
+
+**Why it exists.** `frameCamLayout` gives the drag pose precedence over the base layout rect (`drag ?? camMoveAt(...)`), and the base layout rect is exactly where arrange mode's own live draft lives (`arrange/useArrangeDrag.md`). Without this gate, an unsaved Move-mode drag carried into arrange mode pinned the composited webcam while the arrange frame moved freely.
+
+**Why it SUPPRESSES rather than discards.** `CameraPanel` promises the user exactly two things that throw an unsaved Move drag away: pressing Add/Update, or moving the playhead. Selecting a layout segment is not one of them, and it is reachable in ordinary use (the timeline stays interactive with the Camera panel open) with no feedback at the moment of loss, because `EditorPanels` swaps to `LayoutInspector` in the same pass. So nothing here writes `camDraftRef`: the draft is invisible to the composite for as long as arranging lasts and reasserts intact on exit. An entry seek (`arrangeSeekMs`) can still clear it - but that is the documented playhead trigger doing its own job, not arrange mode taking a third one. Pinned by `frameCam.test.ts`'s "entering AND leaving leaves a pending draft intact" and its end-to-end pass through `frameCamLayout`.
 
 ## frameCamLayout
 

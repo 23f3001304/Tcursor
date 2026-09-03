@@ -35,6 +35,12 @@ pub struct LayoutPresets {
     pub screen: LayoutPresetDto, pub camera: LayoutPresetDto, pub presenter: LayoutPresetDto,
     pub screen_only: LayoutPresetDto, pub camera_only: LayoutPresetDto,
     pub segs: Vec<SegRectDto>,
+    /// `FrameRenderer::inset_w_frac` - the reference width (fraction of output width) the export's
+    /// synthetic cursor scales against (`cursorset::draw`'s `panel` factor). NOT one of the panel
+    /// rects above: it's a fixed baseline independent of the active preset/arrangement, so the
+    /// editor preview can shrink the cursor exactly like the export does when a custom arrangement
+    /// narrows the screen panel (`cursorPanel.ts`'s `panelFactor`).
+    pub inset_w: f32,
 }
 
 fn panel_dto(p: &Panel, ow: f32, oh: f32) -> PanelRectDto {
@@ -84,6 +90,7 @@ pub async fn preview_layouts(folder: String, app: tauri::AppHandle) -> Result<La
                 screen: one(LayoutId::Screen), camera: one(LayoutId::Camera), presenter: one(LayoutId::Presenter),
                 screen_only: one(LayoutId::ScreenOnly), camera_only: one(LayoutId::CameraOnly),
                 segs,
+                inset_w: c.renderer.inset_w_frac(),
             })
         })
     })

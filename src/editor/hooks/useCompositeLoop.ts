@@ -4,12 +4,13 @@ import type { ClickFxSettings, CursorSettings, ZoomSettings } from "../../hud/se
 import type { CameraMove, EffectRegion, LayoutSeg, Zoom } from "../../lib/edit";
 import { camAt } from "../stage/camera";
 import { type CamPose } from "../stage/cameraMoves";
-import { frameCamLayout } from "../stage/frameCam";
+import { activeCamDraft, frameCamLayout } from "../stage/frameCam";
 import { drawPreview } from "../stage/previewCanvas";
 import { requestFxOverlay, type FxCamRect } from "../stage/fxOverlay";
+import { fxCamRect, fxFrameGeometry } from "../stage/fxGeometry";
 import { drawMirroredRipples, overlayNeedsClicks } from "../stage/ripplePreview";
-import { fxCacheKey, fxResponseAction, timeBucket } from "./fxCacheKey";
-import { resolveSpotlight, newSpotlightSimState, type SpotlightSimState } from "../stage/spotlightPreview";
+import { fxCacheKey, fxResponseAction, spotParamsKey, timeBucket } from "./fxCacheKey";
+import { resolveSpotlight, newSpotlightSimState, spotAlphaPlan, type SpotlightSimState } from "../stage/spotlightPreview";
 import { layoutAt } from "../timeline/layoutTrack";
 import type { CursorSpritesState } from "./useCursorSprites";
 
@@ -30,16 +31,14 @@ const FX_SCALE = 0.5; // internal render resolution factor vs the canvas; blit u
 export function useCompositeLoop({
   screenRef, webcamRef, audioRef, canvasRef,
   playRef, timeRef, onTimeRef,
-  trackRef, layoutRef, layoutPresetsRef, layoutSegsRef, cameraMovesRef, zoomsRef, zoomSettingsRef, dragPoseRef, clicksRef, effectsRef, clickfxRef, kindsRef, cursorRef,
+  trackRef, layoutRef, layoutPresetsRef, layoutSegsRef, cameraMovesRef, zoomsRef, zoomSettingsRef, dragPoseRef, arrangingRef, clicksRef, effectsRef, clickfxRef, kindsRef, cursorRef,
   spritesRef, trailRef, dirtyRef, bgImgRef, spotSimRef,
 }: {
-  screenRef: RefObject<HTMLVideoElement | null>;
-  webcamRef: RefObject<HTMLVideoElement | null>;
-  audioRef: RefObject<HTMLAudioElement | null>;
-  canvasRef: RefObject<HTMLCanvasElement | null>;
-  playRef: RefObject<boolean>;
-  timeRef: RefObject<number>;
-  onTimeRef: RefObject<(ms: number) => void>;
+  // The hidden media elements + the canvas they composite onto; then the clock (is it playing,
+  // where is the playhead, and how to report it back).
+  screenRef: RefObject<HTMLVideoElement | null>; webcamRef: RefObject<HTMLVideoElement | null>;
+  audioRef: RefObject<HTMLAudioElement | null>; canvasRef: RefObject<HTMLCanvasElement | null>;
+  playRef: RefObject<boolean>; timeRef: RefObject<number>; onTimeRef: RefObject<(ms: number) => void>;
   trackRef: RefObject<CamSample[]>;
   layoutRef: RefObject<PreviewLayout | null>;
   layoutPresetsRef: RefObject<LayoutPresets | null>;
@@ -48,6 +47,8 @@ export function useCompositeLoop({
   zoomsRef: RefObject<Zoom[]>;
   zoomSettingsRef: RefObject<ZoomSettings>;
   dragPoseRef: RefObject<CamPose | null>;
+  /** Arrange mode owns the stage: `activeCamDraft` suppresses the Move draft's EFFECT without
+   *  clearing `dragPoseRef` - see `frameCam.md`. */ arrangingRef: RefObject<boolean>;
   clicksRef: RefObject<ClickSample[]>;
   effectsRef: RefObject<EffectRegion[]>;
   clickfxRef: RefObject<ClickFxSettings>;
@@ -62,6 +63,9 @@ export function useCompositeLoop({
   const lastReportRef = useRef(0);
   const lastFrameTRef = useRef(0);
   const fxOverlayImgRef = useRef<HTMLImageElement | null>(null);
+  // Whether the CACHED overlay image may be faded client-side (see `spotAlphaPlan`): true only for
+  // an image that was requested at a reference alpha of 1 and contains nothing but the spotlight.
+  const fxSeparableRef = useRef(false);
   const fxInflightRef = useRef(false);
   const fxLastTRef = useRef(""); // key of the last response actually APPLIED
   const fxWantRef = useRef(""); // key computed on the MOST RECENT tick (fires or not)
@@ -102,57 +106,41 @@ export function useCompositeLoop({
             // What drives the webcam PiP this frame (keyframe/drag override, else the smart
             // zoom action) - see frameCamLayout, which mirrors step_camera's ordering.
             const frameLayout = frameCamLayout(baseLayout, t, cam.scale, cameraMovesRef.current,
-              dragPoseRef.current, zoomsRef.current, zoomSettingsRef.current, c.width, c.height);
+              activeCamDraft(dragPoseRef.current, arrangingRef.current), zoomsRef.current, zoomSettingsRef.current, c.width, c.height);
             // Draw the base frame (background + screen + webcam + cursor) WITHOUT FX
             if (!offscreenRef.current) offscreenRef.current = document.createElement("canvas");
             drawPreview(ctx, c.width, c.height, sv, webcamRef.current, cam,
-              frameLayout, bgImgRef.current, clicksRef.current, t, cur, offscreenRef.current);
-            // Panel/zoom mapping for the FX-overlay request AND the ripple draw below - mirrors drawPreview's crop.
-            const fxW = Math.max(1, Math.round(c.width * FX_SCALE)), fxH = Math.max(1, Math.round(c.height * FX_SCALE));
-            const lay = frameLayout, pad = Math.min(fxW, fxH) * 0.045;
-            const dx = lay ? lay.screen[0] * fxW : pad, dy = lay ? lay.screen[1] * fxH : pad;
-            const dw = lay ? lay.screen[2] * fxW : fxW - 2 * pad, dh = lay ? lay.screen[3] * fxH : fxH - 2 * pad;
-            // Spotlight radius/feather are fractions of the SCREEN panel, not the whole FX frame -
-            // pre-scale by the panel's height fraction so the preview matches the export's
-            // screen-panel-relative spotlight (fx_state.rs). See requestFxOverlay.
-            const screenScale = fxH > 0 ? dh / fxH : 1;
-            const scale = Math.max(cam.scale, 0.01);
-            const cw = Math.max(1, Math.round(fxW / scale)), ch = Math.max(1, Math.round(fxH / scale)); // round: coordmap::crop
-            const camPxX = dx + cam.cx * dw, camPxY = dy + cam.cy * dh;
-            const cx0 = Math.min(Math.max(camPxX - cw / 2, 0), Math.max(0, fxW - cw));
-            const cy0 = Math.min(Math.max(camPxY - ch / 2, 0), Math.max(0, fxH - ch));
-            const mapFn = (fx: number, fy: number): [number, number] | null => {
-              const bx = dx + fx * dw, by = dy + fy * dh; // panel-local point, pre-zoom
-              return [(bx - cx0) * fxW / cw, (by - cy0) * fxH / ch];
-            };
+              frameLayout, bgImgRef.current, clicksRef.current, t, cur, offscreenRef.current,
+              layoutPresetsRef.current?.inset_w);
+            // Panel/zoom mapping for the FX-overlay request AND the ripple draw below - mirrors
+            // drawPreview's crop; see fxGeometry.ts for the math and why cw/ch are rounded.
+            const { fxW, fxH, screenScale, map: mapFn } = fxFrameGeometry(c.width, c.height, frameLayout, cam, FX_SCALE);
             const cpos = mapFn(cam.curx, cam.cury);
             // Client-side click ripples (sweep-2, see ripplePreview.ts) - BEFORE the overlay blit
             // below, so an active spotlight's dim composites on top of it like everything else.
             drawMirroredRipples(ctx, clicksRef.current, t, cf.enabled, cf.style, cf.color, cf.intensity, mapFn, fxW, fxH, c.width, c.height);
-            // Blit the cached backend FX overlay (spotlight/video-fx, + clicks for an unmirrored style) on top
-            const fxImg = fxOverlayImgRef.current;
-            if (fxImg && fxImg.complete && fxImg.naturalWidth > 0) ctx.drawImage(fxImg, 0, 0, c.width, c.height);
+            // resolveSpotlight runs EXACTLY once per tick (it advances spotSimRef in place), and now
+            // runs BEFORE the blit rather than after it, because the blit needs this frame's alpha.
             const spot = { effects: effectsRef.current, on: cf.spotlight,
               params: { dim: cf.spotlight_dim, radius: cf.spotlight_radius, feather: cf.spotlight_feather,
                 mode: cf.spotlight_mode, tint: cf.spotlight_tint } };
-            // Camera PiP rect for the spotlight's "don't dim the webcam" exclusion: the webcam is
-            // a fixed, unzoomed overlay drawn on top (see drawPreview/previewCanvas.ts), so its
-            // rect is the layout fraction applied directly to the FX canvas, not the zoom crop.
-            // Hole gate mirrors the export's has_hole (alpha > 0.05), not layoutAt's draw threshold.
-            const camRect: FxCamRect = lay?.cam && (lay.camAlpha ?? 1) > 0.05
-              ? { rect: [lay.cam[0] * fxW, lay.cam[1] * fxH, (lay.cam[0] + lay.cam[2]) * fxW, (lay.cam[1] + lay.cam[3]) * fxH],
-                  radius: lay.cam[4] * fxW }
-              : null;
-
-            // Built from the RESOLVED spotlight (region overrides applied), not the raw global
-            // settings - otherwise editing a region's dim/radius/feather/mode in the inspector
-            // never changed this string, so the cache key never invalidated, so the new look
-            // only ever showed up once something else (cursor movement, a time bucket change)
-            // coincidentally forced a fresh request. That's why it required scrubbing to see.
             const resolvedSpot = resolveSpotlight(spot, t, spotSimRef.current);
-            const spotParamsStr = resolvedSpot
-              ? `${resolvedSpot.dim}-${resolvedSpot.radius}-${resolvedSpot.feather}-${resolvedSpot.mode}-${resolvedSpot.tint.join(",")}-${screenScale.toFixed(3)}`
-              : "off";
+            // The spotlight's fade is applied HERE, at 60fps, instead of being re-rendered by the
+            // backend at FX_BUCKET_MS - which is why it used to pop on/off instead of fading (a
+            // 250ms fade got ~2 overlay updates, fewer when a request outlived it). `separable`
+            // rides with the cached image, not with this tick's plan: a response can land after the
+            // plan moved on, and the stored flag is the basis the CACHED pixels were rendered at.
+            const plan = spotAlphaPlan(resolvedSpot, overlayNeedsClicks(cf.style));
+            const fxImg = fxOverlayImgRef.current;
+            const blitAlpha = fxSeparableRef.current ? plan.drawAlpha : 1;
+            if (fxImg && fxImg.complete && fxImg.naturalWidth > 0 && blitAlpha > 0) {
+              ctx.save();
+              ctx.globalAlpha = blitAlpha;
+              ctx.drawImage(fxImg, 0, 0, c.width, c.height);
+              ctx.restore();
+            }
+            const camRect: FxCamRect = fxCamRect(frameLayout, fxW, fxH);
+            const spotParamsStr = spotParamsKey(resolvedSpot, screenScale, plan.separable);
             const cursorStr = cpos ? `${Math.round(cpos[0])}-${Math.round(cpos[1])}` : "none";
             // "" for a mirrored style (ripplePreview.ts draws it instead) - the real click list
             // only for an unmirrored one, which still falls back to this overlay (see fxCacheKey.ts).
@@ -167,7 +155,12 @@ export function useCompositeLoop({
             if (!fxInflightRef.current && cacheKey !== fxLastTRef.current) {
               fxInflightRef.current = true;
               // Reuses the tick's ONE resolveSpotlight call (above) - resolving again would double-advance the sim.
-              requestFxOverlay(fxW, fxH, clicksRef.current, t, cpos, resolvedSpot, cf, mapFn, screenScale, camRect)
+              // `requestAlpha` is 1 on the separable path (a reference, alpha-independent overlay)
+              // and the live alpha otherwise; `separable` is captured so the response latches the
+              // basis its own pixels were rendered at, not whatever the plan says by then.
+              const separable = plan.separable;
+              const reqSpot = resolvedSpot ? { ...resolvedSpot, alpha: plan.requestAlpha } : null;
+              requestFxOverlay(fxW, fxH, clicksRef.current, t, cpos, reqSpot, cf, mapFn, screenScale, camRect)
                 .then(url => {
                   fxInflightRef.current = false;
                   const action = fxResponseAction(cacheKey, fxWantRef.current, url);
@@ -179,10 +172,10 @@ export function useCompositeLoop({
                   fxLastTRef.current = cacheKey;
                   if (action.imageUrl) {
                     const img = new Image();
-                    img.onload = () => { fxOverlayImgRef.current = img; dirtyRef.current = true; };
+                    img.onload = () => { fxOverlayImgRef.current = img; fxSeparableRef.current = separable; dirtyRef.current = true; };
                     img.src = action.imageUrl;
                   } else {
-                    fxOverlayImgRef.current = null; dirtyRef.current = true; // nothing active at this key
+                    fxOverlayImgRef.current = null; fxSeparableRef.current = false; dirtyRef.current = true; // nothing active at this key
                   }
                 })
                 .catch(() => { fxInflightRef.current = false; }); // failure: unlatched, retried

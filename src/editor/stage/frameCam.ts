@@ -4,6 +4,15 @@ import type { ZoomSettings } from "../../hud/settings/settings";
 import { camMoveAt, overrideCamPanel, type CamPose } from "./cameraMoves";
 import { applyCamZoomAction, camZoomAlpha, resolveCamAction, resolvedCamDefault } from "./camZoomAction";
 
+/** The Move-mode draft the composite should HONOUR this frame: none while arrange mode owns the
+ *  stage, because `frameCamLayout` gives the draft precedence over the base layout rect - which is
+ *  exactly where the arrange draft lives. Suppression, never a discard: the caller's `camDraftRef`
+ *  is not written, so an unsaved Move drag is still there when arranging ends and reasserts, and
+ *  is still discarded ONLY by its two documented triggers (Add/Update keyframe, or moving the
+ *  playhead). See `frameCam.md`. */
+export const activeCamDraft = (draft: CamPose | null, arranging: boolean): CamPose | null =>
+  arranging ? null : draft;
+
 /** The webcam PiP panel for one frame, mirroring `FrameRenderer::step_camera`'s ORDERING - the
  *  single place the preview decides what drives the PiP, so it cannot drift from the export:
  *

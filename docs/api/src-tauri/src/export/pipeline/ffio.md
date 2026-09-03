@@ -60,14 +60,31 @@ Decodes any ffmpeg-readable image format to a `w * h * 4` BGRA buffer, scaled to
 
 ### Returns
 
-`Result<Vec<u8>>` - BGRA buffer of exactly `w * h * 4` bytes. Errors if ffmpeg cannot be spawned or output length mismatches.
+`Result<Vec<u8>>` - BGRA buffer of exactly `w * h * 4` bytes. Errors if the input cannot be staged, ffmpeg cannot be spawned, or output length mismatches.
 
 ### Implementation
 
-1. Write `image` to `$TEMP/cursorzoom_bg_src`. *Why temp file:* ffmpeg cannot read piped data for all image formats.*
-2. Spawn `ffmpeg -v error -i <tmp> -frames:v 1 -f rawvideo -pix_fmt bgra -vf scale=w:h -`, capturing stdout.
-3. Delete the temp file unconditionally after spawn.
-4. Assert `stdout.len() == w * h * 4`; error if not.
+1. Stage `image` via `StagedInput::new` - a temp file at a path unique to this call. *Why temp file:* ffmpeg cannot read piped data for all image formats.*
+2. Spawn `ffmpeg -v error -i <staged> -frames:v 1 -f rawvideo -pix_fmt bgra -vf scale=w:h -`, capturing stdout.
+3. Assert `stdout.len() == w * h * 4`; error if not. The staged file is deleted when the guard drops, including on the early `?` return.
+
+### Behaviors worth knowing
+
+- `decode_image_is_immune_to_a_clobber_of_the_legacy_shared_path` - a decode's result depends only on the bytes it was handed, even while an unrelated writer hammers `$TEMP/cursorzoom_bg_src` (the path every caller used to share) with a different image.
+
+## StagedInput
+
+```rust
+struct StagedInput(std::path::PathBuf); // private to ffio.rs
+```
+
+An input image written to disk for ffmpeg to read, at `$TEMP/cursorzoom_img_<pid>_<n>` (`n` from a process-wide `AtomicU64`), removed by `Drop`.
+
+### Why it exists
+
+`decode_image` used to stage every image at one fixed `$TEMP/cursorzoom_bg_src`, and it has two unrelated callers that run on different threads: `background::build` (the mesh wallpaper, on a cold `FrameRenderer::new` for a preview *or* an export) and `decode_cursor` (every cursor-pack sprite, via the `cursor_sprites` command and `cursorset::prep`). The editor fires both within milliseconds of opening a project, so a sprite decode could overwrite the wallpaper's staged bytes in the window between the write and ffmpeg's read - the background then decoded from `resize_ns.png`, scaled to the full frame. That is what `preview_bg` returned to the editor stage, and what `composite_at` drew under every panel. A per-call path (unique within the process by the counter, across processes by the pid) makes the collision impossible rather than unlikely.
+
+Dropping the guard also deletes the file on the error path, which the old inline `remove_file` (placed after a `?`) skipped.
 
 ## png_dims
 

@@ -625,6 +625,11 @@
    duration, where the percentage width alone would shrink to a few px. */
 .e-zblk, .e-fxblk, .e-layblk { container-type: inline-size; min-width: 18px; }
 @container (max-width: 34px) { .e-zlabel { display: none; } }
+/* T34 L4: the layout pill's thumbnail hides FIRST, at a wider breakpoint than the "hide the whole
+   label" one above - a narrow pill keeps its preset name readable a while longer, losing only the
+   little schematic, before the same 34px rule above takes the text too. Scoped to `.e-layblk`
+   only (the zoom/FX lanes' plain icons never grow this wide, so they don't need the extra step). */
+@container (max-width: 48px) { .e-layblk .e-laythumb { display: none; } }
 /* Audio track: quiet, low-contrast waveform with a small source icon (system vs mic). */
 .e-audiorow { position: relative; height: 22px; border-radius: var(--e-r); overflow: hidden; }
 .e-audiorow img { width: 100%; height: 100%; object-fit: fill; opacity: .5; display: block; pointer-events: none; }
@@ -647,6 +652,14 @@
 .e-layblk::after { right: 0; width: var(--fout, 0%);
   background: linear-gradient(to left, var(--pill-fill), rgba(0,0,0,0)); }
 .e-layblk > * { position: relative; z-index: 1; }
+/* T34 L4: the layout pill's thumbnail (`LayoutThumb.tsx`) - a schematic of the segment's OWN
+   resolved panels (`arrThumb.ts`), shared verbatim (same viewBox, just a bigger rendered size) by
+   `LayoutInspector`'s 48x28 header thumbnail. --e-layout/--e-cam echo the lane accent and the
+   camera accent, same colors `ArrangeOverlay`/`CameraLane` already use for "this is the screen"
+   vs "this is the webcam". */
+.e-laythumb { flex: none; display: block; }
+.e-laythumb-screen { fill: none; stroke: var(--e-layout); stroke-width: 1.4; }
+.e-laythumb-cam { fill: var(--e-cam); opacity: .9; }
 /* Camera-move lane: keyframes are single-point diamonds, not start/end regions, so one row
    holds every keyframe (no layer-stacking like the zoom/fx/layout tracks above). Banded - see
    the zoom row comment above. */
@@ -804,6 +817,10 @@
 /* Panel header: title + matched ghost icon buttons (reset/close) over a hairline. */
 .e-phead { padding-bottom: var(--e-sp-3); margin-bottom: var(--e-sp-4); border-bottom: 1px solid var(--e-border2); }
 .e-phead-top { display: flex; align-items: center; justify-content: space-between; }
+/* T34 L4: title + an optional thumb (LayoutInspector's arrangement schematic) share ONE flex
+   group so .e-phead-top still only ever balances two things (this group vs .e-hicons) - a bare
+   <h2> with no thumb reads identically to the pre-L4 markup. */
+.e-phead-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .e-phead h2 { margin: 0; font-size: var(--e-text-title-size); font-weight: var(--e-text-title-weight); letter-spacing: -0.01em; }
 .e-phead .e-lede { margin: var(--e-sp-1) 0 0; }
 .e-hicons { display: flex; align-items: center; gap: 2px; }

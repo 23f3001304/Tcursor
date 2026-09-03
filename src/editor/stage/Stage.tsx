@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState, type RefObject } from "react";
+import { memo, useRef, useState, type RefObject } from "react";
 import type { CamSample, ClickSample, CursorSpriteDto, CursorKindSample, PreviewLayout, LayoutPresets } from "../../lib/ipc";
 import type { CursorSettings, ClickFxSettings, ZoomSettings } from "../../hud/settings/settings";
 import type { Aspect, CameraMove, EditDoc, EditOp, EffectRegion, LayoutSeg, Zoom } from "../../lib/edit";
@@ -92,6 +92,15 @@ export const Stage = memo(function Stage({ src, webcamSrc, track, layout, layout
   // see a dragged segment exactly as they will once it commits. Presentation only: the op is
   // written on release (see useArrangeDrag).
   const arrange = useArrangeDrag({ seg: arrangeSeg, presets: layoutPresets, canvasRef: canvas, canvasW, canvasH, dirtyRef, onApply });
+  const arranging = arrangeSeg !== null;
+  // Mode exclusivity has a half beyond the pointer: `frameCamLayout` gives `camDraftRef` precedence
+  // over the base layout rect (`drag ?? camMoveAt(...)`), which is exactly where the arrange draft
+  // lives - a leftover UNSAVED Move drag would pin the composited webcam while the arrange frame
+  // moved freely. The loop therefore reads the draft through `activeCamDraft`, which SUPPRESSES it
+  // while this is true instead of clearing it: `camDraftRef` is never written here, so the Move
+  // draft survives arrange mode and reasserts on exit, still discarded only by its own two
+  // documented triggers (CameraPanel's Add/Update, or moving the playhead).
+  const arrangingRef = useRef(arranging); arrangingRef.current = arranging;
   // Mirrored into refs directly (not via useSyncRefs) so the rAF loop always reads the live
   // presets/segments without re-subscribing; same plain "useRef + assign each render" pattern.
   const layoutPresetsRef = useRef(arrange.presets); layoutPresetsRef.current = arrange.presets;
@@ -114,14 +123,14 @@ export const Stage = memo(function Stage({ src, webcamSrc, track, layout, layout
   // The background decode + all three "recomposite / drop the draft now" gates (see the hook's
   // own doc comment) - extracted to keep this file under its line budget, like useReticleDrag.
   useStageInvalidation({ bgUrl, bgImgRef: bgImg, dirtyRef, effects, spotSimRef, timeMs, playRef, camDraftRef,
-    drawDeps: [timeMs, playing, track, layout, arrange.presets, layoutSegs, cameraMoves, zooms, zoomSettings, clicks, effects, cursor, clickfx, cursorKinds] });
+    drawDeps: [timeMs, playing, track, layout, arrange.presets, layoutSegs, cameraMoves, zooms, zoomSettings, clicks, effects, cursor, clickfx, cursorKinds, arranging] });
 
   useMediaPlayback({ screenRef: screen, webcamRef: webcam, audioRef: audio, playing, src, muted, volume, audioSrc, timeMs, playRef });
 
   useCompositeLoop({
     screenRef: screen, webcamRef: webcam, audioRef: audio, canvasRef: canvas,
     playRef, timeRef, onTimeRef,
-    trackRef, layoutRef, layoutPresetsRef, layoutSegsRef, cameraMovesRef, zoomsRef, zoomSettingsRef, dragPoseRef: camDraftRef, clicksRef, effectsRef, clickfxRef, kindsRef, cursorRef,
+    trackRef, layoutRef, layoutPresetsRef, layoutSegsRef, cameraMovesRef, zoomsRef, zoomSettingsRef, dragPoseRef: camDraftRef, arrangingRef, clicksRef, effectsRef, clickfxRef, kindsRef, cursorRef,
     spritesRef, trailRef, dirtyRef, bgImgRef: bgImg, spotSimRef,
   });
 
@@ -137,13 +146,6 @@ export const Stage = memo(function Stage({ src, webcamSrc, track, layout, layout
   // the already-selected Region zoom instead (the two are mutually exclusive click meanings), and
   // except while arranging, where the click belongs to the panel frames and must not also drop a
   // zoom behind them (the same guard aim mode gets, one mode further).
-  const arranging = arrangeSeg !== null;
-  // Mode exclusivity has a second half beyond the pointer: `frameCamLayout` gives `camDraftRef`
-  // precedence over the base layout rect (`drag ?? camMoveAt(...)`), which is exactly where the
-  // arrange draft lives - so an UNSAVED Move-mode drag left over from before would pin the
-  // composited webcam while the arrange frame moved freely. Entering arrange discards it, the same
-  // way a seek does. `dirtyRef` because a paused loop otherwise keeps the stale frame on screen.
-  useEffect(() => { if (arranging) { camDraftRef.current = null; dirtyRef.current = true; } }, [arranging]); // eslint-disable-line react-hooks/exhaustive-deps
   const onCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (arranging) return;
     const t = targetUnderPointer(e.clientX, e.clientY);

@@ -53,4 +53,19 @@ impl FrameRenderer {
         crate::export::scene::layout::resolve_seg_scene(seg, &self.settings.appearance,
             self.layout.out_w, self.layout.out_h, self.sw, self.sh)
     }
+
+    /// The reference inset width `cursorset::draw` normalizes the synthetic cursor's on-screen
+    /// size against (as a fraction of `out_w`) - the width `inset_rect` computes for this
+    /// renderer's OWN base `Layout` (fixed pad/scale, NOT a per-preset appearance value: see
+    /// `composite_at`'s `inset_rect(self.sw, self.sh, &self.layout)` call), so a screen panel
+    /// narrower than this reference gets a proportionally smaller cursor - exactly like a small
+    /// PiP screen shrinks it in the export. Exposed so `preview_layouts` can report it alongside
+    /// the panel rects, letting the editor preview compute the SAME `panel` scale factor
+    /// (`cursorPanel.ts`'s `panelFactor`) the export's `cursorset::draw` does, with no second
+    /// formula to drift out of sync (this is a plain field read + the already-tested `inset_rect`
+    /// - no new logic to test here).
+    pub fn inset_w_frac(&self) -> f32 {
+        crate::export::coordmap::inset_rect(self.sw, self.sh, &self.layout).2 as f32
+            / self.layout.out_w.max(1) as f32
+    }
 }

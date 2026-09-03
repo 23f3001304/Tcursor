@@ -65,3 +65,19 @@ pub fn resolve_seg(&self, seg: &crate::edit::model::LayoutSeg) -> crate::export:
 ```
 
 One `LayoutSeg`'s resolved `Scene` - its own poses when it carries an `arrangement`, else its preset's `Scene` - through `scene::layout::resolve_seg_scene` (`scene/layout.md`), the exact function `LayoutTrack::from_segs` uses per segment when the export runs. Lets `preview_layouts` (T34 L2) report a posed segment's true panels to the editor preview with no second pose-math path to drift out of sync with the export.
+
+## FrameRenderer::inset_w_frac
+
+```rust
+pub fn inset_w_frac(&self) -> f32
+```
+
+The reference inset width `cursorset::draw` normalizes the synthetic cursor's on-screen size against (as a fraction of `out_w`) - the width `inset_rect` (`coordmap.md`) computes for this renderer's OWN base `Layout` (fixed pad/scale, NOT a per-preset appearance value: see `composite_at`'s `inset_rect(self.sw, self.sh, &self.layout)` call in `mod.md`), so a screen panel narrower than this reference gets a proportionally smaller cursor - exactly like a small PiP screen shrinks it in the export.
+
+### Returns
+
+`f32` - `inset_rect(self.sw, self.sh, &self.layout).2 as f32 / self.layout.out_w.max(1) as f32`. Not directly unit-tested: it is a plain field read plus a call to the already-tested `inset_rect` (`coordmap.md`), so there is no new arithmetic here to pin.
+
+### Used by
+
+- `src-tauri/src/export/preview/preview_layouts.rs` - `preview_layouts` reports this as `LayoutPresets.inset_w`, letting the editor preview compute the SAME `panel` scale factor the export's `cursorset::draw` does (`cursorPanel.ts`'s `panelFactor`), with no second formula to drift out of sync.

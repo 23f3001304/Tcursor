@@ -104,7 +104,7 @@ Where one panel sits on the output frame, resolution-independently - mirrors Rus
 ### Used by
 
 - `src/lib/edit.ts` - fields of `Arrangement`; the `set_arrangement` `EditOp` payload.
-- `src/lib/ipc.ts` - inside `LayoutPresetDto.arrangement`.
+- `src/lib/ipcPreview.ts` - inside `LayoutPresetDto.arrangement`.
 
 ## Arrangement
 
@@ -117,7 +117,7 @@ One `LayoutSeg`'s custom two-panel composition (T34) - mirrors Rust `edit::model
 ### Used by
 
 - `src/lib/edit.ts` - the optional `LayoutSeg.arrangement` field.
-- `src/lib/ipc.ts` - `LayoutPresetDto.arrangement`, the pose form of each preset.
+- `src/lib/ipcPreview.ts` - `LayoutPresetDto.arrangement`, the pose form of each preset.
 
 ## LayoutSeg
 
@@ -131,7 +131,7 @@ A time range in which a specific output layout (screen-only, picture-in-picture,
 - `start_ms / end_ms: number` - playback time range for this segment.
 - `layout: string` - layout mode name (e.g., `"screen"`, `"presenter"`, `"camera_only"`). *Why a string rather than a typed union:* matches the Rust serde representation and allows new layout names to be added without regenerating the TS types.
 - `transition_ms: number` - cross-fade duration (ms) blending IN from whatever layout preceded this segment; the blend STARTS at `start_ms`.
-- `transition_out_ms: number` / `easing_out: string` - the exit cross-fade, which COMPLETES at `end_ms`. `0` is a hard cut. *Why these are required here despite being serde-defaulted in Rust:* Rust always SERIALIZES them, so every doc that reaches TypeScript has them - only files on disk can be missing them.
+- `transition_out_ms: number` / `easing_out: string` - the exit cross-fade, which COMPLETES at `end_ms`. `0` is a hard cut - the value a doc saved before this field existed loads as, and the value the user can still set explicitly; a segment created by `add_layout_seg` gets 350ms (`NEW_LAYOUT_TRANSITION_MS`), matching its entry. *Why these are required here despite being serde-defaulted in Rust:* Rust always SERIALIZES them, so every doc that reaches TypeScript has them - only files on disk can be missing them.
 - `easing: string` - easing function name for that cross-fade, same free-form string convention as `Zoom.easing`.
 - `arrangement?: Arrangement | null` - this segment's explicit panel poses. *Why optional here when the other serde-defaulted fields are required:* Rust SKIPS the key entirely when unset (that is what keeps a pre-T34 `edit.json` byte-stable on re-save), so unlike `transition_out_ms` it genuinely can be missing from a doc that reaches TypeScript. Absent = resolve from the `layout` preset as before; present = the poses win and `layout` becomes display-only provenance ("based on Presenter") that still selects the appearance block the panels' radius/ring/shape come from.
 
@@ -267,7 +267,7 @@ Discriminated union of all edit verbs. Each variant is tagged by the `op` string
 - `set_aspect` - replaces `EditDoc.aspect`; the next export or preview build re-resolves the output `Layout` from it.
 - `add_cut` - appends a new `Cut` for the given time range.
 - `set_speed` - sets or replaces the speed ramp covering `[start_ms, end_ms]` with the given `factor`. *Why set rather than add:* the backend merges or replaces overlapping speed segments; the caller describes the desired outcome, not the mutation.
-- `add_layout_seg` - appends a new `LayoutSeg` of `layout` starting at `at_ms` with duration `dur_ms`. `transition_out_ms`/`easing_out` are optional; omitted, the segment gets the hard-cut default, so existing callers are unchanged.
+- `add_layout_seg` - appends a new `LayoutSeg` of `layout` starting at `at_ms` with duration `dur_ms`. `transition_out_ms`/`easing_out` are optional; omitted, the segment gets the SAME cross-fade as its entry (`NEW_LAYOUT_TRANSITION_MS` = 350ms / `"smooth"`, see `api.md`), i.e. a new segment is symmetric. Pass `transition_out_ms: 0` to ask for an explicit hard cut.
 - `update_layout_seg` - patches any subset of a layout segment's fields by `id`: time range, `layout` name, `transition_ms`, `easing`, `transition_out_ms`, `easing_out`. *Why partial update:* dragging a segment's edge on the timeline changes only `start_ms`/`end_ms`.
 - `remove_layout_seg` - deletes the layout segment with the given `id`.
 - `set_arrangement` - sets or hides a layout segment's panel poses. Each panel field is THREE-valued: **omit** the key to leave that panel as it is, pass `null` to hide it, pass a `PanelPose` to set (and un-hide) it. *Why omitted and `null` must differ:* they are the only way one op can patch two independent panels without a caller ever having to resend a pose it did not change. Note `JSON.stringify` drops `undefined` keys, so `{ cam: undefined }` correctly reads as "leave the cam alone" - but an explicit `cam: null` HIDES it, so never use `null` as a stand-in for "no value". On a segment with no arrangement yet the base is "both panels hidden", so converting a preset means sending BOTH panels: take them from the matching `LayoutPresetDto.arrangement` in `previewLayouts`. A change that would hide both panels is rejected by Rust (a no-op).

@@ -1,5 +1,6 @@
 import type { PreviewLayout, ClickSample } from "../../lib/ipc";
 import { drawCursorSprite, type DrawCursor } from "./cursorPreview";
+import { panelFactor, panelClipRect } from "./cursorPanel";
 
 export interface DrawCam { scale: number; cx: number; cy: number; curx: number; cury: number }
 
@@ -9,12 +10,16 @@ export interface DrawCam { scale: number; cx: number; cy: number; curx: number; 
  *  not just the screen's own source, so the background pans/zooms in lockstep with it. The webcam
  *  PiP and cursor are then drawn on top of the zoomed result at their normal (unzoomed) size,
  *  matching the export where they're composited/projected after the crop too. Canvas2D drawImage
- *  holds 60fps. */
+ *  holds 60fps.
+ *
+ *  `insetW` is `LayoutPresets.inset_w` (fraction of canvas width) - the export's fixed cursor-scale
+ *  reference (see `cursorPanel.ts`); defaults to 1 (no shrink) for the brief window before layout
+ *  presets have loaded, same as every other "presets not ready yet" fallback in this file. */
 export function drawPreview(
   ctx: CanvasRenderingContext2D, w: number, h: number,
   screen: HTMLVideoElement, webcam: HTMLVideoElement | null, cam: DrawCam,
   layout: PreviewLayout | null, bg: HTMLImageElement | null, clicks: ClickSample[], now: number,
-  cursor: DrawCursor | null, offscreen: HTMLCanvasElement
+  cursor: DrawCursor | null, offscreen: HTMLCanvasElement, insetW: number = 1
 ) {
   if (offscreen.width !== w) offscreen.width = w;
   if (offscreen.height !== h) offscreen.height = h;
@@ -69,11 +74,17 @@ export function drawPreview(
   ctx.drawImage(offscreen, cx0, cy0, cw, ch, 0, 0, w, h);
 
   // Cursor: project its pre-zoom position through the same crop, drawn on the zoomed result at a
-  // fixed size (the export doesn't scale cursor size with zoom either - only its position moves).
+  // size that scales with the SCREEN PANEL (not the zoom - only its position moves), and clipped
+  // to the panel's on-screen rect - mirroring cursorset::draw's `panel` factor + `clip` exactly
+  // (see cursorPanel.ts). Both are computed from the panel's own pre-zoom rect (dx/dy/dw/dh, the
+  // real layout when loaded or the pad-based fallback otherwise) so they track a shrunk/moved
+  // custom-arrangement panel the same way the export does.
   if (cursor && vw > 0 && vh > 0) {
     const curPxX = dx + cam.curx * dw, curPxY = dy + cam.cury * dh;
     const cpos: [number, number] = [(curPxX - cx0) * w / cw, (curPxY - cy0) * h / ch];
-    drawCursorSprite(ctx, cpos, now, cursor, clicks, h);
+    const panel = panelFactor(dw / w, insetW);
+    const clip = panelClipRect({ x: dx, y: dy, w: dw, h: dh }, { cx0, cy0, cw, ch }, w, h);
+    drawCursorSprite(ctx, cpos, now, cursor, clicks, h, panel, clip);
   }
 
   // Webcam PiP: exact rect from the layout (rounded-rect, cover-fit), else a bottom-right circle.

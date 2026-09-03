@@ -189,7 +189,7 @@ export function Editor({ folder, onClose }: { folder: string; onClose: () => voi
         volume={volume}
         onVolume={setVolume}
       />
-      <Timeline doc={doc} timeMs={timeMs} dur={dur} playing={playing} onSeek={onSeek} sel={sel} onSel={onSel} onApply={applyOp} thumbs={thumbs} waves={waves} wavesReady={wavesReady} hasWebcam={hasWebcamSignal(layout)} />
+      <Timeline doc={doc} timeMs={timeMs} dur={dur} playing={playing} onSeek={onSeek} sel={sel} onSel={onSel} onApply={applyOp} thumbs={thumbs} waves={waves} wavesReady={wavesReady} hasWebcam={hasWebcamSignal(layout)} layoutPresets={layoutPresets} />
       {moveOffDialog}
       <EditorDialogs folder={folder} settings={doc.settings} exportState={exportState} onSaveSettings={saveDocSettings}
         showExport={showExportDialog} onCloseExport={() => setShowExportDialog(false)}

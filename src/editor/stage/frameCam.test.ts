@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { frameCamLayout } from "./frameCam";
+import { activeCamDraft, frameCamLayout } from "./frameCam";
 import type { PreviewLayout } from "../../lib/ipc";
 import type { Zoom } from "../../lib/edit";
+import type { CamPose } from "./cameraMoves";
 import type { ZoomSettings } from "../../hud/settings/settings";
 
 const OW = 1280, OH = 720;
@@ -60,5 +61,37 @@ describe("frameCamLayout - camAlpha parity with the export (H2)", () => {
 
   it("is a no-op when there is no camera panel", () => {
     expect(frameCamLayout(null, 1000, 2.2, [], null, [], settings(), OW, OH)).toBeNull();
+  });
+});
+
+// T34 L3 review round 2: arrange mode must not let a leftover Move-mode draft pin the composited
+// webcam (the draft outranks the base layout rect, which is where the arrange draft lives) - but
+// it must not DESTROY that draft either. `CameraPanel` promises exactly two discard triggers:
+// pressing Add/Update, or moving the playhead. Selecting a layout segment is not one of them.
+describe("activeCamDraft - arrange mode suppresses the Move draft without discarding it", () => {
+  const draft: CamPose = { x: 0.3, y: 0.4, size: 0.2 };
+
+  it("hands the draft straight through while arrange mode is off", () => {
+    expect(activeCamDraft(draft, false)).toBe(draft);
+    expect(activeCamDraft(null, false)).toBeNull();
+  });
+
+  it("hides it from the composite while arrange mode is on", () => {
+    expect(activeCamDraft(draft, true)).toBeNull();
+  });
+
+  it("entering AND leaving leaves a pending draft intact - the ref is never written", () => {
+    const camDraftRef: { current: CamPose | null } = { current: { ...draft } };
+    expect(activeCamDraft(camDraftRef.current, true)).toBeNull(); // arrange entry: ignored...
+    expect(camDraftRef.current).toEqual(draft);                   // ...but still there
+    expect(activeCamDraft(camDraftRef.current, false)).toEqual(draft); // exit: it reasserts
+  });
+
+  it("through the real composite path: the PiP holds its layout rect while arranging, and follows the draft after", () => {
+    const base = layout();
+    const drawn = (arranging: boolean) =>
+      frameCamLayout(base, 1000, 1, [], activeCamDraft(draft, arranging), [], settings(), OW, OH)?.cam;
+    expect(drawn(true)).toEqual(base.cam); // suppressed - the arrange draft in `base` wins
+    expect(drawn(false)).not.toEqual(base.cam); // reasserted once arranging ends
   });
 });

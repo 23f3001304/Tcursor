@@ -12,7 +12,7 @@ fn scene_of(app: &AppearanceSettings, id: LayoutId) -> Scene {
 
 fn seg(id: &str, start: u32, end: u32, layout: &str, transition_ms: u32) -> LayoutSeg {
     LayoutSeg { id: id.into(), start_ms: start, end_ms: end, layout: layout.into(), transition_ms, easing: "smooth".into(),
-        transition_out_ms: 0, easing_out: "smooth".into() }
+        transition_out_ms: 0, easing_out: "smooth".into(), arrangement: None }
 }
 fn with_exit(s: LayoutSeg, transition_out_ms: u32) -> LayoutSeg { LayoutSeg { transition_out_ms, ..s } }
 /// Largest absolute difference between two scenes' screen-panel rects - the continuity yardstick.
@@ -134,6 +134,10 @@ fn a_gapless_successors_entry_wins_the_overlap() {
     assert_ne!(track.scene_at(800), camera, "exit runs into a hard-cutting successor");
     assert!(rect_delta(&track.scene_at(999), &scene_of(&app, LayoutId::Presenter)) < 0.05);
 }
+
+// Arrangement (pose-driven) segment tests, likewise in their own file for the size budget.
+#[path = "layout_arrangement_tests.rs"]
+mod arrangement_tests;
 
 #[test]
 fn a_segments_own_entry_beats_its_own_exit_when_they_overlap() {

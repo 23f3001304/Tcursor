@@ -1,7 +1,9 @@
 import { motion } from "motion/react";
 
 // 1. iOS-style Switch component with spring animation
-export function Switch({ on, onChange, ariaLabel }: { on: boolean; onChange: (v: boolean) => void; ariaLabel?: string }) {
+// `disabled` (T34 L3): a switch whose OFF state the backend would reject must read as unavailable,
+// not silently snap back - see LayoutInspector's panel-visibility rows.
+export function Switch({ on, onChange, ariaLabel, disabled, title }: { on: boolean; onChange: (v: boolean) => void; ariaLabel?: string; disabled?: boolean; title?: string }) {
   return (
     <button
       type="button"
@@ -9,6 +11,8 @@ export function Switch({ on, onChange, ariaLabel }: { on: boolean; onChange: (v:
       role="switch"
       aria-checked={on}
       aria-label={ariaLabel}
+      title={title}
+      disabled={disabled}
       onClick={() => onChange(!on)}
       style={{
         width: 38,
@@ -17,7 +21,8 @@ export function Switch({ on, onChange, ariaLabel }: { on: boolean; onChange: (v:
         background: on ? "var(--e-fg)" : "var(--e-soft)",
         border: `1px solid ${on ? "var(--e-fg)" : "var(--e-border)"}`,
         position: "relative",
-        cursor: "pointer",
+        cursor: disabled ? "default" : "pointer",
+        opacity: disabled ? 0.45 : 1,
         padding: 0,
         display: "inline-flex",
         alignItems: "center",

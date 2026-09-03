@@ -4,7 +4,15 @@ Submodule overviews for the `ops` group.
 
 ## api
 
-Pure business logic for mutating and measuring an `EditDoc`; the single write point for all document mutations. Key items: `apply` (dispatches an `EditOp` variant to mutate `doc` in place), `metrics` (derives a read-only `Metrics` summary from the current doc state), `EditOp` enum (all editor operations: `AddZoom`, `AddZoomFull`, `UpdateZoom`, `RemoveZoom`, `SetTrim`, `AddCut`, `SetSpeed`, `SetLayoutSeg`, `AddEffect`, `UpdateEffect`, `RemoveEffect`), `Metrics` struct (`duration_ms`, `kept_ms`, `zoom_count`, `cut_count`). The effect ops are delegated to `effects::apply_effect`.
+Pure business logic for mutating an `EditDoc`; the single write point for all document mutations. Key items: `apply` (dispatches an `EditOp` variant to mutate `doc` in place), `EditOp` enum (all editor operations: `AddZoom`, `AddZoomFull`, `UpdateZoom`, `RemoveZoom`, `SetTrim`, `AddCut`, `SetSpeed`, `AddLayoutSeg`/`UpdateLayoutSeg`/`RemoveLayoutSeg`, `SetArrangement`/`ClearArrangement`, `AddEffect`, `UpdateEffect`, `RemoveEffect`, the `*CameraMove` trio). The effect ops are delegated to `effects::apply_effect` and the arrangement ops to `arrangement::apply_arrangement`.
+
+## arrangement
+
+Arrangement edit ops (T34), split out of `api.rs`. Key items: `apply_arrangement` - `api::apply` delegates `SetArrangement`/`ClearArrangement` here; `clamp_pose` (bounds a `PanelPose` on the way in); `double_option` (the `deserialize_with` that keeps an absent panel key distinct from an explicit `null`). Enforces the at-least-one-visible-panel rule.
+
+## metrics
+
+Read-only summary statistics over an `EditDoc`, split out of `api.rs` (size budget) - the one thing in this group that never mutates the doc. Key items: `metrics(doc) -> Metrics`, `Metrics` struct (`duration_ms`, `kept_ms`, `zoom_count`, `cut_count`).
 
 ## effects
 

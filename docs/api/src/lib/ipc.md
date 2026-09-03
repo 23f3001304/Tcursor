@@ -409,21 +409,23 @@ One panel's rect (fraction of output, `[x, y, w, h]`) + corner radius (fraction 
 
 ### Used by
 
-- `src/lib/ipc.ts` - field of `LayoutPresetDto`.
+- `src/lib/ipc.ts` - field of `LayoutPresetDto`, and (as `| null`) of `SegRectDto`.
 - `src/editor/timeline/layoutTrack.ts` - `lerpRect` cross-fades between two `PanelRectDto`s.
 
 ## LayoutPresetDto
 
 ```ts
-export interface LayoutPresetDto { screen: PanelRectDto; cam: PanelRectDto }
+export interface LayoutPresetDto { screen: PanelRectDto; cam: PanelRectDto; arrangement: Arrangement }
 ```
 
-One layout preset's two panels: `screen` (the zoomed base layer) + `cam` (the fixed top layer).
+One layout preset's two panels: `screen` (the zoomed base layer) + `cam` (the fixed top layer), plus the same preset expressed as POSES.
+
+- `arrangement: Arrangement` - this preset as a pose pair, ready to feed a `set_arrangement` op so a segment based on the preset becomes directly manipulable. *Why it comes from the backend rather than being computed here from `screen`/`cam`:* resolving it back must reproduce the preset's own pixels, and Rust owns that geometry (`scene::arrangement::arrangement_of_preset`, proven to 0.5px by its parity test). A hidden panel reports `null`, matching the `Arrangement` rule.
 
 ### Used by
 
 - `src/lib/ipc.ts` - value type of `LayoutPresets`.
-- `src/editor/timeline/layoutTrack.ts` - `presetOf`/`rawPresetAt` look up the preset for a given `layout` name.
+- `src/editor/timeline/layoutTrack.ts` - `presetOf` looks up the preset for a given `layout` name; `resolvedPanelsFor` falls back to it per panel when a segment has no `segs` override (it reads only `screen`/`cam`, never `arrangement`).
 
 ## LayoutPresetName
 
@@ -435,21 +437,38 @@ The 5 layout preset names (matches `LayoutSeg.layout`'s known values).
 
 ### Used by
 
-- `src/lib/ipc.ts` - key type of `LayoutPresets`.
+- `src/lib/ipc.ts` - type of the 5 named preset fields on `LayoutPresets`.
 - `src/editor/timeline/layoutTrack.ts` - `KNOWN` validates a `LayoutSeg.layout` string against this set, falling back to `"screen"` for an unrecognized name.
+
+## SegRectDto
+
+```ts
+export interface SegRectDto { id: string; screen: PanelRectDto | null; cam: PanelRectDto | null }
+```
+
+One `EditDoc.layout` segment's own resolved panels, by id (T34 L2). `null` on a field means "this segment doesn't override that panel - fall back to its `layout` preset", which is both fields on a segment with no `arrangement` at all; a segment WITH one always resolves both (never a mix), since Rust's `resolve_arrangement` always returns a full scene - a panel the arrangement hides still gets a real rect, just `alpha: 0`. Resolved in Rust through the exact function the export's `LayoutTrack` uses per segment (`scene::layout::resolve_seg_scene`) - the TS side never re-derives a pose, only picks which already-resolved rect to show.
+
+### Used by
+
+- `src/lib/ipc.ts` - element type of `LayoutPresets.segs`.
+- `src/editor/timeline/layoutTrack.ts` - `resolvedPanelsFor` looks a segment's entry up by id, falling back to its preset per panel.
 
 ## LayoutPresets
 
 ```ts
-export type LayoutPresets = Record<LayoutPresetName, LayoutPresetDto>;
+export interface LayoutPresets {
+  screen: LayoutPresetDto; camera: LayoutPresetDto; presenter: LayoutPresetDto;
+  screen_only: LayoutPresetDto; camera_only: LayoutPresetDto;
+  segs: SegRectDto[];
+}
 ```
 
-All 5 layout presets' panel rects, keyed by name.
+All 5 layout presets' panel rects, keyed by name, plus `segs` - one entry per `EditDoc.layout` segment (T34 L2), in doc order, not just posed ones. An explicit interface rather than `Record<LayoutPresetName, LayoutPresetDto>` (its pre-T34-L2 shape) because `segs` isn't a `LayoutPresetDto`; indexing by `LayoutPresetName` (`presetOf`'s `presets[name]`) still type-checks, since that type is a union of literal keys this interface actually declares.
 
 ### Used by
 
 - `src/editor/hooks/useEditorData.ts` - fetched via `previewLayouts` into state, passed down to `Stage`.
-- `src/editor/timeline/layoutTrack.ts` - `layoutAt` cross-fades between presets as the playhead crosses `LayoutSeg` boundaries.
+- `src/editor/timeline/layoutTrack.ts` - `layoutAt` cross-fades between presets AND per-segment overrides as the playhead crosses `LayoutSeg` boundaries.
 - `src/editor/hooks/useCompositeLoop.ts` - held in a ref so the per-frame compositing loop can resolve the current layout without waiting on React state.
 
 ## previewLayouts
@@ -458,7 +477,7 @@ All 5 layout presets' panel rects, keyed by name.
 export const previewLayouts = (folder: string) => invoke<LayoutPresets>("preview_layouts", { folder })
 ```
 
-All 5 layout presets' panel rects + alpha in one call, so the editor preview can cross-fade between layout presets itself (mirroring the export's `LayoutTrack`) instead of only ever showing the single static layout `previewLayout` returns.
+All 5 layout presets' panel rects + alpha, plus each doc segment's own resolved rects (`segs`) for a segment carrying a T34 arrangement, in one call - so the editor preview can cross-fade between layout segments itself (mirroring the export's `LayoutTrack`, posed or not) instead of only ever showing a segment's provenance preset.
 
 ### Inputs
 
@@ -466,11 +485,11 @@ All 5 layout presets' panel rects + alpha in one call, so the editor preview can
 
 ### Returns
 
-`Promise<LayoutPresets>` - all 5 presets, keyed by name.
+`Promise<LayoutPresets>` - the 5 presets, keyed by name, plus `segs`.
 
 ### Used by
 
-`useEditorData` (`src/editor/hooks/useEditorData.ts`) - fetched on `[folder, rev]` (a layout edit is one of the things `rev` bumps for).
+`useEditorData` (`src/editor/hooks/useEditorData.ts`) - fetched on `[folder, rev]` (a layout edit, INCLUDING a `set_arrangement`/`clear_arrangement` op, is one of the things `rev` bumps for - see `Editor.tsx`'s `applyOp`, which bumps `rev` for every op except one ending in `_effect`).
 
 ## ensureProxy
 

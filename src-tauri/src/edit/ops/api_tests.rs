@@ -136,15 +136,6 @@ fn set_aspect_replaces_aspect() {
 }
 
 #[test]
-fn metrics_kept_ms_subtracts_cuts() {
-    let mut doc = empty();
-    apply(&mut doc, EditOp::SetTrim { in_ms: 0, out_ms: 10000 });
-    apply(&mut doc, EditOp::AddCut { start_ms: 1000, end_ms: 3000 });
-    let m = metrics(&doc);
-    assert_eq!((m.duration_ms, m.kept_ms, m.cut_count), (10000, 8000, 1));
-}
-
-#[test]
 fn add_zoom_full_uses_given_scale() {
     let mut doc = empty();
     apply(&mut doc, EditOp::AddZoomFull { at_ms: 100, dur_ms: 500, scale: 3.0 });

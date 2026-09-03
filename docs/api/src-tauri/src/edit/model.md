@@ -139,6 +139,49 @@ A playback-speed multiplier applied to a time range.
 - `src-tauri/src/edit/ops/api.rs` - appended by `SetSpeed`
 - `src-tauri/src/export/render/fromedit.rs` - applied during frame-time remapping in the compositor
 
+## PanelPose
+
+```rust
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct PanelPose { pub cx: f32, pub cy: f32, pub size: f32 }
+```
+
+Where one panel sits on the output frame, resolution-independently. Deliberately the SAME three-number vocabulary `CameraMove` already uses, so a webcam keyframe and a layout arrangement describe a pose identically and resolve through the same `rect_from_center` machinery.
+
+- `cx` / `cy` - *the panel's CENTER as fractions of output width/height. Center-based, not top-left, because that is what makes a resize keep the panel where it is - and it matches `CameraMove.x`/`y`.*
+- `size` - *the panel's HEIGHT as a fraction of output height.*
+
+**Why no width:** the width is never stored. It is re-derived at resolve time from the panel's own aspect (the screen's is the SOURCE aspect, the cam's is the appearance-configured shape), so no pose - however it was dragged, blended, or hand-edited in the JSON - can ever stretch or squash the content inside a panel. Bounds are enforced on the way in by `edit::ops::arrangement::clamp_pose` (`cx`/`cy` in `0..1`, `size` in `0.05..1.5`).
+
+### Used by
+
+- `src-tauri/src/edit/model.rs` - the two fields of `Arrangement`
+- `src-tauri/src/edit/ops/arrangement.rs` - `clamp_pose`; the `SetArrangement` payload
+- `src-tauri/src/export/scene/arrangement.rs` - `resolve_arrangement` turns a pose into a `Panel`; `pose_of_panel` derives one back out
+- `src/lib/edit.ts` - `PanelPose` TS mirror
+
+## Arrangement
+
+```rust
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct Arrangement { pub screen: Option<PanelPose>, pub cam: Option<PanelPose> }
+```
+
+One `LayoutSeg`'s custom two-panel composition - the T34 model in which a layout segment carries explicit poses instead of only a preset name, and the five presets become one-click starting points that FILL an arrangement.
+
+- `screen` - *pose for the screen (zoomed base layer) panel, or `None` = not shown (resolves to `alpha = 0`).*
+- `cam` - *pose for the webcam panel, same `None` rule.*
+
+At least one panel is always `Some`: `edit::ops::arrangement::apply_arrangement` rejects any change that would hide both, so an empty frame is never a savable state (`ClearArrangement` is the way back to the preset). A `None` panel still resolves at the PRESET's rect with `alpha = 0`, so a cross-dissolve into or out of a hidden panel slides it rather than popping it in from a degenerate rect.
+
+### Used by
+
+- `src-tauri/src/edit/model.rs` - the optional `LayoutSeg.arrangement` field
+- `src-tauri/src/export/scene/arrangement.rs` - `resolve_arrangement` / `arrangement_of_preset`
+- `src-tauri/src/export/scene/layout.rs` - `LayoutTrack::from_segs` resolves it in place of the preset
+- `src-tauri/src/export/preview/preview_layouts.rs` - each `LayoutPresetDto` carries the preset's own arrangement, so the editor can convert a preset with one op
+- `src/lib/edit.ts` - `Arrangement` TS mirror
+
 ## LayoutSeg
 
 ```rust
@@ -149,20 +192,25 @@ pub struct LayoutSeg {
     #[serde(default = "default_layout_easing")] pub easing: String,
     #[serde(default)] pub transition_out_ms: u32,
     #[serde(default = "default_layout_easing")] pub easing_out: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")] pub arrangement: Option<Arrangement>,
 }
 ```
 
-A time span that uses a named screen layout (e.g. `"screen"`, `"camera"`, `"presenter"`).
+A time span that uses a named screen layout (e.g. `"screen"`, `"camera"`, `"presenter"`), optionally overridden by explicit panel poses.
 
 - `id` - *stable key (e.g. `"l0"`) used by `UpdateLayoutSeg` to target the segment to update.*
 - `start_ms` / `end_ms` - *the span where this layout is active, `[start, end)`. Segments may overlap (latest start wins) and need not tile the clip - a gap resolves to the base `screen` layout.*
 - `layout` - *serde wire name of the layout variant (lowercase snake_case); consumed by the compositor to choose the frame composition template.*
 - `transition_ms` / `easing` - *the ENTRY cross-fade, which STARTS at `start_ms`. Defaults to 350ms / `"smooth"`.*
 - `transition_out_ms` / `easing_out` - *the EXIT cross-fade, which COMPLETES at `end_ms` - symmetric with the entry, so everything a segment does stays inside its own timeline pill. Defaults to `0` = a hard cut, which is exactly what every doc written before exit transitions existed deserializes to, so old docs render bit-identically (pinned by `layout_seg_exit_transition_defaults_to_a_hard_cut_on_missing_fields`). `easing_out` is only meaningful when `transition_out_ms > 0`. See `export/scene/layout.md` for the blend semantics, including why a gapless successor's entry wins the overlap.*
+- `arrangement` - *explicit panel poses for this segment (T34). `None` resolves from the `layout` preset exactly as before; `Some` WINS over the preset and demotes `layout` to display-only provenance ("based on Presenter") that still selects the appearance block the panels' radius/ring/shape come from. Resolved by `export::scene::arrangement::resolve_arrangement` inside `LayoutTrack::from_segs`.*
+
+**Back-compat (additive, no doc-version bump).** `#[serde(default)]` makes the field absent-safe, so every pre-T34 `edit.json` loads with `arrangement: None` and renders identically. `skip_serializing_if` closes the other half of the contract: re-saving an untouched old doc does not grow an `"arrangement": null` key, so the bytes on disk are unchanged. Both directions are pinned in `model_arrangement_tests.rs` (`old_layout_seg_json_loads_with_no_arrangement`, `an_untouched_old_seg_re_serializes_byte_identically`). A HIDDEN panel inside a present arrangement is an explicit `null` on the wire, which is why that is distinct from "no arrangement at all".
 
 ### Used by
 
 - `src-tauri/src/edit/ops/api.rs` - `SetLayoutSeg` mutates `layout` on a matched entry
+- `src-tauri/src/edit/ops/arrangement.rs` - `apply_arrangement` sets/clears `arrangement`
 - `src-tauri/src/edit/seed.rs` - `layout_from_actions` builds the initial list from the `SetLayout` action track
 - `src-tauri/src/export/render/fromedit.rs` - segment list drives per-frame layout selection in the compositor
 

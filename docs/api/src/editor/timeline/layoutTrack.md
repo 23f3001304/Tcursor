@@ -2,6 +2,16 @@
 
 The preview's mirror of the export's `LayoutTrack` (`src-tauri/src/export/scene/layout.rs`): which layout is active at a given output time, cross-faded across segment boundaries, plus the shared easing evaluator every per-frame TS mirror uses. Export is the source of truth; this only drives the live canvas preview, so both must change together.
 
+**T34 L2: zero pose math here.** A segment carrying an `Arrangement` is resolved in Rust, once, into `LayoutPresets.segs` (`src/lib/ipc.ts`) - this file only picks, per segment, between that per-segment override and the segment's own preset lookup (`resolvedPanelsFor`). No pose is ever derived on the TS side; that stays the project rule (core logic once, in Rust).
+
+## ResolvedPanels
+
+```ts
+export interface ResolvedPanels { screen: PanelRectDto; cam: PanelRectDto }
+```
+
+One resolved panel pair - either a segment's own `segs` override (a posed T34 arrangement, resolved once in Rust) or its preset's own panels. The internal currency `layoutAt` passes around instead of a full `LayoutPresetDto` (which also carries `arrangement`, unused here).
+
 ## ease
 
 ```ts
@@ -33,11 +43,20 @@ The active layout at output time `t`, mirroring `LayoutTrack::scene_at` exactly.
 
 - A segment is active only INSIDE `[start, end)`. Outside every segment - a gap, or before the first / after the last - the base `screen` preset applies ("empty means default").
 - When segments overlap, the latest-STARTING containing one wins.
-- **Entry.** Within `transition_ms` of `start_ms`, the scene cross-fades from whatever was active just before that segment (`rawPresetAt(start_ms - 1)`) using the segment's own `easing`. Checked FIRST, so a segment shorter than its own two transitions still resolves deterministically - it eases in, never out.
+- Every "the scene at segment X" step below actually means `resolvedPanelsFor(X, presets)` (see below) - a segment's own `segs` entry when it has one, else its preset. This is true for the CURRENT segment, the entry's "from", and the exit's "to" alike, so a posed segment blends correctly on either side of a transition, not just when it's the one currently on screen.
+- **Entry.** Within `transition_ms` of `start_ms`, the scene cross-fades from whatever was active just before that segment (`resolvedPanelsFor(rawSegAt(start_ms - 1), presets)`) using the segment's own `easing`. Checked FIRST, so a segment shorter than its own two transitions still resolves deterministically - it eases in, never out.
 - **Exit.** Within `transition_out_ms` of `end_ms`, it cross-fades from this segment toward whatever the track resolves AFTER it (the next segment if gapless, else the base `screen`), using `easing_out`, with the fraction reaching exactly 1 AT `end_ms` - so it lands on the successor's pose rather than jumping to it. `transition_out_ms` defaults to `0`, a hard cut, which is the historical behaviour.
 - **Overlap rule.** If the successor's OWN entry blend is still running at `end_ms`, that entry WINS and the exit stands down. One blend at a time, deterministically - gapless back-to-back segments stay seamless (the successor's entry already blends FROM this segment) instead of double-blending or jumping backwards at the boundary. The exit therefore only takes visible effect falling into a gap, or into a successor that hard-cuts in.
 
-`activeIdx` is factored out because the exit needs the same "latest-starting containing segment" lookup at `end_ms` that the main query needs at `t`.
+`activeIdx` is factored out because the exit needs the same "latest-starting containing segment" lookup at `end_ms` that the main query needs at `t`. `rawSegAt` wraps it to return the raw `LayoutSeg` (or `null` in a gap) for `resolvedPanelsFor` to resolve.
+
+### resolvedPanelsFor
+
+```ts
+export function resolvedPanelsFor(seg: LayoutSeg | null, presets: LayoutPresets): ResolvedPanels
+```
+
+`seg`'s resolved panels: looks up `presets.segs` by `seg.id` (a flat `.find`, since a doc's `layout` array is small) and uses that entry's `screen`/`cam` when present, else falls back to `presetOf(presets, seg.layout)`'s panels - PER PANEL, not just per segment, so a `segs` entry that only overrides one field (not produced today, but not assumed against either) still resolves something sane rather than `undefined`. `seg === null` (the gap/outside-every-segment case) always means the base `screen` preset, with no per-segment id to look up.
 
 ### Interpolation
 
@@ -49,3 +68,5 @@ The active layout at output time `t`, mirroring `LayoutTrack::scene_at` exactly.
 
 - `src/editor/hooks/useCompositeLoop.ts` - resolves the frame layout every composited frame.
 - `src/editor/stage/CamDragHandle.tsx` - derives the PiP rect the Move-mode handle sits on, so the handle matches the drawn frame.
+
+Both are EXPORTED as of T34 L3: stage arrange mode needs a segment's STEADY-STATE panels - what it resolves to outside any transition - to frame and to start a drag from, and re-deriving that beside `layoutAt` would be a second place for the per-segment-override-vs-preset rule to live. `useArrangeDrag` and `LayoutInspector` both call this one.

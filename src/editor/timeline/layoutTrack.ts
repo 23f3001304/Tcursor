@@ -2,6 +2,13 @@ import type { LayoutSeg } from "../../lib/edit";
 import type { LayoutPresets, LayoutPresetName, LayoutPresetDto, PanelRectDto, PreviewLayout } from "../../lib/ipc";
 import { evalCubic, parseCubic } from "../../lib/cubicBezier";
 
+/** One resolved panel pair - screen + cam - either a segment's own per-segment override (a posed
+ *  T34 arrangement, resolved once in Rust through the exact path the export uses) or its preset's
+ *  own panels. This is the ONLY place `layoutAt` reads pose-derived rects; picking which
+ *  already-resolved pair to show is presentation, not pose math - the project rule (core logic
+ *  once, in Rust) holds even here. */
+export interface ResolvedPanels { screen: PanelRectDto; cam: PanelRectDto }
+
 /** Easing mirror of the export's curves (crate::export::camera::ease): linear / smoothstep /
  *  ease-out-back spring / quadratic ease-in / ease-out / ease-in-out, plus a custom
  *  `cubic(x1,y1,x2,y2)` curve (crate::export::cubic). The ONLY place easing is evaluated in TS -
@@ -48,19 +55,30 @@ function toPreviewLayout(screen: PanelRectDto, cam: PanelRectDto, canvas: [numbe
   };
 }
 
-/** The preset active at `t` with NO cross-fade: the last segment CONTAINING `t` ([start, end)),
- *  else the base `screen`. Used to compute a fade's "from"../. */
-function rawPresetAt(ordered: LayoutSeg[], presets: LayoutPresets, t: number): LayoutPresetDto {
-  let found: LayoutPresetDto | null = null;
-  for (const s of ordered) { if (t >= s.start_ms && t < s.end_ms) found = presetOf(presets, s.layout); }
-  return found ?? presets.screen;
-}
-
 /** The index of the segment active at `t` (latest-starting one containing it), or -1 in a gap. */
 function activeIdx(ordered: LayoutSeg[], t: number): number {
   let idx = -1;
   for (let k = 0; k < ordered.length; k++) { const s = ordered[k]; if (t >= s.start_ms && t < s.end_ms) idx = k; }
   return idx;
+}
+
+/** The raw segment active at `t` with NO cross-fade (the last one CONTAINING `t`), or `null` in a
+ *  gap - used to compute a fade's "from"/"to" endpoint before resolving it to panels. */
+const rawSegAt = (ordered: LayoutSeg[], t: number): LayoutSeg | null => {
+  const idx = activeIdx(ordered, t);
+  return idx < 0 ? null : ordered[idx];
+};
+
+/** `seg`'s resolved panels: its own per-segment override from `presets.segs` (by id) when one
+ *  exists, else its preset's panels - `null` (a gap, or a segment before backend `segs` catches
+ *  up to an edit) always means the base `screen` preset with no override to look up. Falls back
+ *  PER PANEL, not just per segment, so a `segs` entry that only overrides one field (not produced
+ *  today, but not assumed against either) still shows something sane. Zero pose math: this only
+ *  picks which already-resolved rect Rust computed. */
+export function resolvedPanelsFor(seg: LayoutSeg | null, presets: LayoutPresets): ResolvedPanels {
+  const preset = presetOf(presets, seg?.layout ?? "screen");
+  const entry = seg ? presets.segs.find((e) => e.id === seg.id) : undefined;
+  return { screen: entry?.screen ?? preset.screen, cam: entry?.cam ?? preset.cam };
 }
 
 /** The active layout at output time `t`, mirroring LayoutTrack::scene_at exactly: a segment is
@@ -75,16 +93,16 @@ export function layoutAt(segs: LayoutSeg[], presets: LayoutPresets | null, t: nu
   if (!presets) return null;
   const ordered = [...segs].sort((a, b) => a.start_ms - b.start_ms);
   const idx = activeIdx(ordered, t);
-  if (idx < 0) { const b = presets.screen; return toPreviewLayout(b.screen, b.cam, canvas); } // gap/outside -> screen
+  if (idx < 0) { const b = resolvedPanelsFor(null, presets); return toPreviewLayout(b.screen, b.cam, canvas); } // gap/outside -> screen
 
   const s = ordered[idx];
-  const cur = presetOf(presets, s.layout);
-  const blend = (from: LayoutPresetDto, to: LayoutPresetDto, f: number) =>
+  const cur = resolvedPanelsFor(s, presets);
+  const blend = (from: ResolvedPanels, to: ResolvedPanels, f: number) =>
     toPreviewLayout(lerpRect(from.screen, to.screen, f), lerpRect(from.cam, to.cam, f), canvas);
 
   const elapsed = t - s.start_ms;
   if (s.transition_ms > 0 && elapsed < s.transition_ms) {
-    const from = rawPresetAt(ordered, presets, Math.max(0, s.start_ms - 1)); // active just before this seg
+    const from = resolvedPanelsFor(rawSegAt(ordered, Math.max(0, s.start_ms - 1)), presets); // active just before this seg
     return blend(from, cur, ease(s.easing, elapsed / s.transition_ms));
   }
   const exitFrom = s.end_ms - s.transition_out_ms;
@@ -92,7 +110,7 @@ export function layoutAt(segs: LayoutSeg[], presets: LayoutPresets | null, t: nu
     const next = activeIdx(ordered, s.end_ms);
     const nextEntryWins = next >= 0 && ordered[next].transition_ms > 0 && s.end_ms - ordered[next].start_ms < ordered[next].transition_ms;
     if (!nextEntryWins) {
-      const to = next >= 0 ? presetOf(presets, ordered[next].layout) : presets.screen;
+      const to = resolvedPanelsFor(next >= 0 ? ordered[next] : null, presets);
       return blend(cur, to, ease(s.easing_out, (t - exitFrom) / s.transition_out_ms));
     }
   }

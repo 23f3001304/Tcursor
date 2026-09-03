@@ -90,6 +90,16 @@ Returns the resolved `Scene` at `t_ms`: the active segment (else `base`), cross-
 - `a_gapless_successors_entry_wins_the_overlap` - the exit is suppressed against a successor with its own entry, and DOES run against one that hard-cuts in.
 - `a_segments_own_entry_beats_its_own_exit_when_they_overlap` - a 300ms segment with 300ms of each still only eases in.
 
+## resolve_seg_scene
+
+```rust
+pub fn resolve_seg_scene(s: &LayoutSeg, app: &AppearanceSettings, ow: u32, oh: u32, sw: u32, sh: u32) -> Scene
+```
+
+One `LayoutSeg`'s resolved `Scene`: its POSES when it carries an `arrangement` (via `scene::arrangement::resolve_arrangement`; its `layout` name then only picks the `ModeAppearance` block, so the same poses under a different provenance can legitimately differ in cam shape/ring - see `the_layout_name_still_selects_the_appearance_block`), else its preset's `Scene` directly.
+
+**The single definition, used from two places (T34 L2).** `from_segs` (below) calls this once per segment to build the export/preview-track path; `preview_layouts` (`preview/preview_layouts.md`) calls it again through `FrameRenderer::resolve_seg` (`render/accessors.md`) to report a posed segment's true panels to the editor's live canvas preview. Factored out so a segment's live preview and what the export actually draws can never diverge onto two pose-math paths - there is exactly one function that turns a `LayoutSeg` into a `Scene`.
+
 ## from_segs
 
 ```rust
@@ -98,6 +108,8 @@ pub fn from_segs(segs: &[crate::edit::model::LayoutSeg], app: &AppearanceSetting
 ```
 
 The EDITED path: one `Seg` per `LayoutSeg`, each carrying its own span, entry feel and exit feel (both easing strings go through `easing_from`, so a custom `cubic(...)` curve works for either). Gaps between segments fall back to the base `screen`. Segments are sorted by `start_ms` on construction, so `active_idx`'s "last one wins" is a genuine latest-start rule.
+
+Each segment's `Scene` comes from `resolve_seg_scene` (above), called once, up front: `scene_at` then blends already-resolved scenes, so an arrangement<->preset cross-fade is bit-for-bit the same `Scene::lerp` a preset<->preset one is, with no second blend path to keep in sync. Pinned by `a_preset_to_arrangement_crossfade_is_the_same_lerp_as_preset_to_preset` and `an_arrangement_to_preset_exit_blend_lands_on_the_successor_at_end_ms` (`layout_arrangement_tests.rs`).
 
 ## successor
 

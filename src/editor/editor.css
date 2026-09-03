@@ -293,6 +293,43 @@
   box-shadow: 0 0 0 1px rgba(0,0,0,.4), 0 6px 18px rgba(0,0,0,.45), 0 0 0 3px rgba(224,93,158,.2); }
 .e-camdrag.drag { cursor: grabbing; border-color: #ea82b6; background: rgba(224,93,158,.18);
   box-shadow: 0 0 0 1px rgba(0,0,0,.4), var(--e-shadow-pop), 0 0 0 3px rgba(224,93,158,.28); }
+/* Arrange mode (T34): the selected layout segment's two panels, framed over the live composite and
+   dragged directly. Positioned as a % of .e-stage - the canvas' own displayed rect - which is also
+   why hit-testing is the DOM's job here (no second copy of the panel geometry in JS). --e-layout
+   is the Layout timeline lane's accent, matching how .e-camdrag borrows --e-cam. The wrapper is
+   inert so the guides/keyframe dots never eat a pointer; only the frames opt back in. */
+.e-arrange { position: absolute; inset: 0; z-index: 11; pointer-events: none; }
+.e-apanel { position: absolute; pointer-events: auto; cursor: move; touch-action: none; box-sizing: border-box;
+  border: 1.5px solid var(--e-layout); background: rgba(47,158,143,.05);
+  box-shadow: 0 0 0 1px rgba(0,0,0,.35); transition: background .14s ease; }
+.e-apanel:hover { background: rgba(47,158,143,.11); }
+.e-apanel.drag { cursor: grabbing; background: rgba(47,158,143,.16); }
+.e-ahandle { position: absolute; width: 11px; height: 11px; border-radius: 3px; box-sizing: border-box;
+  background: var(--e-card); border: 1px solid var(--e-line-strong); box-shadow: 0 1px 3px rgba(0,0,0,.5); }
+.e-ahandle.tl { left: -6px; top: -6px; cursor: nwse-resize; }
+.e-ahandle.tr { right: -6px; top: -6px; cursor: nesw-resize; }
+.e-ahandle.bl { left: -6px; bottom: -6px; cursor: nesw-resize; }
+.e-ahandle.br { right: -6px; bottom: -6px; cursor: nwse-resize; }
+/* Cam-only hide affordance - the screen can only be hidden from the inspector, so a stage can
+   never be blanked by one stray click with nothing left to grab. */
+.e-ax { position: absolute; right: -9px; top: -9px; width: 18px; height: 18px; padding: 0; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; border-radius: 999px;
+  border: 1px solid var(--e-line-strong); background: var(--e-card); color: var(--e-mut); }
+.e-ax:hover { color: var(--e-fg); border-color: var(--e-fg); }
+.e-aguide { position: absolute; background: var(--e-layout); }
+.e-aguide.x { top: 0; bottom: 0; width: 1px; }
+.e-aguide.y { left: 0; right: 0; height: 1px; }
+/* Camera keyframes inside the segment: dimmed, non-interactive - they refine the webcam WITHIN
+   this arrangement (T27 semantics), they are not part of it. */
+.e-akf { position: absolute; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 2px;
+  transform: rotate(45deg); background: var(--e-cam); opacity: .38; }
+/* Top-centre, not bottom: the Toast pill and the AI director's status pill both live bottom-centre
+   over the stage (.e-stagetoast), and this hint can be on screen for as long as the mode is. */
+.e-ahint { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); margin: 0;
+  padding: 4px 10px; border-radius: 999px; max-width: 88%; overflow: hidden; text-overflow: ellipsis;
+  background: rgba(13,13,15,.72); color: var(--e-dim);
+  font-size: var(--e-text-hint-size); font-weight: var(--e-text-hint-weight); white-space: nowrap; }
+
 /* Zoom aim reticle: a crosshair-ring on the stage marking the selected Region zoom's target.
    Positioned in JS from the same fractions the compositor crops with (mapZoomTargetToCanvasPoint),
    as a % of .e-stage - which is the canvas' own displayed rect. Inert until aim mode is on, so it

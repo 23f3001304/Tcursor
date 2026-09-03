@@ -30,6 +30,9 @@ export const EditorPanels: React.MemoExoticComponent<(props: {
   aimMode: boolean;
   onAimMode: (on: boolean) => void;
   onSeek: (ms: number) => void;
+  layoutPresets: LayoutPresets | null;
+  arrangeOn: boolean;
+  onArrange: () => void;
   addZoom: () => void;
   addSpotlight: () => void;
   addCameraMove: () => void;
@@ -53,6 +56,7 @@ Renders exactly one left-panel slot: an inspector when something is selected, ot
 - `saveDocSettings: (s: EditDoc["settings"]) => void` - bulk-saves a patched `settings` object; used by panels that edit `Settings` fields directly (background, cursor, camera, captions, audio) rather than emitting an `EditOp`.
 - `moveMode` / `requestMoveMode` / `camDraftRef` - webcam "Move mode" state, threaded to `CameraPanel` so it can toggle drag-to-reposition and read the live unsaved pose (`CamPose` from `src/editor/stage/cameraMoves.ts`). `moveMode` also reaches `ZoomInspector`, which disables its "Aim on stage" button while Move mode owns the canvas pointer.
 - `aimMode` / `onAimMode` - on-stage zoom-aiming state, threaded to `ZoomInspector`'s Aim toggle. Only meaningful for a Region-target zoom; see `Editor.md`.
+- `layoutPresets: LayoutPresets | null` / `arrangeOn: boolean` / `onArrange: () => void` (T34 L3) - threaded to `LayoutInspector` only. The presets carry each preset's own `arrangement` (the poses its "Start from" chips write); `arrangeOn`/`onArrange` come from `useArrangeMode` and let the inspector swap its "Arrange on stage" button for the live hint while the stage is already arranging.
 - `onSeek: (ms: number) => void` - `Editor`'s playhead seek (the same path `Timeline`/`Transport` use), threaded to `ZoomInspector` so changing a zoom-scoped control (Target, webcam action) outside the zoom's span jumps the playhead into it - see `ZoomInspector.md`'s `zoomScopedSeekMs`.
 - `osCursorInVideo` - passed straight through to `CursorPanel`, which annotates the "System" style when the recording has no baked OS cursor to show (see its own doc).
 - `addZoom` / `addSpotlight` / `addCameraMove: () => void` - add-at-playhead callbacks, passed to the Effects panel's quick-add buttons (and `addCameraMove` also to `CameraPanel`).
@@ -61,7 +65,7 @@ Renders exactly one left-panel slot: an inspector when something is selected, ot
 
 **Selection derivation.** `selZoom`/`selEffect`/`selLayout`/`selCamMove` look up `sel` against `doc.zooms`/`doc.effects`/`doc.layout`/`doc.camera_moves`. The first one found (checked in that order) wins and renders its inspector; if none match, the router falls through to the `tab` switch.
 
-**Inspector priority.** `ZoomInspector` > `EffectInspector` > `LayoutInspector` > `CameraMoveInspector` > the tab panel. Each inspector gets `onApply={applyOp}` and `onClose={() => setSel(null)}` (deselecting returns to the tab panel underneath). `EffectInspector` additionally gets `onDimCamera`, which patches `doc.settings.clickfx.spotlight_dim_camera` via `saveDocSettings`.
+**Inspector priority.** `ZoomInspector` > `EffectInspector` > `LayoutInspector` > `CameraMoveInspector` > the tab panel. Each inspector gets `onApply={applyOp}` and `onClose={() => setSel(null)}` (deselecting returns to the tab panel underneath). `LayoutInspector` additionally gets `presets`/`arrangeOn`/`onArrange` (T34 L3). `EffectInspector` additionally gets `onDimCamera`, which patches `doc.settings.clickfx.spotlight_dim_camera` via `saveDocSettings`.
 
 **Tab panels.** `"ai"` renders `AiPanel` (model comes from `doc.settings.ai_model`; as of Task 26 it also gets `onClose={() => setTab("ai")}` for its `PanelHeader` - a no-op on this particular tab, but keeps the header wiring uniform across every panel since `PanelHeader.onClose` isn't optional); `"background"`/`"cursor"`/`"camera"`/`"captions"`/`"audio"`/`"effects"` render their matching panel, each wired to patch its own settings slice via `saveDocSettings` and to close back to `"ai"`. `CameraPanel` additionally receives `doc`, `timeMs` (the gated one - see Props), `applyOp`, and the move-mode props (it both reads/writes `camera_moves` via ops and `appearance` via settings). `AudioPanel` reads/writes `audio_offset_ms`, `audio_mic_volume`, and `audio_sys_volume` as three separate `saveDocSettings` calls. `EffectsPanel` wires `onAddLayout` to an inline `add_layout_seg` at `Math.round(timeMsRef.current)` (`layout: "camera"`, `dur_ms: 2000`), alongside the passed-through `addZoom`/`addSpotlight`/`addCameraMove`.
 

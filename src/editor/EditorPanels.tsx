@@ -2,6 +2,7 @@ import { memo } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import type { EditDoc, EditOp } from "../lib/edit";
+import type { LayoutPresets } from "../lib/ipc";
 import type { CamPose } from "./stage/cameraMoves";
 import type { Tab } from "./shell/Rail";
 import { AiPanel } from "./panels/AiPanel";
@@ -38,7 +39,7 @@ function assertNever(x: never): never {
 export const EditorPanels = memo(function EditorPanels({
   doc, sel, tab, dur, setSel, setTab, timeMs, timeMsRef, running, exporting, aiError, aiLog, aiProgress, onRun, onAutoModel, applyOp, saveDocSettings,
   moveMode, requestMoveMode, camDraftRef, addZoom, addSpotlight, addCameraMove, osCursorInVideo,
-  aimMode, onAimMode, onSeek,
+  aimMode, onAimMode, onSeek, layoutPresets, arrangeOn, onArrange,
 }: {
   doc: EditDoc;
   sel: string | null;
@@ -74,6 +75,12 @@ export const EditorPanels = memo(function EditorPanels({
   /** Seeks the playhead through the same path Timeline/Transport use (Editor's `onSeek`) - passed
    *  down so ZoomInspector can jump into a zoom's span when a scoped control changes outside it. */
   onSeek: (ms: number) => void;
+  /** The resolved layout presets - `LayoutInspector`'s "Start from" chips need each preset's own
+   *  `arrangement` (the poses `set_arrangement` is fed). Null until the first fetch lands. */
+  layoutPresets: LayoutPresets | null;
+  /** Whether the stage is currently in arrange mode for the selected layout segment. */
+  arrangeOn: boolean;
+  onArrange: () => void;
 }) {
   const selZoom = doc.zooms.find((z) => z.id === sel) ?? null;
   const selEffect = doc.effects.find((e) => e.id === sel) ?? null;
@@ -92,7 +99,8 @@ export const EditorPanels = memo(function EditorPanels({
             onDimCamera={(v) => saveDocSettings({ ...doc.settings, clickfx: { ...doc.settings.clickfx, spotlight_dim_camera: v } })}
             onClose={() => setSel(null)} />
         ) : selLayout ? (
-          <LayoutInspector seg={selLayout} dur={dur} onApply={applyOp} onClose={() => setSel(null)} />
+          <LayoutInspector seg={selLayout} dur={dur} onApply={applyOp} onClose={() => setSel(null)}
+            presets={layoutPresets} arrangeOn={arrangeOn} onArrange={onArrange} />
         ) : selCamMove ? (
           <CameraMoveInspector move={selCamMove} dur={dur} onApply={applyOp} onClose={() => setSel(null)} />
         ) : tab === "ai" ? (

@@ -1,7 +1,7 @@
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import type { DisplayInfo, AudioInfo } from "../hud/devices/selectDevices";
 import type { Settings } from "../hud/settings/settings";
-import type { EditDoc, EditOp } from "./edit";
+import type { Arrangement, EditDoc, EditOp } from "./edit";
 
 /** One camera-curve sample: output time (ms), the zoom as scale + center, and the cursor
  *  position - cx/cy/curx/cury are 0..1 fractions of the screen content. */
@@ -65,13 +65,33 @@ export const previewLayout = (folder: string) => invoke<PreviewLayout>("preview_
  *  + cross-dissolve alpha (0..1) + ring width (fraction of output width, 0 = no ring) + ring color
  *  (RGB 0..255) - the same basis `PreviewLayout` uses. */
 export interface PanelRectDto { rect: [number, number, number, number]; radius: number; alpha: number; ring_px: number; ring_color: [number, number, number] }
-/** One layout preset's two panels: screen (zoomed base layer) + cam (fixed top layer). */
-export interface LayoutPresetDto { screen: PanelRectDto; cam: PanelRectDto }
+/** One layout preset's two panels: screen (zoomed base layer) + cam (fixed top layer), plus the
+ *  same preset expressed as POSES (`arrangement`) - what a `set_arrangement` op is fed to turn this
+ *  preset into a directly manipulable arrangement. Derived in Rust
+ *  (`scene::arrangement::arrangement_of_preset`) so the conversion has exactly one definition;
+ *  resolving it back reproduces this preset's pixels (proven to 0.5px by the Rust parity test). */
+export interface LayoutPresetDto { screen: PanelRectDto; cam: PanelRectDto; arrangement: Arrangement }
 export type LayoutPresetName = "screen" | "camera" | "presenter" | "screen_only" | "camera_only";
-export type LayoutPresets = Record<LayoutPresetName, LayoutPresetDto>;
-/** All 5 layout presets' panel rects + alpha in one call, so the editor preview can cross-fade
- *  between layout presets itself (mirroring the export's LayoutTrack) instead of only ever
- *  showing the single static layout `previewLayout` returns. */
+/** One `EditDoc.layout` segment's own resolved panels, by id (T34 `preview_layouts` extension).
+ *  `null` on a field means "this segment doesn't override that panel - fall back to its `layout`
+ *  preset", which is both fields on a segment with no `arrangement` at all; a segment WITH one
+ *  always resolves both (never a mix), since Rust's `resolve_arrangement` always returns a full
+ *  scene - a panel the arrangement hides still gets a real rect, just `alpha: 0`. Resolved in Rust
+ *  through the exact function the export's `LayoutTrack` uses per segment
+ *  (`scene::layout::resolve_seg_scene`) - the TS side never re-derives a pose, only picks which
+ *  already-resolved rect to show (see `layoutTrack.ts`'s `layoutAt`). */
+export interface SegRectDto { id: string; screen: PanelRectDto | null; cam: PanelRectDto | null }
+export interface LayoutPresets {
+  screen: LayoutPresetDto; camera: LayoutPresetDto; presenter: LayoutPresetDto;
+  screen_only: LayoutPresetDto; camera_only: LayoutPresetDto;
+  /** One entry per `EditDoc.layout` segment, in doc order - not just posed ones, so a lookup by id
+   *  is a single flat scan with no special-casing "this segment was never in the list". */
+  segs: SegRectDto[];
+}
+/** All 5 layout presets' panel rects + alpha, plus each doc segment's own resolved rects when it
+ *  carries an arrangement (`segs`), in one call - so the editor preview can cross-fade between
+ *  layout segments itself (mirroring the export's LayoutTrack, posed or not) instead of only ever
+ *  showing a segment's provenance preset. */
 export const previewLayouts = (folder: string) => invoke<LayoutPresets>("preview_layouts", { folder });
 /** One click ripple: output time (ms) + 0..1 screen-content position (same basis as CamSample's cursor). */
 export interface ClickSample { t: number; x: number; y: number }

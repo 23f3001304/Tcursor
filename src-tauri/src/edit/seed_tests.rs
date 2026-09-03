@@ -32,7 +32,7 @@ fn effect(id: &str, start_ms: u32, end_ms: u32) -> EffectRegion {
 }
 fn seg(id: &str, start_ms: u32, end_ms: u32) -> LayoutSeg {
     LayoutSeg { id: id.into(), start_ms, end_ms, layout: "screen".into(), transition_ms: 350, easing: "smooth".into(),
-        transition_out_ms: 0, easing_out: "smooth".into() }
+        transition_out_ms: 0, easing_out: "smooth".into(), arrangement: None }
 }
 fn spans(doc: &EditDoc) -> (Vec<(u32, u32)>, Vec<(u32, u32)>) {
     (doc.effects.iter().map(|e| (e.start_ms, e.end_ms)).collect(),

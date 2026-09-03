@@ -15,7 +15,7 @@ fn sample_doc() -> EditDoc {
         zooms: vec![Zoom { id: "z1".into(), start_ms: 200, end_ms: 800, target: ZoomTarget::Cursor, scale: 2.2, easing: "ease".into(), zoom_in_ms: 350, zoom_out_ms: 450, layer: 0, cam_action: None }],
         speed: vec![Speed { id: "s1".into(), start_ms: 1000, end_ms: 2000, factor: 2.0 }],
         layout: vec![LayoutSeg { id: "l1".into(), start_ms: 0, end_ms: 5000, layout: "screen".into(), transition_ms: 350, easing: "smooth".into(),
-            transition_out_ms: 0, easing_out: "smooth".into() }],
+            transition_out_ms: 0, easing_out: "smooth".into(), arrangement: None }],
         effects: vec![],
         camera_moves: vec![],
         aspect: crate::export::types::Aspect::default(),
@@ -47,7 +47,7 @@ fn layout_seg_exit_transition_defaults_to_a_hard_cut_on_missing_fields() {
     let doc_json = format!(r#"{{"version":2,"trim":{{"in_ms":0,"out_ms":5000}},"cuts":[],"zooms":[],"speed":[],"layout":[{json}],"settings":{{}}}}"#);
     let doc: EditDoc = serde_json::from_str(&doc_json).unwrap();
     assert_eq!(doc.layout[0], LayoutSeg { id: "l0".into(), start_ms: 0, end_ms: 1000, layout: "camera".into(),
-        transition_ms: 350, easing: "smooth".into(), transition_out_ms: 0, easing_out: "smooth".into() });
+        transition_ms: 350, easing: "smooth".into(), transition_out_ms: 0, easing_out: "smooth".into(), arrangement: None });
 }
 
 #[test]
@@ -190,3 +190,7 @@ fn clip_ms_missing_field_defaults_to_zero() {
 // the 200-line budget.
 #[path = "model_save_tests.rs"]
 mod save_tests;
+
+// Arrangement serde/back-compat tests, likewise in their own file for the same reason.
+#[path = "model_arrangement_tests.rs"]
+mod arrangement_tests;

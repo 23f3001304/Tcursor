@@ -23,20 +23,24 @@ pub enum EditOp {
     AddLayoutSeg { at_ms: u32, dur_ms: u32, layout: String, transition_out_ms: Option<u32>, easing_out: Option<String> },
     UpdateLayoutSeg { id: String, start_ms: Option<u32>, end_ms: Option<u32>, layout: Option<String>, transition_ms: Option<u32>, easing: Option<String>, transition_out_ms: Option<u32>, easing_out: Option<String> },
     RemoveLayoutSeg { id: String },
+    /// Set or hide a layout segment's panel poses. Each field is THREE-valued on the wire: absent
+    /// = "leave this panel as it is", `null` = hide it, an object = that pose. See
+    /// `ops::arrangement::{apply_arrangement, double_option}`.
+    SetArrangement {
+        id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "crate::edit::ops::arrangement::double_option")]
+        screen: Option<Option<crate::edit::model::PanelPose>>,
+        #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "crate::edit::ops::arrangement::double_option")]
+        cam: Option<Option<crate::edit::model::PanelPose>>,
+    },
+    /// Drop a segment's arrangement, so it resolves from its `layout` preset again.
+    ClearArrangement { id: String },
     AddEffect { kind: crate::edit::model::EffectKind, start_ms: u32, end_ms: u32 },
     UpdateEffect { id: String, start_ms: Option<u32>, end_ms: Option<u32>, fade_in_ms: Option<u32>, fade_out_ms: Option<u32>, mode: Option<String>, dim: Option<f32>, radius: Option<f32>, feather: Option<f32>, layer: Option<u32> },
     RemoveEffect { id: String },
     AddCameraMove { t_ms: u32, x: f32, y: f32, size: f32 },
     UpdateCameraMove { id: String, t_ms: Option<u32>, x: Option<f32>, y: Option<f32>, size: Option<f32>, easing: Option<String> },
     RemoveCameraMove { id: String },
-}
-
-#[derive(Serialize, Clone, Debug, PartialEq)]
-pub struct Metrics {
-    pub duration_ms: u32,
-    pub kept_ms: u32,
-    pub zoom_count: usize,
-    pub cut_count: usize,
 }
 
 fn next_zoom_id(doc: &EditDoc) -> String {
@@ -126,7 +130,7 @@ pub fn apply(doc: &mut EditDoc, op: EditOp) {
                 id, start_ms: at_ms.min(dur), end_ms: at_ms.saturating_add(dur_ms).min(dur),
                 layout: valid_layout(&layout), transition_ms: 350, easing: "smooth".into(),
                 transition_out_ms: transition_out_ms.unwrap_or(0),
-                easing_out: easing_out.map_or_else(|| "smooth".into(), |v| valid_easing(&v)) });
+                easing_out: easing_out.map_or_else(|| "smooth".into(), |v| valid_easing(&v)), arrangement: None });
         }
         EditOp::UpdateLayoutSeg { id, start_ms, end_ms, layout, transition_ms, easing, transition_out_ms, easing_out } => {
             let dur = crate::edit::ops::region::dur_bound(doc);
@@ -142,6 +146,8 @@ pub fn apply(doc: &mut EditDoc, op: EditOp) {
             }
         }
         EditOp::RemoveLayoutSeg { id } => { doc.layout.retain(|s| s.id != id); }
+        op @ (EditOp::SetArrangement { .. } | EditOp::ClearArrangement { .. }) =>
+            crate::edit::ops::arrangement::apply_arrangement(doc, op),
         op @ (EditOp::AddEffect { .. } | EditOp::UpdateEffect { .. } | EditOp::RemoveEffect { .. }) =>
             crate::edit::ops::effects::apply_effect(doc, op),
         EditOp::AddCameraMove { t_ms, x, y, size } => {
@@ -165,24 +171,6 @@ pub fn apply(doc: &mut EditDoc, op: EditOp) {
             if resort { doc.camera_moves.sort_by_key(|m| m.t_ms); }
         }
         EditOp::RemoveCameraMove { id } => { doc.camera_moves.retain(|m| m.id != id); }
-    }
-}
-
-pub fn metrics(doc: &EditDoc) -> Metrics {
-    let duration_ms = doc.trim.out_ms;
-    let trim_in = doc.trim.in_ms;
-    let trim_out = doc.trim.out_ms;
-    let trim_span = trim_out.saturating_sub(trim_in);
-    let cut_sum: u32 = doc.cuts.iter().map(|c| {
-        let s = c.start_ms.max(trim_in);
-        let e = c.end_ms.min(trim_out);
-        e.saturating_sub(s)
-    }).sum();
-    Metrics {
-        duration_ms,
-        kept_ms: trim_span.saturating_sub(cut_sum),
-        zoom_count: doc.zooms.len(),
-        cut_count: doc.cuts.len(),
     }
 }
 

@@ -1,6 +1,6 @@
 # src-tauri/src/edit/ops/api.rs
 
-Pure business logic for mutating and measuring an `EditDoc`. Every write that the editor or AI director performs flows through `apply`; `metrics` derives the read-only summary the UI displays. No I/O occurs here - callers load the doc, call these functions, and persist the result themselves.
+Pure business logic for mutating an `EditDoc`. Every write that the editor or AI director performs flows through `apply`. No I/O occurs here - callers load the doc, call `apply`, and persist the result themselves. (The read-only summary the UI displays moved to `edit/ops/metrics.rs`.)
 
 ## EditOp
 
@@ -31,6 +31,8 @@ pub enum EditOp {
     AddLayoutSeg { at_ms: u32, dur_ms: u32, layout: String, transition_out_ms: Option<u32>, easing_out: Option<String> },
     UpdateLayoutSeg { id: String, start_ms: Option<u32>, end_ms: Option<u32>, layout: Option<String>, transition_ms: Option<u32>, easing: Option<String>, transition_out_ms: Option<u32>, easing_out: Option<String> },
     RemoveLayoutSeg { id: String },
+    SetArrangement { id: String, screen: Option<Option<PanelPose>>, cam: Option<Option<PanelPose>> },
+    ClearArrangement { id: String },
     AddEffect { kind: EffectKind, start_ms: u32, end_ms: u32 },
     UpdateEffect { id: String, start_ms: Option<u32>, end_ms: Option<u32>, fade_in_ms: Option<u32>, fade_out_ms: Option<u32>, mode: Option<String>, dim: Option<f32>, radius: Option<f32>, feather: Option<f32>, layer: Option<u32> },
     RemoveEffect { id: String },
@@ -53,6 +55,7 @@ Discriminated-union command type serialized to/from the Tauri IPC channel and th
 - `AddCut` - *append a cut segment; cut order and overlap resolution are rendering concerns, not enforced here.*
 - `SetSpeed` - *append a speed segment with the given `factor`; the id is auto-assigned and the caller controls ordering via the plan.*
 - `AddLayoutSeg` / `UpdateLayoutSeg` / `RemoveLayoutSeg` - *add/patch/remove a named-layout segment (`"screen"`, `"camera"`, `"presenter"`, ...), auto-id `l{n}`, clamped to the clip duration. Both carry the exit-transition pair as `Option`s: on `Add` they seed the segment (omitted = the `0`/hard-cut default, so every pre-existing caller is unchanged), on `Update` they follow the usual "only `Some` fields are written" rule. `easing_out` runs through `valid_easing` like every other easing setter.*
+- `SetArrangement` / `ClearArrangement` - *set/hide a segment's panel poses, or drop the arrangement so the segment resolves from its `layout` preset again (T34); dispatched to `edit::ops::arrangement::apply_arrangement`, which documents the full semantics. Each panel field is THREE-valued on the wire - key absent = "leave this panel alone", `null` = hide it, an object = that pose - which needs `arrangement::double_option` to deserialize, because plain `Option<Option<_>>` folds `null` into the outer `None` and would make "hide" indistinguishable from "don't touch". (This is the same ambiguity `SetZoomCamAction` exists to avoid; here the three-valued shape is unavoidable because two independent panels are patched by one op, so it is handled explicitly instead.)*
 - `AddEffect` / `UpdateEffect` / `RemoveEffect` - *add/patch/remove a Spotlight effect region; dispatched to `edit::ops::effects::apply_effect`.*
 - `AddCameraMove` - *append a webcam PiP keyframe at `t_ms` with center `(x, y)` and `size`, default easing `"smooth"`; auto-id `k{n}` (max existing `k`-suffix + 1); `t_ms` clamped to `[0, dur_bound(doc)]`, `x`/`y`/`size` clamped to `[0.0, 1.0]`. `doc.camera_moves` is kept sorted by `t_ms` after every add.*
 - `UpdateCameraMove` - *partial patch by `id`; only `Some` fields are written, same clamps as `AddCameraMove`; re-sorts `doc.camera_moves` by `t_ms` only when `t_ms` itself changed.*
@@ -62,29 +65,6 @@ Discriminated-union command type serialized to/from the Tauri IPC channel and th
 
 - `src-tauri/src/edit/commands.rs` - `apply_edit_op` Tauri command deserializes from IPC and forwards here
 - `src-tauri/src/ai/commands.rs` - AI director dispatches a sequence of `EditOp`s from a generated plan
-
-## Metrics
-
-```rust
-#[derive(Serialize, Clone, Debug, PartialEq)]
-pub struct Metrics {
-    pub duration_ms: u32,
-    pub kept_ms: u32,
-    pub zoom_count: usize,
-    pub cut_count: usize,
-}
-```
-
-Read-only doc summary returned to the frontend after every edit. Derived on demand from `EditDoc`; never stored.
-
-- `duration_ms` - *raw clip length (`trim.out_ms`); sets the timeline ruler's right edge.*
-- `kept_ms` - *`(trim.out - trim.in) - sum(cut durations within trim)`; drives the export file-size estimate shown in the sidebar.*
-- `zoom_count` - *`doc.zooms.len()`; the editor badge indicating how many zoom events are active.*
-- `cut_count` - *`doc.cuts.len()`; pairs with `kept_ms` so the user can confirm cuts were registered.*
-
-### Used by
-
-- `src-tauri/src/edit/commands.rs` - returned alongside the updated `EditDoc` in `apply_edit_op`
 
 ## apply
 
@@ -113,6 +93,7 @@ Mutates `doc` in place by dispatching on `op`. The single write point for all `E
 6. **AddCut** - push; no overlap check here since overlap rendering is a display concern.
 7. **SetSpeed** - generate id via `next_speed_id` (same max-suffix strategy, prefix `s`), push `Speed`. The caller supplies ordering.
 8. **UpdateLayoutSeg** - linear scan by `id`; writes only the `Some` fields (`start_ms`/`end_ms` clamped to the clip, `layout`/`easing`/`easing_out` validated same as above), then also runs `region::clamp_order` on `start_ms`/`end_ms` (M5), same as `UpdateZoom`.
+9. **SetArrangement / ClearArrangement** - delegated whole to `edit::ops::arrangement::apply_arrangement`, the same shape the effect ops use.
 
 ### Behaviors
 
@@ -130,30 +111,4 @@ Mutates `doc` in place by dispatching on `op`. The single write point for all `E
 - `update_zoom_start_past_end_pulls_end_to_match` / `update_zoom_end_before_start_pulls_start_to_match` - M5: dragging one handle past the other pulls the untouched handle to meet it rather than persisting an inverted region.
 - `update_layout_seg_start_past_end_pulls_end_to_match` - same M5 guarantee for `UpdateLayoutSeg`.
 
-## metrics
-
-```rust
-pub fn metrics(doc: &EditDoc) -> Metrics
-```
-
-Derives a `Metrics` snapshot from the current state of `doc` without mutating it.
-
-### Inputs
-
-- `doc: &EditDoc` - the document to measure. *Why immutable ref:* `metrics` is a pure read; it must never be callable in a context that expects mutation.*
-
-### Returns
-
-`Metrics` with all four fields computed in a single pass.
-
-### Implementation
-
-1. `duration_ms = doc.trim.out_ms`.
-2. `trim_span = trim.out_ms - trim.in_ms` (saturating).
-3. For each cut, clamp it to `[trim_in, trim_out]`, compute clamped length, accumulate. *Why clamp:* cuts outside the trim window do not reduce the exported clip.
-4. `kept_ms = trim_span - cut_sum` (saturating).
-5. `zoom_count = doc.zooms.len()`, `cut_count = doc.cuts.len()`.
-
-### Behaviors
-
-- `metrics_kept_ms_subtracts_cuts` - a 10 s clip (`SetTrim {0, 10000}`) with a 2 s cut (`AddCut {1000, 3000}`) yields `kept_ms=8000`, `cut_count=1`.
+`Metrics` and `metrics` now live in `edit/ops/metrics.rs` (see `metrics.md`) - this file was at the size budget, and doc statistics are a separate responsibility from doc mutation.

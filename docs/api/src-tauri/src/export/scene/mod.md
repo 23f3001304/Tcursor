@@ -251,3 +251,7 @@ Resolves the active `Scene` at any video timestamp from the `SetLayout` action t
 ## background
 
 Rasterizes the export background (solid, gradient at any angle, or image stub) into a BGRA pixel buffer. Key items: `render(bg, w, h)` - returns `Vec<u8>` of `w*h*4` BGRA bytes, always deterministic.
+
+## arrangement
+
+Pose-based panel arrangements (T34): resolves an `edit::model::Arrangement` into a `Scene` through the camera-keyframe placement machinery (`rect_from_center`/`override_camera`), and derives an `Arrangement` back out of a resolved preset. Key items: `resolve_arrangement(a, base, layout, ov, sw, sh) -> Scene`, `arrangement_of_preset(scene, ow, oh) -> Arrangement`, `pose_of_panel(panel, ow, oh) -> Option<PanelPose>`. Round-tripping a preset through poses reproduces its own pixels to within 0.334 px at 1920x1080.

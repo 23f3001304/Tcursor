@@ -8,7 +8,25 @@ use crate::export::camera::ease; // smoothstep + real ease-out-back spring (matc
 use crate::export::coordmap::to_panel;
 use crate::export::scene::{resolve, Scene};
 use crate::export::types::{Easing, ZoomRegion};
+use crate::edit::model::LayoutSeg;
 use crate::settings::appearance::{layout_for, overlay_for, AppearanceSettings};
+
+/// One `LayoutSeg`'s resolved `Scene`: its POSES when it carries an `arrangement` (the `layout`
+/// name still picks the appearance block the panels' radius/ring/shape come from), else its
+/// preset's `Scene` directly. The single definition both `LayoutTrack::from_segs` (the export/
+/// timeline path) and `preview_layouts` (the editor's per-segment preview rects) resolve a
+/// segment through - factored out so a posed segment's live preview and what the export actually
+/// draws can never diverge onto two pose-math paths.
+pub fn resolve_seg_scene(s: &LayoutSeg, app: &AppearanceSettings, ow: u32, oh: u32, sw: u32, sh: u32) -> Scene {
+    let id = crate::export::render::fromedit::layout_id_from(&s.layout);
+    let ma = app.for_id(id);
+    let base = resolve(id, &layout_for(ma, ow, oh), &overlay_for(ma, ow, oh, true), sw, sh);
+    match &s.arrangement {
+        None => base,
+        Some(a) => crate::export::scene::arrangement::resolve_arrangement(
+            a, base, &layout_for(ma, ow, oh), &overlay_for(ma, ow, oh, true), sw, sh),
+    }
+}
 
 /// One layout segment active over `[start_ms, end_ms)`, with its own cross-fade feel in AND out.
 struct Seg { start_ms: u32, end_ms: u32, scene: Scene, transition_ms: u32, easing: Easing,
@@ -46,6 +64,10 @@ impl LayoutTrack {
 
     /// Edited path: one segment per `LayoutSeg`, each carrying its own `[start, end)` span +
     /// transition_ms + easing. Gaps between segments fall back to the base `screen`.
+    ///
+    /// Each segment resolves via `resolve_seg_scene` - once, here - `scene_at` only ever blends
+    /// already-resolved scenes, so arrangement<->preset cross-fades come out of the same
+    /// `Scene::lerp` as preset<->preset ones with no extra path.
     pub fn from_segs(segs: &[crate::edit::model::LayoutSeg], app: &AppearanceSettings,
                      ow: u32, oh: u32, sw: u32, sh: u32) -> Self {
         let scene_for = |id: LayoutId| {
@@ -54,7 +76,7 @@ impl LayoutTrack {
         };
         let mut segs: Vec<Seg> = segs.iter().map(|s| Seg {
             start_ms: s.start_ms, end_ms: s.end_ms,
-            scene: scene_for(crate::export::render::fromedit::layout_id_from(&s.layout)),
+            scene: resolve_seg_scene(s, app, ow, oh, sw, sh),
             transition_ms: s.transition_ms,
             easing: crate::export::render::fromedit::easing_from(&s.easing, Easing::Smooth),
             transition_out_ms: s.transition_out_ms,

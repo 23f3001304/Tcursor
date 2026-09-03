@@ -44,4 +44,13 @@ impl FrameRenderer {
         crate::export::scene::resolve(id, &crate::settings::appearance::layout_for(ma, ow, oh),
             &crate::settings::appearance::overlay_for(ma, ow, oh, true), self.sw, self.sh)
     }
+
+    /// One `LayoutSeg`'s resolved `Scene` - its own poses when it carries an `arrangement`, else
+    /// its preset's `Scene` - through `scene::layout::resolve_seg_scene`, the exact function
+    /// `LayoutTrack` uses per segment when the export runs. Lets `preview_layouts` report a posed
+    /// segment's true panels with no second pose-math path to drift out of sync with the export.
+    pub fn resolve_seg(&self, seg: &crate::edit::model::LayoutSeg) -> crate::export::scene::Scene {
+        crate::export::scene::layout::resolve_seg_scene(seg, &self.settings.appearance,
+            self.layout.out_w, self.layout.out_h, self.sw, self.sh)
+    }
 }

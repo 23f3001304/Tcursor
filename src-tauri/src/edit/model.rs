@@ -56,6 +56,17 @@ fn default_fade_ms() -> u32 { 250 }
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Speed { pub id: String, pub start_ms: u32, pub end_ms: u32, pub factor: f32 }
 
+/// Normalized panel pose on the output frame: center (fractions of output w/h) + `size` (panel
+/// HEIGHT as a fraction of output height - the same vocabulary `CameraMove` uses). Width always
+/// derives from the panel's OWN aspect at resolve time, so a pose can never stretch content.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct PanelPose { pub cx: f32, pub cy: f32, pub size: f32 }
+
+/// A custom panel arrangement: explicit poses for the screen and webcam panels of one
+/// `LayoutSeg`. A `None` panel is not shown (alpha 0); the ops keep at least one panel `Some`.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct Arrangement { pub screen: Option<PanelPose>, pub cam: Option<PanelPose> }
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct LayoutSeg {
     pub id: String, pub start_ms: u32, pub end_ms: u32, pub layout: String,
@@ -69,6 +80,12 @@ pub struct LayoutSeg {
     #[serde(default)] pub transition_out_ms: u32,
     /// Easing wire-name for the exit fade; only meaningful when `transition_out_ms > 0`.
     #[serde(default = "default_layout_easing")] pub easing_out: String,
+    /// Explicit panel poses for this segment. `None` - what every doc written before this
+    /// existed loads as, and what `skip_serializing_if` keeps out of a re-saved old doc -
+    /// resolves from the `layout` preset exactly as before. `Some` WINS over the preset and
+    /// makes `layout` display-only provenance (it still selects the appearance block the
+    /// panels' radius/ring/shape come from). See `export::scene::arrangement`.
+    #[serde(default, skip_serializing_if = "Option::is_none")] pub arrangement: Option<Arrangement>,
 }
 fn default_layout_transition_ms() -> u32 { 350 }
 fn default_layout_easing() -> String { "smooth".into() }

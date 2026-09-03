@@ -57,3 +57,11 @@ pub fn resolve_layout(&self, id: crate::actions::model::LayoutId) -> crate::expo
 ```
 
 This preset's `Scene`, resolved from the renderer's own appearance + dims (the same resolve `LayoutTrack` performs) - lets `preview_layouts` cross-fade between presets.
+
+## FrameRenderer::resolve_seg
+
+```rust
+pub fn resolve_seg(&self, seg: &crate::edit::model::LayoutSeg) -> crate::export::scene::Scene
+```
+
+One `LayoutSeg`'s resolved `Scene` - its own poses when it carries an `arrangement`, else its preset's `Scene` - through `scene::layout::resolve_seg_scene` (`scene/layout.md`), the exact function `LayoutTrack::from_segs` uses per segment when the export runs. Lets `preview_layouts` (T34 L2) report a posed segment's true panels to the editor preview with no second pose-math path to drift out of sync with the export.

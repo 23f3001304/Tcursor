@@ -1,13 +1,15 @@
 import { memo, useEffect, useRef, useState, type RefObject } from "react";
 import type { CamSample, ClickSample, CursorSpriteDto, CursorKindSample, PreviewLayout, LayoutPresets } from "../../lib/ipc";
 import type { CursorSettings, ClickFxSettings, ZoomSettings } from "../../hud/settings/settings";
-import type { Aspect, CameraMove, EffectRegion, LayoutSeg, Zoom } from "../../lib/edit";
+import type { Aspect, CameraMove, EditDoc, EditOp, EffectRegion, LayoutSeg, Zoom } from "../../lib/edit";
 import type { Tab } from "../shell/Rail";
 import { camAt } from "./camera";
 import { type CamPose } from "./cameraMoves";
-import { newSpotlightSimState, spotlightEffectsKey, type SpotlightSimState } from "./spotlightPreview";
-import { isNaturalPlaybackTick } from "./playbackTick";
+import { newSpotlightSimState, type SpotlightSimState } from "./spotlightPreview";
 import { useReticleDrag } from "./useReticleDrag";
+import { useStageInvalidation } from "./useStageInvalidation";
+import { useArrangeDrag } from "./arrange/useArrangeDrag";
+import { ArrangeOverlay } from "./arrange/ArrangeOverlay";
 import { useCompositeLoop } from "../hooks/useCompositeLoop";
 import { useCursorSprites } from "../hooks/useCursorSprites";
 import { useMediaPlayback } from "../hooks/useMediaPlayback";
@@ -32,7 +34,7 @@ const DEFAULT_CANVAS: [number, number] = [1280, 720];
  *  hygiene pass) - still re-renders every tick while playing (`timeMs` genuinely drives the
  *  reticle/dirty-tracking), but skips re-rendering for unrelated `Editor` state as long as the
  *  caller passes stable callback props. */
-export const Stage = memo(function Stage({ src, webcamSrc, track, layout, layoutPresets, layoutSegs, cameraMoves, zooms, zoomSettings, clicks, bgUrl, cursorSprites, cursorKinds, osCursorInVideo, cursor, effects, clickfx, audioSrc, muted, volume, timeMs, playing, moveMode, aimPoint, aimMode, camDraftRef, tab, onTab, aspect, onAspect, aspectLocked, onTime, onDuration, onZoomAt, onAimAt, onRetryMedia }: {
+export const Stage = memo(function Stage({ src, webcamSrc, track, layout, layoutPresets, layoutSegs, cameraMoves, zooms, zoomSettings, clicks, bgUrl, cursorSprites, cursorKinds, osCursorInVideo, cursor, effects, clickfx, audioSrc, muted, volume, timeMs, playing, moveMode, aimPoint, aimMode, arrangeSeg, camDraftRef, tab, onTab, aspect, onAspect, aspectLocked, onTime, onDuration, onZoomAt, onAimAt, onApply, onRetryMedia }: {
   src: string; webcamSrc: string; track: CamSample[]; layout: PreviewLayout | null;
   layoutPresets: LayoutPresets | null; layoutSegs: LayoutSeg[]; cameraMoves: CameraMove[];
   zooms: Zoom[]; zoomSettings: ZoomSettings;
@@ -52,9 +54,14 @@ export const Stage = memo(function Stage({ src, webcamSrc, track, layout, layout
   aimPoint: [number, number] | null;
   /** Aim mode: the canvas re-aims the selected zoom instead of adding a new one. */
   aimMode: boolean;
+  /** The layout segment being arranged on the stage, else null. Non-null IS arrange mode - a third
+   *  exclusive stage mode alongside aim and Move (all three claim the same pointer), so it
+   *  suspends click-to-zoom/aim and hides the Move handle for as long as it is on. */
+  arrangeSeg: LayoutSeg | null;
   camDraftRef: RefObject<CamPose | null>;
   onTime: (ms: number) => void; onDuration: (ms: number) => void;
   onZoomAt: (x: number, y: number) => void; onAimAt: (x: number, y: number) => void;
+  onApply: (op: EditOp) => Promise<EditDoc | null>;
   onRetryMedia: () => void;
 }) {
   const screen = useRef<HTMLVideoElement>(null);
@@ -69,15 +76,6 @@ export const Stage = memo(function Stage({ src, webcamSrc, track, layout, layout
   // positions, drag mapping) is relative to this same basis, so it must stay a single source.
   const [canvasW, canvasH] = layout?.canvas ?? DEFAULT_CANVAS;
 
-  // Decode the export background (a data URL) once per change into an <img> the canvas draws.
-  useEffect(() => {
-    if (!bgUrl) { bgImg.current = null; dirtyRef.current = true; return; }
-    const img = new Image();
-    img.onload = () => { dirtyRef.current = true; };
-    img.src = bgUrl;
-    bgImg.current = img;
-  }, [bgUrl]);
-
   // Plain-OS fallback, mirroring Rust cursorset::draw: System on a video with no baked cursor
   // draws the synthetic one plainly - arrow only (empty kind track), no bounce, no trail. The raw
   // path itself comes from camera_track, which Rust already leaves unsmoothed in this mode.
@@ -89,9 +87,14 @@ export const Stage = memo(function Stage({ src, webcamSrc, track, layout, layout
   } = useSyncRefs({
     playing, timeMs, onTime, track, layout, clicks, effects, clickfx, cursorKinds: plainOs ? [] : cursorKinds, cursor: effCursor
   });
+  // Arrange mode's live pose draft. It is folded back into `LayoutPresets.segs` (`arrangePresets`)
+  // rather than given a drawing path of its own, so the loop below - and `layoutAt`'s cross-fades -
+  // see a dragged segment exactly as they will once it commits. Presentation only: the op is
+  // written on release (see useArrangeDrag).
+  const arrange = useArrangeDrag({ seg: arrangeSeg, presets: layoutPresets, canvasRef: canvas, canvasW, canvasH, dirtyRef, onApply });
   // Mirrored into refs directly (not via useSyncRefs) so the rAF loop always reads the live
   // presets/segments without re-subscribing; same plain "useRef + assign each render" pattern.
-  const layoutPresetsRef = useRef(layoutPresets); layoutPresetsRef.current = layoutPresets;
+  const layoutPresetsRef = useRef(arrange.presets); layoutPresetsRef.current = arrange.presets;
   const layoutSegsRef = useRef(layoutSegs); layoutSegsRef.current = layoutSegs;
   const cameraMovesRef = useRef(cameraMoves); cameraMovesRef.current = cameraMoves;
   // Zooms + zoom settings drive the smart webcam-on-zoom action (mirrors step_camera).
@@ -108,35 +111,10 @@ export const Stage = memo(function Stage({ src, webcamSrc, track, layout, layout
   // edit the loop's own discontinuous-jump gate can't see (that gate only fires on a moving `t`).
   const spotSimRef = useRef<SpotlightSimState>(newSpotlightSimState());
 
-  // Mark the canvas dirty on any draw-affecting change so the PAUSED rAF recomposites exactly once
-  // per change instead of redrawing the same static frame at 60fps (the idle/interaction-lag fix).
-  useEffect(() => { dirtyRef.current = true; }, [timeMs, playing, track, layout, layoutPresets, layoutSegs, cameraMoves, zooms, zoomSettings, clicks, effects, cursor, clickfx, cursorKinds]);
-  // Gate 2 for the "spotlight freezes mid-fade" bug: a retime/add/remove of a Spotlight region
-  // WHILE PAUSED doesn't move `timeMs` at all, so useCompositeLoop's discontinuous-jump reset
-  // (gate 1) never fires - the sim's in-flight fade-out (armed when the old driver disappeared)
-  // would otherwise keep easing forever against a frozen paused `t`. Keyed on CONTENT
-  // (`spotlightEffectsKey`), not the `effects` array reference, mirroring CamDragHandle's
-  // `cameraMovesKey` use just below for the identical reason (`applyEditOp` hands back a new
-  // array reference on every edit routed through it, not just spotlight ones).
-  const spotEffectsKeyRef = useRef(spotlightEffectsKey(effects));
-  useEffect(() => {
-    const key = spotlightEffectsKey(effects);
-    if (key !== spotEffectsKeyRef.current) spotSimRef.current = newSpotlightSimState();
-    spotEffectsKeyRef.current = key;
-  }, [effects]);
-  // Moving the playhead discards the unsaved Move-mode draft - UNLESS this `timeMs` change is
-  // just the composite loop's own natural playback progress (`isNaturalPlaybackTick`), not an
-  // actual seek/scrub (M6, review round 1 Important 3). The draft must survive an ordinary tick
-  // whether the drag is still in progress OR was already released - "nothing is saved until you
-  // press the button" (CameraPanel's own promise) only holds if the draft actually lives until
-  // then, not just until the next ~16/sec tick after letting go. `playRef` (from `useSyncRefs`
-  // above) keeps this reading the CURRENT `playing`, not whatever it was when the effect last ran.
-  const lastCamTimeRef = useRef(timeMs);
-  useEffect(() => {
-    dirtyRef.current = true;
-    if (!isNaturalPlaybackTick(lastCamTimeRef.current, timeMs, playRef.current)) camDraftRef.current = null;
-    lastCamTimeRef.current = timeMs;
-  }, [timeMs]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The background decode + all three "recomposite / drop the draft now" gates (see the hook's
+  // own doc comment) - extracted to keep this file under its line budget, like useReticleDrag.
+  useStageInvalidation({ bgUrl, bgImgRef: bgImg, dirtyRef, effects, spotSimRef, timeMs, playRef, camDraftRef,
+    drawDeps: [timeMs, playing, track, layout, arrange.presets, layoutSegs, cameraMoves, zooms, zoomSettings, clicks, effects, cursor, clickfx, cursorKinds] });
 
   useMediaPlayback({ screenRef: screen, webcamRef: webcam, audioRef: audio, playing, src, muted, volume, audioSrc, timeMs, playRef });
 
@@ -156,8 +134,18 @@ export const Stage = memo(function Stage({ src, webcamSrc, track, layout, layout
       cam: camAt(trackRef.current, timeRef.current) });
   };
   // Clicking the preview adds a zoom focused on that point - EXCEPT in aim mode, where it re-aims
-  // the already-selected Region zoom instead (the two are mutually exclusive click meanings).
+  // the already-selected Region zoom instead (the two are mutually exclusive click meanings), and
+  // except while arranging, where the click belongs to the panel frames and must not also drop a
+  // zoom behind them (the same guard aim mode gets, one mode further).
+  const arranging = arrangeSeg !== null;
+  // Mode exclusivity has a second half beyond the pointer: `frameCamLayout` gives `camDraftRef`
+  // precedence over the base layout rect (`drag ?? camMoveAt(...)`), which is exactly where the
+  // arrange draft lives - so an UNSAVED Move-mode drag left over from before would pin the
+  // composited webcam while the arrange frame moved freely. Entering arrange discards it, the same
+  // way a seek does. `dirtyRef` because a paused loop otherwise keeps the stale frame on screen.
+  useEffect(() => { if (arranging) { camDraftRef.current = null; dirtyRef.current = true; } }, [arranging]); // eslint-disable-line react-hooks/exhaustive-deps
   const onCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (arranging) return;
     const t = targetUnderPointer(e.clientX, e.clientY);
     if (t) (aimMode ? onAimAt : onZoomAt)(t[0], t[1]);
   };
@@ -168,7 +156,7 @@ export const Stage = memo(function Stage({ src, webcamSrc, track, layout, layout
   // Where that stored aim point lands on the canvas RIGHT NOW (the crop moves it as the camera
   // ramps). Hidden during playback: the reticle is an editing affordance, not a playback overlay.
   const shownAim = liveAim ?? aimPoint;
-  const reticle = shownAim && !playing
+  const reticle = shownAim && !playing && !arranging
     ? mapZoomTargetToCanvasPoint({ tx: shownAim[0], ty: shownAim[1], canvasW, canvasH, layout, cam: camAt(track, timeMs) })
     : null;
 
@@ -178,13 +166,17 @@ export const Stage = memo(function Stage({ src, webcamSrc, track, layout, layout
       <div className="e-stage" style={{ aspectRatio: `${canvasW} / ${canvasH}` }}>
         {!src && !err && <div className="e-stage-empty"><Spin size={20} /><span>Preparing preview</span></div>}
         <canvas ref={canvas} className="e-canvas" width={canvasW} height={canvasH} onClick={onCanvasClick}
-          title={aimMode ? "Click to aim this zoom" : "Click to add a zoom here"}
-          style={{ display: src ? "block" : "none", cursor: aimMode ? "crosshair" : "zoom-in" }} />
+          title={arranging ? "Drag the panel frames to arrange this layout" : aimMode ? "Click to aim this zoom" : "Click to add a zoom here"}
+          style={{ display: src ? "block" : "none", cursor: arranging ? "default" : aimMode ? "crosshair" : "zoom-in" }} />
         {reticle && <ZoomReticle x={reticle[0]} y={reticle[1]} aiming={aimMode} dragging={aimDrag}
           onPointerDown={aimMode ? onReticleDown : undefined} />}
-        {moveMode && (
-          <CamDragHandle layout={layout} layoutPresets={layoutPresets} layoutSegs={layoutSegs} cameraMoves={cameraMoves}
+        {moveMode && !arranging && (
+          <CamDragHandle layout={layout} layoutPresets={arrange.presets} layoutSegs={layoutSegs} cameraMoves={cameraMoves}
             timeMs={timeMs} playing={playing} canvasW={canvasW} canvasH={canvasH} canvasRef={canvas} camDraftRef={camDraftRef} dirtyRef={dirtyRef} />
+        )}
+        {arrangeSeg && arrange.panels && (
+          <ArrangeOverlay seg={arrangeSeg} panels={arrange.panels} camMoves={cameraMoves} guideX={arrange.guideX}
+            guideY={arrange.guideY} active={arrange.active} onPanelDown={arrange.onPanelDown} onHideCam={arrange.onHideCam} />
         )}
         <StageMedia screenRef={screen} webcamRef={webcam} audioRef={audio} src={src} webcamSrc={webcamSrc} audioSrc={audioSrc} err={err}
           onScreenLoadedData={() => { setErr(null); dirtyRef.current = true; }} onScreenSeeked={() => { dirtyRef.current = true; }}

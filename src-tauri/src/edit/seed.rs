@@ -63,7 +63,7 @@ pub fn layout_from_actions(actions: &[ActionEvent], dur_ms: u32) -> Vec<LayoutSe
     for (i, &(start, id)) in switches.iter().enumerate() {
         let end = switches.get(i + 1).map(|&(s, _)| s).unwrap_or(dur_ms).max(start);
         segs.push(LayoutSeg { id: format!("l{}", i), start_ms: start, end_ms: end, layout: layout_name(id),
-            transition_ms: 350, easing: "smooth".into(), transition_out_ms: 0, easing_out: "smooth".into() });
+            transition_ms: 350, easing: "smooth".into(), transition_out_ms: 0, easing_out: "smooth".into(), arrangement: None });
     }
     segs
 }

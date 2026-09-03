@@ -88,13 +88,44 @@ A speed-ramp segment that stretches or compresses a time range in the export.
 - `src/lib/edit.ts` - field `EditDoc.speed`.
 - `src/lib/ipc.ts` - present in `EditDoc`.
 
+## PanelPose
+
+```ts
+export interface PanelPose { cx: number; cy: number; size: number }
+```
+
+Where one panel sits on the output frame, resolution-independently - mirrors Rust `edit::model::PanelPose`, and is deliberately the same three-number vocabulary `CameraMove` uses.
+
+- `cx / cy: number` - the panel's CENTER as fractions of output width/height. *Why center rather than top-left:* a resize then keeps the panel where it is, and it matches `CameraMove.x`/`y`.
+- `size: number` - the panel's HEIGHT as a fraction of output height.
+
+*Why there is no width:* width is never stored. Rust re-derives it from the panel's own aspect at resolve time (the screen's is the SOURCE aspect, the cam's the appearance-configured shape), so no pose can stretch or squash content. Bounds are enforced in Rust on the way in: `cx`/`cy` clamp to `0..1`, `size` to `0.05..1.5`.
+
+### Used by
+
+- `src/lib/edit.ts` - fields of `Arrangement`; the `set_arrangement` `EditOp` payload.
+- `src/lib/ipc.ts` - inside `LayoutPresetDto.arrangement`.
+
+## Arrangement
+
+```ts
+export interface Arrangement { screen: PanelPose | null; cam: PanelPose | null }
+```
+
+One `LayoutSeg`'s custom two-panel composition (T34) - mirrors Rust `edit::model::Arrangement`. A `null` panel is not shown (it resolves at alpha 0). At least one panel is always non-null: Rust rejects any `set_arrangement` that would hide both, so the frontend never has to represent an empty frame.
+
+### Used by
+
+- `src/lib/edit.ts` - the optional `LayoutSeg.arrangement` field.
+- `src/lib/ipc.ts` - `LayoutPresetDto.arrangement`, the pose form of each preset.
+
 ## LayoutSeg
 
 ```ts
-export interface LayoutSeg { id: string; start_ms: number; end_ms: number; layout: string; transition_ms: number; easing: string; transition_out_ms: number; easing_out: string }
+export interface LayoutSeg { id: string; start_ms: number; end_ms: number; layout: string; transition_ms: number; easing: string; transition_out_ms: number; easing_out: string; arrangement?: Arrangement | null }
 ```
 
-A time range in which a specific output layout (screen-only, picture-in-picture, presenter, etc.) is active.
+A time range in which a specific output layout (screen-only, picture-in-picture, presenter, etc.) is active - or, when it carries an `arrangement`, that segment's own explicit panel poses.
 
 - `id: string` - stable identifier.
 - `start_ms / end_ms: number` - playback time range for this segment.
@@ -102,6 +133,7 @@ A time range in which a specific output layout (screen-only, picture-in-picture,
 - `transition_ms: number` - cross-fade duration (ms) blending IN from whatever layout preceded this segment; the blend STARTS at `start_ms`.
 - `transition_out_ms: number` / `easing_out: string` - the exit cross-fade, which COMPLETES at `end_ms`. `0` is a hard cut. *Why these are required here despite being serde-defaulted in Rust:* Rust always SERIALIZES them, so every doc that reaches TypeScript has them - only files on disk can be missing them.
 - `easing: string` - easing function name for that cross-fade, same free-form string convention as `Zoom.easing`.
+- `arrangement?: Arrangement | null` - this segment's explicit panel poses. *Why optional here when the other serde-defaulted fields are required:* Rust SKIPS the key entirely when unset (that is what keeps a pre-T34 `edit.json` byte-stable on re-save), so unlike `transition_out_ms` it genuinely can be missing from a doc that reaches TypeScript. Absent = resolve from the `layout` preset as before; present = the poses win and `layout` becomes display-only provenance ("based on Presenter") that still selects the appearance block the panels' radius/ring/shape come from.
 
 ### Used by
 
@@ -213,6 +245,8 @@ export type EditOp =
   | { op: "add_layout_seg"; at_ms: number; dur_ms: number; layout: string }
   | { op: "update_layout_seg"; id: string; start_ms?: number; end_ms?: number; layout?: string; transition_ms?: number; easing?: string }
   | { op: "remove_layout_seg"; id: string }
+  | { op: "set_arrangement"; id: string; screen?: PanelPose | null; cam?: PanelPose | null }
+  | { op: "clear_arrangement"; id: string }
   | { op: "add_effect"; kind: EffectKind; start_ms: number; end_ms: number }
   | { op: "update_effect"; id: string; start_ms?: number; end_ms?: number; fade_in_ms?: number; fade_out_ms?: number; mode?: string; dim?: number; radius?: number; feather?: number; layer?: number }
   | { op: "remove_effect"; id: string }
@@ -236,6 +270,8 @@ Discriminated union of all edit verbs. Each variant is tagged by the `op` string
 - `add_layout_seg` - appends a new `LayoutSeg` of `layout` starting at `at_ms` with duration `dur_ms`. `transition_out_ms`/`easing_out` are optional; omitted, the segment gets the hard-cut default, so existing callers are unchanged.
 - `update_layout_seg` - patches any subset of a layout segment's fields by `id`: time range, `layout` name, `transition_ms`, `easing`, `transition_out_ms`, `easing_out`. *Why partial update:* dragging a segment's edge on the timeline changes only `start_ms`/`end_ms`.
 - `remove_layout_seg` - deletes the layout segment with the given `id`.
+- `set_arrangement` - sets or hides a layout segment's panel poses. Each panel field is THREE-valued: **omit** the key to leave that panel as it is, pass `null` to hide it, pass a `PanelPose` to set (and un-hide) it. *Why omitted and `null` must differ:* they are the only way one op can patch two independent panels without a caller ever having to resend a pose it did not change. Note `JSON.stringify` drops `undefined` keys, so `{ cam: undefined }` correctly reads as "leave the cam alone" - but an explicit `cam: null` HIDES it, so never use `null` as a stand-in for "no value". On a segment with no arrangement yet the base is "both panels hidden", so converting a preset means sending BOTH panels: take them from the matching `LayoutPresetDto.arrangement` in `previewLayouts`. A change that would hide both panels is rejected by Rust (a no-op).
+- `clear_arrangement` - drops a segment's arrangement so it resolves from its `layout` preset again; the way back from a custom arrangement.
 - `add_effect` - appends a new `EffectRegion` of `kind` for the given time range.
 - `update_effect` - patches any subset of an effect region's fields by `id`, including `layer` for overlap stacking.
 - `remove_effect` - deletes the effect region with the given `id`.

@@ -1,12 +1,10 @@
 import { useCallback, useMemo, useRef, useState } from "react";
-import { exportProject, applyEditOp, fileSrc, DEFAULT_PROXY_HEIGHT } from "../lib/ipc";
+import { applyEditOp, fileSrc, DEFAULT_PROXY_HEIGHT } from "../lib/ipc";
 import type { MarkState } from "../lib/brandWave";
 import { resolveTrim, type EditDoc, type EditOp } from "../lib/edit";
 import type { CamPose } from "./stage/cameraMoves";
 import { TopBar } from "./shell/TopBar";
-import { ExportDialog } from "./shell/ExportDialog";
-import { ShortcutsOverlay } from "./shell/ShortcutsOverlay";
-import { EditorSettingsDialog } from "./shell/settings/EditorSettingsDialog";
+import { EditorDialogs } from "./shell/EditorDialogs";
 import { Toast, useUndoToast } from "./shell/Toast";
 import { ResizeEdges } from "./controls/ResizeEdges";
 import { Rail, type Tab } from "./shell/Rail";
@@ -21,6 +19,7 @@ import { useExportState } from "./hooks/useExportState";
 import { useEditorCallbacks } from "./hooks/useEditorCallbacks";
 import { useEditorKeymap } from "./hooks/useEditorKeymap";
 import { useMoveModeGuard } from "./hooks/useMoveModeGuard";
+import { useArrangeMode } from "./hooks/useArrangeMode";
 import { useTrimActions } from "./hooks/useTrimActions";
 import { useEditHistory } from "./hooks/useEditHistory";
 import { useDocSettings } from "./hooks/useDocSettings";
@@ -65,8 +64,8 @@ export function Editor({ folder, onClose }: { folder: string; onClose: () => voi
     doc, setDoc, track, layout, layoutPresets, clicks, bgUrl, cursorSpr, cursorKnd, osCursor,
     thumbs, waves, wavesReady, audioUrl, srcUrl, playing, setPlaying, retryMedia,
   } = useEditorData(folder, rev, quality);
-  const { exporting, pct, exportDone, setExportDone, exportError, setExportError, exportPath, setExportPath, startExport, exportStartedAt } =
-    useExportState(pushToast);
+  const exportState = useExportState(pushToast);
+  const { exporting } = exportState;
   // Mirrors `doc`/`timeMs` (reassigned every render) so queued closures/tick-stable callbacks read
   // them fresh at execution time instead of closing over a stale value (Editor.md, "render hygiene").
   const docRef = useRef(doc);
@@ -100,7 +99,6 @@ export function Editor({ folder, onClose }: { folder: string; onClose: () => voi
   // otherwise defeat `Stage`'s memo (`aimPoint` is one of its props) on every single tick.
   const selZoom = doc?.zooms.find((z) => z.id === sel);
   const aimPoint = useMemo(() => zoomTargetPoint(selZoom?.target), [selZoom]);
-  const aimMode = aimOn && !moveMode && !!aimPoint;
   // Trim range, kept in a ref alongside `docRef`/`timeMsRef` above - `useEditorCallbacks`'s
   // `onTime`/`onPlayToggle` read it at call time so their identity doesn't depend on the trim
   // (which `resolveTrim` recomputes as a fresh object every render regardless of real changes).
@@ -111,6 +109,10 @@ export function Editor({ folder, onClose }: { folder: string; onClose: () => voi
   const { onTime, aimAt, onMoveMode, onSeek, onPlayToggle, onAspect, cycleQuality, onMuteToggle } = useEditorCallbacks({
     applyOp, sel, dur, timeMsRef, trimRangeRef, setTimeMs, setPlaying, setAimOn, setQuality, setMuted, requestMoveMode,
   });
+  // Stage arrange mode (T34) - the third exclusive stage mode, gated into `aimMode` for the same
+  // reason Move is. Built after `onSeek`, which it seeks into the segment with. useArrangeMode.md.
+  const { arrangeSeg, arrangeOn, onArrange, onSel } = useArrangeMode(doc, sel, { setSel, timeMsRef, onSeek });
+  const aimMode = aimOn && !moveMode && !arrangeOn && !!aimPoint;
   // Shared by Rail and StageToolbar - navigating AWAY clears selection/aim; re-clicking the
   // already-open tab is a no-op (fix round 1: used to clear unconditionally, dropping selection).
   const onTab = useCallback((t: Tab) => { if (t !== tab) { setSel(null); setAimOn(false); } setTab(t); }, [tab]);
@@ -146,20 +148,20 @@ export function Editor({ folder, onClose }: { folder: string; onClose: () => voi
   return (
     <div className="editor">
       <ResizeEdges />
-      <TopBar proj={proj} exporting={exporting} pct={pct} onOpenExport={() => setShowExportDialog(true)} onOpenSettings={() => setShowSettings(true)} onClose={onClose}
+      <TopBar proj={proj} exporting={exporting} pct={exportState.pct} onOpenExport={() => setShowExportDialog(true)} onOpenSettings={() => setShowSettings(true)} onClose={onClose}
         onUndo={() => void undo()} onRedo={() => void redo()} canUndo={canUndo} canRedo={canRedo} brandState={brandState} />
       <div className="e-body">
         <Rail tab={tab} onTab={onTab} />
         <EditorPanels doc={doc} sel={sel} tab={tab} dur={dur} setSel={setSel} setTab={setTab}
           timeMs={tab === "camera" ? timeMs : 0} timeMsRef={timeMsRef} running={running} exporting={exporting} aiError={aiError} aiLog={aiLog} aiProgress={director.progress} onRun={onRun} onAutoModel={onAutoModel} applyOp={applyOp} saveDocSettings={saveDocSettings}
           moveMode={moveMode} requestMoveMode={onMoveMode} camDraftRef={camDraftRef} osCursorInVideo={osCursor}
-          aimMode={aimMode} onAimMode={setAimOn} onSeek={onSeek}
+          aimMode={aimMode} onAimMode={setAimOn} onSeek={onSeek} layoutPresets={layoutPresets} arrangeOn={arrangeOn} onArrange={onArrange}
           addZoom={addZoom} addSpotlight={addSpotlight} addCameraMove={addCameraMove} />
         {/* Relative wrapper so the undo/redo Toast and the AI director's status pill (was
             `position:fixed` from the viewport bottom, floating over the timeline once it grew
             past ~74px, ux audit #17) sit bottom-center of the STAGE, not owned by Stage.tsx. */}
         <div className="e-stagetoast">
-          <Stage src={srcUrl} webcamSrc={fileSrc(`${folder}\\webcam.webm`)} track={track} layout={layout} layoutPresets={layoutPresets} layoutSegs={doc.layout} cameraMoves={doc.camera_moves} zooms={doc.zooms} zoomSettings={doc.settings.zoom} clicks={clicks} bgUrl={bgUrl} cursorSprites={cursorSpr} cursorKinds={cursorKnd} osCursorInVideo={osCursor} cursor={doc.settings.cursor} effects={doc.effects} clickfx={doc.settings.clickfx} audioSrc={audioUrl} muted={muted} volume={volume / 100} timeMs={timeMs} playing={playing} moveMode={moveMode} aimPoint={aimPoint} aimMode={aimMode} camDraftRef={camDraftRef} tab={tab} onTab={onTab} aspect={doc.aspect} onAspect={onAspect} aspectLocked={exporting || dur <= 0} onTime={onTime} onDuration={setVidDurMs} onZoomAt={zoomAt} onAimAt={aimAt} onRetryMedia={retryMedia} />
+          <Stage src={srcUrl} webcamSrc={fileSrc(`${folder}\\webcam.webm`)} track={track} layout={layout} layoutPresets={layoutPresets} layoutSegs={doc.layout} cameraMoves={doc.camera_moves} zooms={doc.zooms} zoomSettings={doc.settings.zoom} clicks={clicks} bgUrl={bgUrl} cursorSprites={cursorSpr} cursorKinds={cursorKnd} osCursorInVideo={osCursor} cursor={doc.settings.cursor} effects={doc.effects} clickfx={doc.settings.clickfx} audioSrc={audioUrl} muted={muted} volume={volume / 100} timeMs={timeMs} playing={playing} moveMode={moveMode} aimPoint={aimPoint} aimMode={aimMode} arrangeSeg={arrangeSeg} camDraftRef={camDraftRef} tab={tab} onTab={onTab} aspect={doc.aspect} onAspect={onAspect} aspectLocked={exporting || dur <= 0} onTime={onTime} onDuration={setVidDurMs} onZoomAt={zoomAt} onAimAt={aimAt} onApply={applyOp} onRetryMedia={retryMedia} />
           <Toast msg={toast} onDone={dismissToast} />
           <DirectorOverlay running={running} planning={director.planning} model={doc.settings.ai_model || undefined} pointerRef={director.pointerRef} progress={director.progress} onCancel={director.requestCancel} />
         </div>
@@ -187,14 +189,12 @@ export function Editor({ folder, onClose }: { folder: string; onClose: () => voi
         volume={volume}
         onVolume={setVolume}
       />
-      <Timeline doc={doc} timeMs={timeMs} dur={dur} playing={playing} onSeek={onSeek} sel={sel} onSel={setSel} onApply={applyOp} thumbs={thumbs} waves={waves} wavesReady={wavesReady} hasWebcam={hasWebcamSignal(layout)} />
+      <Timeline doc={doc} timeMs={timeMs} dur={dur} playing={playing} onSeek={onSeek} sel={sel} onSel={onSel} onApply={applyOp} thumbs={thumbs} waves={waves} wavesReady={wavesReady} hasWebcam={hasWebcamSignal(layout)} />
       {moveOffDialog}
-      <ExportDialog open={showExportDialog} exporting={exporting} pct={pct} done={exportDone} error={exportError} exportPath={exportPath} startedAt={exportStartedAt}
-        onClose={() => setShowExportDialog(false)} onReset={() => { setExportDone(false); setExportError(null); setExportPath(""); }}
-        onExport={(settings) => { setExportDone(false); setExportError(null); setExportPath(""); startExport(); void exportProject(folder, settings); }} />
-      <ShortcutsOverlay open={showShortcuts} onClose={() => setShowShortcuts(false)} />
-      <EditorSettingsDialog open={showSettings} settings={doc.settings} onClose={() => setShowSettings(false)}
-        onSaveSettings={saveDocSettings} onOpenShortcuts={() => { setShowSettings(false); setShowShortcuts(true); }} />
+      <EditorDialogs folder={folder} settings={doc.settings} exportState={exportState} onSaveSettings={saveDocSettings}
+        showExport={showExportDialog} onCloseExport={() => setShowExportDialog(false)}
+        showShortcuts={showShortcuts} onCloseShortcuts={() => setShowShortcuts(false)} showSettings={showSettings}
+        onCloseSettings={() => setShowSettings(false)} onOpenShortcuts={() => { setShowSettings(false); setShowShortcuts(true); }} />
     </div>
   );
 }

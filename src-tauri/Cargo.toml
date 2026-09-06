@@ -41,6 +41,21 @@ png = "0.17"
 version = "0.58"
 features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Registry"]
 
+# The SAME `windows` package as above, at the version windows-capture builds against, under a
+# second name. NOT a second dependency: cargo unifies both entries onto the one 0.61.3 crate
+# instance windows-capture already compiles, and every feature listed here is one it already
+# enables - so nothing extra is downloaded, compiled, or linked.
+#
+# It has to be a direct entry because the D3D11 device, context and texture a WGC frame carries
+# are 0.61's types, not 0.58's: two versions of the same interface are distinct Rust types, so
+# `frame_scaler.rs` (which allocates the encoder's fixed canvas on that device and scales each
+# resized frame into it) cannot name them through 0.58. Aliasing 0.61 is what makes them
+# nameable without a transmute across crate versions.
+[dependencies.wgc-windows]
+package = "windows"
+version = "0.61"
+features = ["Graphics_DirectX_Direct3D11", "Win32_Foundation", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_System_WinRT_Direct3D11"]
+
 
 # Dev builds default to opt-level 0, which makes the export/preview pixel paths (33MB/frame
 # readback copy, cursor blit, wgpu glue, ffmpeg buffer handling) 10-30x slower than release -

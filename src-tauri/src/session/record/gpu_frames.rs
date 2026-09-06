@@ -9,25 +9,28 @@ use windows_capture::encoder::VideoEncoder;
 use windows_capture::frame::Frame;
 use windows_capture::graphics_capture_api::InternalCaptureControl;
 use crate::domain::time::Clock;
-use super::dim_guard::DimGuard;
+use super::frame_scaler::FrameFit;
 use super::pause_clock::PauseClock;
 use super::pause_totals::PauseTotals;
-use super::{Notify, CAPTURE_CLOSED, DISPLAY_CHANGED};
+use super::{Notify, CAPTURE_CLOSED};
 
 /// Capture times (ms, pause-compressed) of the frames actually encoded, in encode order.
 pub type FrameTimes = Arc<Mutex<Vec<u64>>>;
 
 /// Everything `Cap` needs, handed to it through `Settings`' flags slot.
+/// How to build the encoder ONCE the real capture size is known - see `Cap::encoder`.
+pub struct EncoderSpec {
+    pub fps: u32,
+    pub path: String,
+}
+
 pub struct CapFlags {
-    pub encoder: VideoEncoder,
+    pub enc: EncoderSpec,
     pub clock: Arc<dyn Clock>,
     pub frame_ts: FrameTimes,
     pub paused: Arc<AtomicBool>,
     pub totals: Arc<PauseTotals>,
     pub ended: Notify,
-    /// The `(w, h)` the encoder above was configured for, so `on_frame_arrived` can tell a
-    /// mid-record dimension change apart from a normal frame - see `DimGuard`.
-    pub dims: (u32, u32),
 }
 
 pub struct Cap {
@@ -47,9 +50,13 @@ pub struct Cap {
     /// The readback buffer `Frame::new` requires. Never touched: the rebuilt frame only ever
     /// reaches `send_frame`, which reads its surface and its timestamp and nothing else.
     scratch: Vec<u8>,
-    /// Latches the FIRST frame whose size no longer matches the encoder (H1: a maximize/resize,
-    /// display resolution/rotation change, or dock/undock mid-record).
-    dims: DimGuard,
+    /// Built on the FIRST frame, from that frame's own size (see `on_frame_arrived`).
+    enc: EncoderSpec,
+    /// The size the encoder was actually built for (the first frame's). Set with it.
+    enc_dims: (u32, u32),
+    /// The fixed canvas every LATER size is scaled into (`frame_scaler.rs`). Costs nothing
+    /// until the capture actually resizes: it builds itself on the first mismatched frame.
+    fit: FrameFit,
 }
 
 /// Append `sync_ms` to `frame_ts` only once the frame it describes is actually IN the file:
@@ -73,7 +80,9 @@ impl GraphicsCaptureApiHandler for Cap {
     fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
         let Context { flags, device, device_context } = ctx;
         Ok(Self {
-            encoder: Some(flags.encoder),
+            encoder: None,
+            enc: flags.enc,
+            enc_dims: (0, 0),
             clock: flags.clock,
             frame_ts: flags.frame_ts,
             paused: flags.paused,
@@ -81,34 +90,44 @@ impl GraphicsCaptureApiHandler for Cap {
             ended: flags.ended,
             gfx: Context { flags: (), device, device_context },
             scratch: Vec::new(),
-            dims: DimGuard::new(flags.dims),
+            fit: FrameFit::new(),
         })
     }
 
-    fn on_frame_arrived(&mut self, frame: &mut Frame, ctl: InternalCaptureControl) -> Result<(), Self::Error> {
-        // Checked before anything else: the encoder was sized once, at start, and a mid-record
-        // maximize/resize, display resolution/rotation change, or dock/undock hands us frames at
-        // a new size from here on (finding H1 - the crate recreates its frame pool and keeps
-        // delivering; it does not end the capture on its own). Finalize what's recorded so far
-        // exactly like `on_closed` does for an OS-closed capture, then `ctl.stop()` - the SAME
-        // internal-halt mechanism `GpuRecorder::stop`'s external `CaptureControl::stop` uses -
-        // which also guarantees no later frame, mismatched or not, ever reaches this handler
-        // again (the crate gates all future delivery on the halt flag `stop()` sets).
-        if self.dims.mismatched((frame.width(), frame.height())) {
-            let finished = self.encoder.take().map_or(Ok(()), |e| e.finish());
-            (self.ended)(DISPLAY_CHANGED);
-            ctl.stop();
-            return Ok(finished?);
+    fn on_frame_arrived(&mut self, frame: &mut Frame, _ctl: InternalCaptureControl) -> Result<(), Self::Error> {
+        // The encoder is built HERE, from the first frame's own size - never from
+        // `GetWindowRect`, which on Win10/11 includes invisible DWM resize margins the capture
+        // surface does not have. Sizing it from that inflated rect meant every single frame
+        // mismatched the encoder: dropping them emptied the sink ("no samples were processed"),
+        // and encoding them anyway made it read each row at the wrong stride, writing magenta/
+        // green video. Taking the size from the surface makes the common case exact, so the fit
+        // below is only ever needed for a LATER change.
+        if self.encoder.is_none() {
+            self.enc_dims = (frame.width(), frame.height());
+            self.encoder = Some(super::gpu_record::encoder(
+                self.enc_dims.0, self.enc_dims.1, self.enc.fps, &self.enc.path)?);
         }
 
         let now = self.clock.now_ms();
         let paused = self.paused.load(Ordering::SeqCst);
         let Some(tick) = self.pause_clock.tick(now, paused) else { return Ok(()) };
 
-        let Self { encoder, gfx, scratch, frame_ts, .. } = self;
+        let Self { encoder, gfx, scratch, frame_ts, fit, enc_dims, .. } = self;
         // No encoder means `on_closed` already finalized the MP4 (the OS ended the capture);
         // this frame is not going into the file, so it must not go into sync.json either.
         let Some(enc) = encoder.as_mut() else { return Ok(()) };
+        // A LATER size change - a browser tab switch toggling the bookmarks bar, a window resize,
+        // a swapchain recreation - cannot go into this fixed-size MP4 at its own size: the
+        // encoder would read every row at the wrong stride and write magenta/green. Fit it into a
+        // persistent canvas at `enc_dims` instead (`frame_scaler.rs`: aspect preserved, centred,
+        // black bars, one video-processor blit on the GPU) and encode THAT, so a resize neither
+        // ends the take nor freezes the picture on the last good frame. Only if the fit itself
+        // fails is the frame skipped, and `record_if_encoded` then withholds its timestamp too,
+        // so `sync.json` still never describes a frame the file lacks.
+        let dims = *enc_dims;
+        let fitted = if (frame.width(), frame.height()) == dims { None } else {
+            match fit.fit(gfx, frame, dims) { Some(pair) => Some(pair), None => return Ok(()) }
+        };
         // Hand the encoder OUR clock instead of the frame's WGC `SystemRelativeTime`.
         // `send_frame` stamps the MF sample with `frame.timestamp() - first_timestamp` - the
         // raw QPC capture instant - which keeps every paused span alive in video.mp4's own PTS
@@ -118,17 +137,13 @@ impl GraphicsCaptureApiHandler for Cap {
         // `tick.pts_100ns` makes the file's timeline literally sync.json's timeline.
         let mut ts = frame.timestamp();
         ts.Duration = tick.pts_100ns;
+        // The fitted canvas when the capture resized, the frame's own surface when it did not.
+        let (surface, texture) = fitted.unwrap_or_else(|| unsafe {
+            (frame.as_raw_surface().clone(), frame.as_raw_texture().clone())
+        });
         let mut rebased = Frame::new(
-            &gfx.device,
-            unsafe { frame.as_raw_surface().clone() },
-            unsafe { frame.as_raw_texture().clone() },
-            ts,
-            &gfx.device_context,
-            scratch,
-            frame.width(),
-            frame.height(),
-            frame.color_format(),
-            None,
+            &gfx.device, surface, texture, ts, &gfx.device_context, scratch,
+            dims.0, dims.1, frame.color_format(), None,
         );
         record_if_encoded(frame_ts, tick.sync_ms, enc.send_frame(&mut rebased).map_err(Into::into))
     }

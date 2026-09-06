@@ -24,23 +24,22 @@ impl FrameSink for SkippingSink {
     fn finish(self: Box<Self>) -> std::io::Result<()> { Ok(()) }
 }
 
-/// A dimension-mismatched frame used to be skipped forever - every later frame silently
-/// discarded against a sink sized for the old dimensions, with the HUD none the wiser. The
-/// FIRST one must instead end the take: `pump_once` reports "stop", not "skipped, keep going",
-/// and must not inflate `frames` or `frame_ts` - `sync.json` would otherwise gain a phantom
-/// timestamp for a frame that was never actually written to the video.
+/// A dimension-mismatched frame must NOT end the take. A browser tab switch (bookmarks bar,
+/// swapchain recreation) or a window resize changes the capture surface constantly, and ending
+/// the recording there made recording a browsing session impossible. `pump_once` keeps reporting
+/// "keep going"; the frame is simply neither counted nor timestamped, so `sync.json` never gains
+/// a phantom timestamp for a frame the video does not contain.
 #[test]
-fn a_dimension_mismatch_stops_pumping_instead_of_skipping_forever() {
+fn a_dimension_mismatch_keeps_the_take_recording() {
     let mut s = session(vec![frame(0), frame(33)], Box::new(SkippingSink));
-    assert!(!s.pump_once(), "a mismatched frame must not report 'keep pumping'");
+    assert!(s.pump_once(), "a mismatched frame must not end the take - a resize is not a failure");
     assert_eq!(s.frames_written(), 0);
     assert!(s.frame_timestamps().is_empty());
-    assert!(s.dimension_mismatch());
+
 }
 
 /// Counts `push` calls, always reporting a mismatch - the seam-level proof that `run`'s loop
-/// really stops calling the sink after the FIRST mismatch rather than retrying every
-/// subsequently pulled frame (the old "skip forever" behavior this task removes).
+/// keeps feeding the sink instead of ending the take on the first mismatch.
 struct CountingSkipSink { calls: Arc<AtomicUsize> }
 impl FrameSink for CountingSkipSink {
     fn push(&mut self, _f: &Frame) -> std::io::Result<bool> {
@@ -51,14 +50,14 @@ impl FrameSink for CountingSkipSink {
 }
 
 #[test]
-fn run_ends_the_take_at_the_first_mismatch_not_every_frame_after() {
+fn run_keeps_pumping_through_mismatched_frames() {
     let calls = Arc::new(AtomicUsize::new(0));
     let mut s = session(vec![frame(0), frame(33), frame(66)], Box::new(CountingSkipSink { calls: calls.clone() }));
     s.run(&AtomicBool::new(false), &AtomicBool::new(false));
-    assert_eq!(calls.load(Ordering::SeqCst), 1, "the first mismatch must end the take, not skip it forever");
+    assert!(calls.load(Ordering::SeqCst) > 1, "the loop must keep feeding the sink through mismatches, not end the take");
     assert_eq!(s.frames_written(), 0);
     assert!(s.frame_timestamps().is_empty());
-    assert!(s.dimension_mismatch());
+
 }
 
 /// A sink that writes the first `n` frames, then reports every later one as mismatched - the
@@ -81,6 +80,6 @@ fn a_mismatch_after_some_frames_still_finalizes_the_prior_span_cleanly() {
     s.run(&AtomicBool::new(false), &AtomicBool::new(false));
     assert_eq!(s.frames_written(), 2);
     assert_eq!(s.frame_timestamps(), &[0, 33]);
-    assert!(s.dimension_mismatch());
+
     assert_eq!(s.stop_and_finalize().unwrap(), 2, "the prior span must still finalize cleanly");
 }

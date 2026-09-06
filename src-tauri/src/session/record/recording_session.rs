@@ -50,12 +50,12 @@ impl RecordingSession {
                     frame.ts = Timestamp(tick.sync_ms);
                     match self.sink.push(&frame) {
                         Ok(true) => { self.frames += 1; self.frame_ts.push(tick.sync_ms); }
-                        // A dimension mismatch (H1: window resize/maximize, display
-                        // resolution/rotation change). Used to be skipped silently forever;
-                        // now the FIRST one ends the take instead of every frame after it -
-                        // do not count or timestamp this frame, and stop pumping so the prior
-                        // span finalizes cleanly instead of the source running on unread.
-                        Ok(false) => { self.mismatched = true; return false; }
+                        // A dimension mismatch (window resize/maximize, display
+                        // resolution/rotation change, or a browser tab switch toggling the
+                        // bookmarks bar). NOT fatal: this frame is neither counted nor
+                        // timestamped, but the take keeps recording. Ending it here made
+                        // recording a browsing session impossible.
+                        Ok(false) => {}
                         Err(e) => eprintln!("frame sink push failed: {e}"),
                     }
                 }

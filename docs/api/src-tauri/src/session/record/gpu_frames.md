@@ -10,25 +10,34 @@ pub type FrameTimes = Arc<Mutex<Vec<u64>>>;
 
 Capture times (ms, pause-compressed) of the frames actually encoded, in encode order - i.e. exactly `sync.json`'s `frames[]`. Shared between the capture thread (which pushes) and `GpuRecorder::stop` (which clones it out), so the timestamps outlive the encoder and survive a finalize failure.
 
+## EncoderSpec
+
+```rust
+pub struct EncoderSpec {
+    pub fps: u32,
+    pub path: String,
+}
+```
+
+How to build the encoder ONCE the real capture size is known. `GpuRecorder::start` cannot build it: `GetWindowRect` and the monitor dimensions are only an *estimate* of what WGC will deliver, so this carries the settings that do not depend on size and `Cap::on_frame_arrived` supplies the size from the first real frame.
+
 ## CapFlags
 
 ```rust
 pub struct CapFlags {
-    pub encoder: VideoEncoder,
+    pub enc: EncoderSpec,
     pub clock: Arc<dyn Clock>,
     pub frame_ts: FrameTimes,
     pub paused: Arc<AtomicBool>,
     pub totals: Arc<PauseTotals>,
     pub ended: Notify,
-    pub dims: (u32, u32),
 }
 ```
 
 Everything `Cap` needs, handed to it through `Settings`' flags slot (the crate constructs the handler itself, on its own thread, so this is the only way in).
 
 - `totals: Arc<PauseTotals>` - the recorder's exact-span pause ledger, shared with every input tracker.
-- `ended: Notify` - called from `on_closed` when the OS ends the capture, or from `on_frame_arrived` when the capture's own dimensions change mid-record.
-- `dims: (u32, u32)` - the `(w, h)` `encoder` above was configured for (`gpu_record::GpuRecorder::start` threads the same values it built the encoder from), seeding `Cap`'s `DimGuard`.
+- `ended: Notify` - called from `on_closed` when the OS ends the capture.
 
 ## Cap
 
@@ -42,25 +51,20 @@ pub struct Cap {
     ended: Notify,
     gfx: Context<()>,
     scratch: Vec<u8>,
-    dims: DimGuard,
+    enc: EncoderSpec,
+    enc_dims: (u32, u32),
+    fit: FrameFit,
 }
 ```
 
 The `GraphicsCaptureApiHandler` the crate runs on its capture thread.
 
-- `encoder: Option<VideoEncoder>` - `pub` because `GpuRecorder::stop` reaches through the crate's `callback()` handle to `take` and finalize it. `None` after `stop`, `on_closed`, or a dimension-mismatch early end has taken it.
+- `encoder: Option<VideoEncoder>` - `None` until the first frame arrives and gives it a size, and `None` again after `stop` or `on_closed` has taken it. `pub` because `GpuRecorder::stop` reaches through the crate's `callback()` handle to `take` and finalize it.
 - `pause_clock: PauseClock` - the frame's place on the recording clock, from the shared ledger.
-- `gfx: Context<()>` - the capture's D3D device + device context, kept only so `on_frame_arrived` can rebuild the incoming frame around a rebased timestamp. *Why a `Context<()>` and not two typed fields:* the `windows` crate that names `ID3D11Device`/`ID3D11DeviceContext` here is windows-capture's own (0.61), a different version from this crate's direct dependency (0.58), so those two types cannot be written in a field declaration - while `windows_capture::capture::Context<()>` can, and its `pub` fields carry the values with their types inferred.
+- `gfx: Context<()>` - the capture's D3D device + device context, kept so `on_frame_arrived` can rebuild the incoming frame around a rebased timestamp and so `fit` can allocate on that same device. *Why a `Context<()>` and not two typed fields:* the `windows` crate that names `ID3D11Device`/`ID3D11DeviceContext` here is windows-capture's own (0.61), a different version from this crate's `windows` (0.58), so those two types cannot be written in a field declaration - while `windows_capture::capture::Context<()>` can, and its `pub` fields carry the values with their types inferred. (`frame_scaler.rs`, which *does* have to name them, reaches them through the `wgc_windows` alias of that same 0.61 package.)
 - `scratch: Vec<u8>` - the readback buffer `Frame::new` requires. Never touched: the rebuilt frame only ever reaches `send_frame`, which reads its surface and its timestamp and nothing else.
-- `dims: DimGuard` (`dim_guard.rs`) - latches the FIRST frame whose size no longer matches `CapFlags::dims` (finding H1: a maximize/resize, display resolution/rotation change, or dock/undock mid-record).
-
-## Cap::new
-
-```rust
-fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error>
-```
-
-Destructures the crate's `Context` so the flags are consumed while the device and device context are re-boxed into `gfx`, and builds the `PauseClock` over the ledger from `CapFlags`.
+- `enc_dims: (u32, u32)` - the size the encoder was actually built for, i.e. the first frame's. Every later frame is either exactly this size or is fitted into it.
+- `fit: FrameFit` (`frame_scaler.rs`) - the fixed canvas every LATER size is scaled into. Costs nothing until the capture actually resizes: it builds itself on the first mismatched frame.
 
 ## record_if_encoded
 
@@ -84,16 +88,18 @@ The ordering IS the guarantee, and it is a named function so it can be tested wi
 fn on_frame_arrived(&mut self, frame: &mut Frame, ctl: InternalCaptureControl) -> Result<(), Self::Error>
 ```
 
-Encodes one frame, drops it, or - on the first dimension mismatch - ends the take.
+Encodes one frame, dropping it only when the recording clock or the encoder says it does not belong in the file.
 
 ### Implementation
 
-1. Check `dims.mismatched((frame.width(), frame.height()))` FIRST, before any pause/encode work. On `true` (finding H1: a maximize/resize, display resolution/rotation change, or dock/undock changed the frame size mid-record): finalize the encoder exactly like `on_closed` does (`encoder.take().map_or(Ok(()), |e| e.finish())`), call `ended(DISPLAY_CHANGED)`, then `ctl.stop()` - the SAME internal-halt mechanism `GpuRecorder::stop`'s external `CaptureControl::stop` uses, which also guarantees no later frame (mismatched or not) ever reaches this handler again - and return the finalize result. `DimGuard` itself only ever reports `true` once, so this branch cannot run twice even without that guarantee.
+1. If there is no encoder yet, this is the FIRST frame: take `enc_dims` from *its* size and build the encoder for that. *Why not from the capture target:* `GetWindowRect` on Win10/11 includes the invisible DWM resize margins the WGC surface does not have, so an encoder sized from it mismatched every single frame - dropping them emptied the sink ("no samples were processed") and encoding them anyway made the encoder read each row at the wrong stride and write magenta/green video. Sizing from the surface itself makes the common case exact.
 2. Read `clock.now_ms()` and the `paused` flag, and ask `pause_clock.tick`. `None` (paused, or no advance) returns `Ok(())` with nothing recorded and nothing encoded.
 3. If the encoder is already gone (`on_closed` finalized the MP4 because the OS ended the capture), return `Ok(())` - this frame is not going into the file, so it must not go into `sync.json` either.
-4. Rebuild the frame with `Frame::new` around the SAME GPU surface and texture (no readback, no copy) but with `timestamp().Duration = tick.pts_100ns`, and `send_frame` that. *Why:* `send_frame` stamps the MF sample with `frame.timestamp() - first_timestamp`, i.e. the raw WGC `SystemRelativeTime` QPC capture instant. That keeps every paused span alive in `video.mp4`'s own PTS while `sync.json`, the WAVs and all the input streams drop it; the export then decodes that file 1:1 against `sync.json`'s clock and gets a pause-length frozen span, everything else running ahead of the picture from the resume on, and a truncated tail (finding C1). The crate exposes no way to override the timestamp on the zero-copy path, but `Frame::new`, `as_raw_surface` and `as_raw_texture` are all public, so the rebuild is ordinary API use.
+4. If the frame's size no longer matches `enc_dims`, fit it: `FrameFit::fit` (`frame_scaler.rs`) scales it into a persistent D3D11 canvas at `enc_dims`, aspect preserved, centred, black bars, one video-processor blit on the GPU - and the canvas' surface and texture are used in place of the frame's own. *Why a fit and not an end or a skip:* a browser tab switch toggles Chrome's bookmarks bar, which resizes the capture mid-take. Ending the take there is what made recording a browsing session impossible; skipping the frame instead left the picture frozen on the last good frame for the rest of the recording while the audio and the clock kept running. Only if the fit itself fails does the frame get skipped, which is safe because step 6 then withholds its timestamp too.
+5. Rebuild the frame with `Frame::new` around that surface and texture (no readback, no CPU copy) but with `timestamp().Duration = tick.pts_100ns`, at `enc_dims` rather than the frame's own size, and `send_frame` that. *Why the rebased timestamp:* `send_frame` stamps the MF sample with `frame.timestamp() - first_timestamp`, i.e. the raw WGC `SystemRelativeTime` QPC capture instant. That keeps every paused span alive in `video.mp4`'s own PTS while `sync.json`, the WAVs and all the input streams drop it; the export then decodes that file 1:1 against `sync.json`'s clock and gets a pause-length frozen span, everything else running ahead of the picture from the resume on, and a truncated tail (finding C1). The crate exposes no way to override the timestamp on the zero-copy path, but `Frame::new`, `as_raw_surface` and `as_raw_texture` are all public, so the rebuild is ordinary API use.
+6. Hand the send's result to `record_if_encoded`, which appends `tick.sync_ms` only if it succeeded.
 
-5. Hand the send's result to `record_if_encoded`, which appends `tick.sync_ms` only if it succeeded.
+*On the ordering of 2 and 4:* the pause tick runs before the fit so a paused frame never costs a GPU blit. A frame that ticks and is then skipped because the fit failed has advanced `PauseClock`'s `last_ms` without being encoded, which is harmless - that value only rejects a non-increasing PTS, and `send_frame` re-bases the PTS off the first frame it actually sees.
 
 ## Cap::on_closed
 

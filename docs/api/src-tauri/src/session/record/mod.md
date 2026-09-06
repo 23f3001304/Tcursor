@@ -8,7 +8,7 @@ Submodule overviews for the `record` group, plus the two shared items the whole 
 pub type Notify = Arc<dyn Fn(&str) + Send + Sync>;
 ```
 
-A one-way notification from a recording thread to the app: the reason string is what the HUD shows the user. *Why an `Arc<dyn Fn>` and not an `AppHandle`:* the capture/encode pipeline then carries no Tauri types, stays constructible in tests, and the one place that knows about events is `recorder::emitter`. Two are built per recording - `record-warning` (a degraded but still-running take, e.g. an audio input that would not open) and `record-ended-early` (the OS ended the capture, or the capture's own dimensions changed mid-record - `CAPTURE_CLOSED` and `DISPLAY_CHANGED` are the two reason strings sent through the latter).
+A one-way notification from a recording thread to the app: the reason string is what the HUD shows the user. *Why an `Arc<dyn Fn>` and not an `AppHandle`:* the capture/encode pipeline then carries no Tauri types, stays constructible in tests, and the one place that knows about events is `recorder::emitter`. Two are built per recording - `record-warning` (a degraded but still-running take, e.g. an audio input that would not open) and `record-ended-early` (the OS ended the capture, or - on the legacy ffmpeg path only - its dimensions changed mid-record; `CAPTURE_CLOSED` and `DISPLAY_CHANGED` are the two reason strings sent through the latter).
 
 ## CAPTURE_CLOSED
 
@@ -24,7 +24,7 @@ The reason passed to the capture-ended `Notify` when the OS - not the user - end
 pub const DISPLAY_CHANGED: &str = "Display changed — recording saved up to the change.";
 ```
 
-The reason passed to the same `Notify` when the capture's OWN dimensions change mid-record (finding H1) - a recorded window maximized/restored/snapped, or a recorded display changed resolution, rotated, or was docked/undocked. Neither capture path can keep encoding once that happens (the encoder/pipe is sized once, at start): the legacy path used to silently discard every frame from that instant on (`FfmpegFrameSink::write_or_skip`'s `Ok(false)` skip, forever), and the GPU path never checked at all. Both now end the take through this same early-end signal on the FIRST mismatched frame - `gpu_frames::Cap::on_frame_arrived` via `dim_guard::DimGuard`, and `recording_session::RecordingSession::pump_once` via its `mismatched` flag, read by `video_sink::start_ffmpeg` - and this distinct wording is what tells the HUD (and the user) it was a size change, not a closed window or display.
+The reason passed to the same `Notify` when the capture's OWN dimensions change mid-record (finding H1) - a recorded window maximized/restored/snapped, or a recorded display changed resolution, rotated, or was docked/undocked. Sent by the LEGACY ffmpeg path only. Its rawvideo pipe is sized once, at start, so it cannot keep encoding: it used to silently discard every frame from that instant on (`FfmpegFrameSink::write_or_skip`'s `Ok(false)` skip, forever) and now ends the take on the FIRST mismatched frame instead - `recording_session::RecordingSession::pump_once` latches its `mismatched` flag, which `video_sink::start_ffmpeg` reads. This distinct wording is what tells the HUD (and the user) it was a size change, not a closed window or display. The default GPU path no longer sends it at all: `gpu_frames::Cap::on_frame_arrived` fits a resized frame into the encoder's fixed canvas (`frame_scaler`) and keeps recording.
 
 ## recorder
 
@@ -46,9 +46,13 @@ Thread-spawning helpers and persistence logic factored out of `recorder.rs` to k
 
 Thin state machine wrapping one `FrameSource` and one `FrameSink`. Runs entirely on the `"video"` thread; has no threading primitives of its own. Key items: `RecordingSession` (owns source and sink, tracks frame count, timestamps, and whether a dimension mismatch ended the take), `RecordingSession::new`, `RecordingSession::pump_once` (pulls one frame and pushes it to the encoder at its pause-compressed timestamp; stops - and latches `dimension_mismatch()` - on the FIRST dimension-mismatched frame instead of skipping it forever), `RecordingSession::run` (variable-FPS loop with pause support, splitting the sink on each resume), `RecordingSession::run_paced` (delegates to `pacing::run_paced` for CFR mode), `RecordingSession::stop_and_finalize` (flushes the sink and returns the frame count), `RecordingSession::dimension_mismatch`, `SessionState` (lifecycle enum).
 
-## dim_guard
+## frame_fit
 
-Pure decision point for the GPU path's half of the same dimension-change detection, split out so it is testable without live WGC or a real `VideoEncoder`. Key items: `DimGuard` (latches the first frame whose size no longer matches the encoder's configured `(w, h)`).
+Pure geometry for the GPU path's resize fit, split out so it is testable without live WGC or a GPU. Key items: `letterbox` (the centred, aspect-preserving destination rect for a source of one size inside a canvas of another).
+
+## frame_scaler
+
+The GPU path's OBS-style resize handling: one persistent D3D11 canvas at the encoder's size, with the D3D11 video processor scaling every differently-sized capture frame into it, so a mid-record resize neither ends the take nor freezes the picture. Key items: `FrameFit` (what `gpu_frames::Cap` holds - lazily built, and latched off if setup ever fails), `Scaler` (the canvas plus the video device/context), `Chain` (the processor and views for one source size). Names its D3D11 types through `Cargo.toml`'s `wgc-windows` alias of the same `windows` 0.61 package windows-capture builds against.
 
 ## gpu_record
 
@@ -56,7 +60,7 @@ The default capture path: WGC surfaces straight into the Media Foundation `Video
 
 ## gpu_frames
 
-The GPU path's frame callback, split out of `gpu_record.rs`. Key items: `Cap` (the `GraphicsCaptureApiHandler` - rebases each frame's encoder PTS onto the recording clock, ends the take on a mid-record dimension change via `DimGuard`, and reports an OS-closed capture), `CapFlags`, `FrameTimes`.
+The GPU path's frame callback, split out of `gpu_record.rs`. Key items: `Cap` (the `GraphicsCaptureApiHandler` - builds the encoder from the first frame's own size, rebases each frame's encoder PTS onto the recording clock, fits a later-resized frame into that fixed size via `frame_scaler::FrameFit`, and reports an OS-closed capture), `CapFlags`, `EncoderSpec`, `FrameTimes`.
 
 ## video_sink
 

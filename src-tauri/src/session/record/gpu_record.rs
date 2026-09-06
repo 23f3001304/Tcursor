@@ -38,7 +38,7 @@ fn video_settings(w: u32, h: u32, fps: u32) -> VideoSettingsBuilder {
 
 /// The MP4 encoder for a `w`x`h`@`fps` capture writing `video_path`. Audio is disabled - the
 /// mic and system-audio WAVs are captured separately and muxed at export.
-fn encoder(w: u32, h: u32, fps: u32, video_path: &str) -> anyhow::Result<VideoEncoder> {
+pub(super) fn encoder(w: u32, h: u32, fps: u32, video_path: &str) -> anyhow::Result<VideoEncoder> {
     Ok(VideoEncoder::new(
         video_settings(w, h, fps),
         AudioSettingsBuilder::default().disabled(true),
@@ -74,9 +74,13 @@ impl GpuRecorder {
         let cursor_setting = if cfg.with_cursor { CursorCaptureSettings::WithCursor } else { CursorCaptureSettings::WithoutCursor };
         let interval_setting = MinimumUpdateIntervalSettings::Custom(std::time::Duration::from_micros(1_000_000 / cfg.fps.max(1) as u64));
         let frame_ts: FrameTimes = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let flags = |enc: VideoEncoder, dims: (u32, u32)| CapFlags {
-            encoder: enc, clock: cfg.clock.clone(), frame_ts: frame_ts.clone(),
-            paused: cfg.paused.clone(), totals: cfg.totals.clone(), ended: cfg.ended.clone(), dims,
+        // The encoder is NOT built here: `GetWindowRect`/monitor dims are only an estimate of
+        // what WGC will actually deliver, and a wrong guess corrupts every frame. `Cap` builds it
+        // from the first real frame instead; this just carries the settings it needs.
+        let flags = || CapFlags {
+            enc: super::gpu_frames::EncoderSpec { fps: cfg.fps, path: video_path.to_string() },
+            clock: cfg.clock.clone(), frame_ts: frame_ts.clone(),
+            paused: cfg.paused.clone(), totals: cfg.totals.clone(), ended: cfg.ended.clone(),
         };
 
         if let Some(tid) = target_id {
@@ -98,7 +102,7 @@ impl GpuRecorder {
                         interval_setting,
                         DirtyRegionSettings::Default,
                         ColorFormat::Bgra8,
-                        flags(encoder(w, h, cfg.fps, video_path)?, (w, h)),
+                        flags(),
                     );
                     return Ok((Self { control: Cap::start_free_threaded(settings)?, frame_ts }, w, h));
                 }
@@ -115,7 +119,7 @@ impl GpuRecorder {
                             interval_setting,
                             DirtyRegionSettings::Default,
                             ColorFormat::Bgra8,
-                            flags(encoder(w, h, cfg.fps, video_path)?, (w, h)),
+                            flags(),
                         );
                         return Ok((Self { control: Cap::start_free_threaded(settings)?, frame_ts }, w, h));
                     }
@@ -133,7 +137,7 @@ impl GpuRecorder {
             interval_setting,
             DirtyRegionSettings::Default,
             ColorFormat::Bgra8,
-            flags(encoder(w, h, cfg.fps, video_path)?, (w, h)),
+            flags(),
         );
         Ok((Self { control: Cap::start_free_threaded(settings)?, frame_ts }, w, h))
     }

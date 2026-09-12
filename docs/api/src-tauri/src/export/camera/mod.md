@@ -43,10 +43,12 @@ Converts the camera panel's un-overridden (layout-resolved) rect into a `CamPose
 ## fit_durations
 
 ```rust
-fn fit_durations(zi: u32, zo: u32, span: u32) -> (u32, u32)
+pub(crate) fn fit_durations(zi: u32, zo: u32, span: u32) -> (u32, u32)
 ```
 
 Shrinks `(zi, zo)` proportionally so their sum never exceeds `span`, keeping both ramps inside the region.
+
+`pub(crate)` because **layout segments need exactly the same rule**, and there must be one definition of it. `LayoutTrack` (`scene/layout.md`) applies it to every segment's `(transition_ms, transition_out_ms)` at construction: an entry that outlasts its own segment is the layout equivalent of a zoom that never finishes ramping, and it produced a visible jump at the segment boundary (see `scene/layout.md`'s `from_segs`). Its TS mirror, for the live preview, is `fitDurations` in `src/editor/timeline/layoutTrack.ts`.
 
 ### Inputs
 

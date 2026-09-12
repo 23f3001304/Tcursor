@@ -88,7 +88,9 @@ Returns the resolved `Scene` at `t_ms`: the active segment (else `base`), cross-
 - `default_zero_exit_is_the_historical_hard_cut` - the pre-exit-transition gap fixture, sample for sample.
 - `exit_blend_completes_exactly_at_end_ms` - the window opens at `f=0`, is strictly between the two poses mid-way, and the last active sample is within 0.05px of what `end_ms` resolves to; the blend fraction itself is exactly `1.0` at `end_ms`.
 - `a_gapless_successors_entry_wins_the_overlap` - the exit is suppressed against a successor with its own entry, and DOES run against one that hard-cuts in.
-- `a_segments_own_entry_beats_its_own_exit_when_they_overlap` - a 300ms segment with 300ms of each still only eases in.
+- `a_segments_own_entry_and_exit_are_fitted_into_a_span_too_short_for_both` - a 300ms segment asking for 300ms of each becomes a symmetric 150/150 bump: the entry arrives at the midpoint, the exit carries it back before `end_ms`.
+- `a_segment_shorter_than_its_transitions_hands_over_without_a_jump` - the boundary case the fitting exists for. A 200ms segment with a 350ms entry used to jump ~950px in one frame at its `end_ms` (an ordinary step at that point is ~193px), because it never reached its own scene while `raw_scene` handed that unreached scene to the next segment's entry regardless.
+- `an_entry_and_exit_that_would_overlap_are_fitted_instead` - 700ms of transition inside a 400ms segment used to run the exit UNDER the entry, so the instant the entry expired the panel lurched ~1794px in a single millisecond.
 
 ## resolve_seg_scene
 
@@ -108,6 +110,8 @@ pub fn from_segs(segs: &[crate::edit::model::LayoutSeg], app: &AppearanceSetting
 ```
 
 The EDITED path: one `Seg` per `LayoutSeg`, each carrying its own span, entry feel and exit feel (both easing strings go through `easing_from`, so a custom `cubic(...)` curve works for either). Gaps between segments fall back to the base `screen`. Segments are sorted by `start_ms` on construction, so `active_idx`'s "last one wins" is a genuine latest-start rule.
+
+**Transitions are fitted into the span first.** Each segment's `(transition_ms, transition_out_ms)` goes through `fit_durations` (`camera/mod.md`) against `end_ms - start_ms` before being stored, exactly as a zoom's ramps are fitted into its pill - so `Seg` only ever holds durations guaranteed to finish inside the segment, and every reader (`scene_at`'s two branches, `successor`'s "is the next entry still running" test) sees the same fitted value. Unfitted, a segment shorter than its own entry never reached its own scene, yet `raw_scene` handed that unreached scene to whatever blended off it next, so the frame JUMPED at the boundary; and an entry+exit that together outlasted the span ran the exit underneath the entry, lurching most of the way to the successor the moment the entry expired. `LayoutTrack::new` fits the same way, for two recorded switches closer together than the global transition.
 
 Each segment's `Scene` comes from `resolve_seg_scene` (above), called once, up front: `scene_at` then blends already-resolved scenes, so an arrangement<->preset cross-fade is bit-for-bit the same `Scene::lerp` a preset<->preset one is, with no second blend path to keep in sync. Pinned by `a_preset_to_arrangement_crossfade_is_the_same_lerp_as_preset_to_preset` and `an_arrangement_to_preset_exit_blend_lands_on_the_successor_at_end_ms` (`layout_arrangement_tests.rs`).
 

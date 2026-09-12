@@ -27,6 +27,27 @@ export function ease(name: string, p: number): number {
   return c * c * (3 - 2 * c); // smooth (default)
 }
 
+/** TS mirror of Rust `fit_durations` (export/camera/mod.rs), which `LayoutTrack` applies to every
+ *  segment at construction. Shrinks a segment's entry+exit proportionally so they fit inside its
+ *  own span. Without it a segment shorter than its own entry never reaches its own scene, while
+ *  `rawSegAt` hands that unreached scene to whatever blends off it next - so the frame JUMPED at
+ *  the boundary (~950px on a 3840-wide frame for a 200ms segment with a 350ms entry) - and an
+ *  entry+exit that together outlast the span ran the exit underneath the entry.
+ *  `Math.fround` mirrors the f32 arithmetic the export truncates, so both sides pick the same ms. */
+export function fitDurations(tin: number, tout: number, span: number): [number, number] {
+  const total = tin + tout;
+  if (total <= span || total === 0) return [tin, tout];
+  const f = Math.fround(span / total);
+  return [Math.trunc(Math.fround(tin * f)), Math.trunc(Math.fround(tout * f))];
+}
+
+/** One segment's transitions AS THE TRACK SEES THEM - fitted into its span, never the raw doc
+ *  values. Every reader below goes through this, exactly as Rust's `Seg` stores only the fitted
+ *  pair, so the entry branch, the exit branch and the successor's "is its entry still running"
+ *  test can never disagree about how long a transition is. */
+const fittedOf = (s: LayoutSeg): [number, number] =>
+  fitDurations(s.transition_ms, s.transition_out_ms, Math.max(0, s.end_ms - s.start_ms));
+
 const KNOWN: LayoutPresetName[] = ["screen", "camera", "presenter", "screen_only", "camera_only"];
 const presetOf = (presets: LayoutPresets, layout: string): LayoutPresetDto =>
   presets[(KNOWN as string[]).includes(layout) ? (layout as LayoutPresetName) : "screen"];
@@ -85,7 +106,8 @@ export function resolvedPanelsFor(seg: LayoutSeg | null, presets: LayoutPresets)
  *  active only INSIDE `[start, end)`; outside every segment (a gap, or before/after all) falls
  *  back to the base `screen` preset ("empty means default"). Latest-starting containing segment
  *  wins. On entering a segment, cross-fades from whatever was active just before it over that
- *  segment's own transition_ms/easing; over the last transition_out_ms before its end it fades
+ *  segment's own transition_ms/easing - FITTED into its span first (`fittedOf`), as Rust does at
+ *  construction; over the last transition_out_ms before its end it fades
  *  toward whatever follows it, landing on that successor exactly AT end_ms - unless the successor's
  *  OWN entry blend covers end_ms, in which case that entry wins and the exit stands down (one blend
  *  at a time). Returns null when presets haven't loaded (caller falls back). */
@@ -100,18 +122,20 @@ export function layoutAt(segs: LayoutSeg[], presets: LayoutPresets | null, t: nu
   const blend = (from: ResolvedPanels, to: ResolvedPanels, f: number) =>
     toPreviewLayout(lerpRect(from.screen, to.screen, f), lerpRect(from.cam, to.cam, f), canvas);
 
+  const [tin, tout] = fittedOf(s);
   const elapsed = t - s.start_ms;
-  if (s.transition_ms > 0 && elapsed < s.transition_ms) {
+  if (tin > 0 && elapsed < tin) {
     const from = resolvedPanelsFor(rawSegAt(ordered, Math.max(0, s.start_ms - 1)), presets); // active just before this seg
-    return blend(from, cur, ease(s.easing, elapsed / s.transition_ms));
+    return blend(from, cur, ease(s.easing, elapsed / tin));
   }
-  const exitFrom = s.end_ms - s.transition_out_ms;
-  if (s.transition_out_ms > 0 && t >= exitFrom) {
+  const exitFrom = s.end_ms - tout;
+  if (tout > 0 && t >= exitFrom) {
     const next = activeIdx(ordered, s.end_ms);
-    const nextEntryWins = next >= 0 && ordered[next].transition_ms > 0 && s.end_ms - ordered[next].start_ms < ordered[next].transition_ms;
+    const nextTin = next >= 0 ? fittedOf(ordered[next])[0] : 0;
+    const nextEntryWins = next >= 0 && nextTin > 0 && s.end_ms - ordered[next].start_ms < nextTin;
     if (!nextEntryWins) {
       const to = resolvedPanelsFor(next >= 0 ? ordered[next] : null, presets);
-      return blend(cur, to, ease(s.easing_out, (t - exitFrom) / s.transition_out_ms));
+      return blend(cur, to, ease(s.easing_out, (t - exitFrom) / tout));
     }
   }
   return toPreviewLayout(cur.screen, cur.cam, canvas);

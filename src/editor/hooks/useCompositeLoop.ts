@@ -70,6 +70,10 @@ export function useCompositeLoop({
   const fxLastTRef = useRef(""); // key of the last response actually APPLIED
   const fxWantRef = useRef(""); // key computed on the MOST RECENT tick (fires or not)
   const offscreenRef = useRef<HTMLCanvasElement | null>(null);
+  // `drawPreview`'s scratch layer for compositing a part-transparent panel in one go (see
+  // `paintPanel`). Separate from `offscreenRef`, which holds the base scene the panel draws INTO;
+  // only allocated/touched on the frames a layout transition is actually running.
+  const layerRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
     let raf = 0;
@@ -109,9 +113,10 @@ export function useCompositeLoop({
               activeCamDraft(dragPoseRef.current, arrangingRef.current), zoomsRef.current, zoomSettingsRef.current, c.width, c.height);
             // Draw the base frame (background + screen + webcam + cursor) WITHOUT FX
             if (!offscreenRef.current) offscreenRef.current = document.createElement("canvas");
+            if (!layerRef.current) layerRef.current = document.createElement("canvas");
             drawPreview(ctx, c.width, c.height, sv, webcamRef.current, cam,
               frameLayout, bgImgRef.current, clicksRef.current, t, cur, offscreenRef.current,
-              layoutPresetsRef.current?.inset_w);
+              layerRef.current, layoutPresetsRef.current?.inset_w);
             // Panel/zoom mapping for the FX-overlay request AND the ripple draw below - mirrors
             // drawPreview's crop; see fxGeometry.ts for the math and why cw/ch are rounded.
             const { fxW, fxH, screenScale, map: mapFn } = fxFrameGeometry(c.width, c.height, frameLayout, cam, FX_SCALE);

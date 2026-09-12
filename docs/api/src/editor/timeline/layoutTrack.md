@@ -30,6 +30,18 @@ It mirrors `crate::export::camera::ease`, not `export::easing::ease`: `camera::e
 
 Zoom easing never reaches this function: the zoom camera curve arrives pre-baked from Rust as `camera_track`.
 
+## fitDurations
+
+```ts
+export function fitDurations(tin: number, tout: number, span: number): [number, number]
+```
+
+TS mirror of Rust `fit_durations` (`src-tauri/src/export/camera/mod.rs`), which `LayoutTrack` applies to every segment at construction. Shrinks a segment's entry+exit proportionally so that together they fit inside its own span; a pair that already fits is returned untouched, as is `(0, 0)`.
+
+`layoutAt` puts every segment through it (via the internal `fittedOf`) before reading either duration - the entry branch, the exit branch and the successor's "is its entry still running" test all use the fitted pair, so they cannot disagree about how long a transition is. `Math.fround` mirrors the f32 arithmetic the export truncates, so both sides land on the same millisecond.
+
+**Why it exists.** Nothing clamped a segment's transitions against its own length, so a segment shorter than its entry never reached its own scene - while `rawSegAt` handed that unreached scene to whatever blended off it next. The frame jumped at the boundary: on a 200ms segment carrying a 350ms entry, `screen[0]` snapped `0.3409 -> 0.5000` in a single frame. An entry+exit that together outlasted the span had a second form of it, running the exit underneath the entry so the panel lurched most of the way to the successor the instant the entry expired.
+
 ## layoutAt
 
 ```ts
@@ -44,8 +56,9 @@ The active layout at output time `t`, mirroring `LayoutTrack::scene_at` exactly.
 - A segment is active only INSIDE `[start, end)`. Outside every segment - a gap, or before the first / after the last - the base `screen` preset applies ("empty means default").
 - When segments overlap, the latest-STARTING containing one wins.
 - Every "the scene at segment X" step below actually means `resolvedPanelsFor(X, presets)` (see below) - a segment's own `segs` entry when it has one, else its preset. This is true for the CURRENT segment, the entry's "from", and the exit's "to" alike, so a posed segment blends correctly on either side of a transition, not just when it's the one currently on screen.
-- **Entry.** Within `transition_ms` of `start_ms`, the scene cross-fades from whatever was active just before that segment (`resolvedPanelsFor(rawSegAt(start_ms - 1), presets)`) using the segment's own `easing`. Checked FIRST, so a segment shorter than its own two transitions still resolves deterministically - it eases in, never out.
-- **Exit.** Within `transition_out_ms` of `end_ms`, it cross-fades from this segment toward whatever the track resolves AFTER it (the next segment if gapless, else the base `screen`), using `easing_out`, with the fraction reaching exactly 1 AT `end_ms` - so it lands on the successor's pose rather than jumping to it. `transition_out_ms` of `0` is a hard cut - what a doc saved before this field existed deserializes to, so old projects render unchanged. A segment the user creates today is seeded symmetric instead (`NEW_LAYOUT_TRANSITION_MS`, `api.md`), which is what makes a layout effect ease back OUT rather than snap.
+- **Fitting.** A segment's `transition_ms`/`transition_out_ms` are first shrunk to fit its span (`fitDurations` above, mirroring what Rust's `from_segs` stores). Every rule below reads the FITTED pair, never the raw doc values.
+- **Entry.** Within the fitted entry of `start_ms`, the scene cross-fades from whatever was active just before that segment (`resolvedPanelsFor(rawSegAt(start_ms - 1), presets)`) using the segment's own `easing`. Checked first; because the pair was fitted, the entry always completes inside the segment, so the segment genuinely arrives at its own scene before anything blends off it.
+- **Exit.** Within the fitted exit of `end_ms`, it cross-fades from this segment toward whatever the track resolves AFTER it (the next segment if gapless, else the base `screen`), using `easing_out`, with the fraction reaching exactly 1 AT `end_ms` - so it lands on the successor's pose rather than jumping to it. `transition_out_ms` of `0` is a hard cut - what a doc saved before this field existed deserializes to, so old projects render unchanged. A segment the user creates today is seeded symmetric instead (`NEW_LAYOUT_TRANSITION_MS`, `api.md`), which is what makes a layout effect ease back OUT rather than snap.
 - **Overlap rule.** If the successor's OWN entry blend is still running at `end_ms`, that entry WINS and the exit stands down. One blend at a time, deterministically - gapless back-to-back segments stay seamless (the successor's entry already blends FROM this segment) instead of double-blending or jumping backwards at the boundary. The exit therefore only takes visible effect falling into a gap, or into a successor that hard-cuts in.
 
 `activeIdx` is factored out because the exit needs the same "latest-starting containing segment" lookup at `end_ms` that the main query needs at `t`. `rawSegAt` wraps it to return the raw `LayoutSeg` (or `null` in a gap) for `resolvedPanelsFor` to resolve.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { layoutAt } from "./layoutTrack";
+import { fitDurations, layoutAt } from "./layoutTrack";
 import type { LayoutSeg } from "../../lib/edit";
 import type { LayoutPresetDto, LayoutPresets, SegRectDto } from "../../lib/ipc";
 
@@ -68,11 +68,18 @@ describe("layoutAt exit transitions (T33 - parity with LayoutTrack::scene_at)", 
     expect(Math.abs(sx(segs, 999) - 0.9)).toBeLessThan(1e-3); // converged on presenter
   });
 
-  it("resolves a segment shorter than its own two transitions by entry-first", () => {
-    const segs = [seg("l0", 1000, 1300, "camera", 300, 300)];
+  // Was "resolves ... by entry-first": the entry used to simply outrank the exit for the whole
+  // span, so a segment asking for more transition than it has ramped in across ALL of it, never
+  // arrived, and then hard-cut back at `end_ms`. Transitions are now fitted into the span first
+  // (`fitDurations`, mirroring Rust `from_segs`), which makes the same segment a symmetric bump.
+  it("gives a segment shorter than its own two transitions a symmetric in-and-out", () => {
+    const segs = [seg("l0", 1000, 1300, "camera", 300, 300)]; // 600ms asked for inside 300ms
     expect(sx(segs, 1000)).toBeCloseTo(0.1, 6); // entry at f=0, from the screen base
-    expect(sx(segs, 1150)).toBeGreaterThan(0.1); // moving toward camera, never back out
-    expect(sx(segs, 1150)).toBeLessThan(0.5);
+    expect(sx(segs, 1150)).toBeCloseTo(0.5, 6); // 150ms entry ARRIVES at camera, at the midpoint
+    expect(sx(segs, 1299)).toBeCloseTo(0.1, 2); // 150ms exit is back on the base by end_ms
+    // and it is genuinely a round trip, not a ramp that overshoots and snaps
+    expect(sx(segs, 1075)).toBeLessThan(0.5);
+    expect(sx(segs, 1225)).toBeLessThan(0.5);
   });
 });
 
@@ -124,5 +131,35 @@ describe("layoutAt per-segment resolved rects (T34 L2 - posed segments preview t
     const mid = sxWith(segs, withSegs, 1200);
     expect(mid).toBeGreaterThan(0.2);
     expect(mid).toBeLessThan(0.8);
+  });
+});
+
+describe("layoutAt fits transitions into their segment (parity with LayoutTrack::from_segs)", () => {
+  it("shrinks an entry+exit pair that would outlast the span, and leaves a fitting pair alone", () => {
+    expect(fitDurations(350, 0, 1000)).toEqual([350, 0]);   // fits: untouched
+    expect(fitDurations(350, 350, 700)).toEqual([350, 350]); // exactly fits: untouched
+    expect(fitDurations(350, 350, 400)).toEqual([200, 200]); // halved to fit
+    expect(fitDurations(0, 0, 0)).toEqual([0, 0]);           // no divide-by-zero on an empty pair
+  });
+
+  it("hands a short segment over to the next one without a jump", () => {
+    // A 200ms segment carrying a 350ms entry. Unfitted it only ever got ~60% of the way to its own
+    // scene, yet the next segment's entry blended FROM that full unreached scene - so screen[0]
+    // snapped 0.3409 -> 0.5000 in a single frame at the boundary.
+    const segs = [seg("a", 0, 1000, "screen"), seg("b", 1000, 1200, "camera", 350), seg("c", 1200, 3000, "presenter", 350)];
+    const step = Math.abs(sx(segs, 1199) - sx(segs, 1180));
+    const boundary = Math.abs(sx(segs, 1200) - sx(segs, 1199));
+    expect(boundary).toBeLessThanOrEqual(Math.max(step, 0.001) * 2);
+    // It arrives: the fitted entry lands exactly AT end_ms, so its last frame is on its own scene.
+    expect(sx(segs, 1199)).toBeCloseTo(PRESETS.camera.screen.rect[0], 3);
+  });
+
+  it("never lets a fitted entry and exit overlap inside a short segment", () => {
+    // 700ms of transition asked for inside a 400ms segment: unfitted, the exit ran from t=50 under
+    // an entry that owned the frame to t=350, so the scene lurched to the successor in one frame.
+    const segs = [seg("a", 0, 1000, "screen"), seg("b", 1000, 1400, "camera", 350, 350), seg("c", 1400, 3000, "presenter")];
+    let worst = 0;
+    for (let t = 1000; t < 1400; t++) worst = Math.max(worst, Math.abs(sx(segs, t + 1) - sx(segs, t)));
+    expect(worst).toBeLessThan(0.01);
   });
 });

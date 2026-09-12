@@ -1,6 +1,6 @@
 use crate::actions::model::{ActionEvent, ActionKind};
 use crate::actions::model::LayoutId;
-use crate::export::camera::ease; // smoothstep + real ease-out-back spring (matches the zoom feel
+use crate::export::camera::{ease, fit_durations}; // smoothstep + real ease-out-back spring (matches the zoom feel
                                  // and the preview's layoutAt mirror); export/easing::ease is
                                  // ease-out-cubic with spring==smooth, which would make the
                                  // LayoutInspector's Spring curve a silent no-op and diverge
@@ -29,6 +29,10 @@ pub fn resolve_seg_scene(s: &LayoutSeg, app: &AppearanceSettings, ow: u32, oh: u
 }
 
 /// One layout segment active over `[start_ms, end_ms)`, with its own cross-fade feel in AND out.
+/// `transition_ms`/`transition_out_ms` are the FITTED durations (`fit_durations`), never the raw
+/// doc values: both constructors shrink them to fit the span before storing, so every reader here
+/// - `scene_at`'s two branches and `successor`'s "is the next entry still running" test alike -
+/// sees durations that are guaranteed to finish inside the segment.
 struct Seg { start_ms: u32, end_ms: u32, scene: Scene, transition_ms: u32, easing: Easing,
     transition_out_ms: u32, easing_out: Easing }
 
@@ -55,8 +59,11 @@ impl LayoutTrack {
         }
         let segs = pts.iter().enumerate().map(|(i, &(start, id))| {
             let end = pts.get(i + 1).map(|&(s, _)| s).unwrap_or(u32::MAX);
+            // Two switches closer together than the global transition would otherwise leave the
+            // first one still fading when the second takes over - same fit as the edited path.
+            let (tin, _) = fit_durations(if i == 0 { 0 } else { transition_ms }, 0, end.saturating_sub(start));
             Seg { start_ms: start, end_ms: end, scene: scene_for(id),
-                transition_ms: if i == 0 { 0 } else { transition_ms }, easing: Easing::Smooth,
+                transition_ms: tin, easing: Easing::Smooth,
                 transition_out_ms: 0, easing_out: Easing::Smooth }
         }).collect();
         Self { segs, base: scene_for(LayoutId::Screen) }
@@ -74,13 +81,22 @@ impl LayoutTrack {
             let ma = app.for_id(id);
             resolve(id, &layout_for(ma, ow, oh), &overlay_for(ma, ow, oh, true), sw, sh)
         };
-        let mut segs: Vec<Seg> = segs.iter().map(|s| Seg {
-            start_ms: s.start_ms, end_ms: s.end_ms,
-            scene: resolve_seg_scene(s, app, ow, oh, sw, sh),
-            transition_ms: s.transition_ms,
-            easing: crate::export::render::fromedit::easing_from(&s.easing, Easing::Smooth),
-            transition_out_ms: s.transition_out_ms,
-            easing_out: crate::export::render::fromedit::easing_from(&s.easing_out, Easing::Smooth),
+        let mut segs: Vec<Seg> = segs.iter().map(|s| {
+            // Fit the pair into the segment BEFORE anything reads them. Unfitted, a segment
+            // shorter than its own entry never reaches its own scene - while `raw_scene` hands
+            // that unreached scene to the next segment's entry anyway, so the frame jumped at the
+            // boundary; and an entry+exit that together outlast the span ran the exit underneath
+            // the entry, lurching most of the way to the successor the instant the entry expired.
+            let (tin, tout) = fit_durations(s.transition_ms, s.transition_out_ms,
+                s.end_ms.saturating_sub(s.start_ms));
+            Seg {
+                start_ms: s.start_ms, end_ms: s.end_ms,
+                scene: resolve_seg_scene(s, app, ow, oh, sw, sh),
+                transition_ms: tin,
+                easing: crate::export::render::fromedit::easing_from(&s.easing, Easing::Smooth),
+                transition_out_ms: tout,
+                easing_out: crate::export::render::fromedit::easing_from(&s.easing_out, Easing::Smooth),
+            }
         }).collect();
         segs.sort_by_key(|s| s.start_ms);
         Self { segs, base: scene_for(LayoutId::Screen) }
@@ -114,8 +130,8 @@ impl LayoutTrack {
     /// Scene at `t_ms`: the active segment (else base `screen`), cross-faded from whatever was
     /// active just before its start over its own transition_ms/easing, and - over the last
     /// `transition_out_ms` before its end - toward whatever follows it, reaching that successor
-    /// exactly AT `end_ms`. The entry is checked first, so a segment shorter than its own two
-    /// transitions still resolves deterministically.
+    /// exactly AT `end_ms`. The entry is checked first; the durations were already fitted into the
+    /// span at construction, so a segment always settles on its own scene before it hands over.
     pub fn scene_at(&self, t_ms: u32) -> Scene {
         match self.active_idx(t_ms) {
             None => self.base,

@@ -28,7 +28,10 @@ pub fn static_cam_pose(rect: RectF, ow: f32, oh: f32) -> CamPose {
 }
 
 /// Shrink `(zi, zo)` proportionally so `zi + zo <= span`, keeping both ramps inside the pill.
-fn fit_durations(zi: u32, zo: u32, span: u32) -> (u32, u32) {
+/// `pub(crate)` because layout segments need the same rule (`scene::layout`): an entry that
+/// outlasts its own segment never settles, yet hands that unreached scene to whatever blends off
+/// it next. One definition, so the two kinds of region cannot fit their ramps differently.
+pub(crate) fn fit_durations(zi: u32, zo: u32, span: u32) -> (u32, u32) {
     let total = zi + zo;
     if total <= span || total == 0 { return (zi, zo); }
     let f = span as f32 / total as f32;

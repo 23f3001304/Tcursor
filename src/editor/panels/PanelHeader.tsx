@@ -1,5 +1,8 @@
 import { motion } from "motion/react";
 import { IconX, IconRotate2 } from "@tabler/icons-react";
+// Every panel and inspector renders this header, so it is where the panel stylesheet enters the
+// bundle - the same way `Controls.tsx` carries `controls.css`.
+import "./panels.css";
 
 // design/premium-pass D6: the app-wide press spring (scale .96, stiffness 500, damping 30) -
 // these ghost icon buttons had no press feedback at all before this.
@@ -39,7 +42,9 @@ export function PanelHeader({ title, lede, thumb, onReset, onClose, closeTitle =
           </motion.button>
         </div>
       </div>
-      {lede && <p className="e-lede">{lede}</p>}
+      {/* One line at hint size (panels.css). `title` keeps the whole sentence reachable when a
+          longer lede - an inspector's measured one, say - runs past the panel's 320px. */}
+      {lede && <p className="e-lede" title={lede}>{lede}</p>}
     </div>
   );
 }

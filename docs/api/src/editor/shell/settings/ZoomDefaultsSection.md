@@ -1,6 +1,6 @@
 # src/editor/shell/settings/ZoomDefaultsSection.tsx
 
-`EditorSettingsDialog`'s "Zoom defaults" section - all 9 fields of `settings.zoom` (`ZoomSettings`), the seeds the auto-zoom generator (`export/camera/autozoom.rs`, via `ZoomSettings::to_zoom_config`) and the AI director's own zoom placement read as their starting point. Editing an already-placed zoom region goes through `ZoomInspector` instead; this section never touches `doc.zooms`.
+`EditorSettingsDialog`'s "Zoom defaults" section - 10 of the 11 fields of `settings.zoom` (`ZoomSettings`; `cam_zoom_default` has no control here), the seeds the auto-zoom generator (`export/camera/autozoom.rs`, via `ZoomSettings::to_zoom_config`) and the AI director's own zoom placement read as their starting point. Editing an already-placed zoom region goes through `ZoomInspector` instead; this section never touches `doc.zooms`.
 
 ## ZoomDefaultsSection
 
@@ -21,6 +21,7 @@ export function ZoomDefaultsSection({ value, onChange }: {
 - **Zoom amount** (`target_scale`, `Slider` 1.2-4, step 0.1, "x" suffix).
 - **Hold / Idle release** (`hold_ms`, `NumberField` in seconds, 0.6-5s step 0.1) - label reads "Idle release" when `smart_hold` is on, "Hold" otherwise (mirrors the HUD's `SettingsZoom` label-swap exactly).
 - **Smoothness** (`smoothness`, `Slider` 0.04-0.3, step 0.01) - the export's `follow_damping`.
+- **Camera smoothing** (`camera_smoothing_ms`, `Slider` 0-400, step 10, "Off" at 0 else "{v} ms") - forwarded verbatim to `ZoomConfig::smoothing_ms` (`export/types.md`, `export/camera/smoothing.md`), an independent critically-damped post-pass on the camera path, distinct from the `smoothness` follow-damping spring right above it and from `CursorSettings.smoothness` (the cursor low-pass). Followed by an `e-lede` note: "Smooths the auto-zoom camera's path. Higher is calmer but lags the cursor - 120 ms is a good start."
 - **Clicks to zoom** (`clicks`, 3-way `Picker` - "1"/"2"/"3" - via `clicksToOption`/`clicksFromOption` below).
 - **Shrink camera on zoom** (`camera_shrink`, `Switch`).
 - **Min camera size** (`camera_shrink_min`, `Slider` 0.3-1, step 0.02, "%" - only rendered while `camera_shrink` is on).
@@ -31,7 +32,7 @@ All ranges/steps mirror the HUD's own `SettingsZoom` (`src/hud/settings/Settings
 
 ### Reset
 
-The header's reset icon (`.e-secrow`, `IconRotate2`) calls `onChange(DEFAULT_ZOOM_SETTINGS)` - replaces the WHOLE `ZoomSettings` object (all 9 exposed fields plus `cam_zoom_default`, not exposed here), matching the spec's "reset to `ZoomSettings::default()`" (not a partial patch of only this section's fields).
+The header's reset icon (`.e-secrow`, `IconRotate2`) calls `onChange(DEFAULT_ZOOM_SETTINGS)` - replaces the WHOLE `ZoomSettings` object (all 10 exposed fields plus `cam_zoom_default`, not exposed here), matching the spec's "reset to `ZoomSettings::default()`" (not a partial patch of only this section's fields).
 
 ## clicksToOption
 

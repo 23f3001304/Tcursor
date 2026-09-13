@@ -176,7 +176,7 @@ export function useDirector() {
         if (step.op.op === "add_zoom_full") { setPlaying(false); setTimeMs(step.op.at_ms); }
         return d;
       });
-      if (kept < steps.length) setAiLog((l) => [...l, `Stopped — kept ${kept} edit${kept === 1 ? "" : "s"}`]);
+      if (kept < steps.length) setAiLog((l) => [...l, `Stopped, kept ${kept} edit${kept === 1 ? "" : "s"}`]);
       else {
         const zoomN = steps.filter((s) => s.op.op === "add_zoom_full").length;
         setAiLog((l) => [...l, `✓ Done · ${zoomN} zoom${zoomN === 1 ? "" : "s"}`]);

@@ -8,7 +8,11 @@ Per-mode layout and webcam geometry settings, stored as canvas fractions so they
 
 ## background
 
-User-facing background-style settings, separated from `model.rs` to keep that file under the line budget. Key items: `BackgroundKind` (`Mesh`/`Solid`/`Gradient` - the two real color modes plus the bundled default image), `BackgroundSettings` (kind + solid/gradient RGB fields + `blur`). See `export::scene::background::build` for how these become pixels.
+User-facing background-style settings, separated from `model.rs` to keep that file under the line budget. Key items: `BackgroundKind` (`Mesh`/`Solid`/`Gradient`/`Image`/`Video` - the bundled wallpapers, the two real color modes, and the user's own imported file), `BackgroundSettings` (kind + solid/gradient RGB fields + `blur` + `asset` + `dim`), `BackgroundSettings::dim_clamped`. See `export::scene::background::build` for how these become pixels.
+
+## bg_asset
+
+The user's own background file: copy it into `<project>/background/`, describe it, remove it - so `BackgroundSettings.asset` can stay a RELATIVE path and the project stays portable. Key items: `BackgroundAssetInfo`, `asset_kind_for` (extension -> `"image"`/`"video"`), `unique_name` (dedupe rather than overwrite), `asset_path` (resolve a stored relative path, refusing absolute paths and `..`), `thumb_rel`, `probe_asset` / `write_thumb` (both via the bundled ffmpeg/ffprobe - there is no image crate in this build), and the three commands `import_background_asset` / `background_asset_info` / `remove_background_asset`.
 
 ## model
 

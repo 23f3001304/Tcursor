@@ -24,13 +24,21 @@ Renders one composited frame at `time_ms` (uncached: builds a fresh renderer via
 ### Implementation
 
 1. `build_renderer(paths)` calls `FrameRenderer::new(paths, Layout::default(), fps, Resolution::Source, Some(PREVIEW_LONG_EDGE))` - the doc's `aspect` is resolved against the true source dims then downscaled to the `PREVIEW_LONG_EDGE` (1280px) budget (`Layout::resolve`), so the preview frame always matches the export's aspect proportionally. `Resolution::Source` is a no-op here (the export resolution setting only applies to the export build).
-2. Compute `k_target = time_ms as u64 * OUT_FPS / 1000`. Fast-forward the camera sim by calling `step_camera` for every `j` in `0..=k_target` at `video_start + j * 1000 / OUT_FPS`. This must ascend because `CameraSim` and the cursor index only move forward. The last returned `FramePose` is the preview pose. Cost: arithmetic only, no I/O.
+2. Compute `k_target = time_ms as u64 * OUT_FPS / 1000`. Fast-forward the camera sim by calling `step_camera` for every `j` in `0..=k_target` at `video_start + j * 1000 / OUT_FPS`, each with `OUT_STEP_MS` as the frame period (the exact 16.667ms, never the rounded timestamp delta - see `render/mod.md`). This must ascend because `CameraSim` and the cursor index only move forward. The last returned `FramePose` is the preview pose. Cost: arithmetic only, no I/O.
 3. Spawn a `RawDecoder` on `paths.video()` seeked to `time_ms` (the screen file's frame 0 is `video_start`, so `time_ms` is the right offset), read one frame into a `screen_bytes`-sized buffer; bail if the read hits EOF (time past end of video).
 4. If `paths.webcam().exists()`, spawn a `RawDecoder` on the webcam seeked to `video_start + time_ms` (export pre-seeks the webcam by `video_start`, so its file-time is shifted) with `cover_scale = Some((webcam_w, webcam_h))` - the same SOURCE-aspect decode box the export uses (`render::meta::webcam_box`; each panel cover-crops it at composite time), so the preview and the export never disagree about the webcam's framing - read one frame; else `webcam = None`.
 
    **A webcam read failure here is deliberately NOT fatal to the frame.** Both EOF and a hard decode failure just leave the buffer as it was (and log a line): `webcam.webm` routinely ends before `video.mp4`, so an `-ss` past its end is an everyday scrub near the end of a clip, and failing the whole preview frame for it would make the last seconds of such a project un-scrubbable. This is the one place the honest-failure rule (`RawDecoder::classify_end`) is deliberately relaxed - a preview frame is not a deliverable, whereas the EXPORT surfaces the same failure as an `export-warning` and a screen failure as a hard `export-error`.
 5. Call `renderer.composite_at(&pose, &screen_buf, webcam_ref, &mut bgra)` to write a BGRA buffer into `bgra`.
 6. Call `png_encode(bgra, meta.out_w, meta.out_h)` to produce PNG bytes in-process via the `png` crate (no ffmpeg subprocess involved), at the renderer's resolved size.
+
+## walk_to
+
+```rust
+pub(crate) fn walk_to(r: &mut FrameRenderer, video_start: u64, time_ms: u32) -> FramePose
+```
+
+Step the camera along the renderer's frame plan up to the output frame that shows clip time `time_ms` (`map.out_of(time_ms)` converted to an output frame index), through `FrameRenderer::walk_plan` with a no-op body, so the one-shot preview frame's camera is exactly the export's at that frame. With everything cut there is no plan and the camera is stepped once at output time 0 instead.
 
 ## preview_frame
 

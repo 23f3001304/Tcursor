@@ -1,95 +1,148 @@
+/* TCursor Setup. Same material as the app: the editor's three-plane dark system, one red accent,
+   the editor's radii and type rungs (editor.css :root, hud.css). Two rungs are local to this
+   window: the 26px screen title and the 46px progress numeral, which is the only hero here. */
+:root {
+  --bg: #0d0d0f; --surface: #141416; --raised: #1c1c1f;
+  --line: rgba(255, 255, 255, 0.07); --line-strong: rgba(255, 255, 255, 0.14);
+  --divider: rgba(255, 255, 255, 0.05);
+  --fg: #fafafa; --mut: #a1a1aa; --dim: #71717a;
+  --accent: #ef4444; --accent-hover: #dc2626;
+  --r-sm: 8px; --r: 10px; --r-lg: 14px;
+  --sp-1: 8px; --sp-2: 12px; --sp-3: 16px; --sp-4: 20px;
+  --inset-hi: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --shadow: 0 2px 6px rgba(0, 0, 0, 0.5), 0 12px 40px rgba(0, 0, 0, 0.38);
+  --pad: 30px;
+}
+
 * { box-sizing: border-box; margin: 0; }
 html, body { height: 100%; background: transparent; overflow: hidden; }
 body {
-  font-family: "Segoe UI", "Inter", system-ui, sans-serif;
-  color: #EEF0FF;
-  -webkit-user-select: none;
-  user-select: none;
-  cursor: default;
+  font-family: "Inter Variable", -apple-system, "Segoe UI", system-ui, sans-serif;
+  letter-spacing: -0.013em; -webkit-font-smoothing: antialiased;
+  color: var(--fg); cursor: default; -webkit-user-select: none; user-select: none;
 }
+button { font-family: inherit; cursor: pointer; }
+/* The confirm bar and the license sheet are toggled with the `hidden` attribute, and their own
+   `display: flex` would otherwise beat the user-agent rule that hides them. */
+[hidden] { display: none !important; }
+:focus-visible { outline: 2px solid var(--line-strong); outline-offset: 2px; }
 
 #app {
-  position: relative;
-  height: 100vh;
-  border-radius: 14px;
-  overflow: hidden;
-  background:
-    radial-gradient(760px 320px at 18% -8%, rgba(106, 87, 230, 0.30), transparent 60%),
-    radial-gradient(680px 420px at 108% 112%, rgba(44, 116, 240, 0.26), transparent 55%),
-    linear-gradient(158deg, #16122E, #0B1A38);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  position: relative; height: 100vh; display: flex; flex-direction: column;
+  background: var(--bg); border: 1px solid var(--line);
+  border-radius: var(--r-lg); box-shadow: var(--inset-hi), var(--shadow); overflow: hidden;
 }
 
-.titlebar {
-  display: flex; align-items: center; justify-content: space-between;
-  height: 40px; padding: 0 8px 0 16px;
+.bar { flex: none; height: 38px; display: flex; align-items: center; padding: 0 6px 0 var(--sp-3); }
+.bar-title { flex: 1; font-size: 11px; font-weight: 600; color: var(--dim); }
+.bar-close {
+  width: 26px; height: 26px; border: 0; border-radius: var(--r-sm); background: transparent;
+  color: var(--dim); font-size: 12px; transition: background 0.14s ease, color 0.14s ease;
 }
-.brand { font-size: 12px; letter-spacing: 0.3px; color: rgba(238, 240, 255, 0.55); }
-.close-btn {
-  width: 30px; height: 26px; border: 0; border-radius: 7px;
-  background: transparent; color: rgba(238, 240, 255, 0.6);
-  font-size: 13px; cursor: pointer; transition: background 0.15s, color 0.15s;
-}
-.close-btn:hover { background: rgba(255, 255, 255, 0.10); color: #fff; }
+.bar-close:hover { background: var(--raised); color: var(--fg); }
 
-.content { position: relative; height: calc(100vh - 40px); }
+.stage { position: relative; flex: 1; }
 .screen {
-  position: absolute; inset: 0;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  padding: 8px 40px 40px; text-align: center;
-  opacity: 0; transform: translateY(10px); pointer-events: none;
-  transition: opacity 0.35s ease, transform 0.35s ease;
+  position: absolute; inset: 0; padding: 0 var(--pad) var(--sp-3);
+  display: flex; flex-direction: column; align-items: flex-start; justify-content: center;
+  opacity: 0; transform: translateY(6px); pointer-events: none;
+  transition: opacity 0.16s ease, transform 0.16s ease;
 }
-.screen.active { opacity: 1; transform: none; pointer-events: auto; }
+.screen.is-on { opacity: 1; transform: none; pointer-events: auto; }
 
-.art { margin-bottom: 22px; filter: drop-shadow(0 12px 26px rgba(20, 20, 60, 0.55)); }
-.art.pulse { animation: pulse 1.8s ease-in-out infinite; }
-@keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+/* One glyph slot at the top of each screen: the brand mark once, then state. */
+.glyph { width: 38px; height: 38px; margin-bottom: var(--sp-4); flex: none; }
+.mark { filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.5)); }
+.check, .alert { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2.6; }
+.check { stroke: var(--fg); stroke-dasharray: 34; stroke-dashoffset: 34; }
+.is-on .check { animation: draw 420ms cubic-bezier(0.2, 0.7, 0.3, 1) forwards; }
+@keyframes draw { to { stroke-dashoffset: 0; } }
+.alert { stroke: var(--accent); }
+.alert circle { fill: var(--accent); stroke: none; }
 
-.title { font-size: 23px; font-weight: 600; letter-spacing: 0.2px; }
-.subtitle { margin-top: 8px; font-size: 13px; color: rgba(238, 240, 255, 0.58); }
-
-.btn {
-  margin-top: 26px; min-width: 190px; padding: 12px 22px;
-  border: 0; border-radius: 11px; font-size: 15px; font-weight: 500;
-  font-family: inherit; cursor: pointer; transition: filter 0.15s, transform 0.08s, background 0.15s;
+.eyebrow {
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--dim); margin-bottom: var(--sp-1);
 }
-.btn:active { transform: scale(0.985); }
-.btn-primary { color: #fff; background: linear-gradient(120deg, #6E63E8, #2C74F0); }
-.btn-primary:hover { filter: brightness(1.08); }
-.btn-ghost {
-  margin-top: 12px; min-width: 190px;
-  background: transparent; color: rgba(238, 240, 255, 0.75);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-}
-.btn-ghost:hover { background: rgba(255, 255, 255, 0.06); color: #fff; }
-
-.fineprint { margin-top: 16px; font-size: 12px; color: rgba(238, 240, 255, 0.45); }
-.fineprint a { color: rgba(160, 178, 255, 0.85); text-decoration: none; }
-.fineprint a:hover { text-decoration: underline; }
+h1 { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.15; }
+.lede { margin-top: var(--sp-1); font-size: 12.5px; font-weight: 400; line-height: 1.45; color: var(--mut); }
+.numeral { font-size: 46px; font-weight: 300; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.numeral-unit { font-size: 17px; font-weight: 400; color: var(--dim); margin-left: 3px; }
 
 .track {
-  margin-top: 30px; width: 260px; height: 6px; border-radius: 999px;
-  background: rgba(255, 255, 255, 0.10); overflow: hidden;
+  position: relative; width: 100%; height: 4px; margin-top: var(--sp-4);
+  border-radius: 999px; background: rgba(255, 255, 255, 0.07); overflow: hidden;
 }
-.fill {
-  width: 3%; height: 100%; border-radius: 999px;
-  background: linear-gradient(90deg, #6E63E8, #2C74F0);
-  transition: width 0.24s ease;
+.fill { width: 0; height: 100%; border-radius: 999px; background: var(--accent); transition: width 0.18s linear; }
+/* Nothing has landed in the destination yet, so the bar says "unknown" rather than inventing a number. */
+.track[data-phase="preparing"]::after {
+  content: ""; position: absolute; inset: 0; width: 34%; border-radius: 999px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.16), transparent);
+  animation: sweep 1.4s ease-in-out infinite;
 }
-.status { margin-top: 14px; font-size: 13px; color: rgba(238, 240, 255, 0.62); }
+@keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(294%); } }
 
-.overlay {
-  position: absolute; inset: 0; background: rgba(6, 8, 22, 0.66);
-  display: flex; align-items: center; justify-content: center; padding: 26px;
-  opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
+.btn {
+  margin-top: var(--sp-4); min-width: 132px; padding: 10px var(--sp-4);
+  border: 0; border-radius: var(--r); font-size: 12.5px; font-weight: 560;
+  color: #fff; background: var(--accent); box-shadow: var(--inset-hi);
+  transition: background 0.14s ease, transform 0.08s ease;
 }
-.overlay.open { opacity: 1; pointer-events: auto; }
-.license-card {
-  width: 100%; background: #14122C; border: 1px solid rgba(255, 255, 255, 0.10);
-  border-radius: 12px; padding: 20px; text-align: left;
+.btn:hover { background: var(--accent-hover); }
+.btn:active { transform: scale(0.99); }
+.btn-quiet { min-width: 104px; color: var(--mut); background: var(--raised); border: 1px solid var(--line); }
+.btn-quiet:hover { background: var(--raised); color: var(--fg); border-color: var(--line-strong); }
+.row { display: flex; gap: var(--sp-1); }
+
+.message {
+  margin-top: var(--sp-2); max-height: 74px; overflow-y: auto; width: 100%;
+  padding: var(--sp-1) 10px; border-radius: var(--r-sm); background: var(--surface);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 11px; line-height: 1.5; color: var(--mut); -webkit-user-select: text; user-select: text;
 }
-.license-card h2 { font-size: 16px; font-weight: 600; margin-bottom: 10px; }
-.license-text { max-height: 190px; overflow-y: auto; font-size: 12.5px; line-height: 1.6; color: rgba(238, 240, 255, 0.72); }
-.license-text p { margin-bottom: 10px; }
-.license-card .btn-ghost { margin-top: 16px; min-width: 120px; }
+
+.rail {
+  flex: none; height: 34px; display: flex; align-items: center; gap: var(--sp-1);
+  padding: 0 var(--pad); border-top: 1px solid var(--divider); font-size: 11px; color: var(--dim);
+}
+.rail-fact { flex: none; }
+.rail-path {
+  flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.rail-fact + .rail-fact::before { content: "\00b7"; margin-right: var(--sp-1); }
+.rail-note { margin-left: auto; padding-left: var(--sp-2); flex: none; }
+.rail-note a { color: var(--mut); text-decoration: none; border-bottom: 1px solid var(--line-strong); }
+.rail-note a:hover { color: var(--fg); }
+
+/* Mid-install close, answered in the window rather than by an OS dialog. */
+.confirm {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 34px; z-index: 2;
+  display: flex; align-items: center; gap: var(--sp-1); padding: 0 var(--pad);
+  background: var(--surface); border-top: 1px solid var(--line); font-size: 11.5px; color: var(--fg);
+}
+.confirm span { flex: 1; }
+.mini {
+  padding: 4px 12px; border-radius: var(--r-sm); border: 1px solid var(--line);
+  background: var(--raised); color: var(--mut); font-size: 11px; font-weight: 560;
+  transition: color 0.14s ease, border-color 0.14s ease;
+}
+.mini:hover { color: var(--fg); border-color: var(--line-strong); }
+
+/* Starts below the title bar so the window can still be dragged and closed while it is open. */
+.sheet {
+  position: absolute; inset: 38px 0 0; z-index: 3; display: flex; flex-direction: column;
+  padding: var(--sp-3) var(--pad) var(--sp-4); background: var(--bg);
+}
+.sheet-head { font-size: 14px; font-weight: 600; margin-bottom: var(--sp-2); }
+.sheet-body {
+  flex: 1; overflow-y: auto; margin: 0; font-family: inherit; white-space: pre-wrap;
+  font-size: 11.5px; line-height: 1.55; color: var(--mut); -webkit-user-select: text; user-select: text;
+}
+.sheet .btn-quiet { align-self: flex-start; margin-top: var(--sp-2); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::after { animation: none !important; transition-duration: 0.01ms !important; }
+  .check { stroke-dashoffset: 0; }
+  .track[data-phase="preparing"]::after { display: none; }
+}

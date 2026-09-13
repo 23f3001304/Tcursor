@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { METER_W } from "../components/RecMeter";
 
 /** Fixed horizontal size of the HUD bar window while idle (only its height varies, with `menu`).
  *  Also the width `Hud.tsx`'s panel-morph transitions (`openPanel`/`restoreBar`) animate back out
@@ -16,10 +17,10 @@ const ROW_PAD = 12 * 2;                    // .row padding, both sides
 const ROW_GAP = 6;                         // .row gap
 const GRIP_W = 22;                         // .grip
 const CAMTOGGLE_W = 52;                    // .camtoggle
-// .recmeter padding + icon + gap + .wave (fixed, widest state). .wave itself is 13 bars * 3px +
-// 12 gaps * 2px = 63px (gate-feedback item 2, user-reported 2026-09-02: the compact-meter redesign
-// - see hud.css's `.wave`/`.wave span` and useMicWaveform.ts's `BARS = 13`), down from 80.
-const RECMETER_W = 6 + 18 + 8 + 63 + 6;
+// .recmeter padding + icon + gap + the meter itself, whose width is `RecMeter.tsx`'s own
+// `METER_W` rather than a number copied here - the wave meter (benchmark (d)) replaced the 63px
+// bar strip, and the window has to grow with it or the recording bar clips.
+const RECMETER_W = 6 + 18 + 8 + METER_W + 6;
 const SPACER_MIN_W = 8;                    // .spacer min-width
 const TIMER_W = 50;                        // .timer min-width
 const PAUSED_CHIP_W = 62;                  // .paused-chip padding+border+"PAUSED" - measured

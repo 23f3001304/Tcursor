@@ -17,6 +17,7 @@ export const DEFAULT_ZOOM_SETTINGS: ZoomSettings = {
   smart_hold: true,
   smart_follow: false,
   cam_zoom_default: null,
+  camera_smoothing_ms: 0,
 };
 
 // Mirrors the HUD's own `SettingsZoom.tsx` exactly - same three values, same bare "1"/"2"/"3"
@@ -60,7 +61,7 @@ export function ZoomDefaultsSection({ value, onChange }: {
         </button>
       </div>
       <p className="e-lede" style={{ margin: "4px 0 14px" }}>
-        Defaults for new and automatic zooms — existing zoom regions keep their own values.
+        Defaults for new and automatic zooms. Existing zoom regions keep their own values.
       </p>
 
       <div className="e-field"><div className="e-switchrow">
@@ -81,6 +82,14 @@ export function ZoomDefaultsSection({ value, onChange }: {
       <div className="e-field">
         <Slider min={0.04} max={0.3} step={0.01} value={value.smoothness} onChange={(v) => set("smoothness", v)} ariaLabel="Smoothness"
           label="Smoothness" formatValue={(v) => v.toFixed(2)} />
+      </div>
+
+      <div className="e-field">
+        <Slider min={0} max={400} step={10} value={value.camera_smoothing_ms} onChange={(v) => set("camera_smoothing_ms", Math.round(v))} ariaLabel="Camera smoothing"
+          label="Camera smoothing" formatValue={(v) => (v === 0 ? "Off" : `${v} ms`)} />
+        <span className="e-lede" style={{ marginTop: 4 }}>
+          Smooths the auto-zoom camera's path. Higher is calmer but lags the cursor - 120 ms is a good start.
+        </span>
       </div>
 
       <div className="e-field">

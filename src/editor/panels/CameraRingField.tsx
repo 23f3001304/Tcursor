@@ -15,12 +15,12 @@ const swatchItems: SwatchItem<[number, number, number]>[] = SWATCHES.map(([c, na
  *  EffectsPanel's ripple-color/tint rows and BackgroundPanel's presets. */
 export function CameraRingField({ ring, onChange }: { ring: CamRing | null; onChange: (v: CamRing | null) => void }) {
   return (
-    <>
-      <div className="e-field" style={{ marginTop: 16 }}>
-        <div className="e-switchrow">
-          <span>Ring</span>
-          <Switch on={ring !== null} onChange={(v) => onChange(v ? DEFAULT_RING : null)} />
-        </div>
+    // No section heading: the switch's own label is the heading, and a "Ring" head over a "Ring"
+    // row is chrome saying the same word twice.
+    <div className="e-grp">
+      <div className="e-switchrow">
+        <span>Ring</span>
+        <Switch on={ring !== null} onChange={(v) => onChange(v ? DEFAULT_RING : null)} ariaLabel="Ring" />
       </div>
       {ring && (
         <>
@@ -43,6 +43,6 @@ export function CameraRingField({ ring, onChange }: { ring: CamRing | null; onCh
           </div>
         </>
       )}
-    </>
+    </div>
   );
 }

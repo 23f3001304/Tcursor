@@ -14,6 +14,7 @@ describe("DEFAULT_ZOOM_SETTINGS (Task 35 - EditorSettingsDialog per-section rese
       smart_hold: true,
       smart_follow: false,
       cam_zoom_default: null,
+      camera_smoothing_ms: 0,
     });
   });
 });

@@ -4,6 +4,10 @@ The transport bar rendered between the Stage and the Timeline. Left: Trim In/Out
 
 ## Transport
 
+**Cut and Speed (T7).** Four more props, all threaded straight through to `TransportTools` and not otherwise read here: `clicks` (the recording's clicks on clip time, the range-less span's lookahead), `range`/`setRange` (the ruler's selection and the way to clear it) and `onApply` (the op sink). `timeMs` and `dur`, which the readout already took, are passed down as well - `TransportTools` needs both to compute the span.
+
+**Time remap readout.** Three props: `outTimeMs` (output time, what the viewer will see: cuts skipped, speed applied), `outDur` (the exported length) and `plain` (no cuts and no speed spans). The big number is `outTimeMs` over `outDur`; clip time (`timeMs`, the raw recording's clock every lane still sits on) appears as `.e-time-clip` fine print only when `plain` is false. `dur` remains the seek range (jump to the end seeks to clip `dur`). The left tool group moved out to `TransportTools.tsx` and the motion constants to `transportMotion.ts` unchanged, to keep this file under the cap.
+
 ```tsx
 export const Transport: React.MemoExoticComponent<(props: {
   timeMs: number; dur: number; playing: boolean; onPlay: () => void; onSeek: (ms: number) => void;
@@ -56,3 +60,5 @@ Renders the transport bar. `React.memo`'d (render hygiene pass) - `timeMs` still
 ### Notes
 
 - Transport owns no edit-doc state directly - `trimmed`/`aspect`/`quality`/`muted`/`volume`/`exporting` are all derived/owned by `Editor.tsx` and passed down; only the volume flyout's open/closed flag (`showVolumeSlider`) is local. `volume` used to be a local mock but is real, lifted state as of this change.
+
+`onDetectSilences` is threaded straight through to `TransportTools` like `clicks`, `range` and `onApply`.

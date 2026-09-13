@@ -6,7 +6,7 @@
 // transparently rebuilds it and the next preview reflects the change.
 use anyhow::{Context, Result};
 use crate::export::pipeline::ffio::RawDecoder;
-use crate::export::render::{FrameRenderer, RenderMeta, OUT_FPS};
+use crate::export::render::{FramePose, FrameRenderer, RenderMeta, OUT_FPS, OUT_STEP_MS};
 use crate::export::settings::Resolution;
 use crate::export::types::Layout;
 use crate::session::paths::ProjectPaths;
@@ -31,14 +31,21 @@ fn build_renderer(paths: &ProjectPaths) -> Result<(FrameRenderer, RenderMeta)> {
 
 /// Per-frame work given a warm renderer: rewind the camera, fast-forward to T (math only),
 /// seek-decode the screen + webcam frame at T, composite, PNG-encode at the renderer's resolved size.
+/// Step the camera along the frame plan up to the output frame that shows `time_ms` (clip time):
+/// the same `walk_plan` the exporter and `camera_track` run, so the one-shot frame is the export's.
+/// With everything cut there is no plan; the camera is stepped once at output time 0 instead.
+pub(crate) fn walk_to(r: &mut FrameRenderer, video_start: u64, time_ms: u32) -> FramePose {
+    let map = r.time_map().clone();
+    let plan = map.frame_plan(OUT_FPS);
+    if plan.is_empty() { return r.step_camera(video_start, 0, OUT_STEP_MS); }
+    let j_target = (map.out_of(time_ms) as u64 * OUT_FPS / 1000).min(plan.len() as u64 - 1) as usize;
+    r.walk_plan(video_start, OUT_FPS, &plan, j_target, OUT_STEP_MS, |_, _, _, _| true).expect("plan is non-empty")
+}
+
 fn render_frame(renderer: &mut FrameRenderer, meta: &RenderMeta, paths: &ProjectPaths, time_ms: u32) -> Result<Vec<u8>> {
     // step_camera requires ascending t; rewind so the cached renderer can re-scan to T.
     renderer.reset_camera();
-    let k_target = time_ms as u64 * OUT_FPS / 1000;
-    let mut pose = renderer.step_camera(meta.video_start);
-    for j in 1..=k_target {
-        pose = renderer.step_camera(meta.video_start + j * 1000 / OUT_FPS);
-    }
+    let pose = walk_to(renderer, meta.video_start, time_ms);
 
     // Seek-decode one screen frame at time_ms (the screen file's frame 0 is video_start).
     let mut screen_buf = vec![0u8; meta.screen_bytes];
@@ -162,4 +169,4 @@ pub(crate) fn base64_encode(input: &[u8]) -> String {
     out
 }
 
-pub mod preprocess; pub mod preview_fx; pub mod preview_layouts; pub mod preview_track; pub mod session; pub mod thumbs;
+pub mod bg_thumbs; pub mod preprocess; pub mod preview_fx; pub mod preview_layouts; pub mod preview_track; pub mod session; pub mod thumbs;

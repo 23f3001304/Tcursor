@@ -8,20 +8,23 @@ use crate::export::settings::Resolution;
 #[derive(Clone, Copy, Debug, PartialEq)] pub struct Camera { pub cx: f32, pub cy: f32, pub scale: f32 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Easing { Smooth, Linear, Spring { stiffness: f32, damping: f32 }, EaseIn, EaseOut, EaseInOut,
-    Cubic { x1: f32, y1: f32, x2: f32, y2: f32 } }
+pub enum Easing { Smooth, Linear, Spring { stiffness: f32, damping: f32, mass: f32 }, EaseIn, EaseOut,
+    EaseInOut, Cubic { x1: f32, y1: f32, x2: f32, y2: f32 } }
+/// The bare wire word `"spring"`: Motion's own default - a REAL damped oscillator at zeta 0.5, a
+/// gentle overshoot to ~1.16. Why not react-spring's 170/26 (zeta 0.997, no overshoot): `spring.md`.
+pub const SPRING_DEFAULT: Easing = Easing::Spring { stiffness: 100.0, damping: 10.0, mass: 1.0 };
 
 #[derive(Clone, Copy, Debug)]
 pub struct ZoomConfig {
     pub target_scale: f32, pub zoom_in_ms: u32, pub zoom_out_ms: u32, pub idle_release_ms: u32,
     pub clicks_to_trigger: u32, pub merge_window_ms: u32, pub merge_radius_px: u32,
-    pub follow_damping: f32, pub dead_zone_px: u32, pub easing: Easing,
+    pub follow_damping: f32, pub dead_zone_px: u32, pub easing: Easing, pub smoothing_ms: u32,
 }
 impl Default for ZoomConfig {
     fn default() -> Self {
         Self { target_scale: 2.2, zoom_in_ms: 350, zoom_out_ms: 450, idle_release_ms: 2200,
             clicks_to_trigger: 1, merge_window_ms: 600, merge_radius_px: 240,
-            follow_damping: 0.10, dead_zone_px: 60, easing: Easing::Smooth }
+            follow_damping: 0.10, dead_zone_px: 60, easing: Easing::Smooth, smoothing_ms: 0 }
     }
 }
 
@@ -29,20 +32,16 @@ impl Default for ZoomConfig {
 pub struct ZoomRegion {
     pub start_ms: u32, pub end_ms: u32, pub zoom_in_ms: u32, pub zoom_out_ms: u32,
     pub target_scale: f32, pub anchor: FramePoint, pub easing: Easing,
-    /// Per-zoom webcam-on-zoom override carried from `Zoom.cam_action`; `None` inherits the
-    /// global default. Ignored by `CameraSim` - only the camera-panel compositing reads it.
-    pub cam_action: Option<crate::settings::model::CamZoomAction>,
-    /// Priority when this region overlaps another - higher wins (see `CameraSim::step`).
-    pub layer: u32,
-    /// Zoom-in aims at the LIVE cursor every step instead of the stored `anchor` (`ZoomTarget::Cursor`).
-    pub follow_cursor: bool,
+    pub cam_action: Option<crate::settings::model::CamZoomAction>, // per-zoom webcam-on-zoom override; None inherits the global default (ignored by CameraSim, read only by camera-panel compositing)
+    pub layer: u32,          // priority when this region overlaps another - higher wins (see CameraSim::step)
+    pub follow_cursor: bool, // zoom-in aims at the LIVE cursor every step instead of the stored anchor (ZoomTarget::Cursor)
 }
 
 #[derive(Clone, Debug)]
-pub enum Background { Gradient { from: Rgb, to: Rgb, angle_deg: f32 }, Solid(Rgb), Image(PathBuf) }
+pub enum Background { Gradient { from: Rgb, mid: Option<Rgb>, to: Rgb, angle_deg: f32 }, Solid(Rgb), Image(PathBuf) }
 impl Default for Background {
     fn default() -> Self {
-        Background::Gradient { from: Rgb { r: 36, g: 41, b: 56 }, to: Rgb { r: 88, g: 64, b: 120 }, angle_deg: 135.0 }
+        Background::Gradient { from: Rgb { r: 36, g: 41, b: 56 }, mid: None, to: Rgb { r: 88, g: 64, b: 120 }, angle_deg: 135.0 }
     }
 }
 

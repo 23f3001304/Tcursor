@@ -4,13 +4,17 @@ The preview stage: a vertical frame-tool strip (`StageToolbar`) on the left and 
 
 ## Stage
 
+**Time remap.** `map: TimeMap` is a new prop (from `SlotProps`); `layoutSegs`, `cameraMoves`, `zooms` and `effects` now arrive from `outDoc` (the output clock) while `timeMs` stays clip time. The stage derives `tOut = outOf(map, timeMs)` once per render and reads the camera track (`camAt`) for the zoom reticle and click targeting, the Move-mode handle and `useStageInvalidation` (video-background sync, camera-draft discard) at `tOut`; the composite loop gets the same map through `mapRef`. The cursor-style resolution moved out to `stageCursor.ts` unchanged.
+
 ```tsx
-export const Stage: React.MemoExoticComponent<(props: { src, webcamSrc, track, layout, layoutPresets, layoutSegs, cameraMoves, zooms, zoomSettings, clicks, bgUrl, cursorSprites, cursorKinds, osCursorInVideo, cursor, effects, clickfx, audioSrc, muted, volume, timeMs, playing, moveMode, aimPoint, aimMode, arrangeSeg, camDraftRef, tab, onTab, aspect, onAspect, aspectLocked, onTime, onDuration, onZoomAt, onAimAt, onApply, onRetryMedia }) => JSX.Element>
+export const Stage: React.MemoExoticComponent<(props: { src, webcamSrc, track, layout, layoutPresets, layoutSegs, cameraMoves, zooms, zoomSettings, clicks, bg, cursorSprites, cursorKinds, cursorLayer, osCursorInVideo, cursor, effects, clickfx, audioSrc, muted, volume, timeMs, playing, moveMode, aimPoint, aimMode, arrangeSeg, camDraftRef, tab, onTab, aspect, onAspect, aspectLocked, onTime, onDuration, onZoomAt, onAimAt, onApply, onRetryMedia }) => JSX.Element>
 ```
 
 `React.memo`'d (render hygiene pass) - still re-renders every tick while playing (`timeMs` genuinely drives the reticle position and the paused-idle dirty-tracking effect), but skips a re-render from unrelated `Editor` state as long as the caller passes stable callback props.
 
 Composites and shows the current preview frame, driven by the native `<video>`'s clock while playing and by `timeMs` while paused.
+
+**Empty state.** With no `src` and no error, renders `<StageEmpty />` - the wave motif's horizon line with the brand dot landing on it, over "Preparing preview". Its own component (`StageEmpty.tsx`) rather than the inline `Spin` branch it replaced, because this file sits at its line cap; `Stage` still renders one element for it. The recoverable media-error card (`StageMedia`'s `.e-media-err`) is unchanged and still wins over this.
 
 ### Props
 
@@ -23,8 +27,9 @@ Composites and shows the current preview frame, driven by the native `<video>`'s
 - `cameraMoves: CameraMove[]` - `doc.camera_moves`; inside the span they own (`[first - KF_BLEND_MS, last + KF_BLEND_MS]`, Task 27), `camMoveAt` overrides the resolved layout's webcam rect each frame (position + size only - radius/alpha stay as resolved), so the preview PiP follows the same track the export does. Empty, or anywhere outside that span, is a no-op and the layout segments own the panel. `camMoveAt`'s `live` argument (`livePose`, derived from `baseLayout.cam`) is the layout-resolved pose the track eases to and from at the span's edges, and is also what a Move-mode drag seeds its starting size from when the sample is `null` - mirrors the export's `step_camera`/`static_cam_pose`.
 - `zooms: Zoom[]` / `zoomSettings: ZoomSettings` - `doc.zooms` and `doc.settings.zoom`; mirrored into refs and handed to `useCompositeLoop`, which uses them to shrink/reposition the webcam PiP during an active zoom (`camera_shrink`/`camera_shrink_min` etc.), mirroring the export's `step_camera`. `Stage` itself only forwards these - it doesn't read them directly.
 - `clicks: ClickSample[]` - the mouse-down track, drawn as expanding ripples mapped through the zoom crop.
-- `bgUrl: string` - the export background as a data URL, decoded once into an `<img>` the canvas draws under the screen.
-- `cursorSprites: CursorSpriteDto[]` / `cursorKinds: CursorKindSample[]` / `cursor: CursorSettings` - the Capitaine sprite pack, the cursor-shape track, and the recording's cursor settings, so the preview draws the real export cursor (Enhanced style only).
+- `bg: StageBg` - everything the background draw needs in one value (`stage/stageBg.ts`): the export background as a data URL, decoded once into an `<img>` the canvas draws under the screen, plus the imported video/GIF asset's URL, kind and dim for a moving background. One prop rather than four, because this file and the two it feeds all sit within a few lines of the 200-line cap.
+- `cursorSprites: CursorPackDto | null` / `cursorKinds: CursorKindSample[]` / `cursor: CursorSettings` - the selected pack (its nine sprites, its explicit busy frames and its declared busy animation), the cursor-shape track, and the recording's cursor settings, so the preview draws the synthetic export cursor (Enhanced style, or the plain-OS fallback below) with the same animated busy state the export renders.
+- `cursorLayer: CursorLayerDto | null` - the recording's **captured OS-cursor layer** (from the `cursor_layer` IPC): the real cursor bitmaps plus the timeline of which was showing. `null` for a recording made before the layer existed. Forwarded to `useCursorSprites` only when the doc style is `"system"`, which is what makes the preview composite the actual recorded cursor there - see below.
 - `effects: EffectRegion[]` - editor-added effect regions; the Spotlight ones light the spotlight overlay (recorded hotkey holds are seeded into `effects` as regions too, so no separate holds prop is needed here).
 - `clickfx: ClickFxSettings` - the recording's click-FX + spotlight look (dim/radius/feather/mode/tint + the global toggle). Passed straight through to the backend FX-overlay request.
 - `audioSrc: string` / `muted: boolean` - the mixed preview-audio URL played by a hidden `<audio>`, and the mute toggle.
@@ -42,7 +47,7 @@ Composites and shows the current preview frame, driven by the native `<video>`'s
 - `onZoomAt: (x: number, y: number) => void` - called with a 0..1 screen-content point when the canvas is clicked, so the editor adds a zoom focused there. **Not** called in aim mode.
 - `onAimAt: (x: number, y: number) => void` - the aim-mode counterpart: re-aims the already-selected zoom (`update_zoom { target: { fixed } }`) instead of adding a new one. Called immediately on a canvas click in aim mode; a reticle drag instead debounces this call (see "Reticle drag debounce" below) rather than calling it on every pointermove.
 - `onRetryMedia: () => void` - `useEditorData`'s `retryMedia` (bumps its internal `reloadTick`, included in the proxy-source effect's deps - a genuinely fresh `ensureProxy` attempt on the `fetch` branch). Called from `StageMedia`'s error card's Retry button, via a handler defined here (`onRetry={() => { setErr(null); onRetryMedia(); screen.current?.load(); }}`) - see Behavior.
-- `tab: Tab` / `onTab: (t: Tab) => void` (Task 11) - the Rail's active tab and its setter, forwarded straight through to `StageToolbar` so its Cursor/Captions/Camera buttons can jump the Rail to that panel and read `.on` from whether it's already open. `Editor.tsx` passes the SAME `onTab` it gives `Rail` (clears `sel`/`aimOn` on every switch, whichever control triggered it).
+- `tab: Tab` / `onTab: (t: Tab) => void` (Task 11) - the active panel tab and its setter, forwarded straight through to `StageToolbar` so its Cursor/Captions/Camera buttons can open that panel and read `.on` from whether it's already showing. Since M1a there is no rail: `Tab` now comes from `shell/panelTabs.tsx`, and `onTab` is `EditorShell`'s quick-open, which sets the tab and, if the workspace has no `panel` area yet, splits one off the stage. It no longer clears `sel`/`aimOn` - selection and panels are independent axes.
 - `aspect: Aspect` / `onAspect: (aspect: Aspect) => void` / `aspectLocked: boolean` (Task 11) - the doc's aspect ratio, its setter, and whether cycling it is currently unsafe (`exporting || dur <= 0`, mirroring `Transport`'s own `locked`) - forwarded to `StageToolbar`'s aspect quick-toggle, which cycles the exact same `ASPECT_ORDER` sequence as `Transport`'s chip (both exported from `Transport.tsx` so the two controls can't drift apart).
 
 ### Behavior
@@ -80,9 +85,22 @@ Composites and shows the current preview frame, driven by the native `<video>`'s
 - The canvas backing store follows `layout.canvas` (from `PreviewLayout`, resolved server-side via `Layout::resolve` from `EditDoc.aspect`) - `DEFAULT_CANVAS` (1280x720) is only the pre-load fallback. `.e-stage`'s `aspect-ratio` is set inline from the same `[canvasW, canvasH]` so the stage box, the canvas, and every fraction in this file share one basis regardless of the chosen aspect. CSS then scales that box to fit; `onCanvasClick`/`mapCanvasClickToZoomTarget` divide by the displayed rect to recover backing-store pixels.
 - The spotlight/click-FX overlay is rendered by the backend at pixel-perfect parity with the export (not approximated in Canvas2D) - see `previewCanvas.md`, `fxOverlay.md`, `useCompositeLoop.md`.
 
+### The "System" cursor: captured layer first, plain-OS fallback second
+
+Mirrors the renderer's own two-way split (`export::cursor::captured::draws_captured`, then `cursorset::draw`):
+
+```ts
+const captured = cursor.style === "system" ? cursorLayer : null;
+const plainOs = cursor.style === "system" && !osCursorInVideo && !captured;
+```
+
+**Captured (the normal case now).** Any recording made since screen capture went cursor-free has a layer, so `"system"` composites the REAL bitmap that was on screen - `captured` is handed to `useCursorSprites`, lands on `DrawCursor.captured`, and `drawCursorSprite` takes its captured branch and returns before the synthetic gate. The style is deliberately left as `"system"` here (no effective-style substitution), because a non-null `captured` IS the gate.
+
+**Plain-OS (pre-layer recordings only).** Below is the older fallback, now reachable only when there is no layer to composite.
+
 ### Plain-OS cursor fallback
 
-`cursor.style === "system" && !osCursorInVideo` is the case the renderer calls plain-OS: the doc asks for the system cursor, but the video was recorded in `Enhanced` (or `Hidden`) and has none baked in. Rust re-creates it from the recorded path (`cursorset::draw`); Stage mirrors that decision for the canvas preview **without any new drawing code**, by feeding `useSyncRefs` an *effective* cursor instead of the raw prop:
+`cursor.style === "system" && !osCursorInVideo && !captured` is the case the renderer calls plain-OS: the doc asks for the system cursor, but the video was recorded in `Enhanced` (or `Hidden`) BEFORE the cursor layer existed, so it has neither a baked cursor nor a captured one. Rust re-creates it from the recorded path (`cursorset::draw`); Stage mirrors that decision for the canvas preview **without any new drawing code**, by feeding `useSyncRefs` an *effective* cursor instead of the raw prop:
 
 - `style: "enhanced"` - flips on the existing `drawCursorSprite` gate, which is a plain style check.
 - an empty `cursorKinds` array - `cursorAt` then always resolves to `"arrow"`, matching the renderer's always-Arrow rule.

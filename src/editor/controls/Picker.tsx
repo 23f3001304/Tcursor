@@ -93,18 +93,16 @@ export function Picker<T extends string>({
             animate={{ opacity: 1, y: 4, scale: 1 }}
             exit={{ opacity: 0, y: -4, scale: 0.98 }}
             transition={{ duration: 0.12 }}
+            // Paint (plane, radius, shadow) lives in `.e-picker-menu` (controls.css); only the
+            // popover's placement and scroll box stay here.
             style={{
               position: "absolute",
               top: "100%",
               left: 0,
               right: 0,
               zIndex: 50,
-              background: "var(--e-card)",
-              border: "1px solid var(--e-border)",
-              borderRadius: "var(--e-r)",
-              boxShadow: "var(--e-shadow-pop)",
               padding: 4,
-              maxHeight: 200,
+              maxHeight: 216,
               overflowY: "auto",
               boxSizing: "border-box"
             }}

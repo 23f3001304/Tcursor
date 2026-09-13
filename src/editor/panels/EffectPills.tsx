@@ -22,8 +22,8 @@ export function EffectPills({
   onAddCameraMove: () => void;
 }) {
   return (
-    <div className="e-field">
-      <span className="e-fl">Insert timeline elements</span>
+    <div className="e-grp">
+      <span className="e-sechead">Insert timeline elements</span>
       <div className="e-libgrid">
 
         <div draggable onDragStart={(e) => handleDragStart(e, "layout")} onClick={onAddLayout}

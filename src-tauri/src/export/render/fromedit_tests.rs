@@ -114,11 +114,24 @@ fn per_region_durations_flow_into_regions() {
 }
 
 #[test]
-fn easing_unknown_or_spring_falls_back_to_config() {
+fn easing_unknown_falls_back_to_config() {
     let cfg = crate::settings::model::Settings::default().zoom.to_zoom_config();
-    assert_eq!(format!("{:?}", easing_from("spring", cfg.easing)), format!("{:?}", cfg.easing));
+    assert_eq!(format!("{:?}", easing_from("bogus", cfg.easing)), format!("{:?}", cfg.easing));
     assert_eq!(format!("{:?}", easing_from("smooth", cfg.easing)), format!("{:?}", Easing::Smooth));
     assert_eq!(format!("{:?}", easing_from("linear", cfg.easing)), format!("{:?}", Easing::Linear));
+}
+
+/// THE FIX: "spring" used to fall into `_`, fail `parse_cubic`, and return `cfg_easing` (Smooth).
+#[test]
+fn spring_maps_to_a_real_spring_variant() {
+    let cfg = crate::settings::model::Settings::default().zoom.to_zoom_config();
+    assert!(matches!(easing_from("spring", cfg.easing), Easing::Spring { .. }));
+    // A parameterised spring reconstructs exactly, mass defaulted; junk falls back to the config.
+    assert_eq!(easing_from("spring(300,10)", cfg.easing),
+        Easing::Spring { stiffness: 300.0, damping: 10.0, mass: 1.0 });
+    assert_eq!(easing_from("spring(300,10,2)", cfg.easing),
+        Easing::Spring { stiffness: 300.0, damping: 10.0, mass: 2.0 });
+    assert_eq!(easing_from("spring(300)", cfg.easing), cfg.easing);
 }
 
 #[test]

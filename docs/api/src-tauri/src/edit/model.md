@@ -58,18 +58,19 @@ The effective `[in_ms, out_ms)` export/preview range against a clip of `total_du
 
 ```rust
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct Cut { pub start_ms: u32, pub end_ms: u32 }
+pub struct Cut { #[serde(default)] pub id: String, pub start_ms: u32, pub end_ms: u32 }
 ```
 
-A single removed time range within the clip, clamped to the trim window at render time.
+A single removed time range of clip time. Rendered by the time remap (`export::remap::TimeMap`), which clamps it into the trim window, merges overlapping cuts and removes exactly the frames whose time lies inside it.
 
+- `id` - *`c{n}`; defaulted to empty for docs saved before cuts had ids and filled on load by `EditDoc::assign_missing_ids`.*
 - `start_ms` - *inclusive start of the removed span.*
 - `end_ms` - *exclusive end of the removed span.*
 
 ### Used by
 
-- `src-tauri/src/edit/ops/api.rs` - appended by `AddCut`; iterated in `metrics` to compute `kept_ms`
-- `src-tauri/src/export/render/fromedit.rs` - passed to the compositor to skip frames in the cut range
+- `src-tauri/src/edit/ops/api.rs` - appended by `AddCut` with a fresh id; iterated in `metrics` to compute `kept_ms`
+- `src-tauri/src/export/remap.rs` - `TimeMap::build` turns cuts into gaps between kept segments
 
 ## ZoomTarget
 
@@ -298,6 +299,14 @@ Serializes the doc to pretty-printed JSON and writes it atomically to `path`: th
 - `round_trip_save_load` - a full `EditDoc` with all fields populated serializes and deserializes without data loss.
 - `save_leaves_no_tmp_sibling_on_success` - after a successful save, the directory contains only the target file, no leftover temp sibling.
 - `save_overwrites_an_existing_file` - saving over a path that already holds a doc replaces it (the common per-edit-op case).
+
+## EditDoc::assign_missing_ids
+
+```rust
+pub fn assign_missing_ids(&mut self)
+```
+
+Cuts saved before they had ids get `c{n}` ones, `n` counting up from the highest live id. Called by `load` so a pre-remap `edit.json` comes back addressable without a migration; `timeops_tests::a_doc_saved_before_cut_ids_loads_with_ids_assigned` pins the numbering.
 
 ## EditDoc::load
 

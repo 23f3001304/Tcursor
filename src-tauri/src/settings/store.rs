@@ -35,10 +35,13 @@ pub fn record_snapshot(paths: &ProjectPaths) -> Settings {
     std::fs::read(paths.settings()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
-/// Whether this recording's video has the OS cursor baked into its pixels. Missing or corrupt
-/// snapshot -> `true`, i.e. today's behavior (draw no synthetic cursor), never a double cursor.
+/// Whether this recording's video has the OS cursor baked into its pixels. True only for a
+/// PRE-LAYER `System` recording: since the cursor became its own layer the capture is always
+/// cursor-free, and the layer's presence is what says so. Missing or corrupt snapshot -> `true`
+/// on a project with no layer, i.e. draw no synthetic cursor, never a double cursor.
 pub fn os_cursor_in_video(paths: &ProjectPaths) -> bool {
     record_snapshot(paths).cursor.style.captures_os_cursor()
+        && !crate::events::track::cursorlayer::CursorLayer::exists(paths)
 }
 
 /// Serializes and persists `s`, atomically (see `save_to`).
@@ -65,7 +68,7 @@ fn save_to(path: &Path, s: &Settings) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::model::CursorStyle;
+    use crate::settings::cursor::CursorStyle;
 
     #[test]
     fn config_path_is_under_tcursor() {
@@ -96,6 +99,26 @@ mod tests {
         let hid = snapshot_with(CursorStyle::Hidden, "hid");
         assert!(!os_cursor_in_video(&hid));
         for p in [sys, enh, hid] { let _ = std::fs::remove_dir_all(&p.folder); }
+    }
+
+    #[test]
+    fn a_cursor_layer_means_the_video_is_clean_whatever_the_style_was() {
+        // The 2x2 matrix. A layer exists only on a recording made AFTER the capture went
+        // cursor-free, so it beats the style every time; without one the style is the only
+        // evidence there is, and `System` back then meant baked pixels.
+        for (style, layer, want) in [
+            (CursorStyle::System, false, true),
+            (CursorStyle::System, true, false),
+            (CursorStyle::Enhanced, false, false),
+            (CursorStyle::Enhanced, true, false),
+        ] {
+            let p = snapshot_with(style, &format!("matrix-{style:?}-{layer}"));
+            if layer {
+                crate::events::track::cursorlayer::CursorLayerBuilder::default().save(&p).unwrap();
+            }
+            assert_eq!(os_cursor_in_video(&p), want, "{style:?} layer={layer}");
+            let _ = std::fs::remove_dir_all(&p.folder);
+        }
     }
 
     #[test]

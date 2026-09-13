@@ -75,7 +75,7 @@ fn fields_map_faithfully_and_anchor_is_preserved_as_fixed() {
 fn easing_names_map() {
     assert_eq!(easing_str(Easing::Smooth), "smooth");
     assert_eq!(easing_str(Easing::Linear), "linear");
-    assert_eq!(easing_str(Easing::Spring { stiffness: 1.0, damping: 1.0 }), "spring");
+    assert_eq!(easing_str(Easing::Spring { stiffness: 1.0, damping: 1.0, mass: 1.0 }), "spring(1.000,1.000,1.000)");
 }
 
 #[test]

@@ -1,18 +1,19 @@
 import { useCallback, useMemo, useRef, useState } from "react";
+import { useTimeMap } from "./hooks/useTimeMap";
+import { useSilences } from "./hooks/useSilences";
 import { applyEditOp, fileSrc, DEFAULT_PROXY_HEIGHT } from "../lib/ipc";
 import type { MarkState } from "../lib/brandWave";
 import { resolveTrim, type EditDoc, type EditOp } from "../lib/edit";
 import type { CamPose } from "./stage/cameraMoves";
 import { TopBar } from "./shell/TopBar";
 import { EditorDialogs } from "./shell/EditorDialogs";
-import { Toast, useUndoToast } from "./shell/Toast";
+import { useUndoToast } from "./shell/Toast";
 import { ResizeEdges } from "./controls/ResizeEdges";
-import { Rail, type Tab } from "./shell/Rail";
-import { EditorPanels } from "./EditorPanels";
-import { Stage } from "./stage/Stage";
+import type { Tab } from "./shell/panelTabs";
+import { ClassicShell } from "./shell/ClassicShell";
+import type { ShellProps } from "./shell/slotProps";
+import type { Range } from "./timeline/useRangeSelect";
 import { zoomTargetPoint } from "./stage/zoomTargetMapper";
-import { Transport } from "./stage/Transport";
-import { Timeline } from "./timeline/Timeline";
 import { useEditorData } from "./hooks/useEditorData";
 import { hasWebcamSignal } from "./hooks/editorData";
 import { useExportState } from "./hooks/useExportState";
@@ -26,7 +27,6 @@ import { useDocSettings } from "./hooks/useDocSettings";
 import { createQueue } from "./hooks/opQueue";
 import { useDirector } from "./director/useDirector";
 import { useTimelineActions } from "./hooks/useTimelineActions";
-import { DirectorOverlay } from "./director/DirectorOverlay";
 import "./editor.css";
 
 /** The post-record editor. The preview plays the recording natively (Stage) and applies
@@ -37,6 +37,9 @@ export function Editor({ folder, onClose }: { folder: string; onClose: () => voi
   const [rev, setRev] = useState(0);
   const [tab, setTab] = useState<Tab>("ai");
   const [sel, setSel] = useState<string | null>(null);
+  // The ruler's Shift+drag selection, in clip ms - UI state like `sel`, shared because the timeline
+  // draws it and the transport's Cut/Speed act on it (useRangeSelect.ts).
+  const [range, setRange] = useState<Range | null>(null);
   // On-stage aim mode for a Region zoom. Exclusive with camera Move mode (both claim the same
   // pointer): entering Move exits aiming, and aiming stays suppressed while Move is on.
   const [aimOn, setAimOn] = useState(false);
@@ -61,7 +64,7 @@ export function Editor({ folder, onClose }: { folder: string; onClose: () => voi
   const enqueue = useRef(createQueue()).current;
 
   const {
-    doc, setDoc, track, layout, layoutPresets, clicks, bgUrl, cursorSpr, cursorKnd, osCursor,
+    doc, setDoc, track, layout, layoutPresets, clicks, bg, cursorSpr, cursorKnd, cursorLyr, osCursor,
     thumbs, waves, wavesReady, audioUrl, srcUrl, playing, setPlaying, retryMedia,
   } = useEditorData(folder, rev, quality);
   const exportState = useExportState(pushToast);
@@ -74,6 +77,7 @@ export function Editor({ folder, onClose }: { folder: string; onClose: () => voi
   timeMsRef.current = timeMs;
 
   const dur = vidDurMs > 0 ? vidDurMs : (doc?.trim.out_ms ?? 0);
+  const { map, outDoc } = useTimeMap(doc, dur); // cuts and speed spans, as one clock map and a remapped doc for the stage
   const proj = folder.split(/[\\/]/).pop() ?? "project";
   const { record, unrecord, undo, redo, canUndo, canRedo } = useEditHistory(folder, docRef, setDoc, () => setRev((r) => r + 1), enqueue, onSwap);
   const director = useDirector(); // fake-pointer choreography for onRun below - see director/useDirector.ts
@@ -113,17 +117,15 @@ export function Editor({ folder, onClose }: { folder: string; onClose: () => voi
   // reason Move is. Built after `onSeek`, which it seeks into the segment with. useArrangeMode.md.
   const { arrangeSeg, arrangeOn, onArrange, onSel } = useArrangeMode(doc, sel, { setSel, timeMsRef, onSeek });
   const aimMode = aimOn && !moveMode && !arrangeOn && !!aimPoint;
-  // Shared by Rail and StageToolbar - navigating AWAY clears selection/aim; re-clicking the
-  // already-open tab is a no-op (fix round 1: used to clear unconditionally, dropping selection).
-  const onTab = useCallback((t: Tab) => { if (t !== tab) { setSel(null); setAimOn(false); } setTab(t); }, [tab]);
   const { onTrimIn, onTrimOut, onResetTrim } = useTrimActions(doc, timeMsRef, dur, applyOp);
+  const onDetectSilences = useSilences(folder, docRef, applyOp, pushToast);
   const { saveDocSettings, onAutoModel } = useDocSettings(folder, docRef, setDoc, record, setRev, enqueue);
   const { addZoom, addSpotlight, addCameraMove, zoomAt } = useTimelineActions(applyOp, timeMsRef, docRef, setSel, setPlaying);
 
   // Inert behind any modal (M4), incl. the AI director's own scrim (`running`). `shortcutsOpen`
   // lets "?" still toggle ShortcutsOverlay closed while it's the one open (keymap.ts).
   const modalOpen = showExportDialog || showShortcuts || showSettings || moveOffOpen || running;
-  useEditorKeymap({ sel, doc, timeMs, setSel, setPlaying, applyOp, addZoom, addSpotlight, onOverlay: () => setShowShortcuts((s) => !s), modalOpen, shortcutsOpen: showShortcuts });
+  useEditorKeymap({ sel, doc, timeMs, setSel, setPlaying, applyOp, addZoom, addSpotlight, onOverlay: () => setShowShortcuts((s) => !s), modalOpen, shortcutsOpen: showShortcuts, escOwned: arrangeOn });
 
   // Agentic AI director: `director.run` fetches the plan and choreographs the fake pointer
   // (see that hook's own comment). `running` is set synchronously so the wand's `disabled` takes
@@ -144,52 +146,27 @@ export function Editor({ folder, onClose }: { folder: string; onClose: () => voi
   // TcursorMark ever sees anything but "idle"; exporting wins over directing if somehow both were
   // true - `onRun`'s own `exporting` guard above is what actually enforces that, not just this order.
   const brandState: MarkState = !doc.settings.ui.animated_brand ? "idle" : exporting ? "exporting" : running ? "directing" : "idle";
+  // Everything the four editor types need, named after these locals so the hand-off stays a
+  // shorthand literal. `ClassicShell` composes them (rail, one panel slot, stage, transport,
+  // timeline); this file only assembles the props.
+  const shell: ShellProps = {
+    folder, doc, outDoc: outDoc ?? doc, map, range, setRange, sel, setSel, onSel, tab, setTab, dur, timeMs, timeMsRef, playing, muted, volume, setVolume, modalOpen,
+    quality, cycleQuality, onMuteToggle, exporting, running, trimmed, aimMode, aimPoint, setAimOn, moveMode,
+    onMoveMode, arrangeSeg, arrangeOn, onArrange, camDraftRef, srcUrl, audioUrl, bg, track, layout,
+    layoutPresets, clicks, cursorSpr, cursorKnd, cursorLyr, osCursor, thumbs, waves, wavesReady,
+    webcamSrc: fileSrc(`${folder}\\webcam.webm`), hasWebcam: hasWebcamSignal(layout), aspectLocked: exporting || dur <= 0,
+    onTime, onSeek, onPlayToggle, onAspect, onDuration: setVidDurMs, zoomAt, aimAt, applyOp, saveDocSettings,
+    retryMedia, addZoom, addSpotlight, addCameraMove, onRun, onAutoModel, aiError, aiLog, toast, dismissToast,
+    aiProgress: director.progress, aiPlanning: director.planning, pointerRef: director.pointerRef,
+    onCancelRun: director.requestCancel, onTrimIn, onTrimOut, onResetTrim, onDetectSilences,
+  };
 
   return (
     <div className="editor">
       <ResizeEdges />
       <TopBar proj={proj} exporting={exporting} pct={exportState.pct} onOpenExport={() => setShowExportDialog(true)} onOpenSettings={() => setShowSettings(true)} onClose={onClose}
         onUndo={() => void undo()} onRedo={() => void redo()} canUndo={canUndo} canRedo={canRedo} brandState={brandState} />
-      <div className="e-body">
-        <Rail tab={tab} onTab={onTab} />
-        <EditorPanels doc={doc} sel={sel} tab={tab} dur={dur} setSel={setSel} setTab={setTab}
-          timeMs={tab === "camera" ? timeMs : 0} timeMsRef={timeMsRef} running={running} exporting={exporting} aiError={aiError} aiLog={aiLog} aiProgress={director.progress} onRun={onRun} onAutoModel={onAutoModel} applyOp={applyOp} saveDocSettings={saveDocSettings}
-          moveMode={moveMode} requestMoveMode={onMoveMode} camDraftRef={camDraftRef} osCursorInVideo={osCursor}
-          aimMode={aimMode} onAimMode={setAimOn} onSeek={onSeek} layoutPresets={layoutPresets} arrangeOn={arrangeOn} onArrange={onArrange}
-          addZoom={addZoom} addSpotlight={addSpotlight} addCameraMove={addCameraMove} />
-        {/* Relative wrapper so the undo/redo Toast and the AI director's status pill (was
-            `position:fixed` from the viewport bottom, floating over the timeline once it grew
-            past ~74px, ux audit #17) sit bottom-center of the STAGE, not owned by Stage.tsx. */}
-        <div className="e-stagetoast">
-          <Stage src={srcUrl} webcamSrc={fileSrc(`${folder}\\webcam.webm`)} track={track} layout={layout} layoutPresets={layoutPresets} layoutSegs={doc.layout} cameraMoves={doc.camera_moves} zooms={doc.zooms} zoomSettings={doc.settings.zoom} clicks={clicks} bgUrl={bgUrl} cursorSprites={cursorSpr} cursorKinds={cursorKnd} osCursorInVideo={osCursor} cursor={doc.settings.cursor} effects={doc.effects} clickfx={doc.settings.clickfx} audioSrc={audioUrl} muted={muted} volume={volume / 100} timeMs={timeMs} playing={playing} moveMode={moveMode} aimPoint={aimPoint} aimMode={aimMode} arrangeSeg={arrangeSeg} camDraftRef={camDraftRef} tab={tab} onTab={onTab} aspect={doc.aspect} onAspect={onAspect} aspectLocked={exporting || dur <= 0} onTime={onTime} onDuration={setVidDurMs} onZoomAt={zoomAt} onAimAt={aimAt} onApply={applyOp} onRetryMedia={retryMedia} />
-          <Toast msg={toast} onDone={dismissToast} />
-          <DirectorOverlay running={running} planning={director.planning} model={doc.settings.ai_model || undefined} pointerRef={director.pointerRef} progress={director.progress} onCancel={director.requestCancel} />
-        </div>
-      </div>
-      <Transport
-        timeMs={timeMs}
-        dur={dur}
-        playing={playing}
-        onPlay={onPlayToggle}
-        onSeek={onSeek}
-        onAddZoom={addZoom}
-        onAutoedit={onRun}
-        aiRunning={running}
-        exporting={exporting}
-        trimmed={trimmed}
-        onTrimIn={onTrimIn}
-        onTrimOut={onTrimOut}
-        onResetTrim={onResetTrim}
-        aspect={doc.aspect}
-        onAspect={onAspect}
-        quality={quality}
-        onQuality={cycleQuality}
-        muted={muted}
-        onMute={onMuteToggle}
-        volume={volume}
-        onVolume={setVolume}
-      />
-      <Timeline doc={doc} timeMs={timeMs} dur={dur} playing={playing} onSeek={onSeek} sel={sel} onSel={onSel} onApply={applyOp} thumbs={thumbs} waves={waves} wavesReady={wavesReady} hasWebcam={hasWebcamSignal(layout)} layoutPresets={layoutPresets} />
+      <ClassicShell {...shell} />
       {moveOffDialog}
       <EditorDialogs folder={folder} settings={doc.settings} exportState={exportState} onSaveSettings={saveDocSettings}
         showExport={showExportDialog} onCloseExport={() => setShowExportDialog(false)}

@@ -1,30 +1,32 @@
+import { VoiceWave } from "../../lib/wave/ui/VoiceWave";
 import { Mic, MicOff } from "./icons";
 
-/** The recording bar's mic indicator. Split out of `Hud.tsx` to keep that file under the line
- *  cap; owns no state - purely a rendering of the truth its props already carry.
+/** Width and height of the meter's drawing area, px. `useHudWindowSize.ts`'s `RECMETER_W` term
+ *  carries this width, so the recording window stays sized to what the meter actually needs. */
+export const METER_W = 104;
+export const METER_H = 30;
+
+/** The recording bar's mic indicator: the icon, and the live voice wave beside it.
  *
- *  State honesty (task-6 (c)/(i), user-reported): the live waveform renders ONLY when the mic is
- *  actually capturing (`micOn` AND the underlying stream is open, i.e. `active`) - when muted, an
- *  explicit "Muted" chip replaces it instead of a fake/frozen wave. No path here can render bars
- *  for a stream that was never opened; `Hud` only calls `useMicWaveform` with `on` when `micOn` is
- *  also true, so muting closes the mic for real, not just this component's display of it.
+ *  State honesty (task-6 (c)/(i), user-reported): the meter renders ONLY when audio is actually
+ *  being captured - when muted an explicit "Muted" chip replaces it instead of a fake or frozen
+ *  wave, and when the mic is on but no level report has arrived (permission pending, no device, a
+ *  driver reset mid-take) `live` is false and `VoiceWave` drops to the line colour rather than
+ *  drawing a resting wave that would read as a working microphone. The levels themselves come
+ *  from the Rust capture that is writing the WAV (`useAudioLevels`), so there is no path here that
+ *  can show a level for audio this take is not recording.
  *
- *  Bar geometry (gate-feedback item 2, user-reported 2026-09-02: "recording looks bad" - the old
- *  flex-grow bars, spread thin across a wide `.wave`, read as sparse dots rather than a meter):
- *  each bar is a FIXED `2 + level*18` px tall (hud.css floors it at `min-height: 2px` too, so
- *  total silence still shows a low bar, never a bare dot) - the fixed 3px-wide/2px-gap bar sizing
- *  and the meter's own fixed ~64px width live in `hud.css` (`.wave`/`.wave span`), not here. */
-export function RecMeter({ micOn, active, levels }: { micOn: boolean; active: boolean; levels: number[] }) {
+ *  The meter's own geometry is not this file's business: it hands `VoiceWave` a box and a level
+ *  getter, and `voiceWave.ts` decides what a frame looks like inside it. */
+export function RecMeter({ micOn, live, read }: {
+  micOn: boolean; live: boolean; read: () => { mic: number; sys: number };
+}) {
   return (
     <div className={`recmeter ${micOn ? "" : "muted"}`}>
       <span className="ico">{micOn ? <Mic /> : <MicOff />}</span>
-      {micOn ? (
-        <div className={`wave ${active ? "" : "idle"}`}>
-          {levels.map((l, i) => <span key={i} style={{ height: `${2 + l * 18}px` }} />)}
-        </div>
-      ) : (
-        <span className="muted-label">Muted</span>
-      )}
+      {micOn
+        ? <VoiceWave w={METER_W} h={METER_H} read={read} live={live} />
+        : <span className="muted-label">Muted</span>}
     </div>
   );
 }

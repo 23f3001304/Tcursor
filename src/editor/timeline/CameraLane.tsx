@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import type { EditDoc, EditOp } from "../../lib/edit";
-import { CAM_CURVES } from "../inspectors/curves";
+import { CURVE_GLYPHS } from "./curveGlyphs";
 import { KF_BLEND_MS } from "../stage/cameraMoves";
 import { snapKeyframeMs } from "./camSnap";
 import { pastDragThreshold } from "../hooks/dragThreshold";
@@ -151,7 +151,6 @@ export const CameraLane = memo(function CameraLane({ doc, dur, sel, onSel, onApp
             style={{ left: `${pct(m.t)}%` }}
             initial={{ opacity: 0, scale: 0.6, rotate: 45 }}
             animate={{ opacity: 1, scale: 1, rotate: 45 }}
-            whileHover={{ scale: 1.2, rotate: 45 }}
             transition={{ type: "tween", duration: 0.14, ease: [0.4, 0, 0.2, 1] }}
             onPointerDown={(e) => beginDrag(e, m.id, m.t)} />
         ))}
@@ -162,7 +161,7 @@ export const CameraLane = memo(function CameraLane({ doc, dur, sel, onSel, onApp
         // pointer capture - stealing the button's own `onClick` (the easing choice) half the time
         // too (M3).
         <div className="e-campop" style={{ left: `${pick.leftPct}%` }} onPointerDown={(e) => e.stopPropagation()}>
-          {CAM_CURVES.map((c) => (
+          {CURVE_GLYPHS.map((c) => (
             <button key={c.key} type="button" title={c.name}
               className={`e-campop-b${pick.easing === c.key ? " on" : ""}`}
               onClick={() => setEasing(pick.id, c.key)}>

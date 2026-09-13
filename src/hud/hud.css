@@ -21,6 +21,12 @@
   --e-inset-hi: inset 0 1px 0 rgba(255, 255, 255, 0.6);
   --e-fg: var(--fg); --e-dim: var(--muted);
 
+  /* The recording voice wave's ramp (src/lib/wave/ui/VoiceWave.tsx) - the only colour in the HUD
+     that is not the app accent, because the meter is the one element that reports rather than
+     acts, and an accent-red wave beside the accent-red Stop button reads as a second button.
+     Declared here rather than in wave.css so the two themes can carry different pairs. */
+  --wave-a: #3b82f6; --wave-b: #8b5cf6;
+
   /* Type scale + spacing grid (D1) - theme-independent (no color), defined once. */
   --e-text-title-size: 14px;  --e-text-title-weight: 600;
   --e-text-body-size: 12.5px; --e-text-body-weight: 450;
@@ -40,6 +46,9 @@
   --e-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.24);
   --e-shadow-2: 0 2px 6px rgba(0, 0, 0, 0.5), 0 12px 40px rgba(0, 0, 0, 0.38);
   --e-inset-hi: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  /* Same hues, lifted one step: the layers are 40-58% opaque, so the light pair loses most of its
+     luminance against the dark bar's #0d0d0f and the crossings stop separating. */
+  --wave-a: #60a5fa; --wave-b: #a78bfa;
 }
 
 html, body, #root { height: 100%; width: 100%; }
@@ -193,23 +202,10 @@ body { display: flex; align-items: flex-start; justify-content: center; overflow
   text-transform: uppercase; letter-spacing: 0.04em; color: var(--e-dim);
   border: 1px solid var(--e-line); border-radius: 999px; padding: 2px 7px;
 }
-/* Compact level meter (gate-feedback item 2, user-reported 2026-09-02): 13 bars at a FIXED 3px
-   wide + 2px gap (13*3 + 12*2 = 63px, "no flex-grow spacer behavior" - the old `flex:1` bars
-   stretched to fill `.wave`'s width, thinning out into what read as a row of dots rather than a
-   meter) inside a matching fixed-width container - `align-items: flex-end` (baseline-anchored,
-   same as `align-items: end`) was already correct, unchanged. `useMicWaveform.ts`'s `BARS`
-   constant is 13 to match (13 levels rendered, one per bar) - see `useHudWindowSize.ts`'s
-   `RECMETER_W` for the resulting window-width math. */
-.wave { display: flex; align-items: flex-end; gap: 2px; height: 22px; width: 63px; }
-/* Accent at roughly -20% saturation (mixed 20% toward the neutral --e-dim grey) instead of the
-   plain --muted grey the bars used before - ties the live meter to the app's one accent without
-   the bars reading as loud/alert as a full-strength accent fill would. min-height 2px (down from
-   3, item 2) floors even a silent bar above zero - RecMeter.tsx's own base (`2 + level*18`)
-   matches it exactly rather than relying on the CSS floor alone. */
-.wave span { flex: none; width: 3px; min-height: 2px; border-radius: 2px; background: color-mix(in srgb, var(--accent) 80%, var(--e-dim) 20%); transition: height 0.09s ease-out; }
-/* mic toggled on but the stream isn't confirmed live yet (permission pending/denied, no device) -
-   dimmer bars so a stalled meter never reads as "capturing" (state honesty, task-6 (i)). */
-.wave.idle span { background: var(--e-line); }
+/* The level meter's own rules live in src/lib/wave.css with the rest of the wave motif (`.w-voice`,
+   drawn by `VoiceWave.tsx`); only its ramp tokens `--wave-a`/`--wave-b` are declared here, since
+   they differ per theme. Its width comes from `RecMeter.tsx`'s `METER_W`, which
+   `useHudWindowSize.ts` reads directly. */
 
 .timer { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 14px; padding: 0 8px; min-width: 50px;
   text-align: center; flex: none; transition: color 0.15s ease, opacity 0.15s ease; }

@@ -175,9 +175,9 @@ Reads the `project.tcursor` manifest for `folder`.
 pub fn os_cursor_in_video(folder: String) -> bool
 ```
 
-Whether `folder`'s recorded video already contains a baked OS cursor. A thin wrapper over `settings::store::os_cursor_in_video`, which derives it from the record-time `settings.json` snapshot.
+Whether `folder`'s recorded video already contains a baked OS cursor. A thin wrapper over `settings::store::os_cursor_in_video`, which derives it from the record-time `settings.json` snapshot AND the presence of a captured cursor layer - so it is `true` only for a PRE-LAYER `System` recording. Every take made since capture went cursor-free answers `false`.
 
 *Why an IPC of its own rather than a field on `ProjectManifest`:* the manifest is a persisted file written at record-stop, so a new field would be absent on every existing recording and would need a migration and a default. Deriving the value at read time is correct for all recordings, old and new, and keeps a derived value out of a persisted struct.
 
-*Who calls it:* `useEditorData` fetches it once per folder (alongside `cursorKinds` - both are properties of the recording, not of the doc) and hands it to `Stage` (which mirrors the renderer's plain-OS fallback in the canvas preview) and to `CursorPanel` (which annotates the System option when the cursor has to be re-created).
+*Who calls it:* `useEditorData` fetches it once per folder (alongside `cursorKinds` and `cursorLayer` - all three are properties of the recording, not of the doc) and hands it to `Stage` (which mirrors the renderer's plain-OS fallback in the canvas preview, now reachable only when there is ALSO no captured layer) and to `CursorPanel` (which annotates the System option when the cursor has to be re-created).
 

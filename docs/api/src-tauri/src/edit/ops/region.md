@@ -58,8 +58,9 @@ Coerces an easing wire-name to something `easing_from` can actually reconstruct,
 ### Accepted
 
 1. One of the six named curves (`linear`, `smooth`, `spring`, `ease_in`, `ease_out`, `ease_in_out`) - returned verbatim.
-2. A well-formed custom `cubic(x1,y1,x2,y2)` - re-emitted through `export::cubic::format_cubic`, which both **canonicalises** the text (fixed 3 decimals, so the stored value is byte-stable) and **applies the x-clamp** from `parse_cubic`. A client that sends `cubic(-1,0.5,2,0.5)` gets `cubic(0.000,0.500,1.000,0.500)` stored, not a rejection.
-3. Anything else degrades to `"smooth"` - the tuned default, matching what the TS `ease` mirror falls through to for an unparseable name.
+2. A well-formed `spring(stiffness,damping[,mass])` - re-emitted through `export::spring::format_spring`, which **canonicalises** the text (fixed 3 decimals, always all three fields, so the stored value is byte-stable and the frontend's `formatSpring` writes the identical bytes), **fills in the default mass**, and **applies the range clamps** from `parse_spring`. `spring(99999,-4,50)` is stored as `spring(2000.000,0.000,10.000)`, not rejected.
+3. A well-formed custom `cubic(x1,y1,x2,y2)` - re-emitted through `export::cubic::format_cubic`, same canonicalise-and-clamp deal (the x-clamp from `parse_cubic`). A client that sends `cubic(-1,0.5,2,0.5)` gets `cubic(0.000,0.500,1.000,0.500)` stored.
+4. Anything else degrades to `"smooth"` - the tuned default, matching what the TS `ease` mirror falls through to for an unparseable name. Note the bare word `"spring"` is arm 1, not arm 2: it stays a bare word, and `easing_from` resolves it to `SPRING_DEFAULT`.
 
 ### Used by
 
@@ -67,5 +68,5 @@ Coerces an easing wire-name to something `easing_from` can actually reconstruct,
 
 ### Behaviors worth knowing
 
-- `valid_easing_keeps_named_curves_and_canonicalises_cubics` - pins all three arms, including the clamp and the `cubic(1,2)` arity failure degrading to `"smooth"`.
+- `valid_easing_keeps_named_curves_and_canonicalises_cubics` - pins all four arms, including both clamps, the default mass, and the `cubic(1,2)` / `spring(170)` arity failures degrading to `"smooth"`.
 - `auto_layer_finds_lowest_free_layer` / `auto_layer_reuses_a_free_layer_that_does_not_overlap`.

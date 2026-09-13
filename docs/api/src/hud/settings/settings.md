@@ -270,6 +270,7 @@ export interface ZoomSettings {
   smart_hold: boolean;
   smart_follow: boolean;
   cam_zoom_default?: CamZoomAction | null;
+  camera_smoothing_ms: number;
 }
 ```
 
@@ -285,6 +286,7 @@ Configuration for the auto-zoom feature.
 - `smart_hold` - whether typing keystrokes extend the zoom hold.
 - `smart_follow` - whether the zoom anchor follows the cursor during a hold.
 - `cam_zoom_default?: CamZoomAction | null` - the global default for what the webcam PiP does during a zoom (`resolvedCamDefault`), used whenever a zoom has no per-zoom `Zoom.cam_action` override. Absent/`null` falls back to the legacy `camera_shrink`/`camera_shrink_min` pair - `{shrink:{to:camera_shrink_min}}` when `camera_shrink` is on, else `"stay"` - so configs saved before this field existed resolve to exactly today's behavior.
+- `camera_smoothing_ms` - opt-in critically-damped smoothing on the auto-zoom CAMERA path, wire form of Rust `ZoomSettings::camera_smoothing_ms` (`settings/model.md`), forwarded verbatim to `ZoomConfig::smoothing_ms` (`export/types.md`, `export/camera/smoothing.md`). `0` = off (bit-identical export); UI range is 0-400ms in steps of 10. *Why a separate field from `smoothness` above:* `smoothness` is the camera's follow damping, not this post-pass filter - and it is also unrelated to `CursorSettings.smoothness` (the CURSOR low-pass, a different concern entirely).
 
 ### Used by
 
@@ -292,6 +294,7 @@ Configuration for the auto-zoom feature.
 - `src/hud/settings/SettingsZoom.tsx` - renders all zoom controls (not `cam_zoom_default` - not yet exposed by any settings UI)
 - `src/lib/ipc.ts` - serialized into Tauri commands
 - `src/editor/stage/camZoomAction.ts` - `resolvedCamDefault` reads `cam_zoom_default` to compute the global webcam-during-zoom behavior
+- `src/editor/shell/settings/ZoomDefaultsSection.tsx` - renders the editor's own copy of the zoom-defaults controls, including `camera_smoothing_ms`
 
 ## ClickFxSettings
 
@@ -361,15 +364,16 @@ Maps each hotkey action to its key-binding string. Each field is the key combo s
 ## BackgroundKind
 
 ```ts
-export type BackgroundKind = "mesh" | "solid" | "gradient";
+export type BackgroundKind = "mesh" | "solid" | "gradient" | "image" | "video";
 ```
 
-Which of `BackgroundSettings`' fields the renderer uses - mirrors Rust `settings::background::BackgroundKind`. `"mesh"` (the default) is today's bundled image background; `"solid"`/`"gradient"` are real user-chosen colors. Custom image/video backgrounds have no backend yet - `BackgroundPanel` flags those tabs as "coming soon" rather than wiring them to a `kind` that doesn't exist.
+Which of `BackgroundSettings`' fields the renderer uses - mirrors Rust `settings::background::BackgroundKind`. `"mesh"` (the default) is a bundled wallpaper image, picked by `BackgroundSettings.mesh`; `"solid"`/`"gradient"` are real user-chosen colors; `"image"`/`"video"` render the user's own imported file, named by `BackgroundSettings.asset`. A GIF is a `"video"` - one decode path for both in the export; only the preview tells them apart, and it does that by extension (`stage/gifFrames.ts`).
 
 ### Used by
 
 - `src/hud/settings/settings.ts` - `BackgroundSettings.kind`
-- `src/editor/panels/BackgroundPanel.tsx` - the Background Type selector (`default`/`color`/`gradient` tabs map to `mesh`/`solid`/`gradient`)
+- `src/editor/panels/BackgroundPanel.tsx` - the Background Type selector (Wallpapers / Color / Gradient tabs map to `mesh`/`solid`/`gradient`; `image`/`video` come from the asset card at the end of the Wallpapers tab and share that tab)
+- `src/editor/stage/stageBg.ts` - decides whether the preview draws the backend's still PNG or the moving asset itself
 
 ## BackgroundSettings
 
@@ -381,6 +385,10 @@ export interface BackgroundSettings {
   gradient_to: [number, number, number];
   gradient_angle_deg: number;
   blur: number;
+  mesh: string;
+  gradient_mid?: [number, number, number] | null;
+  asset?: string | null;
+  dim: number;
 }
 ```
 
@@ -388,14 +396,18 @@ The recording's background, behind the screen/webcam panels. Mirrors the Rust `s
 
 - `kind: BackgroundKind` - which of the fields below the renderer actually uses.
 - `solid: [number, number, number]` - RGB triplet used when `kind` is `"solid"`.
-- `gradient_from` / `gradient_to: [number, number, number]` - the two RGB stops used when `kind` is `"gradient"`.
+- `gradient_from` / `gradient_to: [number, number, number]` - the gradient's end stops, used when `kind` is `"gradient"`.
 - `gradient_angle_deg: number` - gradient direction in degrees, same convention as CSS `linear-gradient()`.
-- `blur: number` - 0..1 softness applied once to the static background buffer (cheap - rebuilt once per export/preview, not per frame). `0` = off (today's behavior).
+- `blur: number` - 0..1 softness applied once to the STATIC background buffer (cheap - rebuilt once per export/preview, not per frame). `0` = off (today's behavior). Because it is a one-off pass it reaches a video background's first frame only, which is why `BackgroundPanel` hides its slider while `kind` is `"video"` instead of showing a control that does nothing.
+- `asset?: string | null` - the user's imported background file, RELATIVE to the project folder (`background/<file>`, forward-slashed), used by `"image"`/`"video"`. Never absolute: a project folder is copyable, and an absolute path would break the moment it was. Kept when the user switches back to a wallpaper, so re-selecting the asset card needs no re-import; only the card's Remove deletes the file and clears this.
+- `dim: number` - 0..0.8 black overlay over whichever background actually has pixels (wallpaper, image or video). Applied exactly once by whichever side owns the pixels: Rust (`background::apply_dim`) for everything the backend rasterises and for each streamed video frame, `stage/stageBg.ts` for the preview's own video/GIF draw.
+- `mesh: string` - which bundled wallpaper `kind: "mesh"` renders (`settings::wallpapers::WALLPAPERS` id). EMPTY is the legacy "Classic" `bg.jpg` and is what every project saved before the wallpaper library loads as, so those keep rendering byte-identically.
+- `gradient_mid?: [number, number, number] | null` - optional middle stop, sitting at the ramp's midpoint. Absent or `null` is the two-stop ramp, unchanged; Rust omits the key entirely when unset.
 
 ### Used by
 
 - `src/hud/settings/settings.ts` - `Settings.background`
-- `src/editor/panels/BackgroundPanel.tsx` - reads and patches every field; its fixed preset swatches (`backgroundPresets.ts`) ship in the same plain-RGB shape so a swatch always renders identically to what gets applied
+- `src/editor/panels/BackgroundPanel.tsx` - reads and patches every field; its colour swatches (`backgroundPresets.ts`) ship in the same plain-RGB shape so a swatch always renders identically to what gets applied, and its wallpaper/gradient tiles are rendered by the backend itself (`backgroundThumbs`)
 - `src/editor/hooks/useEditorData.ts` - refetches `previewBg` whenever `JSON.stringify(doc?.settings.background)` changes, since a background edit is the only kind of change that alters what the backend's background render returns
 
 ## Settings

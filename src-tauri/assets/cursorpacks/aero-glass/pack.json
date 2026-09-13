@@ -1,0 +1,11 @@
+{
+  "id": "aero-glass",
+  "name": "Aero Glass",
+  "version": 2,
+  "builtin": true,
+  "busy": {
+    "anim": "spin",
+    "fps": 24
+  },
+  "generated": "gpt-image-2.5-sunburst via the OpenAI Images API, 2026-09-13, from TCursor's own prompts; sprites 128px, hotspots derived (tip for arrow/hand, centre otherwise)"
+}

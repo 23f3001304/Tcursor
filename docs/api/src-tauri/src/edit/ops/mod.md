@@ -17,3 +17,7 @@ Read-only summary statistics over an `EditDoc`, split out of `api.rs` (size budg
 ## effects
 
 Effect-region edit ops (`add/update/remove_effect`), split out of `api.rs` so each file stays under the size limit. Key item: `apply_effect` - `api::apply` delegates the three effect-op variants here; `AddEffect` generates an `e`-prefixed id, `UpdateEffect` patches start/end, `RemoveEffect` drops by id.
+
+## timeops
+
+The cut and speed-span ops with their normalisation (`apply_time_op`, `normalize_cuts`, `normalize_speed`), kept apart from `api.rs`; `api::apply` tries them first.

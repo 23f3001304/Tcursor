@@ -41,3 +41,7 @@ Defines two-panel scene geometry, resolves `LayoutId` presets into output-pixel 
 ## preview
 
 Single-frame preview engine: renders one composited frame at an arbitrary scrub position from `edit.json`, reusing `FrameRenderer` so the preview is byte-faithful to the export. Key items: `render_preview(paths, time_ms) -> Result<Vec<u8>>` (fast-forwards step_camera, seek-decodes screen + webcam, composites, PNG-encodes via ffmpeg); `preview_frame(folder, time_ms) -> Result<String, String>` (Tauri command wrapping render_preview at the doc's resolved aspect, downscaled to `PREVIEW_LONG_EDGE`, returns PNG data URL).
+
+## remap
+
+The clip-to-output clock map (`TimeMap`): trim, cuts and speed spans as kept segments with factors and output starts, `out_of`/`clip_of` between the two clocks, and `frame_plan` (the recording frame every output frame shows). The exporter, the one-shot preview and `camera_track` all walk the same plan; `edit::remap_doc` moves every region onto the output clock before the renderer builds its tracks. Mirrored by `src/lib/remap.ts`.

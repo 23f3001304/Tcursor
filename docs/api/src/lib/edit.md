@@ -230,6 +230,8 @@ The complete editable state for one recording session. Loaded from `edit.json` i
 
 ## EditOp
 
+Time remap ops (mirroring `edit::ops::timeops`): `add_cuts { spans }` (one undo step), `update_cut`, `remove_cut`, `update_speed`, `remove_speed`, beside the existing `add_cut` and `set_speed`. `Cut` carries an `id` (`c{n}`).
+
 ```ts
 export type EditOp =
   | { op: "add_zoom"; at_ms: number; dur_ms: number }

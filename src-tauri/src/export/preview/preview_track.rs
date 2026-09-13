@@ -5,7 +5,7 @@
 // renderer cache via `with_warm`.
 use std::path::PathBuf;
 use crate::export::preview::{with_warm, PreviewSession};
-use crate::export::render::OUT_FPS;
+use crate::export::render::{OUT_FPS, OUT_STEP_MS};
 use crate::session::paths::ProjectPaths;
 use crate::win::sys::proc::ffcmd_bg;
 
@@ -27,16 +27,11 @@ pub async fn camera_track(folder: String, app: tauri::AppHandle) -> Result<Vec<C
             // The TRUE full clip length (not `trim.out_ms`, which once a user actually trims is a
             // strict sub-range) - so scrubbing into a trimmed-out region still shows an animated
             // curve instead of freezing on the last in-range sample.
-            let dur = c.meta.video_end.saturating_sub(c.meta.video_start).max(1);
             let vs = c.meta.video_start;
             c.renderer.reset_camera();
-            let step = (1000 / OUT_FPS).max(1);
-            let mut out = Vec::with_capacity((dur / step + 2) as usize);
-            let mut t = 0u64;
-            loop {
-                let pose = c.renderer.step_camera(vs + t);
-                // Map the camera centre + cursor (output coords) into the screen panel rect, so
-                // they are fractions of the SCREEN content - exactly what the <video> shows.
+            let plan = c.renderer.time_map().frame_plan(OUT_FPS);
+            let mut out = Vec::with_capacity(plan.len());
+            c.renderer.walk_plan(vs, OUT_FPS, &plan, plan.len(), OUT_STEP_MS, |_, j, _, pose| {
                 let r = pose.scene.screen.rect;
                 let rel = |vx: f32, vy: f32| (
                     if r.w > 0.0 { ((vx - r.x) / r.w).clamp(0.0, 1.0) } else { 0.5 },
@@ -44,10 +39,9 @@ pub async fn camera_track(folder: String, app: tauri::AppHandle) -> Result<Vec<C
                 );
                 let (cx, cy) = rel(pose.cam.cx, pose.cam.cy);
                 let (curx, cury) = rel(pose.cur.x as f32, pose.cur.y as f32);
-                out.push(CamSample { t: t as u32, scale: pose.cam.scale, cx, cy, curx, cury });
-                if t >= dur { break; }
-                t = (t + step).min(dur);
-            }
+                out.push(CamSample { t: (j as u64 * 1000 / OUT_FPS) as u32, scale: pose.cam.scale, cx, cy, curx, cury });
+                true
+            });
             Ok(out)
         })
     })
@@ -72,7 +66,7 @@ pub async fn preview_layout(folder: String, app: tauri::AppHandle) -> Result<Pre
         use tauri::Manager;
         with_warm(&app.state::<PreviewSession>(), &folder, |c, _paths| {
             c.renderer.reset_camera();
-            let pose = c.renderer.step_camera(c.meta.video_start);
+            let pose = c.renderer.step_camera(c.meta.video_start, 0, OUT_STEP_MS);
             let (ow, oh) = (c.meta.out_w as f32, c.meta.out_h as f32);
             let s = pose.scene.screen.rect;
             let cam = if pose.scene.camera.alpha > 0.5 {

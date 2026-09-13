@@ -28,7 +28,7 @@ more layer toggles, each button now does something real:
   `Transport`'s own aspect chip (`ASPECT_ORDER`/`ASPECT_LABEL` are exported from `Transport.tsx`
   and imported here, not duplicated) - a dramatic, unmistakably real stage-level effect: the canvas
   itself reshapes.
-- **Cursor / Captions / Camera** each jump the Rail to that panel (`onTab("cursor"|"captions"|
+- **Cursor / Captions / Camera** each open that panel (`onTab("cursor"|"captions"|
   "camera")`) - clicking always produces an obvious, real change (the whole left panel swaps),
   which the brief's own escape hatch ("or the control must clearly read as off") covers for the
   case where there's no on-canvas layer to point at.
@@ -38,7 +38,7 @@ more layer toggles, each button now does something real:
 The reviewer flagged that treating Aspect and the Cursor/Captions/Camera trio as visually
 identical toggles was itself misleading - Aspect really is a toggle (a live stage property with
 two states you cycle between), but the other three are NAVIGATION: clicking one doesn't change
-anything about the STAGE, it changes which Rail panel is showing. Styling them the same way as
+anything about the STAGE, it changes which panel is showing. Styling them the same way as
 Aspect made them read as "toggles that happen not to do much," the same complaint this task set
 out to fix. The row is now deliberately split into two groups:
 
@@ -48,7 +48,7 @@ out to fix. The row is now deliberately split into two groups:
   16:9 — click to switch to 9:16"`. Disabled (`aspectLocked`) while exporting or before a clip has
   loaded, mirroring `Transport`'s own `locked` gate on the identical action.
 - **Cursor / Captions / Camera** get `.nav-on` instead of `.on` when `tab === id` - a soft neutral
-  tint (`--e-soft` background, `--e-fg` text) that only MIRRORS the Rail's own active-tab look
+  tint (`--e-soft` background, `--e-fg` text) that only MIRRORS the tab strip's own active look
   (`.e-ric.on`), never Aspect's colored "engaged" look, since nothing here is actually toggled -
   the button just happens to match whichever panel is currently open. Tooltip is a CONSTANT
   `"Open the {X} panel"` regardless of whether that panel is already open (no "panel is open"
@@ -61,12 +61,13 @@ out to fix. The row is now deliberately split into two groups:
 
 ### Props
 
-- `tab: Tab` / `onTab: (t: Tab) => void` - the Rail's active tab and setter (`Editor.tsx` passes
-  the SAME `onTab` it gives `Rail`, so switching from here also clears any selection/aim mode -
-  but ONLY when the tab actually changes; re-clicking the already-open tab is a no-op, fix round 1
-  - see `Editor.md`'s `onTab` note. Before that fix, clicking an already-open nav button silently
-  cleared the current timeline selection with no visible effect: the exact bug this task exists to
-  fix, reproduced by the fix itself).
+- `tab: Tab` / `onTab: (t: Tab) => void` - the active panel tab and the handler that opens one.
+  `Tab` comes from `shell/panelTabs.tsx` since M1a (it used to live in the rail these
+  buttons jumped). `onTab` is `EditorShell`'s quick-open: it sets the tab AND, if the workspace
+  has no `panel` area to show it in, splits one off the stage - so a nav button here always has
+  a visible effect no matter how the user has arranged their layout. It no longer clears
+  `sel`/`aimOn`; selection is an independent axis now, which also retires the older `t !== tab`
+  guard that existed only to stop a re-click from silently dropping the selection.
 - `aspect: Aspect` / `onAspect: (a: Aspect) => void` - the doc's aspect ratio and its setter.
 - `aspectLocked: boolean` - disables the aspect button; `Editor.tsx` passes `exporting || dur <= 0`.
 

@@ -42,6 +42,14 @@ pub fn events_ms(&self) -> u64
 
 The event-time base (the private `events_ms` field), so preview commands outside the renderer can map an event timestamp to output time the same way `click_track` does.
 
+## FrameRenderer::time_map
+
+```rust
+pub fn time_map(&self) -> &TimeMap
+```
+
+The clip-to-output clock map built from the doc's trim, cuts and speed spans in `EditState::load` (`export/remap.md`). The exporter reads its `frame_plan`; `preview::walk_to` and `camera_track` walk the same plan.
+
 ## FrameRenderer::actions
 
 ```rust

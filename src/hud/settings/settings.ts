@@ -1,3 +1,4 @@
+
 export type CamShape = "circle" | "rounded" | "rect";
 export type CamCorner = "bottom_left" | "bottom_right" | "top_left" | "top_right";
 export type CamAspect = "square" | "wide";
@@ -26,7 +27,11 @@ export type VideoFxMode = "nebulawash" | "cinematicdim" | "screenfocus" | "color
  *  (settings/model.rs): serde's externally-tagged encoding gives `{shrink:{to}}` for the struct
  *  variant and bare `"hide"`/`"stay"` for the unit ones. */
 export type CamZoomAction = { shrink: { to: number } } | "hide" | "stay";
-export interface ZoomSettings { enabled: boolean; target_scale: number; hold_ms: number; smoothness: number; clicks: number; camera_shrink: boolean; camera_shrink_min: number; smart_hold: boolean; smart_follow: boolean; cam_zoom_default?: CamZoomAction | null }
+export interface ZoomSettings { enabled: boolean; target_scale: number; hold_ms: number; smoothness: number; clicks: number; camera_shrink: boolean; camera_shrink_min: number; smart_hold: boolean; smart_follow: boolean; cam_zoom_default?: CamZoomAction | null;
+  /** Opt-in critically-damped smoothing on the auto-zoom CAMERA path (Rust `ZoomConfig::smoothing_ms`,
+   *  `export/camera/smoothing.rs`) - NOT `CursorSettings.smoothness` (the cursor low-pass). 0 = off,
+   *  bit-identical export. */
+  camera_smoothing_ms: number }
 export interface ClickFxSettings { enabled: boolean; style: ClickFxStyle; color: [number, number, number]; intensity: number; captions: boolean; spotlight: boolean; spotlight_dim: number; spotlight_radius: number; spotlight_feather: number; spotlight_mode: SpotlightMode; spotlight_tint: [number, number, number]; video_fx_mode: VideoFxMode; spotlight_dim_camera: boolean }
 export interface HotkeySettings {
   zoom_hold: string; layout_screen: string; layout_camera: string;
@@ -34,18 +39,34 @@ export interface HotkeySettings {
   spotlight_hold: string; video_fx_hold: string;
 }
 /** Which of `BackgroundSettings`' fields the renderer uses - mirrors Rust `settings::background::BackgroundKind`.
- *  `mesh` (default) is today's bundled image; `solid`/`gradient` are real user colors. Custom
- *  image/video backgrounds have no backend yet - `BackgroundPanel` flags them as "coming soon". */
-export type BackgroundKind = "mesh" | "solid" | "gradient";
+ *  `mesh` (default) is a bundled wallpaper image; `solid`/`gradient` are real user colors;
+ *  `image`/`video` render the user's own imported file (`asset`), a GIF being a `video`. */
+export type BackgroundKind = "mesh" | "solid" | "gradient" | "image" | "video";
 export interface BackgroundSettings {
   kind: BackgroundKind;
   solid: [number, number, number];
   gradient_from: [number, number, number];
   gradient_to: [number, number, number];
   gradient_angle_deg: number;
-  /** 0..1 softness applied once to the static background buffer (cheap - rebuilt once per
-   *  export/preview, not per frame). 0 = off (today's behavior). */
+  /** 0..1 softness applied once to the STATIC background buffer (cheap - rebuilt once per
+   *  export/preview, not per frame). 0 = off (today's behavior). Because it is a one-off pass it
+   *  reaches a video background's first frame only, so `BackgroundPanel` hides this slider while
+   *  `kind === "video"` rather than showing a control that does nothing. */
   blur: number;
+  /** Which bundled wallpaper `kind: "mesh"` renders (`settings::wallpapers::WALLPAPERS` id).
+   *  EMPTY = the legacy "Classic" `bg.jpg`, which is what every project saved before the
+   *  wallpaper library loads as, so those keep rendering byte-identically. */
+  mesh: string;
+  /** Optional middle stop for `kind: "gradient"`. Absent = the two-stop ramp, unchanged. */
+  gradient_mid?: [number, number, number] | null;
+  /** The user's imported background file, RELATIVE to the project folder (`background/<file>`),
+   *  used by `kind: "image" | "video"`. Never absolute - projects stay portable. Kept when the
+   *  user switches back to a wallpaper, so re-selecting the asset needs no re-import. */
+  asset?: string | null;
+  /** 0..0.8 black overlay over whichever background has pixels (wallpaper, image or video).
+   *  Applied in Rust for everything the backend rasterises and in `stageBg.ts` for the moving
+   *  preview branch only - exactly once either way, same formula. */
+  dim: number;
 }
 export interface Settings {
   zoom: ZoomSettings; clickfx: ClickFxSettings; hotkeys: HotkeySettings; appearance: AppearanceSettings;

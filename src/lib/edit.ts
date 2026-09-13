@@ -21,7 +21,8 @@ export interface Zoom {
   cam_action?: CamZoomAction | null;
 }
 
-export interface Cut { start_ms: number; end_ms: number }
+/** A removed stretch of clip time; `id` is `c{n}`. Rendered by the time remap (`lib/remap.ts`). */
+export interface Cut { id: string; start_ms: number; end_ms: number }
 export interface Speed { id: string; start_ms: number; end_ms: number; factor: number }
 /** Normalized panel pose on the output frame - mirrors Rust `edit::model::PanelPose`. `cx`/`cy` are
  *  the panel CENTER as fractions of output w/h; `size` is the panel HEIGHT as a fraction of output
@@ -85,7 +86,13 @@ export type EditOp =
   | { op: "set_trim"; in_ms: number; out_ms: number }
   | { op: "set_aspect"; aspect: Aspect }
   | { op: "add_cut"; start_ms: number; end_ms: number }
+  // One op for a batch of cuts (Remove silences): one undo step.
+  | { op: "add_cuts"; spans: [number, number][] }
+  | { op: "update_cut"; id: string; start_ms?: number; end_ms?: number }
+  | { op: "remove_cut"; id: string }
   | { op: "set_speed"; start_ms: number; end_ms: number; factor: number }
+  | { op: "update_speed"; id: string; start_ms?: number; end_ms?: number; factor?: number }
+  | { op: "remove_speed"; id: string }
   | { op: "add_layout_seg"; at_ms: number; dur_ms: number; layout: string; transition_out_ms?: number; easing_out?: string }
   | { op: "update_layout_seg"; id: string; start_ms?: number; end_ms?: number; layout?: string; transition_ms?: number; easing?: string; transition_out_ms?: number; easing_out?: string }
   | { op: "remove_layout_seg"; id: string }

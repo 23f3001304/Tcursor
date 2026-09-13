@@ -56,7 +56,7 @@ Creates a WGC capture session targeting the primary display and returns a `WgcFr
 
 - `clock: Arc<dyn Clock>` - Provides `now_ms()` inside the WGC callback. *Why injectable:* allows tests or alternate capture paths to control timestamp values without real hardware.*
 - `fps: u32` - Target frame rate. *Why:* passed as `MinimumUpdateIntervalSettings::Custom(1_000_000 / fps.max(1) microseconds)` to WGC, matching the encoder's target rate so WGC does not deliver at the monitor's native refresh when that differs - a mismatch caused recordings to play at the wrong speed.*
-- `with_cursor: bool` - *Selects `CursorCaptureSettings::WithCursor` or `WithoutCursor`. The TCursor synthetic-cursor path captures without the OS cursor and composites its own cursor sprite on top.*
+- `with_cursor: bool` - *Selects `CursorCaptureSettings::WithCursor` or `WithoutCursor`. Always `false` in TCursor now (`recorder.rs`): the display is captured clean for every cursor style and the real OS cursor is recorded as its own layer (`events::track::cursorlayer`), which the export composites for "System" and the synthetic sprite stack replaces for "Enhanced". The parameter stays because the capture layer should not hardcode a product decision.*
 
 ### Implementation
 

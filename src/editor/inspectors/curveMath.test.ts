@@ -1,7 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { CAM_CURVES } from "./curves";
-import { clampHandle, clientToCurve, curveOf, curvePath, nudgeHandle, setHandle, toSvg, VIEW, Y_MAX, Y_MIN } from "./curveMath";
+import {
+  clampHandle, clientToCurve, CURVE_SEEDS, curveOf, curvePath, handlePct, nudgeHandle, setHandle,
+  springPathOf, toSvg, VIEW, Y_MAX, Y_MIN,
+} from "./curveMath";
 import { evalCubic } from "../../lib/cubicBezier";
+import { spring } from "../../lib/spring";
 import { ease } from "../timeline/layoutTrack";
 
 const RECT = { left: 20, top: 10, width: 200, height: 320 };
@@ -18,10 +21,8 @@ describe("curve/SVG coordinate mapping", () => {
   });
 
   it("inverts a pointer position back to the curve point it sits on", () => {
-    // Dead centre of the box is the middle of the x range and the middle of the y BAND.
     expect(clientToCurve(RECT.left + RECT.width / 2, RECT.top + RECT.height / 2, RECT))
       .toEqual([0.5, (Y_MIN + Y_MAX) / 2]);
-    // Round-trip: a curve point -> its client position -> back.
     for (const [x, y] of [[0.25, 0.9], [0.8, 0.1], [0.42, 1.2]] as [number, number][]) {
       const [sx, sy] = toSvg(x, y);
       const cx = RECT.left + ((sx - VIEW.minX) / VIEW.w) * RECT.width;
@@ -35,6 +36,18 @@ describe("curve/SVG coordinate mapping", () => {
     expect(clampHandle(-4, 9)).toEqual([0, Y_MAX]);
     expect(clampHandle(7, -9)).toEqual([1, Y_MIN]);
     expect(clientToCurve(RECT.left - 500, RECT.top - 500, RECT)).toEqual([0, Y_MAX]);
+  });
+
+  it("places a handle dot at the same percentage clientToCurve would read back", () => {
+    // The dots are HTML, laid over the stretched SVG - their % has to be the exact inverse of the
+    // pointer mapping, or a grabbed handle would jump on the first pointermove.
+    const c = [0.25, 0.9, 0.8, 0.1] as const;
+    for (const h of [0, 1] as const) {
+      const [left, top] = handlePct([...c], h);
+      const back = clientToCurve(RECT.left + (left / 100) * RECT.width, RECT.top + (top / 100) * RECT.height, RECT);
+      expect(back[0]).toBeCloseTo(c[h * 2], 3);
+      expect(back[1]).toBeCloseTo(c[h * 2 + 1], 3);
+    }
   });
 });
 
@@ -62,15 +75,15 @@ describe("curveOf", () => {
   });
 
   it("seeds a named preset from its own control points, and anything unknown from Smooth", () => {
-    expect(curveOf("ease_out")).toEqual(CAM_CURVES.find((c) => c.key === "ease_out")!.c);
-    expect(curveOf("wobble")).toEqual(CAM_CURVES.find((c) => c.key === "smooth")!.c);
+    expect(curveOf("ease_out")).toEqual(CURVE_SEEDS.ease_out);
+    expect(curveOf("wobble")).toEqual(CURVE_SEEDS.smooth);
   });
 });
 
 describe("preset seeds are honest", () => {
   it("reproduces linear / ease_in / ease_out / smooth EXACTLY as cubics", () => {
     for (const key of ["linear", "ease_in", "ease_out", "smooth"]) {
-      const c = CAM_CURVES.find((k) => k.key === key)!.c;
+      const c = CURVE_SEEDS[key];
       for (const p of [0.1, 0.25, 0.5, 0.75, 0.9]) {
         expect(evalCubic(c[0], c[1], c[2], c[3], p)).toBeCloseTo(ease(key, p), 4);
       }
@@ -78,9 +91,26 @@ describe("preset seeds are honest", () => {
   });
 
   it("keeps every preset seed inside the editor's own drag band", () => {
-    for (const { key, c } of CAM_CURVES) {
+    for (const [key, c] of Object.entries(CURVE_SEEDS)) {
       for (const x of [c[0], c[2]]) { expect(x, key).toBeGreaterThanOrEqual(0); expect(x, key).toBeLessThanOrEqual(1); }
       for (const y of [c[1], c[3]]) { expect(y, key).toBeGreaterThanOrEqual(Y_MIN); expect(y, key).toBeLessThanOrEqual(Y_MAX); }
     }
+  });
+});
+
+describe("springPathOf", () => {
+  it("is null for everything that is not a spring", () => {
+    expect(springPathOf("smooth")).toBeNull();
+    expect(springPathOf("cubic(0.1,0.2,0.3,0.4)")).toBeNull();
+    expect(springPathOf(null)).toBeNull();
+  });
+
+  it("samples the SAME oscillator the export evaluates, so the canvas cannot lie", () => {
+    const d = springPathOf("spring(300.000,12.000,1.000)")!;
+    const last = d.split(" L ").pop()!.split(" ").map(Number);
+    expect(last[0]).toBeCloseTo(100, 6);                   // ends at progress 1
+    expect(last[1]).toBeCloseTo(0, 6);                     // ...at value 1 (y is inverted)
+    const mid = d.split(" L ")[24].split(" ").map(Number); // the 24th of 48 samples = p 0.5
+    expect(1 - mid[1] / 100).toBeCloseTo(spring(300, 12, 1, 24 / 48), 2);
   });
 });

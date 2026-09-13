@@ -3,7 +3,8 @@
 use std::collections::{HashMap, VecDeque};
 use crate::events::track::cursortype::{CursorType, CursorTrack};
 use crate::events::model::{EventKind, MouseEvent};
-use crate::settings::model::{CursorSettings, CursorStyle};
+use crate::settings::cursor::{CursorSettings, CursorStyle};
+use crate::export::cursor::busy::{busy_pose, BusyPose, BusySpec};
 use crate::export::cursor::cursordraw::{decode_sprite, CursorSprite};
 use crate::export::scene::Panel;
 use crate::export::types::{Camera, FramePoint, RectF};
@@ -26,6 +27,11 @@ pub struct CursorPrep {
     pub track: CursorTrack,
     pub click_ms: Vec<u32>,
     pub recent: VecDeque<(f32, f32)>,
+    /// The selected pack's busy animation (pack format v2), `None` for a still one.
+    pub busy: Option<BusySpec>,
+    /// Decoded `busy_NN.png` frames when the pack ships them; empty otherwise. Indexed by
+    /// `BusyPose::frame`, so an out-of-range index simply falls back to `set`'s busy sprite.
+    pub busy_frames: Vec<CursorSprite>,
 }
 
 /// Invert RGB in place (black<->white) for a dark-theme cursor; alpha untouched.
@@ -47,6 +53,7 @@ pub fn draws_synthetic(cursor: &CursorSettings, os_cursor_in_video: bool) -> boo
 pub fn prep(cursor: &CursorSettings, events: &[MouseEvent], track: CursorTrack, dark: bool,
             os_cursor_in_video: bool) -> Option<CursorPrep> {
     if !draws_synthetic(cursor, os_cursor_in_video) { return None; }
+    let dark = dark && crate::export::cursor::pack::theme_inverts(&cursor.pack); // coloured packs keep their colours
     let mut set = HashMap::new();
     for (ty, png, hot) in crate::export::cursor::pack::sprite_sources(&cursor.pack) {
         if let Some(mut spr) = decode_sprite(&png, hot) {
@@ -56,7 +63,38 @@ pub fn prep(cursor: &CursorSettings, events: &[MouseEvent], track: CursorTrack, 
     }
     set.get(&CursorType::Arrow)?; // arrow is the universal fallback - required
     let click_ms = events.iter().filter(|e| e.kind == EventKind::Down).map(|e| e.t).collect();
-    Some(CursorPrep { set, track, click_ms, recent: VecDeque::new() })
+    // Decoded here, not per frame: an explicit-frame pack is a handful of extra PNG decodes at
+    // renderer-build time and zero work afterwards.
+    let busy_frames = crate::export::cursor::pack::busy_frames(&cursor.pack).iter()
+        .filter_map(|png| decode_sprite(png, (0.5, 0.5)))
+        .map(|mut spr| { if dark { invert_rgb(&mut spr.bgra); } spr })
+        .collect();
+    let busy = crate::export::cursor::pack::busy_spec(&cursor.pack);
+    Some(CursorPrep { set, track, click_ms, recent: VecDeque::new(), busy, busy_frames })
+}
+
+/// The sprite and transform for this frame: normally the type track's own sprite, still. For the
+/// Busy type on a v2 pack it is `busy_pose`'s answer at OUTPUT time `out_t` - an explicit frame
+/// when the pack ships them, otherwise the single busy sprite plus a rotation or scale.
+///
+/// *Why output time and not `ev_t`:* the animation belongs to the rendered timeline, so one
+/// instant always yields one pose - deterministic per exported frame, and a paused preview shows
+/// exactly the frame for where the playhead sits rather than something that depends on how the
+/// user got there.
+/// Takes the prep's fields SEPARATELY (like `sprite_for`, and for the same reason): the caller
+/// still needs `&mut cp.recent` for the motion trail while holding this sprite, which only works
+/// as disjoint field borrows.
+fn posed<'a>(set: &'a HashMap<CursorType, CursorSprite>, track: &CursorTrack,
+             busy: Option<BusySpec>, frames: &'a [CursorSprite], ev_t: u32, out_t: u32)
+             -> (Option<&'a CursorSprite>, BusyPose) {
+    let spr = sprite_for(set, track, ev_t);
+    if track.type_at(ev_t) != CursorType::Busy { return (spr, BusyPose::still()); }
+    let Some(spec) = busy else { return (spr, BusyPose::still()) };
+    let pose = busy_pose(&spec, out_t);
+    match frames.get(pose.frame as usize) {
+        Some(frame) => (Some(frame), BusyPose::still()),
+        None => (spr, pose),
+    }
 }
 
 /// The sprite for the cursor type active at `ev_t`, falling back to Arrow.
@@ -71,25 +109,41 @@ pub fn sprite_for<'a>(set: &'a HashMap<CursorType, CursorSprite>, track: &Cursor
 /// (alpha < 0.5). `cur` is the cursor in base/output coords; it is projected through `cam`,
 /// scaled to the panel size (so a small PiP screen gets a small cursor), and clipped to the
 /// panel's on-screen rect so it never spills onto the background or the webcam.
+#[allow(clippy::too_many_arguments)]
 pub fn draw(cp: &mut CursorPrep, out: &mut [u8], ow: u32, oh: u32, cur: FramePoint,
-            cam: Camera, screen: &Panel, inset_w: f32, ev_t: u32, c: &CursorSettings,
+            cam: Camera, screen: &Panel, inset_w: f32, ev_t: u32, out_t: u32, c: &CursorSettings,
             os_cursor_in_video: bool) {
-    if screen.alpha < 0.5 { return; }
-    let pos = crate::export::coordmap::project(cur.x as f32, cur.y as f32, cam, ow, oh);
-    let panel = (screen.rect.w / inset_w.max(1.0)).clamp(0.1, 1.0);
-    let clip = project_rect(screen.rect, cam, ow, oh);
+    let Some((pos, panel, clip)) = frame_placement(cur, cam, ow, oh, screen, inset_w) else { return };
     // Plain-OS: the recorded type track may not even exist (a Hidden recording has none), and
     // "System" promises a plain arrow rather than Enhanced-minus-polish - so always Arrow, and
     // none of the fake-polish passes a real OS cursor doesn't have. Decided per frame from the
     // LIVE doc settings, not cached on the prep, so switching style in the editor takes effect
     // in the warm preview immediately (the prep itself is only rebuilt on a full renderer build).
     let plain_os = c.plain_os(os_cursor_in_video);
-    let spr = if plain_os { cp.set.get(&CursorType::Arrow) } else { sprite_for(&cp.set, &cp.track, ev_t) };
+    let (spr, pose) = if plain_os {
+        (cp.set.get(&CursorType::Arrow), BusyPose::still())
+    } else {
+        posed(&cp.set, &cp.track, cp.busy, &cp.busy_frames, ev_t, out_t)
+    };
     if let Some(spr) = spr {
         let (blur, bounce) = if plain_os { (0.0, false) } else { (c.motion_blur, c.click_bounce) };
         crate::export::cursor::cursordraw::apply_enhanced(out, ow, oh, spr, pos, &mut cp.recent, 6,
-            &cp.click_ms, ev_t, c.size, blur, bounce, c.bounce_intensity, panel, clip);
+            &cp.click_ms, ev_t, c.size, blur, bounce, c.bounce_intensity, panel, clip, pose);
     }
+}
+
+/// Where a cursor goes this frame, whichever cursor it is: the hotspot's on-screen point (`cur`
+/// projected through the camera), the panel scale factor (the screen panel's width against the
+/// export's fixed `inset_w` reference, so a shrunk custom arrangement shrinks the cursor with
+/// it), and the panel's projected clip box. `None` once the screen panel is more than half faded
+/// - no screen, no cursor. Shared by the synthetic draw below and the captured-layer draw in
+/// `captured.rs`, so the two can never drift apart.
+pub fn frame_placement(cur: FramePoint, cam: Camera, ow: u32, oh: u32, screen: &Panel,
+                       inset_w: f32) -> Option<((f32, f32), f32, (i32, i32, i32, i32))> {
+    if screen.alpha < 0.5 { return None; }
+    let pos = crate::export::coordmap::project(cur.x as f32, cur.y as f32, cam, ow, oh);
+    let panel = (screen.rect.w / inset_w.max(1.0)).clamp(0.1, 1.0);
+    Some((pos, panel, project_rect(screen.rect, cam, ow, oh)))
 }
 
 /// The screen panel rect projected through the camera into final output pixels, clamped to the
@@ -101,73 +155,5 @@ fn project_rect(r: RectF, cam: Camera, ow: u32, oh: u32) -> (i32, i32, i32, i32)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn tiny_sprite() -> CursorSprite {
-        CursorSprite { bgra: vec![0, 0, 0, 255], w: 1, h: 1, hot: (0.0, 0.0), canvas_h: 1 }
-    }
-    fn cursor_with(style: CursorStyle) -> CursorSettings {
-        let mut c = CursorSettings::default();
-        c.style = style;
-        c
-    }
-
-    #[test]
-    fn prep_is_none_for_system_and_hidden_when_the_video_has_the_os_cursor() {
-        // Style gate only; no decode happens (which would need ffmpeg).
-        assert!(prep(&cursor_with(CursorStyle::System), &[], CursorTrack::default(), false, true).is_none());
-        assert!(prep(&cursor_with(CursorStyle::Hidden), &[], CursorTrack::default(), false, true).is_none());
-        // Hidden means "no cursor" whatever the video holds - never a fallback.
-        assert!(prep(&cursor_with(CursorStyle::Hidden), &[], CursorTrack::default(), false, false).is_none());
-    }
-
-    #[test]
-    fn draws_synthetic_covers_every_style_and_bake_combination() {
-        // The reported bug is the second row: an Enhanced recording (no OS cursor in the pixels)
-        // switched to System in the editor drew nothing at all.
-        let cases = [
-            (CursorStyle::System,   true,  false), // baked cursor already in the video -> draw nothing
-            (CursorStyle::System,   false, true),  // THE FIX: no baked cursor -> plain-OS stand-in
-            (CursorStyle::Enhanced, true,  true),  // Enhanced is unchanged either way
-            (CursorStyle::Enhanced, false, true),
-            (CursorStyle::Hidden,   true,  false), // Hidden means no cursor, full stop
-            (CursorStyle::Hidden,   false, false),
-        ];
-        for (style, baked, want) in cases {
-            assert_eq!(draws_synthetic(&cursor_with(style), baked), want, "{style:?} baked={baked}");
-        }
-    }
-
-    #[test]
-    fn plain_os_mode_strips_the_polish_and_keeps_the_raw_path() {
-        let (sys, enh) = (cursor_with(CursorStyle::System), cursor_with(CursorStyle::Enhanced));
-        assert!(sys.plain_os(false) && !sys.plain_os(true), "only System + no baked cursor is plain-OS");
-        assert!(!enh.plain_os(false) && !enh.plain_os(true), "Enhanced is never plain-OS");
-        // Raw recorded path: alpha 1.0 makes Cursor::at return the interpolated sample verbatim.
-        assert_eq!(sys.follow_alpha_at(false), 1.0);
-        assert_eq!(sys.idealize_at(false), 0.0);
-        // Every other combination keeps the user's smoothing exactly as before.
-        assert_eq!(sys.follow_alpha_at(true), sys.follow_alpha());
-        assert_eq!(enh.follow_alpha_at(false), enh.follow_alpha());
-    }
-
-    #[test]
-    fn invert_rgb_black_to_white_keeps_alpha() {
-        let mut px = [0u8, 0, 0, 255];
-        invert_rgb(&mut px);
-        assert_eq!(px, [255, 255, 255, 255]);
-    }
-
-    #[test]
-    fn sprite_for_empty_track_falls_back_to_arrow() {
-        let mut set = HashMap::new();
-        set.insert(CursorType::Arrow, tiny_sprite());
-        let track = CursorTrack::default();
-        // type_at -> Arrow on empty track, and Arrow is present.
-        assert!(sprite_for(&set, &track, 0).is_some());
-        // A type absent from the map also falls back to Arrow.
-        assert!(sprite_for(&set, &track, 9999).is_some());
-    }
-}
-
+#[path = "cursorset_tests.rs"]
+mod tests;

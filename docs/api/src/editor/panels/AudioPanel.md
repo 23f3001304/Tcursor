@@ -2,6 +2,8 @@
 
 The Audio rail panel: mic/system A/V sync offset, plus real per-track volume. Stateless (all values are props round-tripped through `doc.settings`).
 
+**Flow (panel pass, 2026-09-13).** Two groups: **Volume** (System Audio Volume, then Microphone Volume) and **Sync** (Mic Sync Offset with its legend). The offset used to be first. Volume is what this panel mostly is; sync is a correction you reach for when something is wrong, which puts it last under the "what it is, then the advanced part" ordering. Same three controls, same names.
+
 ## AudioPanel
 
 ```tsx

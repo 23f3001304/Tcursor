@@ -1,5 +1,30 @@
 import { describe, it, expect } from "vitest";
-import { panelFactor, panelClipRect } from "./cursorPanel";
+import { panelFactor, panelClipRect, contentScale } from "./cursorPanel";
+
+describe("contentScale", () => {
+  // The TS mirror of Rust `captured::content_scale`: `panel * insetPx` IS the screen panel's own
+  // width, so this is "canvas px per source px" - the captured cursor's size relative to the
+  // screen content. The Rust test pins the same numbers.
+  it("leaves a source the same size as its panel untouched", () => {
+    expect(contentScale(1, 1920, 1920)).toBe(1);
+  });
+  it("halves a 2x source (a 4K take on a 1080p canvas)", () => {
+    expect(contentScale(1, 1920, 3840)).toBe(0.5);
+  });
+  it("grows an upscaled source with its content", () => {
+    expect(contentScale(1, 1920, 960)).toBe(2);
+  });
+  it("applies a shrunk panel once, not squared", () => {
+    expect(contentScale(0.5, 1920, 1920)).toBe(0.5);
+    expect(contentScale(0.5, 1920, 3840)).toBe(0.25);
+  });
+  it("falls back to the panel factor alone when the source width is unknown", () => {
+    // src_w 0 = the backend could not probe the video; better the old panel-only size than a
+    // cursor collapsed to nothing by a divide-by-zero.
+    expect(contentScale(0.7, 1920, 0)).toBe(0.7);
+    expect(contentScale(1, 1920, -5)).toBe(1);
+  });
+});
 
 describe("panelFactor", () => {
   it("gives 1.0 for a full-frame panel (screenW == insetW)", () => {

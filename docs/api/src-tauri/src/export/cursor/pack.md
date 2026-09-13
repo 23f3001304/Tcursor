@@ -1,6 +1,14 @@
 # src-tauri/src/export/cursor/pack.rs
 
-Cursor pack resolution. Turns a `CursorSettings.pack` id into the `(CursorType, PNG bytes, hotspot)` rows both the export (`cursorset::prep`) and the editor preview (`cursorpreview::cursor_sprites`) decode. `"default"` is the built-in embedded set (`cursorset::SPRITES`); any other id is an imported pack folder under `cursors_dir()`, falling back to the built-in sprite for any kind the pack doesn't provide. Importing a pack is a separate concern, in `pack_import.rs`.
+Cursor pack resolution - "id to sprite bytes". WHICH packs exist, and how the panel's grid shows them, is `packlist.rs`. Turns a `CursorSettings.pack` id into the `(CursorType, PNG bytes, hotspot)` rows both the export (`cursorset::prep`) and the editor preview (`cursorpreview::cursor_sprites`) decode. `"default"` is the built-in embedded set (`cursorset::SPRITES`) - and stays so even now that its sprites ALSO ship as a folder for the grid to show; any other id is a pack folder, bundled or imported, resolved by `packdirs` and falling back to the embedded sprite for any kind the pack doesn't provide. Importing a pack is a separate concern, in `pack_import.rs`.
+
+## theme_inverts
+
+```rust
+pub fn theme_inverts(pack_id: &str) -> bool
+```
+
+True only for the embedded default set, a monochrome arrow drawn to be RGB-flipped for a dark theme so one asset serves both. Every bundled or imported pack is artwork with its own colours and is drawn exactly as its PNGs are; inverting them used to turn an orange cartoon arrow into a blue one on stage and in the export (the owner's "cursor colour bug", 2026-09-13). `cursorset::prep` and `cursorpreview::cursor_sprites` both gate their invert on it.
 
 ## DEFAULT_PACK_ID
 
@@ -14,45 +22,6 @@ The built-in pack's id. Never assigned to a real imported pack folder (`pack_imp
 
 - `src-tauri/src/settings/model.rs` (`CursorSettings::default`) - the persisted default value for `pack`
 - `sprite_sources`, `list_cursor_packs` (this file) - the built-in-vs-imported branch point
-
-## CursorPackInfo
-
-```rust
-#[derive(serde::Serialize, Clone, Debug, PartialEq)]
-pub struct CursorPackInfo {
-    pub id: String,
-    pub name: String,
-    pub builtin: bool,
-}
-```
-
-One selectable cursor pack, as returned to the frontend.
-
-- `id: String` - persists into `CursorSettings.pack`. `"default"` for the built-in set; a slug (e.g. `"my_pack"`, `"my_pack_2"`) for an imported one.
-- `name: String` - display name shown in the picker. For an imported pack, the source folder's original name (case/spacing preserved).
-- `builtin: bool` - `true` only for the embedded default (not stored on disk).
-
-### Used by
-
-- `list_cursor_packs` (this file), `pack_import::import_cursor_pack` - both produce this DTO
-- `src/lib/ipc.ts` (`CursorPackInfo`) - the TS mirror
-- `src/editor/panels/CursorPanel.tsx` - renders the pack picker from a `CursorPackInfo[]`
-
-## cursors_dir
-
-```rust
-pub fn cursors_dir() -> PathBuf
-```
-
-`<config-dir>/TCursor/cursors` - one subfolder per imported pack. Sibling to `settings::store::config_path`'s `TCursor/config.json` (same app-data convention: `dirs_next::config_dir()`, falling back to a temp dir).
-
-## pack_dir
-
-```rust
-pub fn pack_dir(pack_id: &str) -> PathBuf
-```
-
-`cursors_dir().join(pack_id)` - where an imported pack's PNGs, `hotspots.json`, and `pack.json` live.
 
 ## kind_name
 
@@ -86,30 +55,57 @@ Expected on-disk filename for a cursor kind in a pack folder: `"{kind_name(kind)
 
 ```rust
 #[tauri::command]
-pub fn list_cursor_packs() -> Vec<CursorPackInfo>
+pub fn list_cursor_packs(app: tauri::AppHandle) -> Vec<packlist::CursorPackInfo>
 ```
 
-Every selectable pack: the built-in default first, then every imported pack folder under `cursors_dir()`.
+`packlist::list_packs` for the pack grid. Takes the `AppHandle` purely to ask Tauri where its resources are; Tauri injects it, so the JS call is unchanged.
 
-### Returns
+*Why this one-line wrapper lives here rather than beside `list_packs` in `packlist`:* `lib.rs` registers it by path (`export::cursor::pack::list_cursor_packs`), and `tauri::generate_handler!` also needs the macro-generated items that path brings with it - a `pub use` does not carry them. Keeping it put meant the listing split needed no change to the handler list.
 
-`Vec<CursorPackInfo>` - always starts with `{id: "default", name: "Default", builtin: true}`. Then, for each subfolder of `cursors_dir()` (alphabetical by folder name), its `pack.json` metadata if present and parseable; folders with no/unreadable `pack.json` are silently skipped (never partially imported by anything other than `pack_import`, but tolerant of manual tampering).
+## busy_spec
 
-### Implementation
+```rust
+pub fn busy_spec(pack_id: &str) -> Option<BusySpec>
+```
 
-1. Start `packs` with the built-in entry.
-2. `std::fs::read_dir(cursors_dir())`; on any error (folder doesn't exist yet - no packs imported), skip straight to returning just the built-in entry.
-3. Collect subfolder paths, sort them (stable order across calls), and read each one's `pack.json` via `read_pack_meta`, keeping only the ones that parse.
+The busy animation `pack_id` declares, or `None` for the embedded set and any v1 pack (whose busy state is a still).
 
-### Behaviors
+`frames` is filled in by `count_busy_frames`, not read from `pack.json` - so a pack that ships explicit `busy_NN.png` files overrides its own declared `anim` without having to say so twice.
 
-- `list_cursor_packs_always_includes_the_builtin_default_first` - `packs[0]` is always `{id: "default", builtin: true}`, even with no imported packs on disk.
+Also the gate on `busy_as_arrow`: a pack that ANIMATES its busy state keeps its own busy sprite.
 
-### Used by
+## busy_frames
 
-- `src-tauri/src/lib.rs` - registered in `invoke_handler!`
-- `src/lib/ipc.ts` (`listCursorPacks`) - the TS wrapper
-- `src/editor/panels/CursorPanel.tsx` - calls on mount to populate the picker
+```rust
+pub fn busy_frames(pack_id: &str) -> Vec<Vec<u8>>
+```
+
+Every `busy_NN.png` in `pack_id`'s folder, in order, stopping at the first gap. Empty unless the pack ships explicit frames, in which case they ARE the animation (see `busy::busy_pose`). None of the fifteen shipped packs does; the path exists because the format allows it.
+
+## count_busy_frames
+
+```rust
+pub(crate) fn count_busy_frames(dir: &Path) -> u32
+```
+
+How many `busy_NN.png` frames `dir` ships, counting from 00 until the first gap, capped at `MAX_BUSY_FRAMES`.
+
+## busy_frame_path
+
+```rust
+fn busy_frame_path(dir: &Path, i: u32) -> std::path::PathBuf
+```
+
+`busy_00.png`, `busy_01.png`, ... - zero-padded to two digits, the format `assets/cursorpacks/README.md` documents. The one place that filename is spelled.
+
+## MAX_BUSY_FRAMES
+
+```rust
+pub const MAX_BUSY_FRAMES: u32 = 64
+```
+
+Upper bound on `busy_NN.png` frames read from one pack, so a stray folder cannot make the renderer hold hundreds of decoded sprites.
+
 
 ## sprite_sources
 
@@ -138,6 +134,10 @@ One row per entry in `cursorset::SPRITES`, in the same order. For `pack_id == "d
 - `src-tauri/src/export/cursor/cursorset.rs` (`prep`) - resolves export sprite bytes
 - `src-tauri/src/export/cursor/cursorpreview.rs` (`cursor_sprites`) - resolves preview sprite bytes
 
+### Behaviors
+
+- `the_default_pack_still_exports_from_the_embedded_sprites_not_its_folder` - **the export must not change.** `"default"` having a real folder (`assets/cursors`, for the panel's grid) is a listing concern only: this function still returns `SPRITES` verbatim with busy remapped to arrow, never the folder's files. Pinned twice - the bytes and hotspot of all nine rows, and one actually drawn frame compared against the same draw from the embedded bytes - so a later "just resolve default through its folder" refactor cannot slip past.
+
 ## busy_as_arrow
 
 ```rust
@@ -149,6 +149,8 @@ The OS shows "busy" as the plain arrow plus a spinner it draws itself; this app'
 ### Used by
 
 - `sprite_sources` (this file) - applied after either resolution branch
+
+*Opt-out:* a v2 pack that declares `busy` never goes through this - `sprite_sources` only calls it when `busy_spec` is `None`. Its busy sprite is the animation's own frame, so swapping in the arrow would throw away the thing the pack exists to show.
 
 ## sprite_sources_from_dir
 
@@ -186,10 +188,19 @@ fn read_hotspots(path: &Path) -> HashMap<String, (f32, f32)>
 
 `hotspots.json` -> `{kind_name: (hx, hy)}`. Defaults to an empty map on any error (missing file, bad JSON) so a pack with no/partial hotspot data still resolves - just with centered hotspots for the kinds it doesn't specify.
 
-## read_pack_meta
+## Meta
 
 ```rust
-fn read_pack_meta(dir: &Path) -> Option<CursorPackInfo>
+pub(crate) struct Meta { id: String, name: String, busy: Option<BusySpec> }
 ```
 
-One pack folder's metadata: reads and parses `dir/pack.json` (written by `pack_import::write_pack` as `{"id", "name"}`). `None` if the file is missing or fails to parse - `list_cursor_packs` skips such folders rather than erroring the whole list.
+`pack.json` as written by `pack_import` (v1: `{id, name}`) or shipped with a bundled pack (v2: `+ version`, `busy`). Unknown keys - `builtin`, `generated`, `version` itself - are ignored: where a pack came from is decided by which folder it was found in, never by what its own JSON claims, and the presence of `busy` is a better version signal than the number beside it.
+
+## read_meta
+
+```rust
+pub(crate) fn read_meta(dir: &Path) -> Option<Meta>
+```
+
+Parse `dir/pack.json`, or `None` on any error. `pub(crate)` because `packlist` reads the same file for its own half of the job (id, name, busy) while this file reads it for resolution.
+

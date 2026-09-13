@@ -110,6 +110,33 @@ Composites the cursor sprite and its motion trail onto `out`, confined to `clip`
 - `draws_pixels_at_the_position` - a cursor blitted at (20, 20) into a 40x40 zero-filled buffer writes at least one non-zero byte.
 - `offscreen_position_is_safe_noop` - blitting at (1000, 1000) into a 40x40 buffer leaves it unchanged (no panic, no out-of-bounds write).
 
+## draw_cursor_posed
+
+```rust
+pub fn draw_cursor_posed(out: &mut [u8], ow: u32, oh: u32, spr: &CursorSprite,
+                         pos: (f32, f32), recent: &[(f32, f32)],
+                         size_px: f32, blur: f32, bounce: f32, clip: (i32, i32, i32, i32),
+                         pose: BusyPose)
+```
+
+`draw_cursor` plus pack v2's busy transform (`busy::busy_pose`), applied about the hotspot. `draw_cursor` is now a one-line wrapper passing `BusyPose::still()`.
+
+### Inputs
+
+Everything `draw_cursor` takes, plus:
+
+- `pose: BusyPose` - the frame's busy transform. `BusyPose::still()` for every non-busy cursor, and for a busy one on a v1 pack or a pack shipping explicit frames (those are already the animation).
+
+### Implementation
+
+Identical to `draw_cursor` up to the final blit, which branches:
+
+- `pose.is_identity()` - the existing nearest-neighbour `blit`, **byte-for-byte as before pack v2 existed**. Pinned by `a_still_pose_keeps_the_nearest_neighbour_blit_and_never_interpolates`, which draws at a fractional scale and asserts every painted pixel still holds one of the sprite's ORIGINAL channel values (bilinear sampling would leave in-between greys), and by an equality check against `draw_cursor` itself.
+- otherwise - `cursorxform::blit_transformed`, anchored on `pos` rather than the top-left corner.
+
+**The motion trail is never transformed.** It is a fading echo of where the cursor WAS; spinning each ghost independently reads as noise rather than motion.
+
+
 ## apply_enhanced
 
 ```rust
@@ -127,6 +154,7 @@ pub fn apply_enhanced(
     bounce_intensity: f32,
     panel: f32,
     clip: (i32, i32, i32, i32),
+    pose: BusyPose,
 )
 ```
 
@@ -158,3 +186,5 @@ Per-frame convenience wrapper: updates the trail deque, computes bounce and pixe
 4. Compute `size_px = size.clamp(0.4, 3.0) * oh as f32 * 0.033 * panel`. *Why 0.033 * oh:* at size=1.0 and panel=1.0 the cursor occupies ~3.3% of frame height, which is the design baseline calibrated for a 1080p export to look natural.
 5. Collect the trail: all `recent` entries except the newest, collected in reverse (newest first).
 6. Call `draw_cursor` with the assembled parameters.
+
+- `pose: BusyPose` - forwarded to `draw_cursor_posed`; `cursorset::draw` computes it once per frame from the recorded cursor type and the selected pack.

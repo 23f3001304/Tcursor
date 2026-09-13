@@ -20,7 +20,7 @@ const layout = (over: Partial<PreviewLayout> = {}): PreviewLayout => ({
 const settings = (over: Partial<ZoomSettings> = {}): ZoomSettings => ({
   enabled: true, target_scale: 2.2, hold_ms: 2200, smoothness: 0.1, clicks: 1,
   camera_shrink: false, camera_shrink_min: 0.62, smart_hold: true, smart_follow: false,
-  cam_zoom_default: "hide", ...over,
+  cam_zoom_default: "hide", camera_smoothing_ms: 0, ...over,
 });
 
 const zoom = (over: Partial<Zoom> = {}): Zoom => ({

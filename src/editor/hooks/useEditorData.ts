@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getEdit, setCapturable, cameraTrack, previewLayout, previewLayouts, clickTrack, previewBg, cursorSprites, cursorKinds, osCursorInVideo, ensureThumbs, ensureWaveform, ensurePreviewAudio, ensureProxy, fileSrc, getProjectManifest, DEFAULT_PROXY_HEIGHT } from "../../lib/ipc";
+import { getEdit, setCapturable, cameraTrack, previewLayout, previewLayouts, clickTrack, previewBg, cursorSprites, cursorKinds, cursorLayer, osCursorInVideo, ensureThumbs, ensureWaveform, ensurePreviewAudio, ensureProxy, fileSrc, getProjectManifest, DEFAULT_PROXY_HEIGHT } from "../../lib/ipc";
 import type { EditDoc } from "../../lib/edit";
-import type { CamSample, ClickSample, CursorSpriteDto, CursorKindSample, PreviewLayout, LayoutPresets } from "../../lib/ipc";
+import type { CamSample, ClickSample, CursorPackDto, CursorKindSample, CursorLayerDto, PreviewLayout, LayoutPresets } from "../../lib/ipc";
 import { planProxySrc } from "./editorData";
 import { debounce } from "./debounce";
+import { bgAssetUrl, type StageBg } from "../stage/stageBg";
 
 // Trailing debounce window for the previewBg refetch below - see editor.md "render hygiene".
 const PREVIEW_BG_DEBOUNCE_MS = 80;
@@ -19,8 +20,9 @@ export function useEditorData(folder: string, rev: number, quality: number) {
   const [layoutPresets, setLayoutPresets] = useState<LayoutPresets | null>(null);
   const [clicks, setClicks] = useState<ClickSample[]>([]);
   const [bgUrl, setBgUrl] = useState("");
-  const [cursorSpr, setCursorSpr] = useState<CursorSpriteDto[]>([]);
+  const [cursorSpr, setCursorSpr] = useState<CursorPackDto | null>(null);
   const [cursorKnd, setCursorKnd] = useState<CursorKindSample[]>([]);
+  const [cursorLyr, setCursorLyr] = useState<CursorLayerDto | null>(null);
   const [osCursor, setOsCursor] = useState(true);
   const [thumbs, setThumbs] = useState<string[]>([]);
   const [waves, setWaves] = useState<{ system: string; mic: string }>({ system: "", mic: "" });
@@ -106,10 +108,13 @@ export function useEditorData(folder: string, rev: number, quality: number) {
   // Cursor type track and the record-time "is the OS cursor baked in?" flag: both are properties
   // of the RECORDING, not of the doc, so they never change with edits - fetch once per folder.
   // `osCursor` defaults to true (draw nothing), the safe answer while the fetch is in flight.
+  // The captured OS-cursor layer rides along: same "property of the recording" reasoning, and
+  // `null` (no layer - a pre-layer recording) is the safe answer while the fetch is in flight.
   useEffect(() => {
     let live = true;
     cursorKinds(folder).then((d) => { if (live) setCursorKnd(d); }).catch(() => {});
     osCursorInVideo(folder).then((v) => { if (live) setOsCursor(v); }).catch(() => {});
+    cursorLayer(folder).then((l) => { if (live) setCursorLyr(l); }).catch(() => {});
     return () => { live = false; };
   }, [folder]);
   // Cursor sprite pack: refetch when the doc's selected pack changes (picking a different pack,
@@ -174,8 +179,21 @@ export function useEditorData(folder: string, rev: number, quality: number) {
     return () => { live = false; };
   }, [folder, quality, manifest, reloadTick]);
 
+  // Everything the stage needs to paint the background, as ONE value: the backend's finished PNG
+  // for the static case, plus the imported asset's URL for the moving one. Bundled here (rather
+  // than threaded as four props) so `Stage` and `useCompositeLoop` kept their existing signatures
+  // when video backgrounds landed - see `stageBg.ts`.
+  const bgSet = doc?.settings.background;
+  const bg: StageBg = {
+    url: bgUrl,
+    assetUrl: bgAssetUrl(folder, bgSet?.asset, bgSet?.kind ?? "mesh", fileSrc),
+    assetPath: bgSet?.asset ?? "",
+    kind: bgSet?.kind ?? "mesh",
+    dim: bgSet?.dim ?? 0,
+  };
+
   return {
-    doc, setDoc, track, layout, layoutPresets, clicks, bgUrl, cursorSpr, cursorKnd, osCursor,
+    doc, setDoc, track, layout, layoutPresets, clicks, bg, cursorSpr, cursorKnd, cursorLyr, osCursor,
     thumbs, waves, wavesReady, audioUrl, srcUrl, playing, setPlaying, retryMedia,
   };
 }

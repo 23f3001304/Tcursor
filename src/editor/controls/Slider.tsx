@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { debounce } from "../hooks/debounce";
 import { shouldClearOverride } from "../hooks/overrideClear";
+import { SliderValue } from "./SliderValue";
 
 // Trailing debounce window for committing a drag to the caller's `onChange` (which is typically
 // an `apply_edit_op`/`save_edit` IPC round trip) - see editor.md "render hygiene". A pointer
@@ -56,9 +57,10 @@ export function Slider({
   disabled?: boolean;
   accentColor?: string;
   ariaLabel?: string;
-  /** Optional `.e-fl` readout rendered above the track, sourced from the LIVE `shown` value (not
-   *  the committed `value` prop) so it tracks the thumb during a drag. Omit to render nothing
-   *  (the caller keeps rendering its own label from `value`, as every call site used to). */
+  /** Optional `.e-fl` row above the track: the name on the left, the value on the right, where
+   *  the value is click-to-type (`SliderValue`). Sourced from the LIVE `shown` value (not the
+   *  committed `value` prop) so it tracks the thumb during a drag. Omit to render nothing (the
+   *  caller keeps rendering its own label from `value`, as every call site used to). */
   label?: string;
   /** Formats `shown` for `label` above, e.g. `(v) => \`${Math.round(v * 100)}%\`` - falls back to
    *  the raw number when `label` is given without this. */
@@ -122,6 +124,15 @@ export function Slider({
     debouncedRef.current!.flush(); // commit on release - no trailing lag survives the drag ending
   };
 
+  // Shared by the keyboard path and the typed readout: both are discrete, so both bypass the
+  // drag debounce entirely (there is nothing to coalesce) while still painting optimistically.
+  const commitNow = (next: number) => {
+    settledValueRef.current = value; // pre-press value - see the ref's own comment above
+    setDragValue(next);
+    debouncedRef.current!.cancel();
+    onChangeRef.current(next);
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (disabled) return;
     // Steps from `shown` (not the prop `value`) so a fast key-repeat before an async `onChange`
@@ -129,10 +140,7 @@ export function Slider({
     const next = sliderKeyValue(e.key, shown, min, max, step);
     if (next === null) return;
     e.preventDefault();
-    settledValueRef.current = value; // pre-keypress value - see the ref's own comment above
-    setDragValue(next);
-    debouncedRef.current!.cancel();
-    onChangeRef.current(next); // discrete steps commit immediately - nothing to coalesce
+    commitNow(next);
   };
 
   const shown = dragValue ?? value;
@@ -140,7 +148,10 @@ export function Slider({
 
   return (
     <>
-      {label && <span className="e-fl">{label} <b>{formatValue ? formatValue(shown) : shown}</b></span>}
+      {label && (
+        <SliderValue label={label} value={shown} text={formatValue ? formatValue(shown) : String(shown)}
+          min={min} max={max} step={step} disabled={disabled} onCommit={commitNow} />
+      )}
       <div
         ref={trackRef}
         className="e-slider-track"
@@ -157,7 +168,9 @@ export function Slider({
         onPointerCancel={endDrag}
         onLostPointerCapture={endDrag}
         onKeyDown={handleKeyDown}
-        style={{ position: "relative", height: 20, display: "flex", alignItems: "center",
+        // 24px, not the 20 it used to be: this strip IS the control's hit target (the 4px rail is
+        // only paint), and 24 is the floor the usability pass set for anything clickable.
+        style={{ position: "relative", height: 24, display: "flex", alignItems: "center",
           cursor: disabled ? "default" : "pointer", userSelect: "none", width: "100%",
           touchAction: "none", opacity: disabled ? 0.5 : 1 }}
       >

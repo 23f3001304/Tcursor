@@ -16,6 +16,20 @@ export function panelFactor(screenW: number, insetW: number): number {
   return Math.min(1, Math.max(0.1, f));
 }
 
+/** Canvas px per SOURCE px for the screen panel - the scale that keeps the CAPTURED cursor at its
+ *  true size relative to the screen content. The recorded bitmaps are in source pixels, and the
+ *  source is drawn into the screen panel, so one source pixel is `panelWidth / srcW` canvas px;
+ *  written as `panelFactor` times the inset's own source->canvas ratio, the same number with the
+ *  panel shrink applied exactly ONCE. Mirrors Rust `export::cursor::captured::content_scale`.
+ *
+ *  `insetPx` is the reference inset width in CANVAS px (`LayoutPresets.inset_w * canvasW` - the
+ *  fraction scaled up, since `srcW` is in real pixels and the ratio has to share a unit).
+ *  A non-positive `srcW` means the backend could not probe the video: falls back to `panel`
+ *  alone, i.e. the pre-content-scale behavior, rather than collapsing the cursor to nothing. */
+export function contentScale(panel: number, insetPx: number, srcW: number): number {
+  return srcW > 0 ? panel * insetPx / srcW : panel;
+}
+
 /** The zoom crop `previewCanvas.ts` resizes the whole base frame through (its `cx0/cy0/cw/ch`) -
  *  same shape as the export's `coordmap::crop`. */
 export interface ZoomCrop { cx0: number; cy0: number; cw: number; ch: number }

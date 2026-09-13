@@ -25,7 +25,9 @@ impl Trim {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct Cut { pub start_ms: u32, pub end_ms: u32 }
+/// A removed stretch of clip time. `id` is defaulted on load for docs written before cuts had one
+/// (`EditDoc::assign_missing_ids`), so those keep loading unchanged.
+pub struct Cut { #[serde(default)] pub id: String, pub start_ms: u32, pub end_ms: u32 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -162,10 +164,15 @@ impl EditDoc {
         }
         std::fs::rename(&tmp, path)
     }
+    /// Cuts saved before they had ids get `c{n}` ones, `n` counting up from the highest live id.
+    pub fn assign_missing_ids(&mut self) {
+        let mut n = self.cuts.iter().filter_map(|c| c.id.strip_prefix('c').and_then(|d| d.parse::<u32>().ok())).max().map_or(0, |m| m + 1);
+        for c in &mut self.cuts { if c.id.is_empty() { c.id = format!("c{n}"); n += 1; } }
+    }
     pub fn load(path: &std::path::Path) -> Option<EditDoc> {
         let bytes = std::fs::read(path).ok()?;
-        match serde_json::from_slice(&bytes) {
-            Ok(doc) => Some(doc),
+        match serde_json::from_slice::<EditDoc>(&bytes) {
+            Ok(mut doc) => { doc.assign_missing_ids(); Some(doc) }
             Err(e) => {
                 crate::win::sys::proc::preserve_corrupt(path, &e);
                 None

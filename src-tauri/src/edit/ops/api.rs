@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use crate::edit::model::{CameraMove, Cut, EditDoc, Speed, Trim, Zoom, ZoomTarget};
+use crate::edit::model::{CameraMove, EditDoc, Trim, Zoom, ZoomTarget};
 use crate::edit::ops::region::{auto_layer, clamp_order, dur_bound, valid_easing, valid_layout};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -19,7 +19,13 @@ pub enum EditOp {
     SetTrim { in_ms: u32, out_ms: u32 },
     SetAspect { aspect: crate::export::types::Aspect },
     AddCut { start_ms: u32, end_ms: u32 },
+    /// One op for a batch of cuts (Remove silences), so the batch is one undo step.
+    AddCuts { spans: Vec<(u32, u32)> },
+    UpdateCut { id: String, start_ms: Option<u32>, end_ms: Option<u32> },
+    RemoveCut { id: String },
     SetSpeed { start_ms: u32, end_ms: u32, factor: f32 },
+    UpdateSpeed { id: String, start_ms: Option<u32>, end_ms: Option<u32>, factor: Option<f32> },
+    RemoveSpeed { id: String },
     AddLayoutSeg { at_ms: u32, dur_ms: u32, layout: String, transition_out_ms: Option<u32>, easing_out: Option<String> },
     UpdateLayoutSeg { id: String, start_ms: Option<u32>, end_ms: Option<u32>, layout: Option<String>, transition_ms: Option<u32>, easing: Option<String>, transition_out_ms: Option<u32>, easing_out: Option<String> },
     RemoveLayoutSeg { id: String },
@@ -50,13 +56,6 @@ fn next_zoom_id(doc: &EditDoc) -> String {
     format!("z{}", n)
 }
 
-fn next_speed_id(doc: &EditDoc) -> String {
-    let n = doc.speed.iter().filter_map(|s| {
-        s.id.strip_prefix('s').and_then(|d| d.parse::<u32>().ok())
-    }).max().map(|m| m + 1).unwrap_or(doc.speed.len() as u32);
-    format!("s{}", n)
-}
-
 fn next_layout_id(doc: &EditDoc) -> String {
     let n = doc.layout.iter().filter_map(|s| s.id.strip_prefix('l').and_then(|d| d.parse::<u32>().ok()))
         .max().map(|m| m + 1).unwrap_or(doc.layout.len() as u32);
@@ -75,6 +74,8 @@ fn clamp01(v: f32) -> f32 { v.clamp(0.0, 1.0) }
 pub const NEW_LAYOUT_TRANSITION_MS: u32 = 350;
 
 pub fn apply(doc: &mut EditDoc, op: EditOp) {
+    // Cut and speed ops live in `timeops` (they normalise after every write); everything else below.
+    if crate::edit::ops::timeops::apply_time_op(doc, &op) { return; }
     match op {
         EditOp::AddZoom { at_ms, dur_ms } => {
             let id = next_zoom_id(doc);
@@ -121,13 +122,8 @@ pub fn apply(doc: &mut EditDoc, op: EditOp) {
         EditOp::SetAspect { aspect } => {
             doc.aspect = aspect;
         }
-        EditOp::AddCut { start_ms, end_ms } => {
-            doc.cuts.push(Cut { start_ms, end_ms });
-        }
-        EditOp::SetSpeed { start_ms, end_ms, factor } => {
-            let id = next_speed_id(doc);
-            doc.speed.push(Speed { id, start_ms, end_ms, factor });
-        }
+        EditOp::AddCut { .. } | EditOp::AddCuts { .. } | EditOp::UpdateCut { .. } | EditOp::RemoveCut { .. }
+        | EditOp::SetSpeed { .. } | EditOp::UpdateSpeed { .. } | EditOp::RemoveSpeed { .. } => unreachable!("handled by timeops"),
         EditOp::AddLayoutSeg { at_ms, dur_ms, layout, transition_out_ms, easing_out } => {
             let id = next_layout_id(doc);
             let dur = crate::edit::ops::region::dur_bound(doc);

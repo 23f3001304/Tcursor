@@ -1,0 +1,200 @@
+/* The seven rail panels, restyled for the panel pass (2026-09-13 panel-design benchmark).
+   Imported once by `PanelHeader.tsx`, which every panel renders.
+
+   Same three rules as controls/controls.css: surfaces read by lightness rather than strokes, one
+   accent (--e-primary) reserved for on/selected state, one motion language. Three more that are
+   specific to a 320px panel:
+     4. At most ONE level of card. A panel groups by SPACING, never by a box; `.e-tile` (and its
+        strip cousin `.e-rowtile` in controls.css) is that one card level.
+     5. Nothing hugs the left edge: every full-width control spans the content width.
+     6. A panel fits its slot (about 620px on a 720px-tall window) without scrolling. That is a
+        budget, and it is what the usability pass spends: preset GRIDS became `TileRow` strips,
+        short slider pairs went two-up (`.e-two`), and whatever still did not fit went under the
+        panel's ONE `Disclosure`. */
+.editor { --e-plate: #55555b; }   /* the neutral glyph plate - see `.e-glyph-plate` */
+
+/* ---- Panel shell ---------------------------------------------------------------------------
+   Section rhythm 16px, row rhythm 10px, label 11px dim, control text 12.5px. The `.e-panel`
+   scope keeps the settings dialog (which shares `.e-field`/`.e-sechead`) on its own metrics. The
+   rhythm was 20px until the usability pass: at 320px wide 16 still reads as a clean break and
+   buys back a wallpaper row per panel.
+   `.editor` prefix, not a bare `.e-panel`: editor.css is imported last by `Editor.tsx`, so a
+   same-specificity rule here would lose to the one still living there. */
+.editor .e-panel { padding: var(--e-sp-3) var(--e-sp-3) var(--e-sp-4); }
+.e-panel .e-field { gap: 6px; margin-bottom: 10px; }
+.e-panel .e-field:last-child { margin-bottom: 0; }
+.e-panel .e-fl { font-size: 11px; font-weight: 450; color: var(--e-dim); gap: 10px; }
+.e-panel .e-switchrow { min-height: 30px; font-size: 12.5px; font-weight: 480; }
+/* Sentence case, not an uppercase overline: at 11px the tracking an overline needs costs more
+   width than a 320px panel has to spare, and it shouts where this panel wants to be quiet. */
+.e-panel .e-sechead { font-size: 11px; font-weight: 600; letter-spacing: 0; text-transform: none;
+  color: var(--e-mut); }
+/* A group is a heading plus the rows it owns. Spacing alone separates them - 10px between rows
+   inside a group, 16px between groups, 6px from a row's label to its control (`.e-field`).
+   A stack of `TileRow`s (`.e-rowstack`) is ONE block, not a section each: the five wallpaper
+   groups plus Custom read as one library, so 8px between strips and 16px to what follows. */
+.e-grp { display: flex; flex-direction: column; gap: 10px; }
+.e-grp + .e-grp, .e-grp + .e-field, .e-field + .e-grp, .e-grp + .e-more, .e-more + .e-grp {
+  margin-top: var(--e-sp-3); }
+.e-grp > .e-field { margin-bottom: 0; }
+.e-rowstack { gap: 8px; }
+/* Two short controls side by side - the pass's main density move, for pairs whose own inline
+   readouts already name them (Blur | Dim, Corner radius | Padding, Margin X | Margin Y). SHORT
+   names only: `.e-fl-name` ellipsises, and an ellipsised label is worse than a stacked row. */
+.e-two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: start; }
+.e-two > .e-field { margin-bottom: 0; min-width: 0; }
+
+/* ---- PanelHeader ----------------------------------------------------------------------------
+   No rule under the title: the 16px gap to the first group is the separation. The lede is one
+   line at hint size (the full text stays reachable as the element's own `title`). */
+.e-phead { padding-bottom: 0; margin-bottom: var(--e-sp-3); border-bottom: none; }
+.e-phead-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.e-phead-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* `.e-panel` in the selector so this beats editor.css's own `.e-panel h2` on specificity rather
+   than on source order (which favours editor.css - see the note on `.e-panel`'s padding above). */
+.e-panel .e-phead h2, .e-phead h2 { margin: 0; font-size: var(--e-text-title-size); font-weight: var(--e-text-title-weight);
+  letter-spacing: -0.015em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.e-phead .e-lede { margin: 3px 0 0; font-size: 11.5px; color: var(--e-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.e-hicons { display: flex; align-items: center; gap: 2px; flex: none; }
+
+/* ---- The one card level: `.e-tile` -----------------------------------------------------------
+   A raised plane, no border. Hover is one further lightness step and nothing else (tiles that all
+   jump on hover read as jelly). Selected is a 2px inset accent ring, so a tile's own artwork is
+   never darkened or tinted to say "chosen".
+   The cursor packs are a STRIP per group, not a wrapping grid: fifteen built-in packs four-up
+   cost four rows of the panel's height, and the same fifteen scroll sideways in one. The scroller
+   itself (and its reserved, hover-only scrollbar lane) is `.e-tilerow`'s rule in controls.css. */
+.e-tile-strip { gap: 8px; }   .e-tile-section + .e-tile-section { margin-top: 10px; }
+.e-tile-group { display: block; font-size: 11px; line-height: 1; font-weight: 500; color: var(--e-dim); margin: 0 0 4px; }
+.e-tile { position: relative; flex: none; width: 66px; box-sizing: border-box; display: flex;
+  flex-direction: column; align-items: center; gap: 5px; scroll-snap-align: start;
+  padding: 7px 5px 6px; border: none; border-radius: var(--e-r); background: var(--e-raised);
+  color: var(--e-mut); cursor: pointer; outline: none; overflow: hidden;
+  transition: background-color .14s ease, box-shadow .14s ease, color .14s ease; }
+.e-tile:hover { background: var(--e-raised-hi); color: var(--e-fg); }
+.e-tile.on { color: var(--e-fg); box-shadow: inset 0 0 0 2px var(--e-primary); }
+/* Loading skeleton: an empty tile at a real tile's size, so the strip does not resize on resolve. */
+.e-tile-skel { height: 65px; flex: none; width: 66px; }
+.e-tile-label { max-width: 100%; font-size: 10.5px; line-height: 1.2; font-weight: 500;
+  letter-spacing: -0.005em; text-align: center; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; pointer-events: none; }
+/* The glyph plate. Every pack's PNG keeps its own colours - a cream cursor and an ink-black one
+   are both what that pack actually draws - so legibility comes from a constant mid-grey plate
+   behind the glyph rather than any filter, tint or shadow ON the glyph. `PackTile.tsx` fits each
+   sprite by its alpha content box, so the arrows read the same size whatever the file's padding. */
+.e-glyph-plate { position: relative; width: 34px; height: 34px; border-radius: var(--e-r-sm);
+  background: var(--e-plate); overflow: hidden; pointer-events: none; }
+.e-glyph-plate img { position: absolute; max-width: none; }
+
+/* The wallpaper face inside a `.e-rowtile` (controls.css). It was a 16:9 box in an 88px grid cell
+   until the usability pass; the strip now fixes the tile at 64x36, so the face just fills it. */
+.e-tile-img { display: block; width: 100%; height: 100%; background-size: cover;
+  background-position: center; pointer-events: none; }
+
+/* ---- Import affordances ----------------------------------------------------------------------
+   `.e-upload` (the cursor pack folder) is the quiet raised plane, full width, icon plus label - a
+   dashed box is a drop target's idiom and this one opens a file dialog. `.e-rowtile-add` is the
+   same affordance as the tile that LEADS the Background panel's Custom row, since importing is
+   one more way to pick a background rather than a separate mode. */
+.e-upload { width: 100%; height: 34px; box-sizing: border-box; background: var(--e-raised);
+  border: none; border-radius: var(--e-r); color: var(--e-mut); font-size: 12px; font-weight: 500;
+  display: flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer;
+  box-shadow: var(--e-inset-hi); transition: background-color .14s ease, color .14s ease; }
+.e-upload:hover:not(:disabled) { background: var(--e-raised-hi); color: var(--e-fg); }
+.e-upload:disabled { opacity: .55; cursor: default; }
+.e-rowtile-add { display: flex; align-items: center; justify-content: center; color: var(--e-mut);
+  box-shadow: var(--e-inset-hi); }
+.e-rowtile-add:hover:not(:disabled) { color: var(--e-fg); }
+.e-rowtile-add:disabled { opacity: .55; cursor: default; }
+.e-bgasset { flex: 1; min-width: 0; height: 36px; box-sizing: border-box; display: flex;
+  align-items: center; gap: 4px; padding: 2px 2px 2px 0; border-radius: var(--e-r-sm);
+  background: var(--e-raised); transition: background-color .14s ease, box-shadow .14s ease; }
+.e-bgasset:hover { background: var(--e-raised-hi); }
+.e-bgasset.on { box-shadow: inset 0 0 0 2px var(--e-primary); }
+.e-bgasset-pick { flex: 1; min-width: 0; height: 32px; display: flex; align-items: center; gap: 7px;
+  background: none; border: none; padding: 0 0 0 2px; cursor: pointer; text-align: left; color: inherit; }
+.e-bgasset-pick:disabled { cursor: default; }
+.e-bgasset-thumb { flex: none; width: 56px; height: 32px; border-radius: 6px;
+  background: var(--e-bg) center/cover no-repeat; }
+.e-bgasset-text { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.e-bgasset-name { color: var(--e-fg); font-size: 11px; font-weight: 600; line-height: 1.2;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.e-bgasset-sub { color: var(--e-dim); font-size: 10px; line-height: 1.2;
+  font-weight: var(--e-text-hint-weight); }
+.e-bgasset-rm { flex: none; align-self: center; width: 24px; height: 24px; border: none; background: none;
+  border-radius: var(--e-r-sm); color: var(--e-dim); cursor: pointer; display: flex;
+  align-items: center; justify-content: center; transition: color .14s ease, background-color .14s ease; }
+.e-bgasset-rm:hover { color: var(--e-fg); background: var(--e-bg); }
+
+/* ---- Insert-element library (EffectPills.tsx) -------------------------------------------------
+   The one place a panel row carries a lane colour, because these four ARE the timeline's four
+   pill kinds. No border: the 3px left edge in the lane's own accent is the identity. Native HTML5
+   drag rules out Motion here (EffectPills.tsx's comment), so the hover lift is a plain CSS
+   transition. The two-class selector beats the shared `.e-zblk,.e-fxblk,.e-layblk` rule. */
+.e-zblk.e-libpill, .e-fxblk.e-libpill, .e-layblk.e-libpill, .e-spdblk.e-libpill, .e-camkfpill.e-libpill {
+  position: static; width: 100%; height: auto; box-sizing: border-box; padding: 9px 11px;
+  display: flex; align-items: center; gap: 10px; cursor: grab; text-align: left; border: none;
+  box-shadow: inset 3px 0 0 var(--pill-accent), var(--e-inset-hi);
+  transition: transform .14s ease, box-shadow .14s ease; }
+.e-zblk.e-libpill:hover, .e-fxblk.e-libpill:hover, .e-layblk.e-libpill:hover, .e-spdblk.e-libpill:hover, .e-camkfpill.e-libpill:hover {
+  transform: translateY(-1px);
+  box-shadow: inset 3px 0 0 var(--pill-accent), var(--e-inset-hi), var(--e-shadow-1); }
+.e-libgrid { display: flex; flex-direction: column; gap: 6px; }
+.e-libicon { flex: none; color: var(--pill-accent); }
+.e-libtext { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.e-libname { font-size: 12.5px; font-weight: 600; color: var(--e-fg);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.e-libhint { font-size: 11px; font-weight: var(--e-text-hint-weight); color: var(--e-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---- AI Director. `.e-ai-err` and `.e-ai-log` are planes with an accent edge, never tinted
+   bordered boxes; the log is the narration the director streams while it works. ------------- */
+.e-run { width: 100%; height: 38px; border: none; border-radius: var(--e-r);
+  background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,0)), var(--e-ai);
+  color: #fff; font-size: 12.5px; font-weight: 560; display: flex; align-items: center;
+  justify-content: center; gap: 8px; box-shadow: var(--e-inset-hi), var(--e-shadow-1);
+  transition: filter .14s ease, box-shadow .14s ease; }
+.e-run:hover:not(:disabled) { filter: brightness(1.08);
+  box-shadow: var(--e-inset-hi), var(--e-shadow-1), 0 6px 18px rgba(124,108,240,.28); }
+.e-run:disabled { opacity: .6; cursor: default; box-shadow: none; }
+.e-ai-progress { height: 2px; border-radius: 999px; background: var(--e-bg); overflow: hidden; }
+.e-ai-progress-fill { height: 100%; background: var(--e-ai); }
+.e-ai-err { margin: 0; font-size: 11.5px; line-height: var(--e-text-hint-lh); color: #f7b4b4;
+  background: var(--e-raised); border-radius: var(--e-r-sm); padding: 9px 11px;
+  box-shadow: inset 3px 0 0 var(--e-primary); }
+.e-ai-err .hint { display: block; margin-top: 4px; color: var(--e-dim); font-weight: var(--e-text-hint-weight); }
+.e-errline { margin: 0; font-size: 11.5px; line-height: var(--e-text-hint-lh); color: #f7b4b4; }
+.e-errline button { margin-left: 4px; background: none; border: none; padding: 0; color: inherit;
+  font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
+.e-errline button:hover { color: var(--e-fg); }
+.e-picker-shell { height: 34px; border-radius: var(--e-r); background: var(--e-raised); border: none; }
+.e-picker-empty { display: flex; align-items: center; justify-content: space-between; padding: 0 11px;
+  box-sizing: border-box; color: var(--e-dim); font-size: 12px; font-weight: 500; cursor: default; }
+.e-picker-empty button { background: none; border: none; padding: 0; color: var(--e-mut); font: inherit;
+  font-weight: 600; text-decoration: underline; cursor: pointer; }
+.e-picker-empty button:hover { color: var(--e-fg); }
+.e-ai-log { display: flex; flex-direction: column; gap: 7px; padding: 11px;
+  border-radius: var(--e-r); background: var(--e-raised); }
+.e-ai-log-line { font-size: 11.5px; line-height: var(--e-text-hint-lh); color: var(--e-fg);
+  padding-left: 18px; position: relative; }
+.e-ai-log-line::before { content: "\2192"; position: absolute; left: 2px; top: 0; color: var(--e-ai); }
+.e-ai-log-line.done { color: var(--e-ok); font-weight: 500; padding-left: 0; }
+.e-ai-log-line.done::before { content: none; }
+.e-sum { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.e-sum li { display: flex; align-items: center; gap: var(--e-sp-2); font-size: 12.5px; color: var(--e-mut); }
+.e-sum .ic { width: 28px; height: 28px; border-radius: var(--e-r-sm); background: var(--e-raised);
+  border: none; display: flex; align-items: center; justify-content: center;
+  color: var(--e-mut); flex: none; }
+
+/* ---- Panel-only odds and ends: the shared ghost button on panel metrics (a plane, no stroke, no
+   14px slab padding), a wrapping colour row, and two one-line text idioms. -------------------- */
+.e-panel .e-ghostbtn { height: 34px; padding: 0 12px; border: none; background: var(--e-raised);
+  font-size: 12px; font-weight: 500; box-shadow: var(--e-inset-hi);
+  transition: background-color .14s ease, color .14s ease, transform .14s ease; }
+.e-panel .e-ghostbtn:hover { background: var(--e-raised-hi); color: var(--e-fg); transform: translateY(-1px); }
+.e-colorrow { display: flex; flex-wrap: wrap; gap: 12px; }
+/* `.e-hintrow`: AudioPanel's "mic earlier / mic later" legend under its offset track.
+   `.e-hintline`: a sentence standing in for a control that would do nothing (see BackgroundPanel). */
+.e-hintrow { display: flex; justify-content: space-between; font-size: 11px; color: var(--e-dim); }
+.e-hintline { color: var(--e-dim); font-size: 11.5px; line-height: var(--e-text-hint-lh); margin: 0; }

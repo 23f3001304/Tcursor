@@ -1,22 +1,77 @@
+use std::path::{Path, PathBuf};
 use crate::export::types::{Background, Rgb};
 use crate::settings::background::{BackgroundKind, BackgroundSettings};
+use crate::settings::bg_asset;
 
 /// Build the static export background buffer from user settings. `Mesh` decodes the bundled
-/// `mesh_jpg` (falling back to the gradient `Background::default()` if ffmpeg can't decode it);
-/// `Solid`/`Gradient` render the matching `Background` variant directly, no ffmpeg subprocess.
+/// wallpaper named by `settings.mesh` (`settings::wallpapers`, cover-fitted so 16:9 art doesn't
+/// stretch), or - when that id is empty or unknown to this build - the legacy `mesh_jpg` exactly
+/// as it always did (falling back to the gradient `Background::default()` if ffmpeg can't decode
+/// it). `Solid`/`Gradient` render the matching `Background` variant directly, no subprocess.
+/// `Image`/`Video` decode the user's imported file under `project_dir` (a `Video` contributes its
+/// FIRST frame here; the moving picture is `pipeline::bg_pipe`'s job in the export and the TS
+/// preview's in the editor).
 /// Called once per export/preview build (`FrameRenderer::new`/`reload_edit`), never per frame,
-/// so the optional blur pass below is cheap even though it isn't itself per-pixel-parallel.
-pub fn build(settings: &BackgroundSettings, mesh_jpg: &[u8], w: u32, h: u32) -> Vec<u8> {
+/// so the decode, the optional blur, and the dim pass below are all cheap in practice.
+pub fn build(settings: &BackgroundSettings, mesh_jpg: &[u8], w: u32, h: u32, project_dir: &Path) -> Vec<u8> {
+    use crate::export::pipeline::ffio;
+    let legacy = || ffio::decode_image(mesh_jpg, w, h).unwrap_or_else(|_| render(&Background::default(), w, h));
+    // The background the user would see if the asset weren't there: their chosen wallpaper (or the
+    // legacy mesh). Reached by a missing file, an unreadable one, and by both kinds when the
+    // decode fails - a broken import must never cost the whole background, let alone the export.
+    let base = || match crate::settings::wallpapers::wallpaper_by_id(&settings.mesh) {
+        Some(wp) => ffio::decode_image_cover(wp.bytes, w, h).unwrap_or_else(|_| legacy()),
+        None => legacy(),
+    };
     let mut buf = match settings.kind {
-        BackgroundKind::Mesh => crate::export::pipeline::ffio::decode_image(mesh_jpg, w, h)
-            .unwrap_or_else(|_| render(&Background::default(), w, h)),
+        BackgroundKind::Mesh => base(),
+        BackgroundKind::Image | BackgroundKind::Video => match asset_file(settings, project_dir) {
+            Some(f) => ffio::decode_file_cover(&f, w, h).unwrap_or_else(|_| { warn_asset(&f.display()); base() }),
+            None => { warn_asset(&settings.asset.as_deref().unwrap_or("(none)")); base() }
+        },
         BackgroundKind::Solid => render(&Background::Solid(rgb(settings.solid)), w, h),
         BackgroundKind::Gradient => render(&Background::Gradient {
-            from: rgb(settings.gradient_from), to: rgb(settings.gradient_to), angle_deg: settings.gradient_angle_deg,
+            from: rgb(settings.gradient_from), mid: settings.gradient_mid.map(rgb),
+            to: rgb(settings.gradient_to), angle_deg: settings.gradient_angle_deg,
         }, w, h),
     };
     if settings.blur > 0.0 { blur(&mut buf, w, h, settings.blur); }
+    apply_dim(&mut buf, settings.dim_clamped());
     buf
+}
+
+/// The absolute path of the imported asset, for the two kinds that have one.
+fn asset_file(settings: &BackgroundSettings, project_dir: &Path) -> Option<PathBuf> {
+    match settings.kind {
+        BackgroundKind::Image | BackgroundKind::Video =>
+            bg_asset::asset_path(project_dir, settings.asset.as_deref().unwrap_or("")),
+        _ => None,
+    }
+}
+
+/// The file the export should open a decode STREAM on: a `Video` background whose asset really
+/// exists. `None` for every other kind (an image needs no stream) and for a missing file.
+pub fn video_source(settings: &BackgroundSettings, project_dir: &Path) -> Option<PathBuf> {
+    (settings.kind == BackgroundKind::Video).then(|| asset_file(settings, project_dir)).flatten()
+}
+
+/// Darken a BGRA buffer by `dim` (0..1), which is exactly a black overlay at that alpha:
+/// `out = round(src * (1 - dim))`, alpha untouched. `src/editor/stage/stageBg.ts` paints the same
+/// formula over the preview's own video draw, so the two agree; `dim == 0` touches nothing at all,
+/// which is what keeps the default path free (this runs per FRAME for a video background).
+pub fn apply_dim(buf: &mut [u8], dim: f32) {
+    let k = 1.0 - dim.clamp(0.0, 1.0);
+    if k >= 1.0 { return; }
+    for px in buf.chunks_exact_mut(4) {
+        for c in px.iter_mut().take(3) { *c = (*c as f32 * k).round() as u8; }
+    }
+}
+
+/// Say ONCE per process that a background asset could not be used. Once, because this is called
+/// from a per-frame-adjacent path and a broken import would otherwise flood the log.
+fn warn_asset(what: &dyn std::fmt::Display) {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| eprintln!("[BG] background asset unusable ({what}) - falling back to the wallpaper"));
 }
 
 fn rgb(c: [u8; 3]) -> Rgb { Rgb { r: c[0], g: c[1], b: c[2] } }
@@ -72,7 +127,7 @@ pub fn render(bg: &Background, w: u32, h: u32) -> Vec<u8> {
         Background::Image(_) => { // M2b stub: treat as solid dark; image library is M4
             fill(&mut buf, w, h, |_, _| Rgb { r: 24, g: 24, b: 30 });
         }
-        Background::Gradient { from, to, angle_deg } => {
+        Background::Gradient { from, mid, to, angle_deg } => {
             // Normalize against the projection's TRUE range over the four frame corners, not
             // `.abs()` of a single corner - `.abs()` mirror-folds any angle whose projection goes
             // negative (including the DEFAULT 135deg), putting a crease of `from` on the fold line
@@ -84,9 +139,15 @@ pub fn render(bg: &Background, w: u32, h: u32) -> Vec<u8> {
             let pmin = corners.iter().cloned().fold(f32::INFINITY, f32::min);
             let pmax = corners.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
             let range = (pmax - pmin).max(1e-6);
+            // With a middle stop the ramp is two half-length lerps meeting at t = 0.5; without
+            // one it is the single lerp it has always been, bit for bit.
             fill(&mut buf, w, h, |x, y| {
-                let t = ((x as f32 * dx) + (y as f32 * dy) - pmin) / range;
-                lerp(*from, *to, t.clamp(0.0, 1.0))
+                let t = (((x as f32 * dx) + (y as f32 * dy) - pmin) / range).clamp(0.0, 1.0);
+                match mid {
+                    None => lerp(*from, *to, t),
+                    Some(m) if t < 0.5 => lerp(*from, *m, t * 2.0),
+                    Some(m) => lerp(*m, *to, (t - 0.5) * 2.0),
+                }
             });
         }
     }
@@ -108,76 +169,5 @@ fn lerp(a: Rgb, b: Rgb, t: f32) -> Rgb {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::export::types::{Background, Rgb};
-    #[test]
-    fn solid_fills_bgra() {
-        let buf = render(&Background::Solid(Rgb { r: 10, g: 20, b: 30 }), 2, 2);
-        assert_eq!(buf.len(), 2 * 2 * 4);
-        assert_eq!(&buf[0..4], &[30, 20, 10, 255]); // BGRA
-    }
-    #[test]
-    fn gradient_differs_corner_to_corner() {
-        let g = Background::Gradient { from: Rgb { r: 0, g: 0, b: 0 }, to: Rgb { r: 255, g: 255, b: 255 }, angle_deg: 0.0 };
-        let buf = render(&g, 4, 1);
-        assert!(buf[0] < buf[(3 * 4) as usize]); // left darker than right at 0deg
-    }
-    #[test]
-    fn gradient_at_135deg_is_a_true_monotonic_ramp_not_mirror_folded() {
-        // The DEFAULT angle (135deg, top-left -> bottom-right diagonal). The old
-        // `.abs()`-normalized formula folded the ramp along y=x, putting a crease of `from`
-        // there instead of a monotonic corner-to-corner ramp - this is exactly the angle that
-        // regresses if normalization goes back to projecting-onto-`[0, max]` with an abs().
-        let g = Background::Gradient { from: Rgb { r: 0, g: 0, b: 0 }, to: Rgb { r: 255, g: 255, b: 255 }, angle_deg: 135.0 };
-        let (w, h) = (100u32, 100u32);
-        let buf = render(&g, w, h);
-        let px = |x: u32, y: u32| buf[((y * w + x) * 4) as usize]; // blue channel; from/to are gray
-        let (top_right, center, bottom_left) = (px(99, 0), px(50, 50), px(0, 99));
-        assert!(top_right < center, "top-right ({top_right}) must be darker than center ({center})");
-        assert!(center < bottom_left, "center ({center}) must be darker than bottom-left ({bottom_left})");
-        // The two corners perpendicular to the gradient axis sit at the diagonal's midpoint.
-        assert_eq!(px(0, 0), px(99, 99), "the off-axis corners must be equal (both at t=0.5)");
-    }
-
-    // `build` tests only exercise Solid/Gradient (pure Rust, deterministic) - `Mesh` shells out
-    // to ffmpeg and is intentionally left untested here, same as `render`'s Image stub above.
-    #[test]
-    fn build_solid_matches_direct_render() {
-        use crate::settings::background::{BackgroundKind, BackgroundSettings};
-        let s = BackgroundSettings { kind: BackgroundKind::Solid, solid: [10, 20, 30], ..Default::default() };
-        let buf = build(&s, &[], 2, 2); // mesh bytes irrelevant for Solid
-        assert_eq!(buf, render(&Background::Solid(Rgb { r: 10, g: 20, b: 30 }), 2, 2));
-    }
-    #[test]
-    fn build_zero_blur_is_a_no_op() {
-        use crate::settings::background::{BackgroundKind, BackgroundSettings};
-        let s = BackgroundSettings { kind: BackgroundKind::Gradient, blur: 0.0, ..Default::default() };
-        let buf = build(&s, &[], 16, 16);
-        let direct = render(&Background::Gradient { from: rgb(s.gradient_from), to: rgb(s.gradient_to), angle_deg: s.gradient_angle_deg }, 16, 16);
-        assert_eq!(buf, direct);
-    }
-    #[test]
-    fn blur_softens_a_sharp_edge() {
-        // 40x40 (not tiny): the blur radius is a fraction of `w.min(h)`, so a 1px-tall test
-        // image would always round down to radius 0 - this size guarantees a non-zero radius.
-        let (w, h) = (40u32, 40u32);
-        let mut buf = vec![0u8; (w * h * 4) as usize];
-        for y in 0..h { for x in 20..w {
-            let i = ((y * w + x) * 4) as usize;
-            buf[i] = 255; buf[i + 1] = 255; buf[i + 2] = 255; buf[i + 3] = 255;
-        } }
-        blur(&mut buf, w, h, 1.0);
-        // The pixel just left of the old hard edge (x=19) should have picked up some brightness -
-        // a sharp 0/255 edge no longer jumps straight from black to white.
-        let i = ((20 * w + 19) * 4) as usize;
-        assert!(buf[i] > 0, "edge should have softened into the dark side");
-    }
-    #[test]
-    fn blur_amount_zero_is_untouched() {
-        let mut buf = vec![7u8, 8, 9, 255, 1, 2, 3, 255];
-        let before = buf.clone();
-        blur(&mut buf, 2, 1, 0.0);
-        assert_eq!(buf, before);
-    }
-}
+#[path = "background_tests.rs"]
+mod tests;

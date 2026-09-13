@@ -1,24 +1,26 @@
 import { memo, useCallback, useMemo, useRef, useState } from "react";
-import { motion } from "motion/react";
 import { IconZoomIn, IconBulb } from "@tabler/icons-react";
 import type { EditDoc, EditOp } from "../../lib/edit";
 import type { LayoutPresets } from "../../lib/ipc";
-import { rulerTicks } from "./time";
 import { useRegionDrag } from "../hooks/useRegionDrag";
-import { useRafCoalesced } from "../hooks/useRafCoalesced";
 import { layoutRegions } from "./layers";
 import { useLayoutLaneRegions, layoutLabel, layoutExtraStyle } from "./layoutLane";
 import { Filmstrip } from "./Filmstrip";
 import { AudioTrack } from "./AudioTrack";
 import { CameraLane } from "./CameraLane";
+import { TimeLane } from "./TimeLane";
+import { CutOverlay } from "./CutOverlay";
 import { TrimOverlay } from "./TrimOverlay";
 import { RegionRows } from "./RegionRows";
+import { Playhead } from "./Playhead";
+import { Ruler, RangeOverlay, useSeek } from "./timelineRuler";
+import type { Range } from "./useRangeSelect";
 
-/** Multi-track timeline (Filmora-style): an adaptive ruler, a filmstrip clip, and a scrolling
- *  stack of tracks - the zoom track (pills drag/resize via useRegionDrag) plus the system + mic
- *  audio waveforms - with a playhead spanning the clip. Selecting a pill opens the inspector;
- *  add-zoom lives in the transport. The playhead lives inside the body so it stays aligned with
- *  the ruler ticks + pills regardless of the timeline's outer padding. */
+/** Multi-track timeline (Filmora-style): an adaptive ruler (`timelineRuler.tsx`), a filmstrip clip,
+ *  and a scrolling stack of tracks - Time, zoom, FX, layout (pills drag/resize via useRegionDrag),
+ *  camera and the two audio waveforms - with a playhead spanning the clip. Selecting a pill (or a
+ *  cut) opens its inspector; add-zoom lives in the transport. The playhead lives inside the body so
+ *  it stays aligned with the ruler ticks + pills regardless of the timeline's outer padding. */
 
 // Row-height constants shared by the lane label gutter and `.e-tracks`' own natural row layout
 // (editor.css uses the same 32/22/6 numbers) - a lane's gutter label slot is always exactly as
@@ -26,26 +28,26 @@ import { RegionRows } from "./RegionRows";
 const ROW_H = 32, AUDIO_ROW_H = 22, GAP = 6;
 const laneHeight = (rows: number, rowH: number) => (rows > 0 ? rows * rowH + (rows - 1) * GAP : 0);
 
-// `RegionRows.renderLabel` for the zoom/FX lanes - hoisted to module scope (rather than declared
-// inline in the component body) since they're pure and close over nothing per-render: a fresh
-// inline arrow every render would be a fresh prop every render, defeating `RegionRows`'
-// `React.memo` even when the underlying region data hasn't changed. The layout lane's own
-// `layoutLabel`/`layoutExtraStyle` (T34 L4: thumbnail + "Custom" label) live in `layoutLane.tsx`.
+// `RegionRows.renderLabel` for the zoom/FX lanes - module scope, not inline in the body: they are
+// pure and close over nothing per-render, and a fresh arrow every render would be a fresh prop
+// every render, defeating `RegionRows`' memo even with unchanged region data. The layout lane's
+// own `layoutLabel`/`layoutExtraStyle` live in `layoutLane.tsx`, the Time lane's in `TimeLane.tsx`.
 const zoomLabel = (z: { scale: number }) => <><IconZoomIn size={12} />{z.scale.toFixed(1)}x</>;
 const fxLabel = () => <><IconBulb size={12} />Spotlight</>;
 
-export const Timeline = memo(function Timeline({ doc, timeMs, dur, playing, onSeek, sel, onSel, onApply, thumbs, waves, wavesReady, hasWebcam, layoutPresets }: {
+export const Timeline = memo(function Timeline({ doc, timeMs, dur, playing, onSeek, sel, onSel, onApply, thumbs, waves, wavesReady, hasWebcam, layoutPresets, range, setRange }: {
   doc: EditDoc; timeMs: number; dur: number; playing: boolean; onSeek: (ms: number) => void;
   sel: string | null; onSel: (id: string | null) => void;
   onApply: (op: EditOp) => Promise<EditDoc | null>;
   thumbs: string[]; waves: { system: string; mic: string }; wavesReady: boolean;
   hasWebcam: boolean; // threaded straight to CameraLane - see its own prop doc
   layoutPresets: LayoutPresets | null; // T34 L4: the layout pill's thumbnail source (layoutLane.tsx)
+  range: Range | null; setRange: (r: Range | null) => void; // the ruler's Shift+drag selection
 }) {
   const track = useRef<HTMLDivElement>(null);
-  // Whether a SCRUB (a pointerdown that started on the body, not a pill/handle/keyframe bubbling
-  // up) is in progress - every draggable child stops its own `pointerdown` propagation, so this
-  // only ever flips true for a genuine body scrub (playhead grab head included - see below).
+  // Whether a SCRUB (a pointerdown on the body, not a pill/handle/keyframe bubbling up) is in
+  // progress - every draggable child stops its own `pointerdown`, so this only ever flips true for
+  // a genuine body scrub (playhead grab head included - see below).
   const scrubbing = useRef(false);
   // Mirrors `scrubbing` as real state (Task D2) - ONLY consumed by the playhead's Motion-driven
   // glow layer below, which needs a re-render to fade in/out; the high-frequency scrub itself
@@ -99,14 +101,9 @@ export const Timeline = memo(function Timeline({ doc, timeMs, dur, playing, onSe
   );
   const layRows = layouts.length ? maxLayLayer + 1 : 0;
 
-  const seekAt = (clientX: number) => {
-    const el = track.current; if (!el) return;
-    const r = el.getBoundingClientRect();
-    onSeek(Math.min(dur, Math.max(0, ((clientX - r.left) / r.width) * dur)));
-  };
-  // Scrub coalescing: a pointermove burst can outpace the refresh rate, so `scheduleSeek` applies
-  // at most the LATEST position once per frame; `flushSeek` (on release) applies a pending one now.
-  const { schedule: scheduleSeek, flush: flushSeek } = useRafCoalesced(seekAt);
+  // `seekAt` and its rAF coalescing live in `timelineRuler.tsx`: one x-to-ms mapping, measured off
+  // the same element, shared by the ruler's own drag and the track body's.
+  const { seekAt, scheduleSeek, flushSeek } = useSeek(dur, track, onSeek);
   const pct = dur > 0 ? (timeMs / dur) * 100 : 0;
 
   // Audio row count mirrors AudioTrack's own render-or-null rule: loading -> 2 shimmers, resolved
@@ -118,6 +115,10 @@ export const Timeline = memo(function Timeline({ doc, timeMs, dur, playing, onSe
   // One entry per visible lane, in render order - mapped TWICE below (gutter label, track body)
   // from this SAME array, so the two columns can never drift out of sync with each other.
   const lanes: { key: string; label: string; heightPx: number; active: boolean; body: React.ReactNode }[] = [];
+  // Time lane FIRST (nearest the filmstrip): cuts and speed spans are the clip's own structure, above
+  // the decorations every other lane holds. Only once one exists - see TimeLane.md.
+  if (doc.cuts.length || doc.speed.length) lanes.push({ key: "time", label: "Time", heightPx: ROW_H, active: isSel(doc.speed),
+    body: <TimeLane doc={doc} dur={dur} sel={sel} onSel={onSel} onApply={onApply} track={track} /> });
   if (zoomRows > 0) lanes.push({ key: "zoom", label: "Zoom", heightPx: laneHeight(zoomRows, ROW_H), active: isSel(zooms),
     body: <RegionRows rows={zoomRows} regions={zooms} dur={dur} sel={sel} rowClass="e-zoomrow" blkClass="e-zblk"
       dragState={drag} beginDrag={beginDrag} renderLabel={zoomLabel} /> });
@@ -135,11 +136,7 @@ export const Timeline = memo(function Timeline({ doc, timeMs, dur, playing, onSe
 
   return (
     <div className="e-timeline">
-      <div className="e-ruler">
-        {rulerTicks(dur).map((t, i) => (
-          <span key={i} style={{ left: `${dur > 0 ? (t.at / dur) * 100 : 0}%` }}>{t.label}</span>
-        ))}
-      </div>
+      <Ruler dur={dur} trackRef={track} onSeek={onSeek} range={range} setRange={setRange} />
       <div className="e-tlbody" ref={track}
         onDragOver={(e) => {
           e.preventDefault();
@@ -182,17 +179,15 @@ export const Timeline = memo(function Timeline({ doc, timeMs, dur, playing, onSe
                 {fx, layout} was present. */}
             {lanes.map((l, i) => <div key={l.key} className={`e-lanerows e-band-${i % 2 ? "b" : "a"}`}>{l.body}</div>)}
           </div>
+          {/* Cuts cross the whole stack, outside `.e-tracks` - CutOverlay.md says why. */}
+          <CutOverlay cuts={doc.cuts} dur={dur} sel={sel} onSel={onSel} />
         </div>
+        <RangeOverlay range={range} dur={dur} />
         <TrimOverlay trim={doc.trim} dur={dur} trackRef={track} onApply={onApply} />
-        {/* Playhead (Task D2): the line's own left% still tweens via Motion (unchanged); its two
-            children are ALSO Motion-owned - the glow's opacity crossfades on `phDragging` (state,
-            not the high-frequency `scrubbing` ref) and the grab head's hover scale is a spring,
-            not a CSS transition, per the motion-language rule for stateful interaction. */}
-        <motion.div className="e-ph" initial={false} animate={{ left: `${pct}%` }}
-          transition={playing ? { duration: 0 } : { type: "tween", duration: 0.12, ease: "easeOut" }}>
-          <motion.i className="e-ph-glow" initial={false} animate={{ opacity: phDragging ? 1 : 0 }} transition={{ duration: 0.15, ease: "easeOut" }} />
-          <motion.i className="e-ph-head" whileHover={{ scale: 1.15 }} transition={{ type: "spring", stiffness: 420, damping: 22 }} />
-        </motion.div>
+        {/* Playhead: line, glow and drag ripple all live in `Playhead.tsx` - `phDragging` is
+            state, not the high-frequency `scrubbing` ref, so a pointermove burst never re-renders
+            this component just to light the glow. */}
+        <Playhead pct={pct} playing={playing} dragging={phDragging} />
       </div>
     </div>
   );

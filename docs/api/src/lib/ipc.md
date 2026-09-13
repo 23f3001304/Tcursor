@@ -407,10 +407,28 @@ export interface CursorSpriteDto { kind: string; url: string; hot: [number, numb
 
 One cursor sprite (mirrors the Rust `CursorSpriteDto`): the lowercase type name, a PNG data URL (cropped + dark-inverted like the export), the hotspot (0..1 of the cropped sprite), and the original canvas height for uniform scaling. The preview decodes each into an `<img>` keyed by `kind`.
 
+## BusySpecDto
+
+```ts
+export interface BusySpecDto { anim: "spin" | "flip" | "pulse"; fps: number; frames: number }
+```
+
+How a pack animates its busy cursor (pack format v2), mirroring Rust `BusySpec`. `frames` is how many explicit `busy_NN.png` files the pack ships - `0` means `anim` synthesises the animation from the single `busy.png` instead. Fed to `busyPose` (`src/editor/stage/cursorBusy.ts`), the TS mirror of the export's own `busy_pose`.
+
+## CursorPackDto
+
+```ts
+export interface CursorPackDto {
+  sprites: CursorSpriteDto[]; busy_frames: CursorSpriteDto[]; busy: BusySpecDto | null;
+}
+```
+
+The recording's selected cursor pack, ready to draw: one sprite per kind, the pack's explicit busy frames (empty unless it ships them), and its declared busy animation (`null` for the embedded set and any v1 pack). `busy` + `busy_frames` are what let the preview run the same `busyPose` the export does.
+
 ## cursorSprites
 
 ```ts
-export const cursorSprites = (folder: string) => invoke<CursorSpriteDto[]>("cursor_sprites", { folder })
+export const cursorSprites = (folder: string) => invoke<CursorPackDto>("cursor_sprites", { folder })
 ```
 
 ### Inputs
@@ -419,7 +437,7 @@ export const cursorSprites = (folder: string) => invoke<CursorSpriteDto[]>("curs
 
 ### Returns
 
-`Promise<CursorSpriteDto[]>` - the recording's selected cursor pack (`CursorSettings.pack`, built-in or imported) so the preview can draw the real cursor (Enhanced style) instead of an arrow.
+`Promise<CursorPackDto>` - the recording's selected pack (embedded, bundled, or imported), decoded to match the export exactly, so the preview draws the real cursor rather than an arrow.
 
 ## CursorKindSample
 
@@ -443,17 +461,52 @@ export const cursorKinds = (folder: string) => invoke<CursorKindSample[]>("curso
 
 `Promise<CursorKindSample[]>` - the cursor-type track in output time.
 
+## CapturedCursorDto
+
+```ts
+export interface CapturedCursorDto { id: number; w: number; h: number; hx: number; hy: number; url: string }
+```
+
+One captured OS cursor bitmap (mirrors the Rust `CapturedCursorDto`): its layer id, pixel size, hotspot in PIXELS from the top-left, and the recorded PNG as a data URL. This is the real cursor that was on screen, not a sprite-pack stand-in, so the PNG is passed through untouched - no crop, no dark-invert.
+
+## CursorLayerDto
+
+```ts
+export interface CursorLayerDto {
+  cursors: CapturedCursorDto[]; track: [number, number][]; src_w: number; src_h: number;
+}
+```
+
+The recording's captured OS-cursor layer: the bitmaps, `[t, id]` samples in output ms saying which was showing, and the recorded video's own pixel size. The bitmaps are in SOURCE pixels, so `src_w` is what `contentScale` uses to size them relative to the screen content - the preview's `<video>` is a downscaled proxy and cannot supply it. `src_w` is `0` only when the backend could not probe the video. `null` (not an empty object) for a recording made before the layer existed.
+
+## cursorLayer
+
+```ts
+export const cursorLayer = (folder: string) => invoke<CursorLayerDto | null>("cursor_layer", { folder })
+```
+
+### Inputs
+
+- `folder` (`string`) - project directory.
+
+### Returns
+
+`Promise<CursorLayerDto | null>` - the layer, or `null` for a pre-layer recording. `Stage` passes it down only when the doc's cursor style is `"system"`; `useCursorSprites` decodes it into a `CapturedLayer`, and `drawCursorSprite` composites the real cursor from it instead of the synthetic arrow.
+
 ## CursorPackInfo
 
 ```ts
-export interface CursorPackInfo { id: string; name: string; builtin: boolean }
+export interface CursorPackInfo {
+  id: string; name: string; builtin: boolean; dir: string;
+  files: Record<string, string>; busy: BusySpecDto | null;
+}
 ```
 
-One selectable cursor pack (mirrors the Rust `CursorPackInfo`): `id` is what persists into `CursorSettings.pack`, `name` is the display label, and `builtin` marks the embedded default (always first in the list, never stored on disk).
+One selectable cursor pack. `id` persists into `CursorSettings.pack`; `builtin` marks a pack the user cannot delete (the embedded set, always first, or one bundled with the app).
 
-### Used by
+`dir` is the pack's folder, so the grid loads each tile's sprite through the asset protocol rather than the backend base64ing every pack's nine PNGs into one reply. The embedded set has one too now (`assets/cursors`, shipped as a resource) - which is what lets its tile show a sprite - even though the EXPORT still reads the copies compiled into the binary.
 
-- `src/editor/panels/CursorPanel.tsx` - renders the pack grid and drives selection/import
+`files` maps each kind wire name to its filename inside `dir`, already alias-resolved (the embedded pack spells its arrow `pointer.png`) and already carrying the busy-is-arrow substitution, so the grid has to know neither rule; a kind the pack does not ship is absent. `busy` is the pack's busy animation, so a hovered tile previews it with the same `busyPose` the export runs - `null` for the embedded set, whose busy state renders as the arrow.
 
 ## listCursorPacks
 
@@ -486,6 +539,52 @@ export const importCursorPack = (path: string) => invoke<CursorPackInfo>("import
 ### Used by
 
 `CursorPanel` (`src/editor/panels/CursorPanel.tsx`) - called from the "Import pack..." button; on success, appends the result to the local pack list and selects it.
+
+## BackgroundAssetInfo
+
+```ts
+export interface BackgroundAssetInfo { rel_path: string; kind: "image" | "video"; width: number; height: number; duration_ms: number | null }
+```
+
+An imported background file - mirrors Rust `settings::bg_asset::BackgroundAssetInfo`. `rel_path` is always relative to the project folder and forward-slashed (`background/<file>`): that is what `settings.background.asset` stores, and the reason a project folder stays portable. `duration_ms` is `null` for a still; a video's is what the preview loops on.
+
+## importBackgroundAsset
+
+```ts
+export const importBackgroundAsset = (projectDir: string, srcPath: string) =>
+  invoke<BackgroundAssetInfo>("import_background_asset", { projectDir, srcPath })
+```
+
+### Inputs
+
+- `projectDir` (`string`) - the recording's folder (the one holding `edit.json`).
+- `srcPath` (`string`) - absolute path to the file the user picked. *Why a path rather than bytes:* the file can be gigabytes, and the Rust side copies it straight from disk to disk.
+
+### Returns
+
+`Promise<BackgroundAssetInfo>` - the copy that now lives inside the project. Rejects with a message naming the accepted extensions when the file is not png/jpg/jpeg/webp/gif/mp4/webm/mov, or is not a file at all.
+
+### Used by
+
+`BackgroundAssetCard` (`src/editor/panels/BackgroundAssetCard.tsx`) - the "Import image or video" tile.
+
+## backgroundAssetInfo
+
+```ts
+export const backgroundAssetInfo = (projectDir: string, relPath: string) =>
+  invoke<BackgroundAssetInfo | null>("background_asset_info", { projectDir, relPath })
+```
+
+What the panel shows for the asset already named in `edit.json`, since a reopened project carries only the relative path. `null` when the file is gone (project moved without its `background/` folder, file deleted outside the app), which is what lets the card say "File missing" rather than show a stale name. Also re-creates a thumbnail that went missing.
+
+## removeBackgroundAsset
+
+```ts
+export const removeBackgroundAsset = (projectDir: string, relPath: string) =>
+  invoke<void>("remove_background_asset", { projectDir, relPath })
+```
+
+Deletes the imported file and its thumbnail. Idempotent. It does NOT touch `edit.json`: the caller clears `background.asset` in its own `onSaveSettings`, because the doc lives in the frontend and a Rust-side write would be overwritten by the next `save_edit`.
 
 ## ensureThumbs
 
@@ -624,3 +723,11 @@ export const getLaunchProject = () => invoke<string | null>("get_launch_project"
 ### Used by
 
 `App` (`src/App.tsx`) - called once on mount; a non-null folder routes straight to the editor instead of showing the HUD. Only covers cold start - see the Rust `LaunchProject` doc comment for the warm-launch (already-running instance) follow-up.
+
+## detectSilences
+
+```ts
+export const detectSilences = (folder: string) => Promise<[number, number][]>
+```
+
+Remove silences (`src-tauri/src/export/pipeline/silence.rs`): the recording's quiet stretches, silent on mic AND system when both exist, as clip-time spans already padded by 150 ms a side, at least 700 ms long and clamped into the trim. The editor applies them as one `add_cuts` so the batch is one undo step, skipping spans already inside a cut.

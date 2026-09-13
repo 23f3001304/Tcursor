@@ -1,14 +1,8 @@
 # src/editor/shell/Rail.tsx
 
+Back in its classic place by the owner's call (2026-09-13): the area/workspace shell that briefly replaced it is archived on `archive/m1a-shell`. `Tab` and the tab list now come from `panelTabs.tsx`.
+
 Left-side icon rail for the editor. Defines the `Tab` union type and the ordered `TABS` manifest, then renders one icon button per tab. The "ai" tab receives the violet accent class when active; all others use the standard active class. Stateless beyond receiving the current tab and a setter.
-
-## Tab
-
-```ts
-export type Tab = "ai" | "background" | "cursor" | "camera" | "captions" | "audio" | "effects"
-```
-
-Discriminated string union enumerating every editor panel. Used by `Editor` to track `tab` state, by `Rail` to determine the active button, and by the panel-rendering branch in `Editor` to decide what to display.
 
 ## Rail
 

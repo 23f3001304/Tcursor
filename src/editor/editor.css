@@ -51,6 +51,11 @@
   --e-fg: #fafafa; --e-mut: #a1a1aa; --e-dim: #71717a;
   --e-primary: #ef4444; --e-primaryh: #dc2626;
   --e-zoom: #7c7ce6; --e-fx: #d99a2b; --e-layout: #2f9e8f; --e-cam: #e05d9e; --e-ai: #7c6cf0; --e-ok: #22c55e;
+  --e-speed: #3f8fd6;   /* the Time lane's speed pills - the one lane accent the palette was missing */
+  /* The wave motif's own blue (benchmark (d)), used by exactly one thing: the horizon wave on
+     empty and first-run states. Not an interactive accent and never paired with one - those
+     states have no content to compete with, which is the whole reason it can be a second hue. */
+  --e-wave: #4c8dd9;
   --e-ring: rgba(250,250,250,.7); --e-focus: var(--e-line-strong);
   --e-shadow-raise: var(--e-shadow-1);
   --e-shadow-pop: var(--e-shadow-2);
@@ -104,6 +109,9 @@
 .e-bardiv { width: 1px; height: 20px; background: var(--e-border); margin: 0 3px; flex: none; }
 .e-gst.close:hover { background: var(--e-primary); color: #fff; }
 
+/* Animated panel slot: owns the fixed width so the inner panel just fills it. popLayout pulls the
+   exiting panel out of flow, so the slot must not shrink underneath it. Surface plane, no border
+   (border doctrine) - separation from the canvas is the surface step + resting shadow only. */
 .e-body { flex: 1; display: flex; min-height: 0; padding: 10px; gap: 10px; }
 /* Floating sidebar: sits above the canvas with space around it (not edge-to-edge). Surface plane,
    no border (border doctrine) - it separates from the canvas by the surface step + resting shadow. */
@@ -129,13 +137,15 @@
 /* AI tab keeps its violet identity - a faint tint layered over the raised slot + a violet tick. */
 .e-ric.ai.on .e-ric-hl { background: rgba(124, 108, 240, .14); }
 .e-ric.ai.on .e-ric-hl::before { background: var(--e-ai); }
-
-/* Animated panel slot: owns the fixed width so the inner panel just fills it. popLayout pulls the
-   exiting panel out of flow, so the slot must not shrink underneath it. Surface plane, no border
-   (border doctrine) - separation from the canvas is the surface step + resting shadow only. */
 .e-panel-slot { width: 320px; flex: none; display: flex; min-height: 0; border-radius: var(--e-r-lg);
   overflow: hidden; box-shadow: var(--e-inset-hi), var(--e-shadow-1); }
 .e-panel-slot > .e-panel, .e-panel-slot > .e-insp { width: 100%; flex: 1; min-height: 0; }
+/* Properties sidebar: the selected clip's inspector, a fixed column on the right of the stage, always
+   mounted (owner's call, 2026-09-13: selecting a clip must not replace the left panel). Same surface
+   plane as the panel slot; the slot's own fixed width is overridden so it fills the column. */
+.e-props-side { width: 360px; flex: none; display: flex; min-height: 0; border-radius: var(--e-r-lg);
+  background: var(--e-surface); box-shadow: var(--e-inset-hi), var(--e-shadow-1); }
+.e-props-side > .e-panel-slot { width: 100%; }
 .e-panel { width: 320px; flex: none; overflow-y: auto;
   padding: var(--e-sp-3); background: var(--e-surface); }
 .e-panel h2 { font-size: var(--e-text-title-size); font-weight: var(--e-text-title-weight); margin: 0 0 6px; }
@@ -146,92 +156,15 @@
   min-height: 32px; font-size: var(--e-text-body-size); font-weight: var(--e-text-body-weight); color: var(--e-fg); }
 /* Sparing full-bleed divider between panel sections (border doctrine) + the 20px section rhythm. */
 .e-sec { border-top: 1px solid var(--e-border2); margin-top: var(--e-sp-4); padding-top: var(--e-sp-3); }
-/* Insert-element library (Task D4): the four "add to timeline" pills as raised cards - icon +
-   name + an 11px hint line, sharing the exact lane-accent-tinted-raised fill/left-edge/inset-hi/
-   shadow-1 treatment the timeline pills themselves use (.e-zblk/.e-fxblk/.e-layblk/.e-camkfpill
-   below), so the palette and the timeline read as the same object family instead of the old
-   full-saturation toy-button slabs. Native HTML5 drag (EffectPills.tsx's handleDragStart comment,
-   commit b23b73d) rules out putting Motion on this exact element - whileHover alone was enough to
-   swallow dragstart - so the hover lift is the same plain CSS translateY+shadow transition
-   `.e-tbtn`/`.e-chip`/`.e-pack-card` already use elsewhere in this file for their own raised-card
-   hover, not the Motion spring the rest of this pass reaches for. The combined two-class selector
-   (not a bare `.e-libpill`) beats the shared `.e-zblk,.e-fxblk,.e-layblk` rule's specificity
-   regardless of source order, so `position/display/padding` reliably override it. */
-.e-zblk.e-libpill, .e-fxblk.e-libpill, .e-layblk.e-libpill, .e-camkfpill.e-libpill {
-  position: static; width: 100%; height: auto; box-sizing: border-box; padding: 9px 11px;
-  display: flex; align-items: center; gap: 10px; cursor: grab; text-align: left;
-  transition: transform .14s ease, box-shadow .14s ease; }
-.e-zblk.e-libpill:hover, .e-fxblk.e-libpill:hover, .e-layblk.e-libpill:hover, .e-camkfpill.e-libpill:hover {
-  transform: translateY(-1px);
-  box-shadow: inset 3px 0 0 var(--pill-accent), var(--e-inset-hi), var(--e-shadow-2); }
-.e-libgrid { display: flex; flex-direction: column; gap: var(--e-sp-1); margin-top: 4px; }
-.e-libicon { flex: none; color: var(--pill-accent); }
-.e-libtext { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.e-libname { font-size: var(--e-text-body-size); font-weight: 600; color: var(--e-fg);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.e-libhint { font-size: 11px; font-weight: var(--e-text-hint-weight); color: var(--e-dim);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The insert-element library's own rules (.e-libpill and friends) moved to panels/panels.css. */
 /* Camera-move pill fill (Task D2: the same accent-tinted-raised treatment as e-zblk/e-fxblk/e-layblk).
    `--pill-accent` (Task D4) joins the other three lane pills' own custom property so `.e-libicon`
    above can read one shared variable name for all four insert-palette cards' icon color. */
 .e-camkfpill { --pill-accent: var(--e-cam); border-radius: 7px; border: 1px solid var(--e-line);
   background: color-mix(in srgb, var(--e-cam) 12%, var(--e-raised));
   box-shadow: inset 3px 0 0 var(--e-cam), var(--e-inset-hi), var(--e-shadow-1); }
-/* Raised interactive row (Engine/device selector) - border doctrine: an interactive control gets
-   the raised plane + a hairline border + inset top-light, not a transparent bg floating on a bare
-   border (its pre-D1 treatment). */
-.e-sel { display: flex; align-items: center; justify-content: space-between; height: 40px; width: 100%;
-  padding: 0 13px; border: 1px solid var(--e-border); background: var(--e-soft); color: var(--e-fg);
-  border-radius: var(--e-r); margin-bottom: 9px; box-shadow: var(--e-inset-hi);
-  transition: background .14s ease, border-color .14s ease; }
-.e-sel:hover { border-color: var(--e-line-strong); }
-.e-sel .l { font-size: var(--e-text-body-size); color: var(--e-mut); }
-.e-sel .v { font-size: var(--e-text-body-size); font-weight: var(--e-text-body-weight); display: flex; align-items: center; gap: 7px; }
-.e-sel .lc { width: 6px; height: 6px; border-radius: 50%; background: var(--e-ok); }
-.e-run { width: 100%; height: 42px; border: none; border-radius: var(--e-r);
-  background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,0)), var(--e-ai);
-  color: #fff; font-size: var(--e-text-body-size); font-weight: var(--e-text-body-weight); display: flex; align-items: center;
-  justify-content: center; gap: 8px; margin: 6px 0 18px; box-shadow: var(--e-lift), var(--e-shadow-raise);
-  transition: filter .14s ease, transform .14s ease, box-shadow .14s ease; }
-.e-run:hover { filter: brightness(1.08); transform: translateY(-1px);
-  box-shadow: var(--e-lift), var(--e-shadow-raise), 0 6px 18px rgba(124,108,240,.28); }
-.e-run:active { transform: translateY(0); }
-.e-run:disabled { opacity: .6; cursor: default; transform: none; box-shadow: none; }
-/* Live "k of N" progress track while the director is running - sits right under the run button. */
-.e-ai-progress { height: 2px; margin: -12px 0 14px; border-radius: 999px; background: var(--e-soft); overflow: hidden; }
-.e-ai-progress-fill { height: 100%; background: var(--e-ai); }
-/* AI auto-edit failure (e.g. Ollama not running) - surfaced under the Auto-edit button. */
-.e-ai-err { margin: 12px 0 0; font-size: var(--e-text-hint-size); line-height: var(--e-text-hint-lh); color: #f7b4b4;
-  background: rgba(239,68,68,.09); border: 1px solid rgba(239,68,68,.3);
-  border-radius: var(--e-r-sm); padding: 10px 12px; }
-.e-ai-err .hint { display: block; margin-top: 4px; color: var(--e-dim); font-weight: var(--e-text-hint-weight); }
-/* Quiet single-line error (no card, unlike .e-ai-err above) - the model-list fetch failure in
-   AiPanel and the pack-import failure in CursorPanel. Same red as .e-ai-err (no new colors). */
-.e-errline { margin: 8px 0 0; font-size: var(--e-text-hint-size); line-height: var(--e-text-hint-lh); color: #f7b4b4; }
-.e-errline button { margin-left: 4px; background: none; border: none; padding: 0; color: inherit;
-  font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
-.e-errline button:hover { color: var(--e-fg); }
-/* Skeleton box matching the Picker button's own metrics, for a loading Engine picker. */
-.e-picker-shell { height: 36px; border-radius: var(--e-r); background: var(--e-soft); border: 1px solid var(--e-border); }
-/* Disabled Engine row for "no local Ollama models resolved" - same footprint as the loading
-   shell/populated Picker (gate finding: an empty Engine field read as broken, not "nothing here
-   yet"), with a quiet Retry affordance instead of the alert-red .e-errline treatment. */
-.e-picker-empty { display: flex; align-items: center; justify-content: space-between; padding: 0 12px;
-  box-sizing: border-box; color: var(--e-dim); font-size: var(--e-text-body-size); font-weight: var(--e-text-body-weight); cursor: default; }
-.e-picker-empty button { background: none; border: none; padding: 0; color: var(--e-mut); font: inherit;
-  font-weight: 600; text-decoration: underline; cursor: pointer; }
-.e-picker-empty button:hover { color: var(--e-fg); }
-/* Agentic director narration - each applied edit streams in as a terminal-like step line. */
-.e-ai-log { margin-top: 16px; display: flex; flex-direction: column; gap: var(--e-sp-1); }
-.e-ai-log-line { font-size: var(--e-text-hint-size); line-height: var(--e-text-hint-lh); color: var(--e-fg); padding-left: 20px; position: relative; }
-.e-ai-log-line::before { content: "↳"; position: absolute; left: 2px; top: 0; color: var(--e-ai); }
-.e-ai-log-line.done { color: var(--e-ok); font-weight: 500; padding-left: 0; }
-.e-ai-log-line.done::before { content: none; }
-.e-sum { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
-.e-sum li { display: flex; align-items: center; gap: var(--e-sp-2); font-size: var(--e-text-body-size); }
-.e-sum .ic { width: 28px; height: 28px; border-radius: 8px; background: var(--e-soft);
-  border: 1px solid var(--e-border); display: flex; align-items: center; justify-content: center;
-  color: var(--e-mut); flex: none; }
+/* The AI Director panel's own rules (.e-run, .e-ai-*, .e-sum, .e-picker-shell/-empty, .e-errline)
+   moved to panels/panels.css. */
 
 .e-stagewrap { flex: 1; position: relative; display: flex; align-items: center; justify-content: center;
   min-width: 0; min-height: 0; padding: 26px; border-radius: var(--e-r-lg);
@@ -261,7 +194,7 @@
 .e-ftool button.on { background: rgba(239,68,68,.1); color: var(--e-primary); border-color: rgba(239,68,68,.4); }
 .e-ftool button.on:hover { background: rgba(239,68,68,.16); }
 /* "nav-on" (Cursor/Captions/Camera) - fix round 1, controller ruling: these are navigation, not
-   toggles, so their highlight only MIRRORS the Rail's own active-tab look (`.e-ric.on`, a soft
+   toggles, so their highlight only MIRRORS the workspace rail's active look (`.e-wsric.on`, a soft
    neutral tint) rather than latching Aspect's colored "engaged" look - nothing here is actually
    toggled, the button just happens to match whichever panel is currently open. */
 .e-ftool button.nav-on { background: var(--e-divider); color: var(--e-fg); border-color: var(--e-line); }
@@ -344,17 +277,9 @@
 .e-zreticle.aim { pointer-events: auto; cursor: grab; background: rgba(124,124,230,.18);
   box-shadow: 0 0 0 1px rgba(0,0,0,.45), 0 0 0 4px rgba(124,124,230,.22), 0 0 14px rgba(0,0,0,.45); }
 .e-zreticle.drag { cursor: grabbing; }
-/* "Aim on stage" toggle under the Target segmented control. */
-.e-aimbtn { margin-top: 7px; height: 30px; width: 100%; display: flex; align-items: center;
-  justify-content: center; gap: 6px; border: 1px solid var(--e-border); border-radius: var(--e-r);
-  background: transparent; color: var(--e-mut); font: inherit; font-size: 12.5px; cursor: pointer;
-  transition: background .14s ease, border-color .14s ease, color .14s ease; }
-.e-aimbtn:hover:not(:disabled) { background: var(--e-soft); color: var(--e-fg); }
-.e-aimbtn.on { border-color: var(--e-zoom); color: var(--e-fg); background: rgba(124,124,230,.14); }
-.e-aimbtn:disabled { opacity: .45; cursor: not-allowed; }
+/* "Aim on stage" lives with the rest of the inspector surface, in inspectors/inspectors.css. */
 .e-stage-empty { margin: auto; color: var(--e-dim); font-size: var(--e-text-hint-size); display: flex; flex-direction: column;
   align-items: center; gap: 10px; }
-.e-stage-load { position: absolute; top: 12px; right: 12px; color: var(--e-mut); display: flex; }
 /* Recoverable stage-media error card (StageMedia.tsx) - icon + reason + a Retry button that
    clears `err` and bumps useEditorData's `reloadTick` to force the proxy effect to re-run. */
 .e-media-err { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 8px;
@@ -422,6 +347,7 @@
   min-width: 106px; text-align: center; letter-spacing: -0.01em; white-space: nowrap; }
 .e-time .sep { color: var(--e-dim); font-weight: 400; margin: 0 2px; }
 .e-time .tot { color: var(--e-dim); font-weight: 500; }
+.e-time .e-time-clip { margin-left: 8px; color: var(--e-mut); font-weight: 400; font-size: 11px; }
 /* Right-rail chip (aspect / quality): transparent, bordered, 28px, 11px tabular. */
 .e-chip { height: 28px; padding: 0 9px; border: 1px solid var(--e-border);
   background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,0));
@@ -475,7 +401,8 @@
    intended reading of "the ruler bar has NO background (canvas plane)" (spec review, round 1):
    an explicit `--e-bg`, not merely "no background" (which would inherit `.e-timeline`'s surface). */
 .e-ruler { position: relative; height: 18px; font-size: 10px; color: var(--e-dim);
-  font-variant-numeric: tabular-nums; margin-bottom: 7px; background: var(--e-bg); }
+  font-variant-numeric: tabular-nums; margin-bottom: 7px; background: var(--e-bg);
+  cursor: pointer; user-select: none; touch-action: none; }
 /* Each 10px label has a 1x4px hairline tick beneath it, pinned to the tick's time. */
 .e-ruler span { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap;
   padding-bottom: 5px; }
@@ -522,17 +449,8 @@
   background: linear-gradient(90deg, transparent, rgba(255,255,255,.04), transparent); }
 /* Track stack: scrolls when many effect layers appear; ruler + filmstrip stay above. */
 .e-tracks { display: flex; flex-direction: column; gap: 6px; max-height: 230px; overflow-y: auto; overflow-x: hidden; padding-bottom: 2px; }
-/* NumberField (Task D4): the raised-plane + border-doctrine container - hairline border,
-   --e-inset-hi top-light, --e-line-strong on hover - matching Switch/Picker's own raised treatment. */
-.e-numfield { display: flex; align-items: center; background: var(--e-raised); border: 1px solid var(--e-line);
-  border-radius: var(--e-r); height: 36px; padding: 0 5px; width: 100%; box-sizing: border-box;
-  box-shadow: var(--e-inset-hi); transition: border-color .14s ease; }
-.e-numfield:hover { border-color: var(--e-line-strong); }
-/* NumberField +/- steppers: proper hover/disabled affordance (the button layout is inline in NumberField.tsx). */
-.e-numstep { background: transparent; opacity: .55; cursor: pointer; transition: background .12s ease, opacity .12s ease, transform .1s ease; }
-.e-numstep:hover:not(:disabled) { background: var(--e-card); opacity: 1; }
-.e-numstep:active:not(:disabled) { transform: scale(.88); }
-.e-numstep:disabled { opacity: .22; cursor: default; }
+/* NumberField's own rules (.e-numfield/.e-numstep) moved to controls/controls.css in the panel
+   pass, alongside every other shared-control rule. */
 .e-tracks::-webkit-scrollbar { width: 11px; }
 .e-tracks::-webkit-scrollbar-track { background: transparent; }
 .e-tracks::-webkit-scrollbar-thumb { background: var(--e-dim); border-radius: 999px;
@@ -568,9 +486,9 @@
    from the lane's INDEX in the already-filtered visible-lanes array - NOT a fixed lane-TYPE
    mapping, which put two same-shade lanes adjacent whenever a project had exactly one of
    {fx, layout} present (an ordinary session, not an edge case). */
-.e-band-a .e-zoomrow, .e-band-a .e-fxrow, .e-band-a .e-layrow, .e-band-a .e-camrow, .e-band-a .e-audiorow {
+.e-band-a .e-zoomrow, .e-band-a .e-fxrow, .e-band-a .e-layrow, .e-band-a .e-timerow, .e-band-a .e-camrow, .e-band-a .e-audiorow {
   background: var(--e-surface); }
-.e-band-b .e-zoomrow, .e-band-b .e-fxrow, .e-band-b .e-layrow, .e-band-b .e-camrow, .e-band-b .e-audiorow {
+.e-band-b .e-zoomrow, .e-band-b .e-fxrow, .e-band-b .e-layrow, .e-band-b .e-timerow, .e-band-b .e-camrow, .e-band-b .e-audiorow {
   background: var(--e-surface-alt); }
 .e-zoomrow { position: relative; height: 32px; border-radius: var(--e-r); }
 /* Pill base (Task D2, replaces the old flat full-saturation slabs): --e-raised tinted 12% toward
@@ -581,7 +499,7 @@
    (not just inlined into `background`) so `.e-layblk`'s fade-ramp pseudo-elements below can fade
    INTO the exact same computed color instead of the stale `--e-surface` they used to reference,
    which no longer matches this pill's own fill. */
-.e-zblk, .e-fxblk, .e-layblk { position: absolute; top: 0; height: 32px; border-radius: 7px; cursor: grab;
+.e-zblk, .e-fxblk, .e-layblk, .e-spdblk { position: absolute; top: 0; height: 32px; border-radius: 7px; cursor: grab;
   overflow: hidden; display: flex; align-items: stretch; user-select: none; touch-action: none;
   --pill-fill: color-mix(in srgb, var(--pill-accent) 12%, var(--e-raised));
   background: var(--pill-fill); border: 1px solid var(--e-line);
@@ -590,11 +508,11 @@
 .e-zblk { --pill-accent: var(--e-zoom); }
 .e-fxblk { --pill-accent: var(--e-fx); }
 .e-layblk { --pill-accent: var(--e-layout); }
-.e-zblk.drag, .e-fxblk.drag, .e-layblk.drag { cursor: grabbing;
+.e-zblk.drag, .e-fxblk.drag, .e-layblk.drag, .e-spdblk.drag { cursor: grabbing;
   box-shadow: inset 3px 0 0 var(--pill-accent), var(--e-inset-hi), var(--e-shadow-2); }
 /* Selected = an accent-tinted border (mixed into --e-line-strong, not a flat accent) + the
    popover-depth shadow - replaces the old per-lane colored outline+glow trio. */
-.e-zblk.sel, .e-fxblk.sel, .e-layblk.sel { transform: translateY(-1px);
+.e-zblk.sel, .e-fxblk.sel, .e-layblk.sel, .e-spdblk.sel { transform: translateY(-1px);
   border-color: color-mix(in srgb, var(--pill-accent) 35%, var(--e-line-strong));
   box-shadow: inset 3px 0 0 var(--pill-accent), var(--e-inset-hi), var(--e-shadow-2); }
 /* Resize-handle grabbability over TrimOverlay (item 1 fix round 1, controller ruling
@@ -606,16 +524,16 @@
    every pill now stays at z-index auto (stack level 0, below `.e-trimdim`), exactly as it did
    before this whole fix existed; the bump only exists for the moment a user is actually about to
    grab (or is dragging) a handle, which is also the only moment it needs to win the race. */
-.e-zblk:hover, .e-fxblk:hover, .e-layblk:hover,
-.e-zblk.sel, .e-fxblk.sel, .e-layblk.sel,
-.e-zblk.drag, .e-fxblk.drag, .e-layblk.drag { z-index: 7; }
+.e-zblk:hover, .e-fxblk:hover, .e-layblk:hover, .e-spdblk:hover,
+.e-zblk.sel, .e-fxblk.sel, .e-layblk.sel, .e-spdblk.sel,
+.e-zblk.drag, .e-fxblk.drag, .e-layblk.drag, .e-spdblk.drag { z-index: 7; }
 .e-zlabel { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; color: var(--e-fg);
   font-size: 11px; font-weight: 600; pointer-events: none; white-space: nowrap; overflow: hidden; }
 .e-zh { width: 11px; flex: none; cursor: ew-resize; position: relative; touch-action: none; }
 .e-zh::after { content: ""; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
   width: 2px; height: 12px; border-radius: 2px; background: rgba(255,255,255,.55); opacity: 0;
   transition: opacity .14s ease; }
-.e-zblk:hover .e-zh::after { opacity: 1; }
+.e-zblk:hover .e-zh::after, .e-spdblk:hover .e-zh::after { opacity: 1; }
 .e-zh:hover::after { height: 16px; background: rgba(255,255,255,.9); opacity: 1; }
 /* Tiny pills: below this width the icon+text label can't fit without clipping, so it hides
    entirely (a bare color chip still reads and stays draggable) rather than showing a sliver of
@@ -623,7 +541,7 @@
    viewport, so it reacts as the SAME pill's live drag-resize crosses the threshold. `min-width`
    keeps a short region's hit target (drag body + both edge handles) usable even at near-zero
    duration, where the percentage width alone would shrink to a few px. */
-.e-zblk, .e-fxblk, .e-layblk { container-type: inline-size; min-width: 18px; }
+.e-zblk, .e-fxblk, .e-layblk, .e-spdblk { container-type: inline-size; min-width: 18px; }
 @container (max-width: 34px) { .e-zlabel { display: none; } }
 /* T34 L4: the layout pill's thumbnail hides FIRST, at a wider breakpoint than the "hide the whole
    label" one above - a narrow pill keeps its preset name readable a while longer, losing only the
@@ -652,6 +570,31 @@
 .e-layblk::after { right: 0; width: var(--fout, 0%);
   background: linear-gradient(to left, var(--pill-fill), rgba(0,0,0,0)); }
 .e-layblk > * { position: relative; z-index: 1; }
+/* Time lane (TimeLane.tsx): speed spans on the shared pill plane above, with the one lane accent
+   the palette was missing (`--e-speed`) so the lane reads apart from Zoom/FX/Layout at a glance.
+   Banded like every other row - see the `.e-band-a`/`.e-band-b` lists above. */
+.e-timerow { position: relative; height: 32px; border-radius: var(--e-r); }
+.e-spdblk { --pill-accent: var(--e-speed); }
+/* Cut spans (CutOverlay.tsx): the time a cut removes, hatched across the whole track stack. A
+   PATTERN fill, not chrome decoration - the same exemption `.e-trimdim` takes - 45-degree 1px
+   --e-dim stripes at 18% over a 40% --e-bg scrim, and no border at rest. The 1px accent edges
+   arrive only on hover (or while selected), so a resting timeline stays quiet. z-index 2 puts it
+   over the lane rows and under `.e-trimdim`'s own dimming (3), so trimmed-out time still reads as
+   excluded even where a cut also sits inside it. */
+.e-cut { position: absolute; top: 0; bottom: 0; z-index: 2; cursor: pointer;
+  background:
+    repeating-linear-gradient(45deg, color-mix(in srgb, var(--e-dim) 18%, transparent) 0 1px, transparent 1px 6px),
+    color-mix(in srgb, var(--e-bg) 40%, transparent);
+  transition: box-shadow .14s ease; }
+.e-cut:hover, .e-cut.sel { box-shadow: inset 1px 0 0 var(--e-primary), inset -1px 0 0 var(--e-primary); }
+/* The edges still appear, they just stop easing in; `CutOverlay`'s enter/leave is gated by `useReducedMotion` in TS. */
+@media (prefers-reduced-motion: reduce) { .e-cut { transition: none; } }
+/* Range selection (timelineRuler.tsx, the ruler's Shift+drag): a translucent accent wash with the
+   same 1px accent edges, drawn across the track body so what Cut and Speed will act on is
+   unmistakable. Never interactive - the gesture that made it is how it is changed. */
+.e-range { position: absolute; top: 0; bottom: 0; z-index: 4; pointer-events: none;
+  background: color-mix(in srgb, var(--e-primary) 12%, transparent);
+  box-shadow: inset 1px 0 0 var(--e-primary), inset -1px 0 0 var(--e-primary); }
 /* T34 L4: the layout pill's thumbnail (`LayoutThumb.tsx`) - a schematic of the segment's OWN
    resolved panels (`arrThumb.ts`), shared verbatim (same viewBox, just a bigger rendered size) by
    `LayoutInspector`'s 48x28 header thumbnail. --e-layout/--e-cam echo the lane accent and the
@@ -743,16 +686,10 @@
    line stays a plain confident accent stroke until the user actually grabs it. */
 .e-ph-glow { position: absolute; top: 0; bottom: 0; left: 50%; width: 12px; margin-left: -6px;
   background: var(--e-primary); filter: blur(6px); opacity: 0; pointer-events: none; }
-/* Triangular grab head: the ONE interactive part of an otherwise pointer-events:none playhead
-   (`.e-ph` stays click-through so body scrubbing is unaffected) - `pointer-events: auto`
-   re-enables hit-testing for just this child, and its own pointerdown bubbles straight up to
-   `.e-tlbody`'s existing scrub handler (no stopPropagation here), so grabbing the head drags the
-   playhead exactly like scrubbing the body does, with no extra wiring. Motion (not CSS) owns the
-   hover scale - a spring, per the global motion-language rule for stateful interaction. */
-.e-ph-head { position: absolute; top: -1px; left: 50%; width: 12px; height: 9px; margin-left: -6px;
-  clip-path: polygon(0 0, 100% 0, 50% 100%); background: var(--e-primary);
-  pointer-events: auto; cursor: grab; }
-.e-ph-head:active { cursor: grabbing; }
+/* The grab head is now the brand's dot (`.w-ph-head` in src/lib/wave.css - the mark rotated 90
+   degrees), together with its drag ripple. It is still the ONE interactive part of an otherwise
+   pointer-events:none playhead: `.e-ph` stays click-through so body scrubbing is unaffected, and
+   the head's own pointerdown bubbles straight up to `.e-tlbody`'s existing scrub handler. */
 
 /* Export dialog (ExportDialog + ExportProgress) - reuses the modal scrim/card/actions above. */
 .e-export-modal { width: 400px; }
@@ -765,11 +702,12 @@
 .e-export-progress-row { display: flex; align-items: center; gap: 8px; font-size: var(--e-text-body-size); font-weight: var(--e-text-body-weight); margin-bottom: 12px; }
 .e-export-pct { margin-left: auto; color: var(--e-mut); font-variant-numeric: tabular-nums;
   font-size: var(--e-text-value-size); font-weight: var(--e-text-value-weight); }
-.e-export-bar-track { height: 6px; border-radius: 999px; background: var(--e-soft); border: 1px solid var(--e-border2); overflow: hidden; }
-.e-export-bar-fill { height: 100%; background: var(--e-primary); border-radius: 999px; }
+/* The fill bar (`.e-export-bar-track`/`.e-export-bar-fill`) is gone: `ExportProgress` draws a
+   `SweepWave` whose dot sits at the percentage and whose amplitude decays to flat at 100%. */
 .e-export-eta { margin: 10px 0 0; font-size: var(--e-text-hint-size); color: var(--e-dim); text-align: center; }
 .e-export-outcome { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 10px 0 4px; gap: 4px; }
-.e-export-icon.done { color: var(--e-ok); }
+/* `.e-export-icon.done` is gone with the success icon it coloured: the done view ends the sweep
+   instead, and `SweepWave`'s checkmark takes --e-ok from `wave.css`. */
 .e-export-icon.error { color: var(--e-primary); }
 .e-export-outcome-title { margin: 6px 0 0; font-size: var(--e-text-title-size); font-weight: var(--e-text-title-weight); }
 .e-export-outcome-body { margin: 0 0 12px; font-size: var(--e-text-hint-size); color: var(--e-mut); max-width: 320px; word-break: break-word; }
@@ -789,6 +727,8 @@
 
 /* Shortcuts overlay (ShortcutsOverlay) - reuses the modal scrim/card above. */
 .e-shortcuts-modal { width: 300px; }
+.e-shortcuts-group { margin: 14px 0 0; font-size: var(--e-text-label-size); font-weight: var(--e-text-label-weight);
+  letter-spacing: var(--e-text-label-ls); text-transform: uppercase; color: var(--e-dim); }
 .e-shortcuts-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .e-shortcuts-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px;
   height: 32px; padding: 0 2px; }
@@ -814,16 +754,8 @@
 
 /* Zoom inspector (left panel while a timeline block is selected). */
 .e-insp { display: flex; flex-direction: column; }
-/* Panel header: title + matched ghost icon buttons (reset/close) over a hairline. */
-.e-phead { padding-bottom: var(--e-sp-3); margin-bottom: var(--e-sp-4); border-bottom: 1px solid var(--e-border2); }
-.e-phead-top { display: flex; align-items: center; justify-content: space-between; }
-/* T34 L4: title + an optional thumb (LayoutInspector's arrangement schematic) share ONE flex
-   group so .e-phead-top still only ever balances two things (this group vs .e-hicons) - a bare
-   <h2> with no thumb reads identically to the pre-L4 markup. */
-.e-phead-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.e-phead h2 { margin: 0; font-size: var(--e-text-title-size); font-weight: var(--e-text-title-weight); letter-spacing: -0.01em; }
-.e-phead .e-lede { margin: var(--e-sp-1) 0 0; }
-.e-hicons { display: flex; align-items: center; gap: 2px; }
+/* PanelHeader's own rules (.e-phead*, .e-hicons) moved to panels/panels.css in the panel pass.
+   `.e-hicon` itself stays here: the settings dialog's sections use it too. */
 .e-hicon { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
   border: none; background: transparent; color: var(--e-dim); border-radius: var(--e-r-sm); cursor: pointer;
   transition: background .14s ease, color .14s ease; }
@@ -855,40 +787,16 @@
   font-size: var(--e-text-value-size); font-weight: var(--e-text-value-weight); }
 .e-field2 { display: flex; gap: var(--e-sp-2); }
 .e-field2 .e-field { flex: 1; }
-/* Slider (Task D4): the rail is a flat 3px groove (border doctrine - a passive channel, not
-   itself a bordered control) filled with the caller's own accentColor; the THUMB carries the
-   actual raised-interactive treatment (hairline border + inset top-light + resting shadow),
-   same language as the trim handle / camera keyframe diamond. Motion owns the hover grow (a
-   `scale` transform, not a width/height change, so the thumb's own fixed margin-based centering
-   never needs to recompute per hover state) and the press shrink; the border-color hover state is
-   a plain CSS transition living alongside it - "Motion owns transform, CSS owns color". */
-.e-slider-rail { width: 100%; height: 3px; border-radius: 999px; background: var(--e-raised); position: relative; }
-.e-slider-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; }
-.e-slider-thumb { position: absolute; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px;
-  border-radius: 50%; background: var(--e-raised); border: 1px solid var(--e-line);
-  box-shadow: var(--e-inset-hi), var(--e-shadow-1); transition: border-color .14s ease; }
-.e-slider-thumb:hover { border-color: var(--e-line-strong); }
-/* Small dim caption row under a slider (e.g. AudioPanel's "Mic earlier/later" ends). */
-.e-hintrow { display: flex; justify-content: space-between; font-size: var(--e-text-hint-size); color: var(--e-dim); margin-bottom: 4px; }
-/* One-line dim caption under an inspector section (e.g. ZoomInspector's scoped-controls note). */
-.e-sec-hint { margin: -3px 0 var(--e-sp-2); font-size: var(--e-text-hint-size); color: var(--e-dim); }
-/* Switch (Task D4): already on the raised plane with a hairline border (see Switch.tsx's own
-   comment) - this just adds the border doctrine's missing hover state for the off/neutral track
-   (the on/engaged track's border is already the bright --e-fg it should stay). Plain CSS color
-   transition riding the `transition` Switch.tsx already declares inline. */
-.sw:hover:not(.on) { border-color: var(--e-line-strong); }
+/* Slider, Switch and the slider readout moved to controls/controls.css in the panel pass;
+   AudioPanel's `.e-hintrow` moved to panels/panels.css and the inspector captions to
+   inspectors/inspectors.css with the rest of their rules. */
 .e-seg { display: flex; gap: 4px; background: var(--e-soft); border-radius: var(--e-r-sm); padding: 3px; }
 .e-seg button { flex: 1; height: 30px; border: none; background: transparent; color: var(--e-mut);
   border-radius: var(--e-r-sm); font-size: var(--e-text-body-size); font-weight: var(--e-text-body-weight); transition: background .14s ease, color .14s ease; }
 .e-seg button.on { background: var(--e-card);
   color: var(--e-fg); box-shadow: var(--e-inset-hi), var(--e-shadow-1); }
-.e-del { margin-top: 14px; width: 100%; box-sizing: border-box; padding: 14px;
-  border: 1px solid rgba(239, 68, 68, 0.35); border-radius: var(--e-r); background: rgba(239, 68, 68, 0.09);
-  color: #f87171; font-size: var(--e-text-body-size); font-weight: 600; display: flex; align-items: center; justify-content: center;
-  gap: 6px; cursor: pointer; transition: background .15s ease, border-color .15s ease, transform .1s ease; }
-.e-del svg { flex: none; }
-.e-del:hover { background: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.55); }
-.e-del:active { transform: scale(0.98); }
+/* `.e-del` (the inspectors' Remove) lives in inspectors/inspectors.css - it is a quiet ghost now,
+   not a filled red slab, and no panel outside the inspectors uses it. */
 
 /* Custom inset rounded-pill scrollbar for the scrolling rail panel (WebView2 = Chromium). */
 .e-panel::-webkit-scrollbar { width: 11px; }
@@ -897,230 +805,9 @@
   border: 3px solid var(--e-bg); background-clip: padding-box; min-height: 40px; }
 .e-panel:hover::-webkit-scrollbar-thumb { background: var(--e-mut); background-clip: padding-box; }
 
-/* Picker (Task D4): closed button on the raised plane with the full border-doctrine treatment
-   (hairline border + inset top-light, --e-line-strong on hover/focus). Menu options sit on the
-   surface-plane popover (.e-picker-menu, below); the selected option is now a raised chip -
-   --e-raised fill + an --e-line-strong hairline - replacing the old borderless heavy solid-fill
-   block, the same "active raised chip" language `.e-seg button.on` already uses. */
-.e-picker-btn { width: 100%; height: 36px; background: var(--e-raised); border: 1px solid var(--e-line);
-  border-radius: var(--e-r); padding: 0 12px; display: flex; align-items: center; justify-content: space-between;
-  cursor: pointer; color: var(--e-fg); font-family: inherit; font-size: 13px; font-weight: 500;
-  text-align: left; outline: none; box-sizing: border-box; box-shadow: var(--e-inset-hi);
-  transition: border-color .14s ease; }
-.e-picker-btn:hover { border-color: var(--e-line-strong); }
-.e-picker-opt { width: 100%; height: 32px; box-sizing: border-box; padding: 0 8px; display: flex; align-items: center;
-  background: transparent; color: var(--e-fg); border: 1px solid transparent; border-radius: var(--e-r-sm);
-  cursor: pointer; font-family: inherit; font-size: 12.5px; font-weight: 500; text-align: left;
-  transition: background-color .14s ease, border-color .14s ease; }
-.e-picker-opt:hover { background: var(--e-divider); }
-.e-picker-opt.on { background: var(--e-raised); border-color: var(--e-line-strong); font-weight: 600; }
-/* Same custom scrollbar, scoped to the Picker dropdown menu (Controls.tsx) - its border/bg
-   differ from .e-panel's dark surface, so the thumb inset border matches its own background. */
-.e-picker-menu::-webkit-scrollbar { width: 11px; }
-.e-picker-menu::-webkit-scrollbar-track { background: transparent; }
-.e-picker-menu::-webkit-scrollbar-thumb { background: var(--e-dim); border-radius: 999px;
-  border: 3px solid var(--e-card); background-clip: padding-box; min-height: 40px; }
-.e-picker-menu:hover::-webkit-scrollbar-thumb { background: var(--e-mut); background-clip: padding-box; }
-
-.e-curve-pick {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  margin-top: var(--e-sp-1);
-}
-.e-curve-card {
-  flex: 1;
-  background: var(--e-soft);
-  border: 1px solid var(--e-border);
-  border-radius: var(--e-r-sm);
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  color: var(--e-mut);
-  font-family: inherit;
-  font-size: var(--e-text-body-size);
-  font-weight: var(--e-text-body-weight);
-  box-shadow: var(--e-lift);
-  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease, transform 0.14s ease, box-shadow 0.14s ease;
-}
-.e-curve-card:hover {
-  border-color: var(--e-mut);
-  color: var(--e-fg);
-}
-/* Hover-lift (design/premium-pass D6), same plain-CSS mechanism `.e-pack-card` already uses -
-   `.wide` is the SELECTED card expanded in place into the live bezier editor, not a hoverable
-   pick anymore (it has `cursor: default`), so it's excluded from the lift + the :active reset. */
-.e-curve-card:not(.wide):hover {
-  transform: translateY(-1px);
-  box-shadow: var(--e-lift), var(--e-shadow-raise);
-}
-.e-curve-card:not(.wide):active { transform: translateY(0); }
-.e-curve-card.on {
-  background: var(--e-card);
-  border-color: var(--e-fg);
-  color: var(--e-fg);
-  font-weight: 600;
-}
-.e-curve-svg {
-  width: 100%;
-  height: 48px;
-  overflow: visible;
-}
-/* The SELECTED curve card expands in place across the whole picker row and becomes the
-   interactive bezier editor (CurveEditor.tsx): its curve is drawn live from the control points,
-   and the two handles are draggable + arrow-key nudgeable. */
-.e-curve-card.wide { grid-column: 1 / -1; cursor: default; padding: 10px 12px 8px; }
-.e-curve-card.wide .e-curve-svg { height: 116px; }
-.e-curve-card.wide span { display: flex; align-items: baseline; gap: 8px; }
-.e-curve-card.wide span em { font-style: normal; font-weight: var(--e-text-hint-weight); font-size: var(--e-text-hint-size); color: var(--e-dim); }
-.e-curve-arm { stroke: var(--e-border); stroke-width: 1.5; stroke-dasharray: 4 3; }
-.e-curve-h { fill: var(--e-card); stroke: var(--e-fg); stroke-width: 2.5; cursor: grab;
-  touch-action: none; transition: fill .14s ease, stroke .14s ease; }
-.e-curve-h:hover { fill: var(--e-soft); }
-.e-curve-h:focus-visible { outline: none; stroke: var(--e-primary); fill: var(--e-soft); }
-.e-curve-h.grab { cursor: grabbing; fill: var(--e-fg); }
-
-/* Custom visual controls for settings panels */
-.e-preset-grid {
-  display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 8px;
-  margin-top: 4px;
-}
-.e-preset-circle {
-  width: 100%;
-  aspect-ratio: 1;
-  border-radius: 50%;
-  cursor: pointer;
-  padding: 0;
-  border: none;
-  outline: none;
-  box-shadow: var(--e-lift), var(--e-shadow-raise);
-  transition: transform 0.14s ease, box-shadow 0.15s ease;
-}
-.e-preset-circle:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--e-lift), var(--e-shadow-raise), 0 4px 10px rgba(0,0,0,.35);
-}
-.e-preset-circle:active { transform: translateY(0); }
-.e-preset-circle.on {
-  box-shadow: 0 0 0 2px var(--e-bg), 0 0 0 4px var(--e-fg), 0 0 16px rgba(250,250,250,.18);
-}
-
-.e-accent-list {
-  display: flex;
-  gap: 10px;
-  margin-top: 4px;
-}
-.e-accent-circle {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  cursor: pointer;
-  padding: 0;
-  border: none;
-  outline: none;
-  box-shadow: var(--e-lift), var(--e-shadow-raise);
-  transition: transform 0.14s ease, box-shadow 0.15s ease;
-}
-.e-accent-circle:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--e-lift), var(--e-shadow-raise), 0 4px 10px rgba(0,0,0,.35);
-}
-.e-accent-circle:active { transform: translateY(0); }
-.e-accent-circle.on {
-  box-shadow: 0 0 0 2px var(--e-bg), 0 0 0 4px var(--e-fg, #fff);
-}
-
-/* Small swatch row (Swatches.tsx `variant="small"`) - EffectsPanel's ripple color/tint,
-   CameraRingField's ring color. Border-based selection (not the preset/accent ring above) -
-   this is the pre-Task-26 inline-styled look, just promoted to a real class. */
-.e-swatch-row { display: flex; gap: 8px; margin-top: 2px; }
-.e-swatch-sm {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  padding: 0;
-  outline: none;
-  border: 1px solid var(--e-border);
-  cursor: pointer;
-}
-.e-swatch-sm.on { border: 2px solid var(--e-fg); }
-.e-swatch-sm:disabled { opacity: .4; cursor: default; }
-
-.e-pack-grid {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 8px;
-  margin-top: 4px;
-}
-.e-pack-card {
-  height: 56px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  border-radius: var(--e-r-sm);
-  background: var(--e-soft);
-  border: 1px solid var(--e-border);
-  cursor: pointer;
-  padding: 6px 0 4px;
-  outline: none;
-  box-shadow: var(--e-lift);
-  transition: transform 0.14s ease, border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.14s ease;
-}
-.e-pack-card:hover {
-  transform: translateY(-1px);
-  border-color: var(--e-mut);
-  box-shadow: var(--e-lift), var(--e-shadow-raise);
-}
-.e-pack-card:active { transform: translateY(0); }
-.e-pack-card.on {
-  background: var(--e-card);
-  border-color: var(--e-fg);
-  box-shadow: var(--e-lift), 0 0 16px rgba(250,250,250,.14);
-}
-.e-pack-card span {
-  font-size: var(--e-text-body-size);
-  font-weight: var(--e-text-body-weight);
-  color: var(--e-mut);
-  text-transform: none;
-  letter-spacing: -0.01em;
-  pointer-events: none;
-}
-.e-pack-card.on span {
-  color: var(--e-fg);
-}
-
-.e-upload-dashed {
-  width: 100%;
-  height: 36px;
-  background: var(--e-soft);
-  border: 1px dashed var(--e-border);
-  border-radius: 6px;
-  color: var(--e-mut);
-  font-size: var(--e-text-body-size);
-  font-weight: var(--e-text-body-weight);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  cursor: pointer;
-  border-style: dashed;
-  box-shadow: var(--e-lift);
-  transition: border-color 0.15s, color 0.15s, transform 0.14s ease, box-shadow 0.14s ease;
-}
-.e-upload-dashed:hover {
-  border-color: var(--e-fg);
-  color: var(--e-fg);
-  transform: translateY(-1px);
-  box-shadow: var(--e-lift), var(--e-shadow-raise);
-}
-.e-upload-dashed:active { transform: translateY(0); }
+/* Picker, Swatches and ColorInput moved to controls/controls.css; the pack grid, the wallpaper
+   grid, the background asset card and the import affordance moved to panels/panels.css, where
+   they now share one tile idiom (`.e-tile`) instead of three near-identical card rules. */
 
 /* AI director choreography (Task 25): the fake pointer that visibly performs each edit, the
    cancel scrim, and the Stop pill - z-index sits above panels/timeline (<30) but below modals
@@ -1148,3 +835,5 @@
   color: var(--e-fg); pointer-events: all;
   cursor: pointer; white-space: nowrap; }
 
+/* (The wallpaper grid and the colour picker's own rules now live in panels/panels.css and
+   controls/controls.css respectively - see the note above the AI-director block.) */

@@ -1,7 +1,12 @@
+pub mod busy;
+pub mod captured;
 pub mod cursordraw;
 pub mod cursorset;
+pub mod cursorxform;
 pub mod cursorpreview;
 pub mod pack;
+pub mod packdirs;
+pub mod packlist;
 pub mod pack_import;
 
 use crate::events::model::{EventKind, MouseEvent, ScreenInfo};
@@ -18,7 +23,7 @@ pub struct Cursor {
     idx: usize,
     sx: f32,
     sy: f32,
-    a: f32, // follow low-pass alpha (settings-driven; lower = smoother, more deliberate glide)
+    a: f32, // follow low-pass alpha PER 60fps FRAME (settings-driven; lower = smoother glide)
     idealize: f32, // 0 = raw path, 1 = clean eased strokes between the click/endpoint anchors
     anchors: Vec<(u32, f32, f32)>, // (t, x, y) frame-local anchors for path idealization
     primed: bool,
@@ -63,8 +68,12 @@ impl Cursor {
     /// reused to re-scan from t=0 (preview fast-forward to an arbitrary T).
     pub fn reset(&mut self) { self.idx = 0; self.sx = 0.0; self.sy = 0.0; self.primed = false; }
 
-    /// Smoothed cursor position at `t_ms` (interpolate, then exponential low-pass).
-    pub fn at(&mut self, t_ms: u32) -> FramePoint {
+    /// Smoothed cursor position at `t_ms` (interpolate, then exponential low-pass) after one frame
+    /// of `dt_ms`. `dt_ms` is the caller's EXACT frame period (`render::OUT_STEP_MS`), never a
+    /// difference of `t_ms` values: `a` is a per-60fps-frame fraction and `follow::damping` turns
+    /// it into the equivalent fraction for this step, so `smoothness` means the same time constant
+    /// at every output rate - and whole-ms timestamps would read 16/17/17/16 and ripple it.
+    pub fn at(&mut self, t_ms: u32, dt_ms: f32) -> FramePoint {
         while self.idx + 1 < self.events.len() && self.events[self.idx + 1].t <= t_ms {
             self.idx += 1;
         }
@@ -74,8 +83,9 @@ impl Cursor {
             self.sy = raw.y as f32;
             self.primed = true;
         } else {
-            self.sx += (raw.x as f32 - self.sx) * self.a;
-            self.sy += (raw.y as f32 - self.sy) * self.a;
+            let a = crate::export::camera::follow::damping(self.a, dt_ms);
+            self.sx += (raw.x as f32 - self.sx) * a;
+            self.sy += (raw.y as f32 - self.sy) * a;
         }
         // Path idealization: blend the smoothed position toward the eased anchor path so wandering
         // routes become clean, deliberate strokes between the points that matter (clicks).
@@ -145,7 +155,7 @@ mod tests {
         let s = ScreenInfo { w: 1920, h: 1080, origin_x: 0, origin_y: 0 };
         let ev = vec![mv(1000, 100, 100)];
         let mut c = Cursor::new(ev, s, 0.35);
-        assert_eq!(c.at(0), FramePoint { x: 960, y: 540 }); // before the first sample -> center
+        assert_eq!(c.at(0, 16.0), FramePoint { x: 960, y: 540 }); // before the first sample -> center
     }
 
     #[test]
@@ -154,7 +164,7 @@ mod tests {
         let ev = vec![mv(0, 0, 0), mv(100, 800, 400)];
         let mut c = Cursor::new(ev, s, 0.35);
         let mut p = FramePoint { x: 0, y: 0 };
-        for t in (0..2000).step_by(16) { p = c.at(t); }
+        for t in (0..2000).step_by(16) { p = c.at(t, 16.0); }
         assert!((p.x - 800).abs() <= 2 && (p.y - 400).abs() <= 2); // converged to the held target
     }
 
@@ -167,8 +177,8 @@ mod tests {
         let mut raw = Cursor::new(ev.clone(), s, 1.0); // a=1 -> follows the raw detour
         let mut ideal = Cursor::new(ev, s, 1.0);
         ideal.set_idealize(1.0);
-        for t in (0..=500).step_by(16) { raw.at(t); ideal.at(t); }
-        let (r, i) = (raw.at(500), ideal.at(500));
+        for t in (0..=500).step_by(16) { raw.at(t, 16.0); ideal.at(t, 16.0); }
+        let (r, i) = (raw.at(500, 16.0), ideal.at(500, 16.0));
         assert!(i.y.abs() < r.y.abs(), "idealized y {} should hug the anchor line, not the detour {}", i.y, r.y);
     }
 }

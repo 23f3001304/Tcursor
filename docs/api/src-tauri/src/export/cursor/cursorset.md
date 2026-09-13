@@ -36,6 +36,12 @@ All per-export Enhanced cursor state, created once by `prep` and mutated each fr
 
 - `src-tauri/src/export/pipeline/exporter.rs` - creates one `CursorPrep` per export via `prep`, then calls `draw` once per rendered frame.
 
+Two more fields carry pack format v2's animated busy state, both resolved once at `prep` time:
+
+- `busy: Option<BusySpec>` - the selected pack's busy animation, `None` for a still one.
+- `busy_frames: Vec<CursorSprite>` - decoded `busy_NN.png` frames when the pack ships them, empty otherwise. Indexed by `BusyPose::frame`, so an out-of-range index simply falls back to `set`'s busy sprite. Decoded here, not per frame: an explicit-frame pack is a handful of extra PNG decodes at renderer-build time and zero work afterwards.
+
+
 ## draws_synthetic
 
 ```rust
@@ -81,6 +87,21 @@ Decodes all cursor sprites and assembles the `CursorPrep` for an export run. Spr
 
 - `prep_is_none_for_system_and_hidden_when_the_video_has_the_os_cursor` - returns `None` for `System` (with a baked cursor) and for `Hidden` (either way) without attempting any decode.
 - `draws_synthetic_covers_every_style_and_bake_combination` - all six style x baked pairs. The row that changed is `System` + no baked cursor, which now draws instead of rendering nothing at all.
+
+## posed
+
+```rust
+fn posed<'a>(set: &'a HashMap<CursorType, CursorSprite>, track: &CursorTrack,
+             busy: Option<BusySpec>, frames: &'a [CursorSprite], ev_t: u32, out_t: u32)
+             -> (Option<&'a CursorSprite>, BusyPose)
+```
+
+The sprite and transform for this frame: normally the type track's own sprite, still. For the **Busy** type on a v2 pack it is `busy_pose`'s answer - an explicit frame when the pack ships them (drawn untransformed), otherwise the single busy sprite plus a rotation or scale.
+
+*Why OUTPUT time and not `ev_t`:* the animation belongs to the rendered timeline, so one instant always yields one pose. Deterministic per exported frame, and a paused preview shows exactly the frame for where the playhead sits rather than something that depends on how the user scrubbed there. The SPRITE choice still comes from `ev_t`, because the cursor-type track is a raw event stream.
+
+*Why it takes the prep's fields separately* (like `sprite_for`, and for the same reason): the caller still needs `&mut cp.recent` for the motion trail while holding this sprite, which only works as disjoint field borrows.
+
 
 ## invert_rgb
 
@@ -128,7 +149,7 @@ Returns the sprite for the cursor type active at `ev_t`, falling back to Arrow i
 
 ```rust
 pub fn draw(cp: &mut CursorPrep, out: &mut [u8], ow: u32, oh: u32, cur: FramePoint,
-            cam: Camera, screen: &Panel, inset_w: f32, ev_t: u32, c: &CursorSettings,
+            cam: Camera, screen: &Panel, inset_w: f32, ev_t: u32, out_t: u32, c: &CursorSettings,
             os_cursor_in_video: bool)
 ```
 
@@ -149,7 +170,8 @@ Per-frame synthetic cursor draw, clipped to the screen panel.
 - `cam: Camera` - the current zoom/pan camera transform. *Why:* the cursor must be drawn at the camera-projected position in the output frame, not at the raw recording position.
 - `screen: &Panel` - the screen panel's alpha and screen-space rect. *Why:* two uses - `screen.alpha < 0.5` is the early-out guard (no cursor when the screen panel is invisible), and `screen.rect` is projected into the clip box that confines the cursor to the panel bounds.
 - `inset_w: f32` - width of the full inset region in output pixels. *Why:* the cursor size scales by `screen.rect.w / inset_w` so a small PiP screen gets a proportionally smaller cursor.
-- `ev_t: u32` - current frame event-time; forwarded to `sprite_for` and `apply_enhanced`.
+- `ev_t: u32` - current frame event-time; forwarded to `posed` (for the sprite) and `apply_enhanced` (for the click bounce).
+- `out_t: u32` - current frame OUTPUT time, the clock pack v2's busy animation runs on. Plain-OS mode ignores it: a real OS cursor has no synthesised animation either.
 - `c: &CursorSettings` - the LIVE cursor display settings (size, motion blur, click bounce, bounce intensity, and the `style` that plain-OS mode keys off).
 - `os_cursor_in_video: bool` - record-time truth, threaded from `FrameRenderer`. *Why here as well as in `prep`:* `prep` decides whether there is anything to draw; this decides how to draw it, and only this one is re-evaluated per frame.
 
@@ -159,8 +181,34 @@ Per-frame synthetic cursor draw, clipped to the screen panel.
 
 ### Implementation
 
-1. Return immediately if `screen.alpha < 0.5`.
-2. Project `cur` through `cam` via `coordmap::project` to get the output-space hotspot `pos`.
-3. Compute `panel = (screen.rect.w / inset_w.max(1.0)).clamp(0.1, 1.0)` as the cursor size scale.
-4. Project `screen.rect` via `project_rect` to get the `clip` box `(x0, y0, x1, y1)` in output pixels.
-5. Call `sprite_for(&cp.set, &cp.track, ev_t)`. On `Some(spr)`, call `cursordraw::apply_enhanced` with trail cap 6 and all cursor settings from `c`.
+1. Call `frame_placement` for the position, panel factor and clip box; return immediately on `None` (screen panel more than half faded).
+2. Call `posed(..)` for the sprite AND its busy pose - or force Arrow with a still pose in plain-OS mode. On `Some(spr)`, call `cursordraw::apply_enhanced` with trail cap 6, the pose, and all cursor settings from `c`.
+
+## frame_placement
+
+```rust
+pub fn frame_placement(cur: FramePoint, cam: Camera, ow: u32, oh: u32, screen: &Panel,
+                       inset_w: f32) -> Option<((f32, f32), f32, (i32, i32, i32, i32))>
+```
+
+Where a cursor goes this frame, whichever cursor it is. Extracted from `draw` so the captured-layer path (`export::cursor::captured::CapturedCursors::draw`) projects through the exact same math instead of a second copy of it - the two must agree on scale and clipping or a style switch would visibly move the cursor.
+
+### Inputs
+
+- `cur: FramePoint` - the cursor in base/output coordinates, before camera projection.
+- `cam: Camera` - the frame's zoom/pan transform.
+- `ow`, `oh` - output frame dimensions.
+- `screen: &Panel` - the screen panel: `alpha` is the early-out gate, `rect` is both the size reference and the clip source.
+- `inset_w: f32` - the full inset region's width in output pixels, the export's fixed cursor-scale reference.
+
+### Returns
+
+`Some((pos, panel, clip))`:
+
+- `pos` - the hotspot's on-screen point, `cur` projected through `cam` (`coordmap::project`).
+- `panel` - `(screen.rect.w / inset_w.max(1.0)).clamp(0.1, 1.0)`, so a shrunk custom-arrangement screen panel shrinks the cursor with it. A LAYOUT factor, never a zoom factor - the cursor does not grow when the camera zooms in.
+- `clip` - `screen.rect` projected into output pixels and clamped to the frame, as `(x0, y0, x1, y1)`. Left UNNORMALIZED: when the panel falls entirely outside the crop `x0` can exceed `x1`, and `blit`'s own `ox_start >= ox_end` check is what makes that a no-op.
+
+`None` when `screen.alpha < 0.5` - no screen panel, no cursor.
+
+**Dark-theme invert is gated on `pack::theme_inverts`** (2026-09-13): only the embedded default set is flipped; a bundled or imported pack keeps its own colours.

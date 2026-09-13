@@ -1,0 +1,71 @@
+/* The wave motif, one stylesheet. Imported by the wave components themselves (not by editor.css
+   or hud.css), so the same rules apply wherever a wave mounts - the recorder HUD and the editor
+   have separate stylesheets and neither owns this.
+
+   Doctrine: every stroke is a true sine (the geometry lives in `wave/math/sine.ts`, never here),
+   2-3px wide, with a soft low-opacity glow and nothing else. No fills, no radial glows, no second
+   accent. Colour comes from `currentColor` on the component's own wrapper so each surface's token
+   choice is made in markup, not duplicated per rule. */
+
+.w-wave { display: block; overflow: visible; }
+/* The glow: a 4-6px blur at low opacity, painted by the stroke itself rather than a second
+   element. `drop-shadow` follows the path, so a flat line glows as a line and a peak as a peak. */
+.w-stroke { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round;
+  filter: drop-shadow(0 0 5px color-mix(in srgb, currentColor 34%, transparent)); }
+.w-stroke.front { stroke-width: 2.5px; }
+.w-dot { filter: drop-shadow(0 0 5px color-mix(in srgb, currentColor 40%, transparent)); }
+
+/* --- The recording voice wave (VoiceWave.tsx) -------------------------------------------------
+   The one wave in the app that is filled rather than stroked, and the one that is not the app
+   accent: four closed mirrored lenses over a blue-to-violet ramp (--wave-a / --wave-b, defined per
+   theme in hud.css). Every layer takes the SAME ramp, so the deepening where two of them cross is
+   two translucent fills compositing and never a third colour painted in. No glow: at four
+   overlapping layers a drop-shadow only muddies the crossings the shape is built to show.
+   Geometry is entirely voiceWave.ts's; CSS here decides colour and nothing else. */
+.w-voice { overflow: hidden; }
+.w-voice .w-grad-a { stop-color: var(--wave-a); }
+.w-voice .w-grad-b { stop-color: var(--wave-b); }
+.w-voice .w-layer { stroke: none; }
+/* The line the wave rests on and the dot at each end. Drawn under the layers, so a loud take
+   washes over it instead of being cut by it - the taper guarantees the wave meets the line at
+   both ends, so the three read as one object rather than a wave parked on a rule. */
+.w-voice .w-axis { stroke: var(--e-line-strong, rgba(0, 0, 0, 0.16)); stroke-width: 1.25; stroke-linecap: round; }
+.w-voice .w-cap.a { fill: var(--wave-a); }
+.w-voice .w-cap.b { fill: var(--wave-b); }
+/* Toggled on but no level has arrived yet (permission pending, no device, driver reset): the
+   meter must not imply capture, so the colour drains out of it and only the resting line is left. */
+.w-voice.stale .w-layer { fill: var(--e-line-strong, rgba(0, 0, 0, 0.16)); fill-opacity: 0.35; }
+.w-voice.stale .w-cap { fill: var(--e-dim); }
+
+/* --- Processing / export sweep (SweepWave.tsx) ------------------------------------------------ */
+.w-sweep { color: var(--e-primary, #ef4444); }
+.w-sweep.ai { color: var(--e-ai, #7c6cf0); }
+.w-sweep .w-dot { fill: currentColor; }
+.w-sweep .w-check { fill: none; stroke: var(--e-ok, #22c55e); stroke-width: 2.5px;
+  stroke-linecap: round; stroke-linejoin: round; }
+/* The director's sweep sits above the Stop pill, anchored to `.e-stagetoast` exactly the way the
+   pill is (that container is a flex row holding the stage, so anything in flow here would become
+   a sibling column of it). `bottom: 102px` clears the pill's own 60px offset plus its height. */
+.w-director { position: absolute; left: 0; right: 0; bottom: 102px; margin: 0 auto; width: fit-content;
+  z-index: 49; display: flex; justify-content: center; pointer-events: none; }
+
+/* --- Idle wave (IdleWave.tsx), the generic spinner's replacement ------------------------------ */
+.w-idle { color: currentColor; flex: none; }
+.w-idle .w-dot { fill: currentColor; }
+
+/* --- Horizon wave (HorizonWave.tsx), empty and first-run states -------------------------------
+   The one place the wave's own blue appears instead of the app accent: this is a state with no
+   content yet, so it is not competing with any interactive accent on screen. */
+.w-horizon { color: var(--e-wave, #4c8dd9); }
+.w-horizon .w-dot { fill: var(--e-primary, #ef4444); }
+
+/* --- Playhead (Playhead.tsx) ------------------------------------------------------------------
+   The brand mark turned on its side: a vertical stroke with the dot at its head. `.e-ph` (the
+   positioned line itself) stays in editor.css with the rest of the timeline's layout. */
+.w-ph-head { position: absolute; top: -4px; left: 50%; width: 9px; height: 9px; margin-left: -4.5px;
+  border-radius: 50%; background: var(--e-primary); pointer-events: auto; cursor: grab; }
+.w-ph-head:active { cursor: grabbing; }
+/* The drag ripple: a ring propagating out from the head and decaying. Transform + opacity only,
+   and Motion owns both - nothing here animates, so reduced motion simply never mounts it. */
+.w-ph-ripple { position: absolute; top: -4px; left: 50%; width: 9px; height: 9px; margin-left: -4.5px;
+  border-radius: 50%; border: 1.5px solid var(--e-primary); pointer-events: none; }

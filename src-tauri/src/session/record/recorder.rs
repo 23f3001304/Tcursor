@@ -2,7 +2,6 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use tauri::Emitter;
 
 use crate::domain::time::{Clock, SystemClock};
 use crate::events::track::cursortracker::CursorTypeTracker;
@@ -11,10 +10,10 @@ use crate::events::track::tracker::MouseTracker;
 use crate::actions::keyboard::KeyboardTracker;
 use crate::actions::matcher::arming_from_settings;
 use crate::session::paths::ProjectPaths;
+use crate::session::record::emit::{emitter, level_emitter};
 use crate::session::record::pause_totals::PauseTotals;
 use crate::session::record::recorder_threads::{spawn_mic_thread, spawn_system_thread};
 use crate::session::record::video_sink::{start_video, VideoSink, VideoStart};
-use crate::session::record::Notify;
 
 pub(super) struct Running {
     pub stop: Arc<AtomicBool>,
@@ -71,13 +70,6 @@ impl Recorder {
     }
 }
 
-/// A `Notify` that forwards its reason to the frontend as `event`. Recording threads hold these
-/// instead of an `AppHandle`, so nothing below this file needs to know about Tauri.
-fn emitter(app: &tauri::AppHandle, event: &'static str) -> Notify {
-    let app = app.clone();
-    Arc::new(move |reason: &str| { let _ = app.emit(event, reason.to_string()); })
-}
-
 #[tauri::command]
 pub fn start_recording(
     project_name: String,
@@ -117,15 +109,22 @@ pub fn start_recording(
     let warn = emitter(&app, "record-warning");
     let mouse = Some(MouseTracker::start(8, paused_totals.clone()));
     let keyboard = Some(KeyboardTracker::start(arming_from_settings(&snap.hotkeys), paused_totals.clone()));
-    // Only track cursor shape when Enhanced (System/Hidden don't draw a synthetic cursor).
-    let cursor = (snap.cursor.style == crate::settings::model::CursorStyle::Enhanced).then(|| CursorTypeTracker::start(paused_totals.clone()));
+    // Always on, whatever the style: the capture below is cursor-free for ALL of them, so the
+    // real OS cursor only survives as this tracker's layer. A Hidden or Enhanced take switched
+    // to System in the editor needs it just as much as a System one does.
+    let cursor = Some(CursorTypeTracker::start(paused_totals.clone()));
+    // `level_emitter` feeds the HUD's live wave meter: one `audio-level` per open source every
+    // ~50ms, straight from the capture that is actually writing the WAV - so a meter can only
+    // move for audio this take is really recording.
     let mic_thread = spawn_mic_thread(
         mic_id, paths.mic().to_string_lossy().into_owned(),
         stop.clone(), paused.clone(), clock.clone(), mic_start.clone(), warn.clone(),
+        Some(level_emitter(&app, "mic")),
     );
     let system_thread = spawn_system_thread(
         system_audio, paths.system().to_string_lossy().into_owned(),
         stop.clone(), paused.clone(), clock.clone(), system_start.clone(), warn,
+        Some(level_emitter(&app, "system")),
     );
 
     // Slow part - the screen video pipeline - while the inputs above already run. GPU-native
@@ -135,7 +134,9 @@ pub fn start_recording(
     let cfg = VideoStart {
         legacy: game_mode, clock: clock.clone(), stop: stop.clone(), paused: paused.clone(),
         totals: paused_totals.clone(), ended: emitter(&app, "record-ended-early"),
-        fps, with_cursor: snap.cursor.style.captures_os_cursor(),
+        // Never bake the OS cursor into the pixels - it is captured as its own layer instead
+        // (`CursorTypeTracker` above), so every style stays switchable in the editor.
+        fps, with_cursor: false,
     };
     let (video, w, h, origin_x, origin_y) = match start_video(cfg, target_id.as_deref(), &video_path) {
         Ok(v) => v,

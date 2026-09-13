@@ -1,7 +1,8 @@
 [package]
 name = "tcursor-setup"
 version = "0.1.0"
-description = "Branded installer for TCursor"
+# Also the FileDescription in the exe's version resource, which is the name Task Manager shows.
+description = "TCursor Setup"
 edition = "2021"
 
 [build-dependencies]

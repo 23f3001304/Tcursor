@@ -119,6 +119,34 @@ pub fn cursor(&self) -> PathBuf
 
 Returns `folder/cursor.json` - the `CursorTrack` of cursor-type samples used by the enhanced cursor renderer.
 
+## ProjectPaths::cursor_dir
+
+```rust
+pub fn cursor_dir(&self) -> PathBuf
+```
+
+Returns `folder/cursor/` - the captured OS-cursor layer's folder. A DIRECTORY, unlike the `cursor.json` shape track above; the two names differ so they can never collide.
+
+### Behaviors
+
+- `builds_cursor_layer_paths_under_a_cursor_folder`: asserts `cursor_dir()` ends with `cursor`, and that it is not equal to `cursor()`.
+
+## ProjectPaths::cursor_layer
+
+```rust
+pub fn cursor_layer(&self) -> PathBuf
+```
+
+Returns `folder/cursor/layer.json` - the serialized `CursorLayer` (entries + `(t_ms, id)` track). Its mere existence is what `settings::store::os_cursor_in_video` reads to tell a post-layer recording from a pre-layer one, so this is the single place that filename is spelled.
+
+## ProjectPaths::cursor_png
+
+```rust
+pub fn cursor_png(&self, id: u32) -> PathBuf
+```
+
+Returns `folder/cursor/<id>.png` - one captured cursor bitmap, RGBA8. `id` is the `CursorEntry::id`, and `CursorEntry::file` records the same name so a reader can resolve the PNG from the JSON alone.
+
 ## ProjectPaths::edit
 
 ```rust

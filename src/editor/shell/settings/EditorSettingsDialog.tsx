@@ -59,7 +59,7 @@ export function EditorSettingsDialog({ open, settings, onClose, onSaveSettings, 
 
             <div className="e-sec">
               <p className="e-lede" style={{ margin: 0 }}>
-                Capture settings (hotkeys, devices, game mode) live in the recorder — they apply at record time.
+                Capture settings (hotkeys, devices, game mode) live in the recorder. They apply at record time.
               </p>
             </div>
           </motion.div>

@@ -115,6 +115,14 @@ Returns the next decoded screen frame - 1:1 with output frames, blocking on the 
 
 `Result<Option<&[u8]>>` - the decoded frame's nv12 bytes (`Some`), or `None` for a zero-frame video.
 
+## ScreenPipe::held
+
+```rust
+pub fn held(&self) -> Option<&[u8]>
+```
+
+The frame `next` last delivered (held through EOF). The frame loop composites from it, so an output frame that re-uses the previous recording frame (slow motion) or that follows several skipped decodes (a cut, a fast span) never calls `next` twice for one frame.
+
 ## ScreenPipe::join
 
 ```rust
@@ -184,6 +192,14 @@ Joins the decode thread and surfaces any stored decode error, dropping the recei
 
 Top-level export orchestrator: calls `FrameRenderer::new`, spawns the screen/webcam decode threads (`ScreenPipe`/`WebcamPipe`) and the encoder thread, then drives the per-frame composite loop via `step_camera` + `composite_at` and muxes audio. Key items: `export(paths, settings, on_progress) -> Result<()>` - single public entry point; `settings: ExportSettings` resolves output resolution/fps/quality/format.
 
+## plan_walk
+
+`PlanCursor`: the pure bookkeeping of feeding sequential decoders along a `TimeMap::frame_plan` (how many recording frames to decode before each output frame, 0 to re-use the held one).
+
+## bg_pipe
+
+The VIDEO/GIF background's decode stream - a third stream on the same output clock, `WebcamPipe` being the template (it even reuses `spawn_webcam` as its thread body). Key items: `bg_decode_args` (the pure `-stream_loop -1 -an -r out_fps` arg list), `BgPipe::open`/`feed`/`join`. Frames are dimmed on their way out and swapped straight into `FrameRenderer`'s `bg` buffer.
+
 ## run
 
 Thin Tauri command adapter that launches the export on a background thread and bridges results to the frontend as events. Key items: `run_export(app, folder, settings)` - fire-and-forget; emits `export-progress`, `export-done`, and `export-error`.
@@ -191,6 +207,14 @@ Thin Tauri command adapter that launches the export on a background thread and b
 ## ffio
 
 FFmpeg and ffprobe spawn helpers, raw BGRA frame reader, and bundled-image decode/crop utilities. Key items: `RawDecoder` (spawned ffmpeg subprocess, `spawn` + `read_frame`, arg list built by the pure `decode_args`), `probe_dims`, `probe_duration`, `probe_frame_count`, `decode_image`, `decode_cursor`, `crop_to_alpha`, `png_dims`.
+
+## audio_segments
+
+The time remap's kept ranges as one ffmpeg filter chain (`atrim` + `asetpts` + `atempo` per segment, `concat`), inserted by `audio_mux::mux_args`; the identity emits nothing.
+
+## silence
+
+Remove silences: `silencedetect` over the recorded tracks, intersected, shifted onto the clip clock, padded, filtered, clamped; the `detect_silences` command the editor's button calls.
 
 ## audio_mux
 

@@ -69,63 +69,72 @@ export function AiPanel({
 
   return (
     <div className="e-panel e-insp">
-      <PanelHeader title="AI Director" lede="Edits from your recording events - clicks, keystrokes, cursor. Runs on your machine via Ollama." onClose={onClose} />
-      <div className="e-field">
-        <span className="e-fl">Engine</span>
-        {models === null ? (
-          <Shimmer className="e-picker-shell" />
-        ) : models.length === 0 ? (
-          <div className="e-picker-shell e-picker-empty" role="status" title={noModelsTitle}>
-            <span>No local models found</span>
-            <button type="button" onClick={loadModels}>Retry</button>
+      <PanelHeader title="AI Director" lede="Local edits from your clicks and keystrokes, via Ollama." onClose={onClose} />
+
+      {/* The choice this panel is about, first: which local model does the editing. */}
+      <div className="e-grp">
+        <div className="e-field">
+          <span className="e-fl">Engine</span>
+          {models === null ? (
+            <Shimmer className="e-picker-shell" />
+          ) : models.length === 0 ? (
+            <div className="e-picker-shell e-picker-empty" role="status" title={noModelsTitle}>
+              <span>No local models found</span>
+              <button type="button" onClick={loadModels} title="Look for installed Ollama models again">Retry</button>
+            </div>
+          ) : (
+            <Picker value={current} options={options} onChange={onChangeModel} ariaLabel="Engine" />
+          )}
+        </div>
+        <button className="e-run" onClick={onRun} disabled={running || exporting || !models?.length}
+          title={noModelsTitle} data-director-anchor="wand">
+          {running
+            ? <><Spin size={16} />Directing{progress ? `... ${progress.step} of ${progress.total}` : "..."}</>
+            : <><IconSparkles size={16} />Auto-edit</>}
+        </button>
+        <AnimatePresence>
+          {running && progress && (
+            <motion.div className="e-ai-progress" {...HINT_MOTION}>
+              <motion.div className="e-ai-progress-fill" initial={false}
+                animate={{ width: `${(progress.step / progress.total) * 100}%` }}
+                transition={{ type: "tween", duration: 0.16, ease: [0.4, 0, 0.2, 1] }} />
+            </motion.div>
+          )}
+        </AnimatePresence>
+        <AnimatePresence>
+          {errInfo && (
+            <motion.p className="e-ai-err" role="alert" {...HINT_MOTION}>
+              {errInfo.title}{errInfo.hint && <span className="hint">{errInfo.hint}</span>}
+            </motion.p>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* Then what it did, or - before a run - what it will do. */}
+      <div className="e-grp">
+        <span className="e-sechead">{log.length > 0 ? "Run" : "What it does"}</span>
+        {log.length > 0 ? (
+          // Agentic reveal: each edit the director applies streams in here as a narration line.
+          <div className="e-ai-log">
+            {log.map((line, i) => (
+              <motion.div key={i} className={`e-ai-log-line${line.startsWith("✓") ? " done" : ""}`}
+                initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
+                transition={{ type: "tween", duration: 0.16, ease: [0.4, 0, 0.2, 1] }}>
+                {line}
+              </motion.div>
+            ))}
           </div>
         ) : (
-          <Picker value={current} options={options} onChange={onChangeModel} ariaLabel="Engine" />
+          <ul className="e-sum">
+            {SUMMARY.map(([Icon, txt], i) => (
+              <motion.li key={i} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }}
+                transition={{ type: "tween", duration: 0.16, ease: [0.4, 0, 0.2, 1], delay: 0.1 + i * 0.05 }}>
+                <span className="ic"><Icon size={15} /></span>{txt}
+              </motion.li>
+            ))}
+          </ul>
         )}
       </div>
-      <button className="e-run" onClick={onRun} disabled={running || exporting || !models?.length}
-        title={noModelsTitle} style={{ marginTop: 16 }} data-director-anchor="wand">
-        {running
-          ? <><Spin size={16} />Directing{progress ? `… ${progress.step} of ${progress.total}` : "…"}</>
-          : <><IconSparkles size={16} />Auto-edit</>}
-      </button>
-      <AnimatePresence>
-        {running && progress && (
-          <motion.div className="e-ai-progress" {...HINT_MOTION}>
-            <motion.div className="e-ai-progress-fill" initial={false}
-              animate={{ width: `${(progress.step / progress.total) * 100}%` }}
-              transition={{ type: "tween", duration: 0.2, ease: [0.4, 0, 0.2, 1] }} />
-          </motion.div>
-        )}
-      </AnimatePresence>
-      <AnimatePresence>
-        {errInfo && (
-          <motion.p className="e-ai-err" role="alert" {...HINT_MOTION}>
-            {errInfo.title}{errInfo.hint && <span className="hint">{errInfo.hint}</span>}
-          </motion.p>
-        )}
-      </AnimatePresence>
-      {log.length > 0 ? (
-        // Agentic reveal: each edit the director applies streams in here as a narration line.
-        <div className="e-ai-log">
-          {log.map((line, i) => (
-            <motion.div key={i} className={`e-ai-log-line${line.startsWith("✓") ? " done" : ""}`}
-              initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
-              transition={{ type: "tween", duration: 0.24, ease: [0.4, 0, 0.2, 1] }}>
-              {line}
-            </motion.div>
-          ))}
-        </div>
-      ) : (
-        <ul className="e-sum">
-          {SUMMARY.map(([Icon, txt], i) => (
-            <motion.li key={i} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 + i * 0.05 }}>
-              <span className="ic"><Icon size={15} /></span>{txt}
-            </motion.li>
-          ))}
-        </ul>
-      )}
     </div>
   );
 }

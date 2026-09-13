@@ -67,6 +67,21 @@ export const clickTrack = (folder: string) => invoke<ClickSample[]>("click_track
 /** The export background (mesh/gradient) as a PNG data URL, so the canvas preview matches the export. */
 export const previewBg = (folder: string) => invoke<string>("preview_bg", { folder });
 
+/** One background-picker tile: a 96x54 thumbnail rendered by the EXPORT's own background code,
+ *  so a tile is a true miniature of what picking it produces. `kind` is the `BackgroundKind` the
+ *  tile applies, `group` the section it belongs to; `id` is what gets written to `background.mesh`
+ *  for a wallpaper, while a gradient tile instead carries the `gradient` stops the panel applies
+ *  (the presets live in Rust,
+ *  `settings::wallpapers::GRADIENT_WALLPAPERS`, so there is no second copy to drift). `png_base64`
+ *  is empty when the decode failed (no ffmpeg) - the tile stays selectable and the panel draws a
+ *  plain swatch for it. */
+export interface GradientStops { from: [number, number, number]; mid: [number, number, number] | null; to: [number, number, number]; angle_deg: number }
+export interface BackgroundThumb { id: string; name: string; kind: "mesh" | "gradient"; group: string; png_base64: string; gradient?: GradientStops }
+/** Every bundled wallpaper then every gradient preset, thumbnailed. Rendered once per process in
+ *  Rust, so calling this per panel mount is cheap after the first time. Wallpapers arrive grouped
+ *  (`group`: Ribbons, Folds, Scenic) in the order the picker shows them; gradients are one group. */
+export const backgroundThumbs = () => invoke<BackgroundThumb[]>("background_thumbs");
+
 /** Render the FX overlay (spotlight + click effects) using the exact export shaders.
  *  Returns a PNG data URL of the overlay to composite on the preview canvas. */
 export interface FxOverlayParams {

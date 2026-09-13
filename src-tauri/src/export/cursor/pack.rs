@@ -1,35 +1,33 @@
 // Cursor pack resolution: turns a `CursorSettings.pack` id into the (type, PNG bytes, hotspot)
 // rows both the export (`cursorset::prep`) and the editor preview (`cursorpreview::cursor_sprites`)
-// decode. "default" is the built-in embedded set (`cursorset::SPRITES`); any other id is an
-// imported pack folder under `cursors_dir()`, missing kinds falling back to the built-in sprite.
+// decode. "default" is the built-in embedded set (`cursorset::SPRITES`); any other id is a pack
+// FOLDER - bundled with the app or imported by the user, resolved by `packdirs` - with missing
+// kinds falling back to the embedded sprite.
+//
+// Format v2 (`pack.json` `version: 2`) adds `busy: { anim, fps }`: the pack's busy state animates.
+// See `busy.rs` for the poses and `assets/cursorpacks/README.md` for the on-disk format. WHICH packs
+// exist, and how the panel's grid shows them, is `packlist.rs`.
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use crate::events::track::cursortype::CursorType;
+use crate::export::cursor::busy::BusySpec;
 use crate::export::cursor::cursorset::SPRITES;
+use crate::export::cursor::packdirs::resolve_pack_dir;
 
-/// The built-in pack's id - never a real imported-pack folder name (see `unique_id` in
-/// `pack_import.rs`, which never assigns this id to an import).
+/// The built-in pack's id - never a real pack folder name (see `unique_id` in `pack_import.rs`,
+/// which never assigns this id to an import).
 pub const DEFAULT_PACK_ID: &str = "default";
 
-/// One selectable cursor pack: `id` persists into `CursorSettings.pack`, `name` is shown in the
-/// picker, `builtin` distinguishes the embedded set (not stored on disk) from an imported one.
-#[derive(serde::Serialize, Clone, Debug, PartialEq)]
-pub struct CursorPackInfo {
-    pub id: String,
-    pub name: String,
-    pub builtin: bool,
-}
+/// Whether a pack's sprites are RGB-inverted for a dark theme. Only the embedded default set is:
+/// it is a monochrome black-on-white arrow drawn to be flipped, so one asset serves both themes.
+/// Every bundled or imported pack is artwork with its own colours (an orange cartoon arrow, a blue
+/// glass one); inverting those turned them into their negatives on stage and in the export, which
+/// is the "cursor colour bug" the owner saw. They are drawn exactly as their PNGs are.
+pub fn theme_inverts(pack_id: &str) -> bool { pack_id == DEFAULT_PACK_ID }
 
-/// `<config-dir>/TCursor/cursors` - one subfolder per imported pack. Sibling to
-/// `settings::store::config_path`'s `TCursor/config.json` (same app-data convention).
-pub fn cursors_dir() -> PathBuf {
-    dirs_next::config_dir().unwrap_or_else(std::env::temp_dir).join("TCursor").join("cursors")
-}
-
-/// Where an imported pack's PNGs + `hotspots.json` + `pack.json` live.
-pub fn pack_dir(pack_id: &str) -> PathBuf {
-    cursors_dir().join(pack_id)
-}
+/// Upper bound on `busy_NN.png` frames read from one pack, so a stray folder cannot make the
+/// renderer hold hundreds of decoded sprites.
+pub const MAX_BUSY_FRAMES: u32 = 64;
 
 /// A `CursorType`'s wire name (`"arrow"`, `"resize_ns"`, ...) - the shared basis for both the
 /// expected PNG filename (`{name}.png`) and the `hotspots.json` key, so the two can never drift
@@ -47,49 +45,89 @@ fn read_hotspots(path: &Path) -> HashMap<String, (f32, f32)> {
     std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
-/// One pack folder's metadata (`pack.json` = `{"id", "name"}`, written by `pack_import`).
-fn read_pack_meta(dir: &Path) -> Option<CursorPackInfo> {
-    #[derive(serde::Deserialize)]
-    struct Meta { id: String, name: String }
-    let bytes = std::fs::read(dir.join("pack.json")).ok()?;
-    let m: Meta = serde_json::from_slice(&bytes).ok()?;
-    Some(CursorPackInfo { id: m.id, name: m.name, builtin: false })
+/// `pack.json` as written by `pack_import` (v1: `{id, name}`) or shipped with a bundled pack
+/// (v2: `+ version`, `busy`). Unknown keys - `builtin`, `generated` - are ignored: where a pack
+/// came from is decided by WHICH FOLDER it was found in, never by what its own JSON claims.
+#[derive(serde::Deserialize)]
+pub(crate) struct Meta {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    #[serde(default)]
+    pub(crate) busy: Option<BusySpec>,
 }
 
-/// Built-in pack first, then every imported pack folder under `cursors_dir()` (alphabetical by
-/// folder name for a stable order), skipping any folder missing/with unreadable `pack.json`.
+pub(crate) fn read_meta(dir: &Path) -> Option<Meta> {
+    serde_json::from_slice(&std::fs::read(dir.join("pack.json")).ok()?).ok()
+}
+
+/// How many `busy_NN.png` frames `dir` ships, counting from 00 until the first gap.
+pub(crate) fn count_busy_frames(dir: &Path) -> u32 {
+    (0..MAX_BUSY_FRAMES).take_while(|i| busy_frame_path(dir, *i).is_file()).count() as u32
+}
+
+/// `packlist::list_packs` for the pack grid. Takes the `AppHandle` purely to ask Tauri where its
+/// resources are; Tauri injects it, so the JS call is unchanged.
+///
+/// *Why the command lives here rather than beside `list_packs` in `packlist`:* `lib.rs` registers
+/// it by path (`export::cursor::pack::list_cursor_packs`), and `tauri::generate_handler!` also
+/// needs the macro-generated items that path brings with it - a `pub use` does not carry them.
+/// Keeping the one-line wrapper put means the listing split needed no change to the handler list.
 #[tauri::command]
-pub fn list_cursor_packs() -> Vec<CursorPackInfo> {
-    let mut packs = vec![CursorPackInfo { id: DEFAULT_PACK_ID.to_string(), name: "Default".to_string(), builtin: true }];
-    if let Ok(entries) = std::fs::read_dir(cursors_dir()) {
-        let mut dirs: Vec<PathBuf> = entries.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.is_dir()).collect();
-        dirs.sort();
-        packs.extend(dirs.iter().filter_map(|d| read_pack_meta(d)));
-    }
-    packs
+pub fn list_cursor_packs(app: tauri::AppHandle) -> Vec<crate::export::cursor::packlist::CursorPackInfo> {
+    use tauri::Manager;
+    crate::export::cursor::packlist::list_packs(app.path().resource_dir().ok().as_deref())
+}
+
+/// The busy animation `pack_id` declares, or `None` for the embedded set and any v1 pack (whose
+/// busy state is a still). `frames` is filled in by counting the folder's `busy_NN.png` files, so
+/// an explicit-frame pack overrides its own declared `anim` without saying so twice.
+pub fn busy_spec(pack_id: &str) -> Option<BusySpec> {
+    if pack_id.is_empty() || pack_id == DEFAULT_PACK_ID { return None; }
+    let dir = resolve_pack_dir(pack_id);
+    let mut spec = read_meta(&dir)?.busy?;
+    spec.frames = count_busy_frames(&dir);
+    Some(spec)
+}
+
+/// Every `busy_NN.png` in `pack_id`'s folder, in order. Empty unless the pack ships explicit
+/// frames, in which case they ARE the animation (see `busy::busy_pose`).
+pub fn busy_frames(pack_id: &str) -> Vec<Vec<u8>> {
+    if pack_id.is_empty() || pack_id == DEFAULT_PACK_ID { return Vec::new(); }
+    let dir = resolve_pack_dir(pack_id);
+    (0..MAX_BUSY_FRAMES)
+        .map(|i| std::fs::read(busy_frame_path(&dir, i)))
+        .take_while(|r| r.is_ok())
+        .filter_map(|r| r.ok())
+        .collect()
+}
+
+/// `busy_00.png`, `busy_01.png`, ... - zero-padded to two digits, the format the README documents.
+fn busy_frame_path(dir: &Path, i: u32) -> std::path::PathBuf {
+    dir.join(format!("busy_{i:02}.png"))
 }
 
 /// Resolve a pack id to one `(CursorType, PNG bytes, hotspot)` row per built-in kind - the
-/// built-in pack returns `SPRITES` verbatim (Busy excepted, see `busy_as_arrow`); anything else
+/// embedded pack returns `SPRITES` verbatim (Busy excepted, see `busy_as_arrow`); anything else
 /// resolves against its folder.
 pub fn sprite_sources(pack_id: &str) -> Vec<(CursorType, Vec<u8>, (f32, f32))> {
     let mut rows = if pack_id.is_empty() || pack_id == DEFAULT_PACK_ID {
         SPRITES.iter().map(|&(kind, png, hot)| (kind, png.to_vec(), hot)).collect()
     } else {
-        sprite_sources_from_dir(&pack_dir(pack_id))
+        sprite_sources_from_dir(&resolve_pack_dir(pack_id))
     };
-    busy_as_arrow(&mut rows);
+    // A pack that ANIMATES its busy state has a busy sprite worth drawing; only a still one gets
+    // swapped for the arrow.
+    if busy_spec(pack_id).is_none() { busy_as_arrow(&mut rows); }
     rows
 }
 
-/// The OS shows "busy" as the plain arrow plus a spinner overlay it draws itself; this app's
-/// only busy asset is a static multicolor pinwheel disc, which at cursor size in a dimmed preview
-/// (or baked into an export) reads as visual corruption, not "loading" - worse than no animation
-/// at all. Rather than patch the asset, resolve Busy to whatever Arrow resolved to for this pack
-/// (built-in, or a custom pack's own arrow override) at the single seam both export
+/// The OS shows "busy" as the plain arrow plus a spinner overlay it draws itself; the embedded
+/// set's only busy asset is a static multicolor pinwheel disc, which at cursor size reads as
+/// visual corruption rather than "loading" - worse than no animation at all. Rather than patch the
+/// asset, resolve Busy to whatever Arrow resolved to, at the single seam both export
 /// (`cursorset::prep`) and preview (`cursorpreview::cursor_sprites`) call through. The `Busy`
-/// variant itself, and the recorded cursor-type track, are untouched - only which sprite bytes
-/// get drawn for it.
+/// variant itself, and the recorded cursor-type track, are untouched - only which sprite bytes get
+/// drawn for it. A v2 pack declaring `busy` opts out: its busy sprite is the animation's frame.
 fn busy_as_arrow(rows: &mut [(CursorType, Vec<u8>, (f32, f32))]) {
     let Some(arrow) = rows.iter().find(|(k, ..)| *k == CursorType::Arrow).map(|(_, b, h)| (b.clone(), *h)) else { return };
     if let Some(busy) = rows.iter_mut().find(|(k, ..)| *k == CursorType::Busy) {
@@ -99,11 +137,11 @@ fn busy_as_arrow(rows: &mut [(CursorType, Vec<u8>, (f32, f32))]) {
 }
 
 /// Pure core of `sprite_sources`, taking the pack folder directly so it is unit-testable against
-/// a temp dir (no dependency on the real app-data `cursors_dir()`). An imported pack overrides
-/// any kind whose PNG file is present in `dir` (hotspot from `dir`'s `hotspots.json`, defaulting
-/// to a centered `(0.5, 0.5)` if that kind is absent from it), and falls back to the built-in
-/// bytes + hotspot for every kind the pack doesn't provide (missing/unreadable file, or an
-/// entirely missing/nonexistent `dir`).
+/// a temp dir (no dependency on the real app-data `cursors_dir()`). A pack overrides any kind
+/// whose PNG file is present in `dir` (hotspot from `dir`'s `hotspots.json`, defaulting to a
+/// centered `(0.5, 0.5)` if that kind is absent from it), and falls back to the embedded bytes +
+/// hotspot for every kind the pack doesn't provide (missing/unreadable file, or an entirely
+/// missing/nonexistent `dir`).
 fn sprite_sources_from_dir(dir: &Path) -> Vec<(CursorType, Vec<u8>, (f32, f32))> {
     let hotspots = read_hotspots(&dir.join("hotspots.json"));
     SPRITES.iter().map(|&(kind, builtin_png, builtin_hot)| {

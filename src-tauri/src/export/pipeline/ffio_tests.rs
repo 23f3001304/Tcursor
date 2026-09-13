@@ -1,5 +1,5 @@
 // Tests for `ffio.rs` - split into its own file purely for the size budget.
-use super::{crop_to_alpha, decode_image, StagedInput};
+use super::{crop_to_alpha, decode_file_cover, decode_image, decode_image_cover, StagedInput};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -93,4 +93,57 @@ fn decode_image_is_immune_to_a_clobber_of_the_legacy_shared_path() {
         // BGRA: red is [0, 0, 255, 255]; the clobbering blue would be [255, 0, 0, 255].
         assert!(px[2] > 200 && px[0] < 40, "decoded the wrong image: {:?}", &px[..4]);
     }
+}
+
+/// A 4x2 PNG whose OUTER columns are green and inner columns red: a cover fit into a square
+/// crops the green away, while a plain stretch squeezes it into the result.
+fn banded_png() -> Vec<u8> {
+    let (w, h) = (4u32, 2u32);
+    let mut out = Vec::new();
+    let mut enc = png::Encoder::new(&mut out, w, h);
+    enc.set_color(png::ColorType::Rgba);
+    enc.set_depth(png::BitDepth::Eight);
+    let mut wr = enc.write_header().expect("png header");
+    let px: Vec<u8> = (0..w * h)
+        .flat_map(|i| if i % w == 0 || i % w == w - 1 { [0, 255, 0, 255] } else { [255, 0, 0, 255] })
+        .collect();
+    wr.write_image_data(&px).expect("png data");
+    drop(wr);
+    out
+}
+
+/// `decode_image_cover` keeps the source's aspect ratio and crops the overflow - the bundled
+/// wallpapers are 16:9 and would visibly stretch in a 9:16 or 1:1 export otherwise. The legacy
+/// `decode_image` must keep stretching (every pre-existing project's background depends on it).
+#[test]
+fn cover_fit_crops_the_overflow_while_the_legacy_decode_still_stretches() {
+    if !ffmpeg_present() { eprintln!("SKIPPED: no ffmpeg on PATH"); return; }
+    let src = banded_png();
+    let cover = decode_image_cover(&src, 2, 2).expect("cover decode");
+    assert_eq!(cover.len(), 2 * 2 * 4);
+    // BGRA: the kept centre is red ([0, 0, 255]); a surviving green edge would show as G > 60.
+    for px in cover.chunks(4) {
+        assert!(px[2] > 200 && px[1] < 60, "cover fit kept a column it should have cropped: {px:?}");
+    }
+    let stretched = decode_image(&src, 2, 2).expect("stretch decode");
+    assert!(stretched.chunks(4).any(|px| px[1] > 60), "the plain stretch must still fold the edges in");
+}
+
+/// The file-input decode is the SAME cover fit as the in-memory one, and must stay that way: a
+/// still background goes through `decode_file_cover` while every bundled wallpaper goes through
+/// `decode_image_cover`, and the two backgrounds have to be framed alike. (The file path exists so
+/// a multi-MB import - or a video, decoded here for its first frame - is never read into memory
+/// and re-staged just to be handed to ffmpeg.)
+#[test]
+fn the_file_input_decode_frames_exactly_like_the_in_memory_one() {
+    if !ffmpeg_present() { eprintln!("SKIPPED: no ffmpeg on PATH"); return; }
+    let src = banded_png();
+    let path = std::env::temp_dir().join(format!("tcursor_dfc_{}.png", std::process::id()));
+    std::fs::write(&path, &src).expect("write fixture");
+    let from_file = decode_file_cover(&path, 2, 2).expect("file cover decode");
+    let from_bytes = decode_image_cover(&src, 2, 2).expect("bytes cover decode");
+    assert_eq!(from_file, from_bytes, "the two cover decodes must be byte-identical");
+    assert!(decode_file_cover(&std::env::temp_dir().join("tcursor_no_such_file.png"), 2, 2).is_err(),
+        "a missing file is an Err, which is what makes `background::build` fall back");
+    let _ = std::fs::remove_file(&path);
 }

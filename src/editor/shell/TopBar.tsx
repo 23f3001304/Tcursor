@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { motion } from "motion/react";
 import { getCurrentWindow, LogicalSize, LogicalPosition } from "@tauri-apps/api/window";
-import { IconArrowLeft, IconArrowBackUp, IconArrowForwardUp, IconDownload, IconMinus, IconMaximize, IconSettings, IconX } from "@tabler/icons-react";
+import { IconArrowLeft, IconArrowBackUp, IconArrowForwardUp, IconDownload, IconMinus, IconMaximize, IconMinimize, IconSettings, IconX } from "@tabler/icons-react";
 import { Spin } from "../controls/Spin";
 import { TcursorMark } from "../../lib/TcursorMark";
 import type { MarkState } from "../../lib/brandWave";
@@ -54,7 +54,9 @@ export function TopBar({ proj, exporting, pct, onOpenExport, onOpenSettings, onC
       <button className="e-gst" title="Project settings" onClick={onOpenSettings}><IconSettings size={18} /></button>
       <span className="e-bardiv" />
       <button className="e-gst" title="Minimize" onClick={() => void win.minimize()}><IconMinus size={18} /></button>
-      <button className="e-gst" title={maxed ? "Restore" : "Maximize"} onClick={() => void toggleMax()}><IconMaximize size={16} /></button>
+      <button className="e-gst" title={maxed ? "Restore" : "Maximize"} onClick={() => void toggleMax()}>
+        {maxed ? <IconMinimize size={16} /> : <IconMaximize size={16} />}
+      </button>
       <button className="e-gst close" title="Close" onClick={() => void win.close()}><IconX size={18} /></button>
     </div>
   );

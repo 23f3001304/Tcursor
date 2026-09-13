@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use crate::export::gpu::compositor::Compositor;
 use crate::export::gpu::Gpu;
@@ -27,11 +28,14 @@ pub struct GpuCompositor {
     out_w: u32,
     out_h: u32,
     res: Mutex<Option<CompositorResources>>,
+    /// Does `bg` change every frame (a video/GIF background)? See `set_bg_dynamic`.
+    bg_dynamic: AtomicBool,
 }
 
 impl GpuCompositor {
     pub fn new(out_w: u32, out_h: u32) -> Option<GpuCompositor> {
-        Some(GpuCompositor { gpu: Gpu::new(out_w, out_h)?, out_w, out_h, res: Mutex::new(None) })
+        Some(GpuCompositor { gpu: Gpu::new(out_w, out_h)?, out_w, out_h,
+            res: Mutex::new(None), bg_dynamic: AtomicBool::new(false) })
     }
 }
 
@@ -52,8 +56,10 @@ impl Compositor for GpuCompositor {
         let (wc_data, ww, wh) = webcam.unwrap_or((&[0u8; 4], 1, 1));
         let u = build_uniforms(scene, cam, layout, webcam.map(|(_, w, h)| (w, h)));
         // Hashed BEFORE the lock: it is a strided read over the whole ~8 MB background (~0.1-0.3 ms,
-        // cache-miss bound), and nothing about it needs the cached resources.
-        let key = gpu_compositor_tex::bg_key(bg);
+        // cache-miss bound), and nothing about it needs the cached resources. Skipped entirely for a
+        // dynamic (video) background, which re-uploads either way - so the hash would be pure cost.
+        let dynamic = self.bg_dynamic.load(Ordering::Relaxed);
+        let key = (!dynamic).then(|| gpu_compositor_tex::bg_key(bg));
 
         let mut lock = self.res.lock().unwrap();
         let rebuild = match lock.as_ref() {
@@ -73,10 +79,12 @@ impl Compositor for GpuCompositor {
         g.update_tex(&r.webcam_tex, wc_data, ww, wh);
         // Re-upload whenever the background's CONTENT changed, not just its dimensions: an edit
         // (colour/blur/kind) rebuilds `bg` at the same size, and a dimension-only check threw
-        // every rebuilt buffer away, so the warm preview kept showing the old background.
-        if r.bg_key != Some(key) {
+        // every rebuilt buffer away, so the warm preview kept showing the old background. A VIDEO
+        // background changes every frame and cannot be decided by the sampled key at all - see
+        // `gpu_compositor_tex::should_upload`.
+        if gpu_compositor_tex::should_upload(r.bg_key != key, dynamic) {
             g.update_tex(&r.bg_tex, bg, ow, oh);
-            r.bg_key = Some(key);
+            r.bg_key = key;
         }
         g.queue.write_buffer(&r.ubuf, 0, bytemuck::bytes_of(&u));
 
@@ -141,6 +149,10 @@ impl Compositor for GpuCompositor {
         }
         g.readback.unmap();
     }
+
+    /// Latch whether the background moves. Relaxed ordering: it is set from the render thread
+    /// before the frames it applies to, and read by the same thread that composites them.
+    fn set_bg_dynamic(&self, dynamic: bool) { self.bg_dynamic.store(dynamic, Ordering::Relaxed); }
 }
 
 #[cfg(test)]

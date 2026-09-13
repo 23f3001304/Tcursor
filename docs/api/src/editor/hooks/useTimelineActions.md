@@ -1,6 +1,6 @@
 # src/editor/hooks/useTimelineActions.ts
 
-The "add a region at the playhead" handlers shared by the Rail/Transport quick-add buttons and the canvas double-click (`zoomAt`). Kept out of `Editor` so it stays under the line limit (Task 36, mirrors `useTrimActions.ts`) - each applies its op then selects the newly created region so the inspector opens on it immediately, add + focus as one gesture.
+The "add a region at the playhead" handlers shared by the Effects panel/Transport quick-add buttons and the canvas double-click (`zoomAt`). Kept out of `Editor` so it stays under the line limit (Task 36, mirrors `useTrimActions.ts`) - each applies its op then selects the newly created region so the inspector opens on it immediately, add + focus as one gesture.
 
 ## useTimelineActions
 

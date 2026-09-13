@@ -73,13 +73,36 @@ impl Drop for StagedInput {
 }
 
 /// Decode `image` bytes (any ffmpeg-readable format) to a `w*h*4` BGRA buffer,
-/// scaled to the output size. Used for the bundled background wallpaper.
+/// STRETCHED to the output size. Used for the legacy bundled background (`bg.jpg`), whose look
+/// every pre-existing project depends on - hence a plain `scale`, aspect ratio and all.
 pub fn decode_image(image: &[u8], w: u32, h: u32) -> Result<Vec<u8>> {
+    decode_with(image, w, h, format!("scale={w}:{h}"))
+}
+
+/// `decode_image` with a COVER fit: the image is scaled up until it fills `w`x`h` with its aspect
+/// ratio intact, then centre-cropped. Used for the bundled wallpaper library
+/// (`settings::wallpapers`), whose 16:9 art would visibly stretch in a 9:16 or 1:1 export.
+pub fn decode_image_cover(image: &[u8], w: u32, h: u32) -> Result<Vec<u8>> {
+    decode_with(image, w, h, format!("scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"))
+}
+
+/// `decode_image_cover` for a file already ON DISK - the user's imported background
+/// (`settings::bg_asset`), whose bytes must not be read into memory and re-staged: a still can be
+/// tens of MB and a video background is decoded here too (for its FIRST frame, which is what the
+/// preview commands show and what the export falls back to if its stream dies).
+pub fn decode_file_cover(file: &Path, w: u32, h: u32) -> Result<Vec<u8>> {
+    decode_from(file, w, h, format!("scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"))
+}
+
+fn decode_with(image: &[u8], w: u32, h: u32, vf: String) -> Result<Vec<u8>> {
     let tmp = StagedInput::new(image)?;
+    decode_from(tmp.path(), w, h, vf)
+}
+
+fn decode_from(file: &Path, w: u32, h: u32, vf: String) -> Result<Vec<u8>> {
     let out = ffcmd("ffmpeg")
-        .args(["-v", "error", "-i"]).arg(tmp.path())
-        .args(["-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "bgra",
-            "-vf", &format!("scale={w}:{h}"), "-"])
+        .args(["-v", "error", "-i"]).arg(file)
+        .args(["-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "bgra", "-vf", &vf, "-"])
         .stderr(Stdio::null())
         .output()
         .context("spawn ffmpeg (image decode)")?;

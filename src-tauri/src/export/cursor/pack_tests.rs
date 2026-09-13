@@ -1,6 +1,8 @@
 // Split from pack.rs per repo convention (#[path] sibling test module).
 use super::*;
 use std::io::Write;
+use std::path::PathBuf;
+use crate::export::cursor::packlist::list_packs;
 
 /// A minimal valid 1x1 PNG (smallest possible RGBA image), so tests can write real files
 /// without needing an encoder - only byte presence/non-emptiness is exercised here.
@@ -17,24 +19,6 @@ fn temp_pack_dir(name: &str) -> PathBuf {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
-}
-
-#[test]
-fn default_pack_id_resolves_to_builtin_sprites_verbatim_except_busy() {
-    let rows = sprite_sources(DEFAULT_PACK_ID);
-    assert_eq!(rows.len(), SPRITES.len());
-    let arrow = SPRITES.iter().find(|&&(k, ..)| k == CursorType::Arrow).unwrap();
-    for ((kind, bytes, hot), &(sk, spng, shot)) in rows.iter().zip(SPRITES.iter()) {
-        assert_eq!(*kind, sk);
-        if sk == CursorType::Busy {
-            // Busy is remapped to Arrow's bytes/hotspot (busy_as_arrow) - not its own builtin PNG.
-            assert_eq!(bytes.as_slice(), arrow.1);
-            assert_eq!(*hot, arrow.2);
-        } else {
-            assert_eq!(bytes.as_slice(), spng);
-            assert_eq!(*hot, shot);
-        }
-    }
 }
 
 #[test]
@@ -137,8 +121,75 @@ fn kind_name_round_trips_every_variant_through_serde() {
 }
 
 #[test]
-fn list_cursor_packs_always_includes_the_builtin_default_first() {
-    let packs = list_cursor_packs();
-    assert_eq!(packs[0].id, DEFAULT_PACK_ID);
-    assert!(packs[0].builtin);
+fn a_v2_pack_declares_its_busy_animation_and_keeps_its_own_busy_sprite() {
+    use crate::export::cursor::busy::BusyAnim;
+    // "cat" ships `busy: { anim: "pulse" }` with a single busy.png and no explicit frames.
+    let spec = busy_spec("cat").expect("the Cat pack declares a busy animation");
+    assert_eq!((spec.anim, spec.frames), (BusyAnim::Pulse, 0));
+    assert!(busy_frames("cat").is_empty(), "no busy_NN.png in this pack");
+    // An animating pack opts OUT of the busy-is-arrow substitution: its busy bytes are its own.
+    let rows = sprite_sources("cat");
+    let (_, arrow, _) = rows.iter().find(|(k, ..)| *k == CursorType::Arrow).unwrap();
+    let (_, busy, _) = rows.iter().find(|(k, ..)| *k == CursorType::Busy).unwrap();
+    assert_ne!(busy, arrow, "an animated busy state keeps its own sprite");
+}
+
+#[test]
+fn the_embedded_pack_and_a_v1_pack_declare_no_busy_animation() {
+    // The last one is a folder with no pack.json (what `sprite_sources_from_dir` tolerates).
+    for id in [DEFAULT_PACK_ID, "", "tcursor_pack_that_does_not_exist"] {
+        assert!(busy_spec(id).is_none(), "{id}");
+        assert!(busy_frames(id).is_empty(), "{id}");
+    }
+}
+
+#[test]
+fn every_shipped_pack_declares_a_usable_busy_animation() {
+    for info in list_packs(None).iter().filter(|p| p.builtin && p.id != DEFAULT_PACK_ID) {
+        let spec = busy_spec(&info.id).unwrap_or_else(|| panic!("{} declares no busy", info.id));
+        assert!(spec.fps > 0.0, "{} has fps {}", info.id, spec.fps);
+        // Every kind must resolve to real bytes, or the grid tile would render blank.
+        let rows = sprite_sources(&info.id);
+        assert_eq!(rows.len(), SPRITES.len(), "{}", info.id);
+        assert!(rows.iter().all(|(_, b, _)| !b.is_empty()), "{}", info.id);
+    }
+}
+
+/// THE EXPORT MUST NOT CHANGE. The embedded pack having a real folder on disk is a GRID
+/// concern: `sprite_sources("default")` still returns `cursorset::SPRITES` verbatim (busy
+/// remapped to arrow), never the folder's files. Pinned two ways - the bytes, and one actually
+/// drawn frame, so a future "just resolve default through its folder" refactor cannot slip past.
+#[test]
+fn the_default_pack_still_exports_from_the_embedded_sprites_not_its_folder() {
+    use crate::export::cursor::cursordraw::{decode_sprite, draw_cursor};
+
+    let rows = sprite_sources(DEFAULT_PACK_ID);
+    let arrow = SPRITES.iter().find(|&&(k, ..)| k == CursorType::Arrow).unwrap();
+    for ((kind, bytes, hot), &(sk, spng, shot)) in rows.iter().zip(SPRITES.iter()) {
+        assert_eq!(*kind, sk);
+        let (want_png, want_hot) = if sk == CursorType::Busy { (arrow.1, arrow.2) } else { (spng, shot) };
+        assert_eq!(bytes.as_slice(), want_png, "{sk:?} bytes came from somewhere else");
+        assert_eq!(*hot, want_hot, "{sk:?} hotspot");
+    }
+
+    // And the pixels those bytes produce. `decode_sprite` shells out to ffmpeg, so this needs the
+    // bundled binary - skip rather than fail where it is unavailable (same as other ffmpeg tests).
+    let (_, png, hot) = rows.iter().find(|(k, ..)| *k == CursorType::Arrow).unwrap();
+    let Some(spr) = decode_sprite(png, *hot) else { return };
+    let mut drawn = vec![0u8; 64 * 64 * 4];
+    draw_cursor(&mut drawn, 64, 64, &spr, (32.0, 32.0), &[], 24.0, 0.0, 1.0, (0, 0, 64, 64));
+    let mut reference = vec![0u8; 64 * 64 * 4];
+    let (_, embedded_png, embedded_hot) = SPRITES.iter().find(|&&(k, ..)| k == CursorType::Arrow).unwrap();
+    let embedded = decode_sprite(embedded_png, *embedded_hot).unwrap();
+    draw_cursor(&mut reference, 64, 64, &embedded, (32.0, 32.0), &[], 24.0, 0.0, 1.0, (0, 0, 64, 64));
+    assert_eq!(drawn, reference, "a drawn Default frame must be byte-identical to the embedded one");
+    assert!(drawn.iter().any(|&b| b != 0), "the frame actually drew something");
+}
+
+#[test]
+fn only_the_embedded_default_set_inverts_for_a_dark_theme() {
+    assert!(theme_inverts(DEFAULT_PACK_ID));
+    for id in ["cartoon", "gradient-glass", "neon", "my-imported-pack"] {
+        assert!(!theme_inverts(id), "{id} is artwork with its own colours");
+    }
 }

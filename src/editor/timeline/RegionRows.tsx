@@ -40,7 +40,7 @@ function RegionRowsInner<T extends Region>({ rows, regions, dur, sel, rowClass, 
             return (
               <motion.div key={r.id} data-region-id={r.id} className={`${blkClass}${sel === r.id ? " sel" : ""}${dragging ? " drag" : ""}`}
                 style={{ left: `${leftPct}%`, width: `${pillWidthPct(s, e, dur, leftPct)}%`, ...extraStyle?.(r, s, e) }}
-                initial={{ opacity: 0 }} whileHover={{ scale: 1.02, transition: { duration: 0.12 } }}
+                initial={{ opacity: 0 }}
                 animate={{ opacity: 1, y: dragging && dragState ? dragState.dyPx : 0, scale: 1 }}
                 transition={{ opacity: { type: "tween", duration: 0.16, ease: [0.4, 0, 0.2, 1] },
                   y: dragging ? { duration: 0 } : { type: "tween", duration: 0.16, ease: [0.4, 0, 0.2, 1] } }}

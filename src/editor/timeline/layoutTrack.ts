@@ -1,6 +1,7 @@
 import type { LayoutSeg } from "../../lib/edit";
 import type { LayoutPresets, LayoutPresetName, LayoutPresetDto, PanelRectDto, PreviewLayout } from "../../lib/ipc";
 import { evalCubic, parseCubic } from "../../lib/cubicBezier";
+import { spring, springOf } from "../../lib/spring";
 
 /** One resolved panel pair - screen + cam - either a segment's own per-segment override (a posed
  *  T34 arrangement, resolved once in Rust through the exact path the export uses) or its preset's
@@ -10,15 +11,18 @@ import { evalCubic, parseCubic } from "../../lib/cubicBezier";
 export interface ResolvedPanels { screen: PanelRectDto; cam: PanelRectDto }
 
 /** Easing mirror of the export's curves (crate::export::camera::ease): linear / smoothstep /
- *  ease-out-back spring / quadratic ease-in / ease-out / ease-in-out, plus a custom
- *  `cubic(x1,y1,x2,y2)` curve (crate::export::cubic). The ONLY place easing is evaluated in TS -
- *  exported so other per-frame mirrors (e.g. camMoveAt) share this single implementation. MUST
- *  stay identical to the Rust `ease` - export is the source of truth, this only drives the live
- *  preview. An unparseable name falls through to smooth, matching `valid_easing`'s coercion. */
+ *  quadratic ease-in / ease-out / ease-in-out, plus the two parameterised forms - a custom
+ *  `cubic(x1,y1,x2,y2)` curve (crate::export::cubic) and a real damped-oscillator
+ *  `spring(stiffness,damping[,mass])` (crate::export::spring), whose bare word `spring` means
+ *  `SPRING_DEFAULT`. The ONLY place easing is evaluated in TS - exported so other per-frame
+ *  mirrors (e.g. camMoveAt) share this single implementation. MUST stay identical to the Rust
+ *  `ease` - export is the source of truth, this only drives the live preview. An unparseable name
+ *  falls through to smooth, matching `valid_easing`'s coercion. */
 export function ease(name: string, p: number): number {
   const c = Math.min(1, Math.max(0, p));
   if (name === "linear") return c;
-  if (name === "spring") { const k = 1.70158, q = c - 1; return 1 + (k + 1) * q * q * q + k * q * q; }
+  const spr = springOf(name);
+  if (spr) return spring(spr[0], spr[1], spr[2], c);
   if (name === "ease_in") return c * c;
   if (name === "ease_out") return c * (2 - c);
   if (name === "ease_in_out") return c < 0.5 ? 2 * c * c : 1 - 2 * (1 - c) * (1 - c);

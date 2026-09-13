@@ -57,3 +57,29 @@ Projects `rect` (pre-zoom canvas px, the offscreen base-frame space `drawPreview
 
 - `src/editor/stage/previewCanvas.ts` - `drawPreview` computes `panelClipRect({x:dx,y:dy,w:dw,h:dh}, {cx0,cy0,cw,ch}, w, h)` from the same panel rect and crop `drawPreview` already has, and passes it to `drawCursorSprite`.
 - `src/editor/stage/cursorPreview.ts` - `drawCursorSprite` no-ops when the result is empty/inverted, and clips the trail + main blit to it otherwise.
+
+## contentScale
+
+```ts
+export function contentScale(panel: number, insetPx: number, srcW: number): number
+```
+
+Canvas px per SOURCE px for the screen panel - the scale that keeps the CAPTURED cursor at its true size relative to the screen content. The TS mirror of Rust `export::cursor::captured::content_scale`, pinned by the same numbers on both sides.
+
+### Inputs
+
+- `panel: number` - `panelFactor`'s result (0.1..1.0).
+- `insetPx: number` - the reference inset width in **canvas px**. `previewCanvas.ts` passes `insetW * w`: unlike `panelFactor`, this is not a pure ratio - `srcW` is in real pixels, so the two must share a unit, and `LayoutPresets.inset_w` is a canvas fraction.
+- `srcW: number` - the recorded video's own width in pixels, from `CursorLayerDto.src_w` (carried on `CapturedLayer.srcW`). NOT `video.videoWidth`, which is the downscaled preview proxy.
+
+### Returns
+
+`panel * insetPx / srcW`. Since `panel * insetPx` IS the screen panel's own canvas width, this is `panelWidth / srcW` - the same ratio the canvas draws the screen content at - with the panel shrink applied exactly ONCE.
+
+A non-positive `srcW` (the backend could not probe the video) falls back to `panel` alone, i.e. the pre-content-scale behavior, rather than collapsing the cursor to nothing on a divide-by-zero.
+
+### Behaviors
+
+- `leaves a source the same size as its panel untouched` / `halves a 2x source (a 4K take on a 1080p canvas)` / `grows an upscaled source with its content` - the ratio itself.
+- `applies a shrunk panel once, not squared` - 0.5 panel gives 0.5 and 0.25, never 0.25 and 0.0625.
+- `falls back to the panel factor alone when the source width is unknown` - `srcW` 0 or negative.

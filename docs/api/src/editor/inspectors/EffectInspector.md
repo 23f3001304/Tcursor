@@ -1,9 +1,18 @@
 # src/editor/inspectors/EffectInspector.tsx
 
-Left-panel inspector for the selected effect region (spotlight), shown in place of the tab content
-while an effect region is selected. Edits start/end/fade/mode, three overridable per-region
-spotlight params (dim/radius/feather, each falling back to the global default when unset), the
-webcam-dim toggle (a global setting, not per-region), and delete.
+Inspector for the selected effect region (spotlight). Edits start/end/fade/mode, three overridable
+per-region spotlight params (dim/radius/feather, each falling back to the global default when
+unset), the webcam-dim toggle (a global setting, not per-region), and delete.
+
+Sections, in DOM order (pinned by `inspectorShape.test.tsx`): **Timing**, **Look**, **Fades**, then
+Remove - the shared reading order from `InspectorShape.md`. The three overrides and the webcam-dim
+switch are all "how it looks", so they moved up next to Spotlight Mode and the two fade fields moved
+below them; every switch in the panel now sits directly above the control it enables, which was the
+point of the reorder (an Override switch three rows above its own slider is the arrangement the
+owner called out).
+
+This is the one inspector with no transition curve: a spotlight fades rather than eases, and
+`EffectRegion` carries no `easing` field.
 
 ## OverrideField
 
@@ -80,10 +89,11 @@ export function EffectInspector({ effect, dur, settings, onApply, onDimCamera, o
 
 ### Behavior
 
-Start/End and Fade in/Fade out are two `NumberField` pairs (`e-field2` rows). Spotlight Mode is a
-`Picker` over the global mode list plus `"Use Global Default"`. Dim/Radius/Feather are three
-`OverrideField`s (see above) - `onToggle(on)` for each writes `defaultValue` when turning an
-override ON (so the slider starts from a sane value instead of jumping to `0`) or the `-1`
-sentinel when turning it OFF (converted back to `None` server-side). "Dim webcam" is a plain
-`Switch` + explanatory `e-lede` text, unrelated to the three overrides. Delete removes the region
-and closes the inspector.
+Start/End is a shared `TimingRow`; Fade in/Fade out is a `NumberField` pair (`e-field2`), each
+bounded by the span's own length. Spotlight Mode is a `Picker` over the global mode list plus
+`"Use Global Default"`. Dim/Radius/Feather are three `OverrideField`s (see above) - `onToggle(on)`
+for each writes `defaultValue` when turning an override ON (so the slider starts from a sane value
+instead of jumping to `0`) or the `-1` sentinel when turning it OFF (converted back to `None`
+server-side). "Dim webcam" is a plain `Switch` with a `Hint` under it, unrelated to the three
+overrides and explicitly labelled as applying to every spotlight. Remove deletes the region and
+closes the inspector.

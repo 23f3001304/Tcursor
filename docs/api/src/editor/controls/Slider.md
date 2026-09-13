@@ -115,3 +115,35 @@ that needed to sit somewhere other than immediately above the track (a `.e-switc
 supporting layout change each (see `EffectInspector.md`'s `OverrideField` section and
 `AudioPanel.md`'s "Live readout" note) rather than staying unconverted, since leaving the lag in
 place wasn't an acceptable fix for those findings.
+
+### Editable value readout (panel pass, 2026-09-13)
+
+`label` no longer renders `{label} <b>{formatValue(shown)}</b>`. It renders `SliderValue`
+(`SliderValue.md`): the same one-row `.e-fl`, name left and value right in tabular figures, but the
+value is **click-to-type** - Enter commits, Esc reverts, blur commits, and a typed number is snapped
+and clamped exactly like a dragged one. Rationale in that file: at 320px a track cannot reliably
+reach an exact degree or pixel, and the panels are full of ranges where a user knows the number they
+want.
+
+`Slider`'s props did not change, so every call site is untouched. Internally the keyboard path and
+the typed path now share one `commitNow(next)` - snapshot the settled value, paint optimistically,
+cancel any pending drag debounce, call `onChange` straight away - because both are discrete and have
+nothing to coalesce.
+
+### Look
+
+The rail is a groove one plane DOWN (`--e-bg`, 4px) rather than a raised bar, and the thumb is a
+plain `--e-fg` disc with a shadow and no border - surfaces read by lightness, not strokes.
+`accentColor` still defaults to `--e-fg`, so a slider's fill stays neutral and the panels' one accent
+(`--e-primary`) is left to mark selected state. The rules moved from `editor.css` to
+`controls/controls.css`.
+
+**Hit strip: 24px (usability pass, 2026-09-13).** The `role="slider"` div was 20px tall. That div
+IS the control's hit target - the 4px rail inside it is only paint - so it sat under the 24px floor
+the pass set for anything clickable, and it is 24 now. Nothing about the rail, the thumb or the
+geometry changed; the strip around them simply got 2px taller on each side.
+
+**Two-up (`.e-two`).** Several panels now put two short sliders side by side, roughly 139px each.
+Nothing in `Slider` needs to know: the track is `width: 100%` and `SliderValue`'s `.e-fl-name`
+ellipsises. The rule for whether a pair qualifies is the NAME's length, and it lives with the
+`.e-two` class in `panels.css`.

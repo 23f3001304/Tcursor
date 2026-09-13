@@ -1,31 +1,71 @@
 # src/editor/inspectors/curveMath.ts
 
-The pure geometry behind `CurveEditor`: curve-space <-> SVG mapping, the drag/nudge clamp, path rendering, and the "which control points should the editor show for this easing string" lookup. No React, no state - all of it is unit-tested in `curveMath.test.ts`.
+The geometry behind `CurveEditor`'s canvas: curve space to SVG, pointer to curve space, and the
+clamp both share. Pure, so it is testable without a DOM (`curveMath.test.ts`).
+
+This module came back with the curve editor. It went away when the six curve cards were replaced by
+a dropdown, and returned when the owner asked where the curve editor had gone: what they had vetoed
+was the card grid, not the ability to shape a curve. See `CurveEditor.md`.
+
+The drawn shapes of the six named curves are **not** here. They live in
+`src/editor/timeline/curveGlyphs.ts`, which the timeline's transition popover also draws, so the
+row, the popover and the canvas cannot show three different pictures of one easing.
+
+## Cubic
+
+```ts
+export type Cubic = [number, number, number, number];
+```
+
+`[x1, y1, x2, y2]` - the two control points of a CSS-semantics cubic bezier through `(0,0)` and
+`(1,1)`, the same four numbers `lib/cubicBezier.ts`'s `cubic(...)` wire form carries.
 
 ## VIEW
 
 ```ts
-export const VIEW = { minX: 0, minY: -30, w: 100, h: 160 } as const;
-export const VIEW_BOX: string;
+export const VIEW: { minX: 0; minY: -30; w: 100; h: 160 }
 ```
 
-The curve cards' shared SVG viewBox, and its string form. `x 0..100` is progress `0..1`; `y 100..0` is value `0..1`; the extra `-30..130` band is the room a handle has to overshoot in either direction. Every other constant here is derived from it, so widening the band is a one-line change.
+The canvas' SVG box. x `0..100` is progress `0..1`; y `100..0` is value `0..1`; the extra `-30..130`
+band is the room a handle has to overshoot in either direction, which a spring-shaped curve needs.
+
+## VIEW_BOX
+
+```ts
+export const VIEW_BOX: string
+```
+
+`VIEW` as the `viewBox` attribute string.
 
 ## Y_MAX
 
 ```ts
-export const Y_MAX: number; // 1.3
+export const Y_MAX: number
 ```
-
-The upper value bound the viewBox band implies - how far a handle may overshoot past 1. Rounded to 3 decimals like every coordinate this module emits, so a clamped handle compares exactly equal to the bound rather than to a float-noise neighbour.
 
 ## Y_MIN
 
 ```ts
-export const Y_MIN: number; // -0.3
+export const Y_MIN: number
 ```
 
-The lower bound, the same derivation mirrored: how far below 0 a handle may dip.
+The value bounds the viewBox band implies, and therefore the drag/nudge clamp. Derived from `VIEW`
+rather than written twice, and rounded like every other coordinate this module emits so a clamped
+handle compares equal to the bound itself.
+
+## CURVE_SEEDS
+
+```ts
+export const CURVE_SEEDS: Record<string, Cubic>
+```
+
+The cubic each named curve seeds its handles from when the user starts dragging it. Exact for
+`linear`, `ease_in`, `ease_out` and `smooth` - `curveMath.test.ts` proves each reproduces `ease(key,
+p)` to 4 decimals - and the nearest standard bezier for `ease_in_out`. A spring is not a cubic at
+all, so its entry is only the seed a user gets by dragging a spring into a custom curve.
+
+Separate from `curveGlyphs.ts` on purpose: that file publishes what each curve **looks like**, this
+one what it **converts to**, and only the editor needs the second.
 
 ## toSvg
 
@@ -33,7 +73,7 @@ The lower bound, the same derivation mirrored: how far below 0 a handle may dip.
 export const toSvg: (x: number, y: number) => [number, number]
 ```
 
-Curve space -> SVG user units. `(0,0)` is the bottom-left corner (`[0,100]`), `(1,1)` the top-right (`[100,0]`).
+Curve space (progress, value) to SVG user units.
 
 ## clampHandle
 
@@ -41,7 +81,8 @@ Curve space -> SVG user units. `(0,0)` is the bottom-left corner (`[0,100]`), `(
 export const clampHandle: (x: number, y: number) => [number, number]
 ```
 
-Clamp a control point to what the editor can show AND what the Rust parser accepts: `x` into `[0,1]` (which is what keeps `x(t)` monotonic), `y` into the viewBox's overshoot band. Rounds both to 3 decimals.
+Clamps a control point to what the canvas can show and the Rust parser accepts: x into `[0,1]`
+(which keeps `x(t)` monotonic), y into the viewBox's overshoot band.
 
 ## curvePath
 
@@ -49,7 +90,7 @@ Clamp a control point to what the editor can show AND what the Rust parser accep
 export function curvePath(c: Cubic): string
 ```
 
-The SVG `d` for a cubic through P0=(0,0), P1, P2, P3=(1,1). Used both for the expanded editor's live curve and for the Custom card's glyph.
+The `d` for a cubic through P0=(0,0), P1, P2, P3=(1,1).
 
 ## setHandle
 
@@ -57,7 +98,7 @@ The SVG `d` for a cubic through P0=(0,0), P1, P2, P3=(1,1). Used both for the ex
 export function setHandle(c: Cubic, handle: 0 | 1, x: number, y: number): Cubic
 ```
 
-Replace one control point (`0` = P1, `1` = P2), clamped. Returns a NEW tuple - the caller's copy is never mutated, which is what lets `CurveEditor` hold a pre-drag base and derive from it on every pointer move.
+Replaces one control point (0 = P1, 1 = P2), clamped.
 
 ## nudgeHandle
 
@@ -65,16 +106,29 @@ Replace one control point (`0` = P1, `1` = P2), clamped. Returns a NEW tuple - t
 export const nudgeHandle: (c: Cubic, handle: 0 | 1, dx: number, dy: number, step?: number) => Cubic
 ```
 
-The keyboard form of `setHandle`: one arrow press moves a handle by `step` (default `0.05`) in curve space, with the same clamp and the same no-mutation guarantee.
+Keyboard nudge: one arrow press moves a handle by `step` (0.05) in curve space. The handles are
+real `role="slider"` controls, so this is how the curve is editable without a pointer.
 
 ## clientToCurve
 
 ```ts
-export function clientToCurve(clientX: number, clientY: number,
-  rect: { left: number; top: number; width: number; height: number }): [number, number]
+export function clientToCurve(clientX: number, clientY: number, rect): [number, number]
 ```
 
-Pointer position -> curve space, clamped. `rect` is the editor SVG's bounding box, captured once at pointer-down. Derived from `VIEW` rather than hardcoded, and pinned as the exact inverse of `toSvg` by a round-trip test (including a `y = 1.2` overshoot point).
+Pointer position to curve space, clamped. `rect` is the canvas element's bounding box, captured once
+per drag rather than per move.
+
+## handlePct
+
+```ts
+export function handlePct(c: Cubic, handle: 0 | 1): [number, number]
+```
+
+Where a handle sits over the canvas as `[left%, top%]`. The dots are HTML laid over the SVG, not
+circles inside it, because the canvas draws with `preserveAspectRatio="none"` (a 268x96 box showing
+a 100x160 viewBox) and that stretch would squash a circle into an ellipse. This is the exact
+inverse of `clientToCurve`, pinned as a round trip in the tests - if the two ever disagreed, a
+grabbed handle would jump on its first pointermove.
 
 ## curveOf
 
@@ -82,10 +136,20 @@ Pointer position -> curve space, clamped. `rect` is the editor SVG's bounding bo
 export function curveOf(easing: string): Cubic
 ```
 
-The control points the editor should show for an easing wire-name:
+The control points the canvas should show for an easing wire-name: the parsed curve for a custom
+`cubic(...)`, else that named preset's seed, else Smooth's (what `valid_easing` coerces an unknown
+name to anyway).
 
-1. a custom `cubic(...)` parses straight back to its own handles;
-2. a named preset seeds from that preset's `c` (`curves.ts`);
-3. anything unknown seeds from Smooth - which is also what `valid_easing` would coerce it to, so the editor and the backend agree on what an unrecognised name means.
+## springPathOf
 
-Returns a copy, never the shared `CAM_CURVES` entry, so editing cannot mutate the preset table.
+```ts
+export function springPathOf(easing: string | undefined | null): string | null
+```
+
+The canvas path for an easing that IS a spring (the bare word or a parameterised `spring(k,c,m)`),
+sampled at 48 points from the same `spring()` the export evaluates, so the drawing cannot lie about
+the oscillator the two sliders under it are tuning. `null` for everything else, which is also how
+`CurveEditor` asks "is this a spring" when deciding whether to show handles or sliders.
+
+`curveGlyphs.ts` samples only the ONE default spring, for its static glyph, and keeps its sampler
+private; the live one is computed here.

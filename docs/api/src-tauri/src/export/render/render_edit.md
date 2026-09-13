@@ -8,6 +8,7 @@ Cursor prep (`CursorPrep`) is deliberately excluded: it is edit-independent for 
 
 ```rust
 pub(crate) struct EditState {
+    pub map: TimeMap,
     pub settings: Settings,
     pub cfg: ZoomConfig,
     pub track: LayoutTrack,
@@ -24,8 +25,10 @@ Everything the renderer derives from `edit.json` that a zoom/spotlight/camera-mo
 ## EditState::load
 
 ```rust
-pub(crate) fn load(paths: &ProjectPaths, actions: &[ActionEvent], layout: &Layout, sw: u32, sh: u32, shift: i64) -> Self
+pub(crate) fn load(paths: &ProjectPaths, actions: &[ActionEvent], layout: &Layout, sw: u32, sh: u32, shift: i64, full_dur_ms: u32) -> Self
 ```
+
+**Time remap (first thing it does).** `full_dur_ms` is the clip length; the `TimeMap` is built from the raw doc's trim, cuts and speed spans, and the doc is run through `edit::remap_doc` BEFORE any track is built, so `fromedit`, `LayoutTrack`, `CameraMoveTrack` and the effects list only ever see output-clock spans and never learn about cuts or speed. The recorded layout switches used by the fallback track (`actions_on_output_clock`, which despite its name puts them on the clip clock) are mapped through `out_of` the same way. The map is kept on the state (`map`) and reaches the renderer's `time_map()`.
 
 Loads the edit-derived state from `paths` (reads `edit.json` via `load_or_seed`). `actions` / `layout` / `sw` / `sh` are the edit-independent inputs the caller already holds (recorded action log, preview layout, probed video dims), so this touches only `edit.json`.
 

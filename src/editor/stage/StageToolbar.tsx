@@ -1,7 +1,7 @@
 import type { ComponentType } from "react";
 import { motion } from "motion/react";
 import { IconAspectRatio, IconClick, IconTypography, IconVideo } from "@tabler/icons-react";
-import type { Tab } from "../shell/Rail";
+import type { Tab } from "../shell/panelTabs";
 import type { Aspect } from "../../lib/edit";
 import { ASPECT_ORDER, ASPECT_LABEL } from "./Transport";
 
@@ -21,10 +21,10 @@ const TAP = { whileTap: { scale: 0.92 }, transition: { type: "tween" as const, d
  *  the toggle-vs-navigation question):
  *  - **Aspect** is a real toggle of a live stage property - the canvas itself reshapes when
  *    clicked. It keeps the strong, latched `.on` look (`--e-primary` red accent, `.e-tbtn.on`'s
- *    own language) and a state-sentence tooltip ("Aspect ratio: 16:9 — click to switch to 9:16").
+ *    own language) and a state-sentence tooltip ("Aspect ratio: 16:9, click to switch to 9:16").
  *  - **Cursor / Captions / Camera** are navigation, not toggles - clicking one doesn't change
- *    anything about the STAGE, it changes which Rail panel is showing. Their `.nav-on` look only
- *    ever MIRRORS the Rail's own active-tab highlight (`.e-ric.on`'s soft neutral tint, not a
+ *    anything about the STAGE, it changes which panel is showing. Their `.nav-on` look only
+ *    ever MIRRORS the workspace rail's active highlight (`.e-wsric.on`'s soft neutral tint, not a
  *    colored accent) rather than latching its own independent "engaged" state, and their tooltip
  *    is a constant "Open the {X} panel" regardless of whether that panel happens to already be
  *    open - clicking an already-open one is a harmless no-op, not a toggle-off. A thin divider
@@ -49,7 +49,7 @@ export function StageToolbar({ tab, onTab, aspect, onAspect, aspectLocked }: {
   return (
     <div className="e-ftool">
       <motion.button className={aspect !== "source" ? "on" : ""} disabled={aspectLocked} onClick={cycleAspect}
-        title={`Aspect ratio: ${ASPECT_LABEL[aspect]} — click to switch to ${ASPECT_LABEL[nextAspect]}`}
+        title={`Aspect ratio: ${ASPECT_LABEL[aspect]} - click to switch to ${ASPECT_LABEL[nextAspect]}`}
         aria-label="Aspect ratio" aria-pressed={aspect !== "source"} {...TAP}>
         <IconAspectRatio size={16} />
       </motion.button>

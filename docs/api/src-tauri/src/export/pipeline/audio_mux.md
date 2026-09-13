@@ -5,8 +5,10 @@ Muxes the encoded silent video with recorded microphone and/or system audio into
 ## mux
 
 ```rust
-pub fn mux(tmp: &Path, paths: &ProjectPaths, format: Format, mic_shift_ms: i64, sys_shift_ms: i64, mic_vol: f32, sys_vol: f32, out_dur_ms: u64) -> Result<()>
+pub fn mux(tmp: &Path, paths: &ProjectPaths, format: Format, mic_shift_ms: i64, sys_shift_ms: i64, mic_vol: f32, sys_vol: f32, out_dur_ms: u64, segs: &[AudioSeg]) -> Result<()>
 ```
+
+**Time remap.** `segs` (`audio_segments::audio_segs`) is the kept ranges in trimmed-video seconds. `mux_args` appends `audio_segments::segment_chain` after the volume/mix step: the mix (or the lone track) lands on `[x]` and the chain trims, re-times (`atempo`, pitch preserved) and concatenates it into `[a]`. The identity (one segment at 1x, or none) adds nothing, so a no-cut export runs the exact pre-remap command, pinned by `without_segments_the_two_track_and_one_track_commands_are_the_pre_remap_ones`; `a_cut_and_a_double_speed_span_shorten_the_muxed_audio_to_match` runs the real ffmpeg on a lavfi fixture and checks the length.
 
 Combines the temporary video file with whichever audio tracks exist and writes `<project_folder>/final.<ext>`.
 

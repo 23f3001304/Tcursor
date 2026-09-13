@@ -29,6 +29,7 @@ A spawned ffmpeg process emitting a continuous stream of raw BGRA frames at a fi
 ### Used by
 
 - `src-tauri/src/export/pipeline/mod.rs` - `ScreenPipe::spawn` and `WebcamPipe::spawn` each spawn one `RawDecoder`.
+- `src-tauri/src/export/pipeline/bg_pipe.rs` - `BgPipe::open` spawns one through `spawn_args`, with its own looping arg list.
 - `src-tauri/src/export/pipeline/pipeline_decode.rs` - `spawn_screen`/`spawn_webcam` decode-thread bodies read frames from a `RawDecoder` in a loop.
 - `src-tauri/src/export/preview/mod.rs` - the preview engine spawns short-lived decoders directly to grab a single frame at an arbitrary time.
 
@@ -57,7 +58,17 @@ Spawns the ffmpeg decoder subprocess and captures its stdout.
 
 ### Implementation
 
-1. Build the arg list via `decode_args` (below). stdout AND stderr are piped - stderr is *captured*, not discarded (it used to be `Stdio::null()`), because it is the only account of WHY a decode died.
+1. Build the arg list via `decode_args` (below) and hand it to `spawn_args`.
+
+## RawDecoder::spawn_args
+
+```rust
+pub fn spawn_args(args: Vec<String>, frame_bytes: usize) -> Result<Self>
+```
+
+`spawn` for a caller that builds its OWN argument list: the background stream (`pipeline::bg_pipe`), whose `-stream_loop -1 -an` shape does not fit `decode_args`' parameters and should not distort them for the three call sites that do fit. Everything downstream is shared and identical - which is the point of the split.
+
+1. Spawn `ffmpeg` with `args`. stdout AND stderr are piped - stderr is *captured*, not discarded (it used to be `Stdio::null()`), because it is the only account of WHY a decode died.
 2. Take `child.stdout`; hand `child.stderr` to `drain_stderr`; return `Self { child, stdout, frame_bytes, stderr, drain, frames: 0 }`.
 
 ## drain_stderr

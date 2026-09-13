@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use crate::audio::level::{block_rms_f32, block_rms_i16, LevelSlot};
 use crate::audio::wav_writer::WavWriter;
 use crate::domain::time::Clock;
 
@@ -22,7 +23,10 @@ impl SystemAudioHandle {
 pub struct SystemAudio;
 
 impl SystemAudio {
-    pub fn loopback(wav_path: &str, paused: Arc<AtomicBool>, started: Arc<AtomicU64>, clock: Arc<dyn Clock>) -> anyhow::Result<SystemAudioHandle> {
+    /// `level`, when given, receives each block's RMS for the HUD's live meter (see
+    /// `CpalMic::open` - same lock-free push from the realtime callback, same reason).
+    pub fn loopback(wav_path: &str, paused: Arc<AtomicBool>, started: Arc<AtomicU64>, clock: Arc<dyn Clock>,
+        level: Option<Arc<LevelSlot>>) -> anyhow::Result<SystemAudioHandle> {
         let host = cpal::default_host();
         let device = host
             .default_output_device()
@@ -32,6 +36,7 @@ impl SystemAudio {
         let channels = config.channels();
         let writer = Arc::new(Mutex::new(Some(WavWriter::create(wav_path, sample_rate, channels)?)));
         let w2 = writer.clone();
+        let lv = level.clone();
         let err_fn = |e| eprintln!("system-audio stream error: {e}");
         let stream = match config.sample_format() {
             cpal::SampleFormat::F32 => device.build_input_stream(
@@ -41,6 +46,7 @@ impl SystemAudio {
                     if !data.is_empty() && started.load(Ordering::SeqCst) == 0 {
                         started.store(clock.now_ms(), Ordering::SeqCst);
                     }
+                    if let Some(l) = lv.as_ref() { l.push(block_rms_f32(data)); }
                     let s: Vec<i16> = data.iter().map(|&x| (x.clamp(-1.0, 1.0) * i16::MAX as f32) as i16).collect();
                     if let Some(w) = w2.lock().unwrap().as_mut() { w.write(&s); }
                 }, err_fn, None)?,
@@ -51,6 +57,7 @@ impl SystemAudio {
                     if !data.is_empty() && started.load(Ordering::SeqCst) == 0 {
                         started.store(clock.now_ms(), Ordering::SeqCst);
                     }
+                    if let Some(l) = level.as_ref() { l.push(block_rms_i16(data)); }
                     if let Some(w) = w2.lock().unwrap().as_mut() { w.write(data); }
                 }, err_fn, None)?,
             other => anyhow::bail!("unsupported sample format: {other:?}"),

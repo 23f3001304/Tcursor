@@ -51,7 +51,7 @@ Queries a video's container duration in seconds. Returns `0.0` if the duration f
 pub fn decode_image(image: &[u8], w: u32, h: u32) -> Result<Vec<u8>>
 ```
 
-Decodes any ffmpeg-readable image format to a `w * h * 4` BGRA buffer, scaled to the exact output size. Used for the bundled background wallpaper.
+Decodes any ffmpeg-readable image format to a `w * h * 4` BGRA buffer, STRETCHED to the exact output size. Used for the legacy bundled background (`assets/backgrounds/bg.jpg`). *Why a plain stretch:* every project saved before the wallpaper library renders through this call, and its exact look - aspect distortion and all - is what those projects expect. The library's own images take the cover-fitting `decode_image_cover` below instead.
 
 ### Inputs
 
@@ -68,9 +68,51 @@ Decodes any ffmpeg-readable image format to a `w * h * 4` BGRA buffer, scaled to
 2. Spawn `ffmpeg -v error -i <staged> -frames:v 1 -f rawvideo -pix_fmt bgra -vf scale=w:h -`, capturing stdout.
 3. Assert `stdout.len() == w * h * 4`; error if not. The staged file is deleted when the guard drops, including on the early `?` return.
 
+Steps 1-3 live in the private `decode_with`, which both this and `decode_image_cover` call with their own `-vf` filter - the only thing that differs between them.
+
 ### Behaviors worth knowing
 
 - `decode_image_is_immune_to_a_clobber_of_the_legacy_shared_path` - a decode's result depends only on the bytes it was handed, even while an unrelated writer hammers `$TEMP/cursorzoom_bg_src` (the path every caller used to share) with a different image.
+
+## decode_image_cover
+
+```rust
+pub fn decode_image_cover(image: &[u8], w: u32, h: u32) -> Result<Vec<u8>>
+```
+
+`decode_image` with a COVER fit: the image is scaled until it fills `w` x `h` with its aspect ratio intact, then centre-cropped. Used for the bundled wallpaper library (`settings::wallpapers`).
+
+### Inputs
+
+Identical to `decode_image` - raw image bytes plus the output frame's dimensions.
+
+### Returns
+
+`Result<Vec<u8>>` - BGRA buffer of exactly `w * h * 4` bytes, same contract as `decode_image`.
+
+### Implementation
+
+Calls `decode_with` with `-vf scale=w:h:force_original_aspect_ratio=increase,crop=w:h`. *Why cover and not fit:* the wallpapers are 16:9 art; letterboxing them into a 9:16 or 1:1 export would put bars behind the screen panel, and stretching them would visibly distort the ribbons. Cropping the overflow is the only option that keeps the frame filled and the art undistorted. At a 16:9 output the `crop` is a no-op and the result is the same plain scale `decode_image` would have produced.
+
+### Behaviors worth knowing
+
+- `cover_fit_crops_the_overflow_while_the_legacy_decode_still_stretches` - a 4x2 image whose outer columns are green decodes into a 2x2 square that is entirely the red centre, while `decode_image` on the same input folds the green edges in. Skipped (not failed) when no ffmpeg is on PATH.
+
+## decode_file_cover
+
+```rust
+pub fn decode_file_cover(file: &Path, w: u32, h: u32) -> Result<Vec<u8>>
+```
+
+`decode_image_cover` for a file already ON DISK: the user's imported background (`settings::bg_asset`). Same filter, same BGRA contract, same cover framing - so an imported still is framed exactly like a bundled wallpaper.
+
+*Why a second entry point rather than reading the bytes and reusing `decode_image_cover`:* that path stages its input through a temp file, so a multi-MB import would be read into memory and written back out just to hand ffmpeg a path it could have had directly. A VIDEO background is decoded here too, for its FIRST frame (what the Rust preview commands show and what the export falls back to if its stream dies) - and those files can be gigabytes.
+
+An `Err` here is the ordinary case for a deleted or unreadable asset, and is what makes `export::scene::background::build` fall back to the wallpaper.
+
+### Behaviors worth knowing
+
+- `the_file_input_decode_frames_exactly_like_the_in_memory_one` - the same fixture decoded both ways is byte-identical, and a missing file is an `Err`. Skipped (not failed) when no ffmpeg is on PATH.
 
 ## StagedInput
 

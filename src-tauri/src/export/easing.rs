@@ -6,7 +6,7 @@ pub fn ease(e: Easing, t: f32) -> f32 {
     match e {
         Easing::Linear => t,
         Easing::Smooth => 1.0 - (1.0 - t).powi(3), // ease-out cubic
-        Easing::Spring { .. } => 1.0 - (1.0 - t).powi(3), // M2b: behave as Smooth; real spring is M3+
+        Easing::Spring { .. } => crate::export::spring::eval(e, t),
         Easing::EaseIn => t * t,
         Easing::EaseOut => t * (2.0 - t),
         Easing::EaseInOut => if t < 0.5 { 2.0 * t * t } else { 1.0 - 2.0 * (1.0 - t) * (1.0 - t) },

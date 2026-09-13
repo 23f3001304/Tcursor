@@ -18,19 +18,18 @@ export function CaptionsPanel({
 
   return (
     <div className="e-panel e-insp">
-      <PanelHeader title="Captions" lede="Show which hotkey was held as an on-screen caption."
+      <PanelHeader title="Captions" lede="Show the hotkeys you press, on screen."
         onReset={handleReset} onClose={onClose} />
 
-      {/* `.e-field`, not `.e-sec` - `.e-sec` adds its own top border + margin/padding, which
-          stacked with PanelHeader's own hairline to read as an empty divider strip with nothing
-          in it. Every other panel's first group after PanelHeader uses `.e-field` directly. */}
-      <div className="e-field">
+      {/* One switch and the sentence that qualifies it - no section heading, because a heading
+          over a single row is chrome with nothing to organise. */}
+      <div className="e-grp">
         <div className="e-switchrow">
           <span>Show keystrokes on screen</span>
-          <Switch on={settings.captions} onChange={(v) => set("captions", v)} />
+          <Switch on={settings.captions} onChange={(v) => set("captions", v)} ariaLabel="Show keystrokes on screen" />
         </div>
-        <span className="e-lede" style={{ marginTop: 8, marginBottom: 0 }}>
-          Spoken captions (auto-transcription) are coming later — this toggle shows typed keystrokes.
+        <span className="e-hintline">
+          Spoken captions (auto-transcription) are coming later. This toggle shows typed keystrokes.
         </span>
       </div>
     </div>

@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { motion } from "motion/react";
-import { IconCheck, IconAlertTriangle, IconFolderOpen } from "@tabler/icons-react";
+import { IconAlertTriangle, IconFolderOpen } from "@tabler/icons-react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { Spin } from "../controls/Spin";
+import { SweepWave } from "../../lib/wave/ui/SweepWave";
 import { fmt } from "../timeline/time";
 import { estimateEtaMs } from "./exportEta";
 
@@ -46,7 +46,9 @@ export function ExportProgress({ exporting, pct, done, error, exportPath, starte
   if (done) {
     return (
       <div className="e-export-outcome">
-        <IconCheck size={28} className="e-export-icon done" />
+        {/* The sweep's own ending, not a separate success icon: the wave is already flat at 100%,
+            so the dot it left behind is what becomes the checkmark. */}
+        <SweepWave w={200} h={30} pct={100} done />
         <p className="e-export-outcome-title">Export complete</p>
         <div className="e-modal-actions">
           <button type="button" className="e-modal-btn" onClick={onReset}>Export again</button>
@@ -65,14 +67,13 @@ export function ExportProgress({ exporting, pct, done, error, exportPath, starte
   return (
     <div className="e-export-progress">
       <div className="e-export-progress-row">
-        <Spin size={15} />
         <span>Exporting...</span>
         <span className="e-export-pct">{pct}%</span>
       </div>
-      <div className="e-export-bar-track">
-        <motion.div className="e-export-bar-fill" animate={{ width: `${pct}%` }}
-          transition={{ type: "spring", stiffness: 120, damping: 24 }} />
-      </div>
+      {/* The fill bar's replacement: the dot sits exactly at `pct` of the width on the wave's
+          trailing crest, and the wave decays to flat as it reaches 100 - so the shape says how
+          far along this is before the number is read. */}
+      <SweepWave w={352} h={34} pct={pct} />
       <p className="e-export-eta">
         {etaMs === null ? "Estimating time remaining..." : `About ${fmt(etaMs)} remaining`}
       </p>

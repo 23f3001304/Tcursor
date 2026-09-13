@@ -16,7 +16,7 @@ pub struct RecentProject {
 }
 
 /// `<config-dir>/TCursor/recents.json`. Sibling to `settings::store::config_path`'s
-/// `TCursor/config.json` and `pack::cursors_dir`'s `TCursor/cursors`.
+/// `TCursor/config.json` and `packdirs::cursors_dir`'s `TCursor/cursors`.
 fn recents_path() -> PathBuf {
     dirs_next::config_dir().unwrap_or_else(std::env::temp_dir).join("TCursor").join("recents.json")
 }

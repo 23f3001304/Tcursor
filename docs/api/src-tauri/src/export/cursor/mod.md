@@ -110,7 +110,7 @@ Click (mouse-down) positions as `(event_time_ms, x, y)` where `x`/`y` are 0..1 f
 ## Cursor::at
 
 ```rust
-pub fn at(&mut self, t_ms: u32) -> FramePoint
+pub fn at(&mut self, t_ms: u32, dt_ms: f32) -> FramePoint
 ```
 
 Returns the smoothed cursor position in frame-local pixels at event-time `t_ms`.
@@ -118,6 +118,7 @@ Returns the smoothed cursor position in frame-local pixels at event-time `t_ms`.
 ### Inputs
 
 - `t_ms: u32` - the frame's event time in milliseconds. *Why:* the exporter passes the frame timestamp so the tracker can advance its internal index forward and interpolate between surrounding samples. Must be non-decreasing across calls (the index only advances).
+- `dt_ms: f32` - the caller's **exact** frame period (`render::OUT_STEP_MS` = 16.666667 at 60fps; the exporter computes `1000 / out_fps` from its settings-resolved rate). *Why an argument and not `t_ms` minus the previous `t_ms`:* the frame loops build `t_ms` as `k * 1000 / out_fps` in integer math, so differencing it reads 16/17/17/16 at 60fps - the clock's rounding, not a real timing difference - and a first-order filter turns that straight into a per-frame ripple. Same contract, same reason, as `CameraSim::step`'s `dt_ms` (`export/render/mod.md`).
 
 ### Returns
 
@@ -128,7 +129,7 @@ Returns the smoothed cursor position in frame-local pixels at event-time `t_ms`.
 1. Advance `self.idx` forward while `events[idx + 1].t <= t_ms`. *Why one event at a time:* frames are queried in ascending order; this is amortised O(1) over the full export rather than O(log n) per frame.
 2. Call `raw_at(t_ms)` to get the interpolated, un-smoothed position.
 3. If `!self.primed`, set `sx = raw.x`, `sy = raw.y`, `primed = true`. *Why seed on first call:* prevents a large artificial lerp from (0, 0) to the true starting position at the opening frame.
-4. Otherwise apply exponential low-pass: `sx += (raw.x - sx) * self.a` (same for `y`). `a` is the settings-driven follow alpha (`CursorSettings::follow_alpha`, default ~0.36): higher = snappier follow, lower = a smoother, more deliberate glide (the editor's Cursor Smoothness slider). *Why low-pass over raw positions:* recorded mouse data is typically throttled to 60-100 Hz and exhibits sample-to-sample jitter that would produce a visibly shaking cursor in the rendered video.
+4. Otherwise apply exponential low-pass: `sx += (raw.x - sx) * follow::damping(self.a, dt_ms)` (same for `y`). `a` is the settings-driven follow alpha (`CursorSettings::follow_alpha`, default ~0.36) read as "fraction of the remaining error closed in one **60fps frame**": higher = snappier follow, lower = a smoother, more deliberate glide (the editor's Cursor Smoothness slider). *Why low-pass over raw positions:* recorded mouse data is typically throttled to 60-100 Hz and exhibits sample-to-sample jitter that would produce a visibly shaking cursor in the rendered video. *Why the `damping` conversion (H4 in the camera probe):* the raw alpha was applied once per STEP, so the same setting meant a different time constant at every output rate - ~4% off between a 16ms grid and the export's 16.667ms one, and ~100% off at a 30fps export. `export::camera::follow::damping` (`export/camera/follow.md`) turns the per-60fps-frame fraction into the equivalent fraction for this step, `1 - (1 - a)^(dt / 16.667)`, and is the **same** function the camera's own follow lerp uses - one definition, so the two filters cannot drift apart on what `smoothness` means. At exactly 60fps it returns `a` untouched, so the shipped trajectory is bit-identical (`jank_filter_tests::smoothing_off_is_bit_identical` did not move when this landed).
 5. Return `FramePoint { x: sx.round(), y: sy.round() }`.
 
 ### Behaviors
@@ -138,12 +139,32 @@ Returns the smoothed cursor position in frame-local pixels at event-time `t_ms`.
 
 ## cursordraw
 
-Submodule (`cursor/cursordraw.rs`). CPU rasterizer for the Enhanced synthetic cursor: sprite placement, click-bounce scale animation, and motion trail blending, clipped to the screen panel. Key items: `CursorSprite`, `decode_sprite`, `bounce_scale`, `draw_cursor`, `apply_enhanced` - full per-symbol docs in `cursor/cursordraw.md`.
+Submodule (`cursor/cursordraw.rs`). CPU rasterizer for the Enhanced synthetic cursor: sprite placement, click-bounce scale animation, and motion trail blending, clipped to the screen panel. Key items: `CursorSprite`, `decode_sprite`, `bounce_scale`, `draw_cursor`, `draw_cursor_posed`, `apply_enhanced` - full per-symbol docs in `cursor/cursordraw.md`.
 
 ## cursorset
 
-Submodule (`cursor/cursorset.rs`). Manages the per-type cursor sprite set: decodes each shape once at prep time, inverts RGB for dark themes, and dispatches per-frame draw calls with panel-proportional sizing. Key items: `SPRITES`, `CursorPrep`, `prep`, `sprite_for`, `draw`, `invert_rgb` - full per-symbol docs in `cursor/cursorset.md`.
+Submodule (`cursor/cursorset.rs`). Manages the per-type cursor sprite set: decodes each shape once at prep time, inverts RGB for dark themes, and dispatches per-frame draw calls with panel-proportional sizing. Key items: `SPRITES`, `CursorPrep`, `prep`, `sprite_for`, `posed` (the busy animation's per-frame sprite + transform), `draw`, `frame_placement` (the projection both cursor paths share), `invert_rgb` - full per-symbol docs in `cursor/cursorset.md`.
+
+## busy
+
+Submodule (`cursor/busy.rs`). Pack format v2's animated busy cursor: pure math turning an output-clock timestamp into "which frame, rotated how far, scaled how much". Key items: `BusyAnim` (spin/flip/pulse), `BusySpec` (a pack's declared animation plus its explicit frame count), `BusyPose`, `busy_pose` - full per-symbol docs in `cursor/busy.md`. Mirrored in TS by `src/editor/stage/cursorBusy.ts`.
+
+## cursorxform
+
+Submodule (`cursor/cursorxform.rs`). The rotated/scaled blit the animated busy cursor needs: destination-driven inverse mapping with premultiplied bilinear sampling, reached only when `BusyPose::is_identity` is false so every still cursor keeps `cursordraw`'s nearest-neighbour fast path. Key item: `blit_transformed` - full per-symbol docs in `cursor/cursorxform.md`.
+
+## packdirs
+
+Submodule (`cursor/packdirs.rs`). Where cursor packs live: the embedded set, the BUNDLED folders under the app's `assets/cursorpacks` resources, and the user's imports under `cursors_dir()`. Resolves a pack id to a folder (bundled wins) and explains why the exe-relative candidates make `tauri dev` work with no staging step. Key items: `cursors_dir`, `pack_dir`, `resource_candidates`, `bundled_root`, `default_pack_dir` (the embedded pack's own `assets/cursors` folder), `bundled_pack_dir`, `bundled_pack_dirs`, `imported_pack_dirs`, `resolve_pack_dir` - full per-symbol docs in `cursor/packdirs.md`.
+
+## packlist
+
+Submodule (`cursor/packlist.rs`). What packs exist and how the Cursor panel's grid shows them - names, folders, and a kind-to-filename map that already carries the embedded pack's `pointer.png` alias and the busy-is-arrow substitution, so the frontend needs neither rule. Key items: `CursorPackInfo`, `list_packs`, `imported_info`, `pack_files`, `default_filename` - full per-symbol docs in `cursor/packlist.md`.
+
+## captured
+
+Submodule (`cursor/captured.rs`). The REAL OS cursor, composited from the layer the recorder captured (`events::track::cursorlayer`) - what "System" means on any recording made since screen capture went cursor-free. Draws the actual recorded bitmap at the raw recorded point, with none of the Enhanced polish. Key items: `draws_captured` (the single gate that picks captured over synthetic), `CapturedCursors`, `CapturedCursors::load`, `CapturedCursors::sprite_at`, `CapturedCursors::draw` - full per-symbol docs in `cursor/captured.md`.
 
 ## cursorpreview
 
-Submodule (`cursor/cursorpreview.rs`). Editor-preview cursor commands: expose the Capitaine sprite pack + cursor-type track to the frontend so the canvas preview draws the same cursor the export renders. Key items: `cursor_sprites`, `cursor_kinds` (Tauri commands) - full per-symbol docs in `cursor/cursorpreview.md`.
+Submodule (`cursor/cursorpreview.rs`). Editor-preview cursor commands: expose the Capitaine sprite pack + cursor-type track to the frontend so the canvas preview draws the same cursor the export renders. Key items: `cursor_sprites` (now returning a `CursorPackDto` carrying the pack's busy animation), `cursor_kinds`, `cursor_layer` (Tauri commands) - full per-symbol docs in `cursor/cursorpreview.md`.

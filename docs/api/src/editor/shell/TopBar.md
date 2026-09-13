@@ -47,7 +47,7 @@ Undo (`IconArrowBackUp`, title "Undo (Ctrl+Z)") calls `onUndo` and is `disabled=
 **Window controls + drag.**
 The bar has `data-tauri-drag-region`, and CSS sets `pointer-events: none` on its non-button children, so dragging the empty bar / brand area moves the window while the buttons stay clickable.
 - **Minimize** (`IconMinus`) calls `getCurrentWindow().minimize()`.
-- **Maximize** (`IconMaximize`) toggles a local `maxed` flag: on it `setSize`s to the full screen and `setPosition`s to (0,0); off it `setSize`s back to the comfortable windowed size and `center()`s. *Why setSize rather than `maximize()`:* native maximize no-ops on this transparent window, but `setSize` works.
+- **Maximize** (`IconMaximize`, swapped for `IconMinimize`, the arrows-inward restore glyph, while `maxed` is true so the button says what it will do next) toggles a local `maxed` flag: on it `setSize`s to the full screen and `setPosition`s to (0,0); off it `setSize`s back to the comfortable windowed size and `center()`s. *Why setSize rather than `maximize()`:* native maximize no-ops on this transparent window, but `setSize` works.
 - **Close** (`IconX`, red hover) calls `getCurrentWindow().close()`, which closes the sole window and so quits the app.
 
 *Why both a back arrow and a close:* the back arrow returns to the recorder HUD (`onClose`); the X quits, matching where users expect a window-close.

@@ -53,7 +53,8 @@ Stateless factory for loopback capture. All configuration is passed to `loopback
 ## SystemAudio::loopback
 
 ```rust
-pub fn loopback(wav_path: &str, paused: Arc<AtomicBool>, started: Arc<AtomicU64>, clock: Arc<dyn Clock>) -> anyhow::Result<SystemAudioHandle>
+pub fn loopback(wav_path: &str, paused: Arc<AtomicBool>, started: Arc<AtomicU64>, clock: Arc<dyn Clock>,
+    level: Option<Arc<LevelSlot>>) -> anyhow::Result<SystemAudioHandle>
 ```
 
 Opens the default output device as a loopback input, builds a sample callback that stamps `started` at the first non-empty packet, and starts the stream.
@@ -64,6 +65,7 @@ Opens the default output device as a loopback input, builds a sample callback th
 - `paused: Arc<AtomicBool>` - Shared pause flag. *Why:* when set the callback discards incoming loopback samples so paused time is excluded from the WAV without stopping and restarting the stream.*
 - `started: Arc<AtomicU64>` - Written once, in the data callback, on the first non-empty packet with `clock.now_ms()` (compare against `0` then store - the callback runs on one CPAL thread so no `compare_exchange` is needed, matching `CpalMic::open`'s pattern). *Why in-callback and not at open:* stream-open (config query, `WavWriter::create`, `build_input_stream`, `stream.play()`) measurably precedes the first sample; stamping in the callback removes that gap so `system_ms` lines up with when audio actually starts, the same way `cpal_mic`'s `capture_ms` removes device latency.*
 - `clock: Arc<dyn Clock>` - Provides `now_ms()` inside the callback. *Why injectable:* tests substitute a `FakeClock`/deterministic clock without needing real hardware timing; `SystemClock` is the production instance.*
+- `level: Option<Arc<LevelSlot>>` - Receives each block's RMS for the HUD's live meter. Same lock-free push from the realtime callback, and the same reason, as `CpalMic::open`. This is what makes the meter's back stroke real: system-audio levels never reached the frontend before, because a webview has no way to see them.*
 
 ### Implementation
 
@@ -72,8 +74,8 @@ Opens the default output device as a loopback input, builds a sample callback th
 3. Create `WavWriter` at `wav_path` for the discovered format.
 4. Clone `writer` into `w2` for the callback closure.
 5. Build the callback depending on `sample_format`:
-   - `F32`: if `paused`, return early. If `data` is non-empty and `started == 0`, store `clock.now_ms()` into `started`. Clamp each sample to `[-1.0, 1.0]`, scale to `i16::MAX`, write to WAV.
-   - `I16`: if `paused`, return early. Same `started` stamp as `F32`. Write `data` directly to WAV.
+   - `F32`: if `paused`, return early. If `data` is non-empty and `started == 0`, store `clock.now_ms()` into `started`. Push `block_rms_f32(data)` to `level`. Clamp each sample to `[-1.0, 1.0]`, scale to `i16::MAX`, write to WAV.
+   - `I16`: if `paused`, return early. Same `started` stamp as `F32`. Push `block_rms_i16(data)` to `level`. Write `data` directly to WAV.
    - Other formats: bail with an unsupported-format error before the stream is started.
 6. Call `stream.play()`.
 7. Return `SystemAudioHandle { stream, writer }`.

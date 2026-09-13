@@ -83,7 +83,9 @@ Lowercase alnum-only slug for a pack id seed (`"My Pack!"` -> `"my_pack"`), neve
 fn unique_id(base: &str) -> String
 ```
 
-`base`, or the first of `base_2`, `base_3`, ... not already present under `cursors_dir()` (via `pack::pack_dir`). *Why suffix rather than reject:* two different source folders can share a name (e.g. two unrelated "Pack" folders on the user's disk); collision should never block an import.
+`base`, or the first of `base_2`, `base_3`, ... that no pack already answers to.
+
+**BOTH sources are checked**: an imported folder under `cursors_dir()`, and a BUNDLED pack of that id. Bundled packs win at resolution time (`packdirs::resolve_pack_dir`), so handing an import a bundled id would silently make the import unreachable - the user would pick their own pack and get the shipped one. It also never returns `"default"`, since the embedded set has no folder and `slugify` cannot produce a collision the loop would miss.
 
 ## write_pack
 

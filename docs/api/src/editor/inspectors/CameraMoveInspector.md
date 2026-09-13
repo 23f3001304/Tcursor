@@ -1,6 +1,8 @@
 # src/editor/inspectors/CameraMoveInspector.tsx
 
-Inspector for the selected camera-move keyframe on the Camera lane (a single-point `t_ms/x/y/size` entry, not a region). Mirrors `ZoomInspector`'s shape - shown in the left panel in place of the tab content while a keyframe is selected.
+Inspector for the selected camera-move keyframe on the Camera lane (a single-point `t_ms/x/y/size` entry, not a region).
+
+Sections, in DOM order (pinned by `inspectorShape.test.tsx`): **Timing**, **Placement**, **Transition**, then Remove - the shared reading order from `InspectorShape.md`. This is the one inspector whose Timing section is a single field rather than a `TimingRow`, and whose lede is `"Keyframe at 0:12.4"` rather than a span, because a keyframe is a point in time and has no length.
 
 ## CameraMoveInspector
 
@@ -21,6 +23,6 @@ export function CameraMoveInspector({ move, dur, onApply, onClose }: {
 
 **Fields.** Time (seconds, converted to/from `t_ms`, `NumberField`'s default `unit="s"`), X, Y, and Size (`NumberField` with `unit=""` - no suffix, since these are 0-1 fractions, not a time value) are all `NumberField` (`src/editor/controls/NumberField.tsx`), mirroring `ZoomInspector`. Not a raw `<input type="number">`: that control's `onChange` fires on every keystroke including a momentarily-cleared field (`Number("")` is `0`), which used to collapse the PiP to size 0 mid-edit and could send a negative value the Rust side's u32 deserialization rejected (silently, via `applyOp`'s `catch{}`). `NumberField` has no such intermediate state - `x`/`y`/`size` are clamped to `[0, 1]` (matching the Edit API's own clamp) purely by `NumberField`'s stepper only ever moving by `step`, never by a directly-typed value.
 
-**Transition Curve.** A `<CurveEditor>` (see `CurveEditor.md`): the six shared `CAM_CURVES` as one-click cards, with the selected one expanding into a draggable cubic-bezier editor that commits a custom `cubic(x1,y1,x2,y2)`. The named curves are still pickable straight off the timeline via `CameraLane`'s per-segment popover, which keeps its own compact glyph row.
+**Transition curve.** A `<CurveEditor>` (see `CurveEditor.md`): the six named curves as a segmented row over one canvas whose two handles shape a custom `cubic(x1,y1,x2,y2)` directly. The named curves are still pickable straight off the timeline via `CameraLane`'s per-segment popover, which keeps its own compact glyph row and draws from the same `curveGlyphs.ts` paths.
 
 **Delete.** Removes the keyframe and deselects.

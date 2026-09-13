@@ -33,6 +33,9 @@ impl FrameRenderer {
     /// event timestamp to output time the same way `click_track` does.
     pub fn events_ms(&self) -> u64 { self.events_ms }
 
+    /// The clip-to-output clock map built from the doc's trim, cuts and speed spans.
+    pub fn time_map(&self) -> &crate::export::remap::TimeMap { &self.map }
+
     /// The recorded action log (hotkey hold starts/ends), so preview commands can surface
     /// recorded effect holds (e.g. spotlight) the way `click_track` surfaces clicks.
     pub fn actions(&self) -> &[ActionEvent] { &self.actions }

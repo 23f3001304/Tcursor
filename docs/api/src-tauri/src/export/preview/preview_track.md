@@ -20,6 +20,8 @@ pub async fn camera_track(folder: String, app: tauri::AppHandle) -> Result<Vec<C
 
 Returns the exact camera curve over the whole timeline, one `CamSample` per output frame.
 
+**Since the time remap** the samples are keyed by OUTPUT time: the command walks the renderer's `TimeMap::frame_plan` through `walk_plan` (warm-up, cut snaps and all, exactly as the exporter does), one `CamSample` per output frame with `t = j * 1000 / OUT_FPS`. The TS side does not receive the plan; it rebuilds the same map from the doc (`src/lib/remap.ts`) and looks the track up at `outOf(clip time)`.
+
 **Off the main thread (sweep-2 Task 1).** `async fn` + `spawn_blocking`, the pattern `preview_frame` documents (`mod.md`). An earlier sweep left this sync on the grounds that its own body is pure math on a warm cache - true, but every `with_warm` command can land on the COLD path, where `FrameRenderer::new` decodes the event log, spawns up to three `ffprobe`/`ffmpeg` subprocesses, builds two wgpu pipelines and preps the cursor pack. The editor fires six of these commands on the same mount tick (`camera_track`, `preview_layout`, `preview_layouts`, `click_track`, `cursor_kinds`, `preview_bg`), so as sync commands the first paid that build on the UI thread and the other five queued behind it - the multi-hundred-ms-to-seconds freeze on opening a project, repeated on every aspect change. Because `tauri::State<'_, PreviewSession>` is not `'static` it cannot cross into `spawn_blocking`; the command takes `app: tauri::AppHandle` instead and re-derives the same managed state inside the closure via `app.state::<PreviewSession>()`. The JS call is unchanged - `AppHandle` is injected by Tauri, never passed from the frontend.
 
 ### Inputs (what, and why it is needed)
@@ -34,7 +36,7 @@ Returns the exact camera curve over the whole timeline, one `CamSample` per outp
 ### Implementation
 
 1. Inside `with_warm` (the shared cache helper), read the duration as `meta.video_end - meta.video_start` - the recording's TRUE full length, NOT `trim.out_ms` (which, once a user actually trims, is a strict sub-range). This means scrubbing into a trimmed-out region still shows an animated camera curve instead of freezing on the last in-range sample; trim only clamps PLAYBACK (the frontend's `resolveTrim`-based pause/snap in `Editor.tsx`), not the curve data itself.
-2. `reset_camera`, then `step_camera(video_start + t)` for `t` stepping by `1000/OUT_FPS` up to that full duration. This is pure math (no decode), so it is instant.
+2. `reset_camera`, then `step_camera(video_start + t, OUT_STEP_MS)` walking the EXPORT's own frame index - `t = k * 1000 / OUT_FPS` for `k = 0, 1, 2, ...` up to that full duration. This is pure math (no decode), so it is instant. *Why the frame index and not a flat 16ms step:* `1000 / OUT_FPS` in integer math is 16, but the true 60fps period is 16.667, so a 16ms grid took 4.17% more steps per second than the export ever does. Both runs are stateful, so the preview drifted from the export by up to 28.7 source px (74.5 screen px) at sharp transitions - the preview quietly stopped being a preview. On the export's own grid, with the exact period handed to the filters, the two now agree to 0.000 px (`jank_probe_tests::preview_grid_vs_true_60fps`). Sample times stay whole milliseconds, which is what the editor's `camAt` interpolates between.
 3. For each pose, map the zoom centre (`pose.cam.cx/cy`) and cursor (`pose.cur.x/y`) - both output coords - into `pose.scene.screen.rect` to get 0..1 screen-relative fractions, and push a `CamSample`.
 
 ## PreviewLayout
@@ -66,7 +68,7 @@ Returns the `PreviewLayout` for the recording. `async` + `spawn_blocking` for th
 
 ### Implementation
 
-1. Inside `with_warm`, `reset_camera`, then `step_camera(video_start)` to get the scene at t=0 (the unzoomed base layout).
+1. Inside `with_warm`, `reset_camera`, then `step_camera(video_start, OUT_STEP_MS)` to get the scene at t=0 (the unzoomed base layout).
 2. Divide `pose.scene.screen.rect` and `pose.scene.camera.rect` (+ radii, + `ring_px`) by `c.meta.out_w`/`out_h` to get fractions; set `cam` to `None` when `pose.scene.camera.alpha <= 0.5`; set `canvas: [c.meta.out_w, c.meta.out_h]` (the warm renderer's own resolved size).
 
 ## ClickSample

@@ -49,6 +49,22 @@ A cheap CONTENT key for the background buffer: FNV-1a seeded with `bg.len()` and
 
 `FrameRenderer::reload_edit` rebuilds `bg` in place at the SAME `out_w x out_h` whenever the background settings change, so the resource-rebuild condition (`sw/sh/ww/wh`) never fires for a background edit - the old `bg_uploaded` flag stayed `true`, every rebuilt buffer was discarded, and the warm preview kept rendering the previous background until something forced a full `build_renderer` (a folder or aspect change). A full hash (or memcmp) of an ~8 MB BGRA buffer every frame would cost more than the upload it saves; a background that changes at all - fill colour, gradient, blur radius, wallpaper - changes across the whole frame, so a strided sample sees it.
 
+### Where the sampling is NOT enough
+
+The sample is why a VIDEO background cannot be decided by this key at all: a frame that moves only a small region can hash equal to the frame before it, and "probably changed" is the difference between a moving background and one frozen on screen. `should_upload` below is the exception that covers it.
+
 ### Behaviors worth knowing
 
 - `bg_key_tracks_content_not_just_length` (unit test): identical buffers key identically; a one-channel change across every pixel changes the key; a different length changes the key; an empty slice is stable and does not panic.
+
+## should_upload
+
+```rust
+pub(super) fn should_upload(key_changed: bool, dynamic: bool) -> bool
+```
+
+Does this frame's background need uploading to the GPU? A STATIC background uploads only when its content key moved - that is the whole point of `bg_key`, and it saves an ~8 MB texture write on every frame of a normal export. A DYNAMIC one (a video/GIF asset - `Compositor::set_bg_dynamic`, decided by `scene::background::video_source`) uploads unconditionally, for the reason above. The caller skips computing the key at all in that case, so the dynamic path is also the cheaper one per frame.
+
+### Behaviors worth knowing
+
+- `a_dynamic_background_always_uploads_a_static_one_only_on_change` (unit test): all four combinations, including the one that matters - `should_upload(false, true)` is `true`.

@@ -11,14 +11,15 @@ use crate::session::paths::ProjectPaths;
 pub use crate::edit::migrate::true_duration_ms;
 pub(crate) use crate::edit::migrate::output_shift;
 
-/// Stable lowercase name for an easing curve (mirrors the export `Easing` enum).
-/// NOTE: `Spring` carries stiffness/damping that a plain string cannot hold; the
-/// default `to_zoom_config()` never produces `Spring`, so this is not hit today.
+/// Stable lowercase name for an easing curve (mirrors the export `Easing` enum). `Spring` and
+/// `Cubic` carry parameters, so they emit their own wire form rather than a bare word - both
+/// round-trip exactly through `valid_easing` + `easing_from`.
 fn easing_str(e: Easing) -> String {
     match e {
         Easing::Smooth => "smooth".into(),
         Easing::Linear => "linear".into(),
-        Easing::Spring { .. } => "spring".into(),
+        Easing::Spring { stiffness, damping, mass } =>
+            crate::export::spring::format_spring(stiffness, damping, mass),
         Easing::EaseIn => "ease_in".into(),
         Easing::EaseOut => "ease_out".into(),
         Easing::EaseInOut => "ease_in_out".into(),

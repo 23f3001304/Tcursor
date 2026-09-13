@@ -1,6 +1,7 @@
 import type { PreviewLayout, ClickSample } from "../../lib/ipc";
 import { drawCursorSprite, type DrawCursor } from "./cursorPreview";
-import { panelFactor, panelClipRect } from "./cursorPanel";
+import { panelFactor, panelClipRect, contentScale } from "./cursorPanel";
+import { drawBackground, type StageBgState } from "./stageBg";
 
 export interface DrawCam { scale: number; cx: number; cy: number; curx: number; cury: number }
 
@@ -21,22 +22,18 @@ export interface DrawCam { scale: number; cx: number; cy: number; curx: number; 
 export function drawPreview(
   ctx: CanvasRenderingContext2D, w: number, h: number,
   screen: HTMLVideoElement, webcam: HTMLVideoElement | null, cam: DrawCam,
-  layout: PreviewLayout | null, bg: HTMLImageElement | null, clicks: ClickSample[], now: number,
-  cursor: DrawCursor | null, offscreen: HTMLCanvasElement, layer: HTMLCanvasElement, insetW: number = 1
+  layout: PreviewLayout | null, bg: StageBgState | null, clicks: ClickSample[], now: number,
+  cursor: DrawCursor | null, offscreen: HTMLCanvasElement, layer: HTMLCanvasElement, insetW: number = 1,
+  bgTimeMs?: number // a video background runs on the output clock; `now` (clip time) is the default
 ) {
   if (offscreen.width !== w) offscreen.width = w;
   if (offscreen.height !== h) offscreen.height = h;
   const octx = offscreen.getContext("2d");
   if (!octx) return;
 
-  // Background: the exact export bg image once loaded, else a gradient placeholder.
-  if (bg && bg.complete && bg.naturalWidth > 0) {
-    octx.drawImage(bg, 0, 0, w, h);
-  } else {
-    const g = octx.createLinearGradient(0, 0, w * 0.4, h);
-    g.addColorStop(0, "#2c2c42"); g.addColorStop(1, "#131318");
-    octx.fillStyle = g; octx.fillRect(0, 0, w, h);
-  }
+  // Background: the exact export bg (a still PNG from the backend, already dimmed there) or, for a
+  // video/GIF asset, this frame of it drawn here - see `stageBg.ts` for why those are two paths.
+  drawBackground(octx, w, h, bg, bgTimeMs ?? now);
 
   // Screen rect: from the backend layout (exact export framing), else an inset fallback.
   let dx: number, dy: number, dw: number, dh: number, r: number;
@@ -81,7 +78,8 @@ export function drawPreview(
   // to the panel's on-screen rect - mirroring cursorset::draw's `panel` factor + `clip` exactly
   // (see cursorPanel.ts). Both are computed from the panel's own pre-zoom rect (dx/dy/dw/dh, the
   // real layout when loaded or the pad-based fallback otherwise) so they track a shrunk/moved
-  // custom-arrangement panel the same way the export does.
+  // custom-arrangement panel the same way the export does. The CAPTURED cursor also gets
+  // `contentScale`: its bitmaps are in SOURCE pixels, so they shrink with the content, not the panel.
   // `screenAlpha >= 0.5` mirrors cursorset::draw's own gate (`if screen.alpha < 0.5 { return; }`):
   // the export stops drawing the synthetic cursor once the screen panel is more than half faded,
   // so a cross-fade into camera_only must not leave a cursor hanging over a panel that has gone.
@@ -90,7 +88,8 @@ export function drawPreview(
     const cpos: [number, number] = [(curPxX - cx0) * w / cw, (curPxY - cy0) * h / ch];
     const panel = panelFactor(dw / w, insetW);
     const clip = panelClipRect({ x: dx, y: dy, w: dw, h: dh }, { cx0, cy0, cw, ch }, w, h);
-    drawCursorSprite(ctx, cpos, now, cursor, clicks, h, panel, clip);
+    drawCursorSprite(ctx, cpos, now, cursor, clicks, h, panel, clip,
+      contentScale(panel, insetW * w, cursor.captured?.srcW ?? 0));
   }
 
   // Webcam PiP: exact rect from the layout (rounded-rect, cover-fit), else a bottom-right circle.

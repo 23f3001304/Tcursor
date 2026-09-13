@@ -45,3 +45,19 @@ reflecting `value === opt.value`, plus a `--e-focus` outline on whichever option
 keyboard-active. Because focus never leaves the toggle button during keyboard use, "focus
 returns to the button" on close is automatic - `closeMenu` also calls `buttonRef.current?.focus()`
 for the mouse-interaction edge case (an option was reached via Tab, then `Escape` pressed there).
+
+### When to use it (panel pass, 2026-09-13)
+
+`Picker` is now for LONG lists only: the AI engine list, ripple style (seven), spotlight mode (six),
+video FX mode (four, but two words each), and the inspectors' easing curves. Two to four exclusive
+states with one-word labels use `Segmented` instead (`Segmented.md`), which has the same
+`value`/`options`/`onChange` shape - the benchmark's section (b) point 2, "segmented controls for
+exclusive states, never dropdowns".
+
+### Look
+
+The closed button and the menu are both raised planes with no stroke (34px button, `--e-raised`, one
+lightness step on hover). The selected option is a **3px accent tick** at the row's left edge rather
+than a filled or outlined chip, so a long menu stays quiet while it is being scanned. The menu's
+paint moved out of `Picker.tsx`'s inline style and into `.e-picker-menu` (`controls/controls.css`);
+only its placement and scroll box are still inline.

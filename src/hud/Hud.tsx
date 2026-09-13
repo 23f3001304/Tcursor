@@ -8,7 +8,7 @@ import { useHudWindowSize, WIDTH } from "./hooks/useHudWindowSize";
 import { useRecordingTimer } from "./hooks/useRecordingTimer";
 import { useWebcamPreview } from "./hooks/useWebcamPreview";
 import { useCameraDevices } from "./hooks/useCameraDevices";
-import { useMicWaveform } from "./hooks/useMicWaveform";
+import { useAudioLevels } from "./hooks/useAudioLevels";
 import { useRecordingFlow } from "./hooks/useRecordingFlow";
 import { Dropdown } from "./components/Dropdown";
 import { RecMeter } from "./components/RecMeter";
@@ -60,8 +60,8 @@ export function Hud({ onEdit }: { onEdit?: (folder: string) => Promise<void> }) 
   camStreamRef.current = cam.stream;
   const cameras = useCameraDevices(cam.on ? 1 : 0);
   const elapsed = useRecordingTimer(recording, paused);
-  // `micOn` gates this too, not just recording/paused - the mic must never open while toggled off.
-  const mic = useMicWaveform(recording && !paused && micOn);
+  // Mic AND system levels, from the Rust capture itself - no second mic stream in the webview.
+  const audio = useAudioLevels(recording && !paused && (micOn || sysOn));
   const win = getCurrentWindow();
 
   const BOX_W = 360, BOX_H = 440; // 16px body top-padding + 420 box + a little slack
@@ -183,7 +183,7 @@ export function Hud({ onEdit }: { onEdit?: (folder: string) => Promise<void> }) 
                 </div>
               </>
             ) : (
-              <RecMeter micOn={micOn} active={mic.active} levels={mic.levels} />
+              <RecMeter micOn={micOn} live={audio.live} read={audio.read} />
             )}
 
             <div className="spacer" />

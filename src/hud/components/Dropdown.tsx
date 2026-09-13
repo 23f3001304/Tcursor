@@ -37,7 +37,7 @@ export function Dropdown({ icon, value, options, open, onToggle, onPick }: {
     return () => document.removeEventListener("mousedown", close);
   }, [open, onToggle]);
 
-  const label = options.find((o) => o.id === value)?.label ?? options[0]?.label ?? "—";
+  const label = options.find((o) => o.id === value)?.label ?? options[0]?.label ?? "-";
 
   return (
     <div className={`dd ${open ? "open" : ""}`} ref={ref}>

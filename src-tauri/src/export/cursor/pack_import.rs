@@ -4,7 +4,9 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use crate::export::cursor::cursorset::SPRITES;
-use crate::export::cursor::pack::{kind_filename, pack_dir, CursorPackInfo};
+use crate::export::cursor::pack::kind_filename;
+use crate::export::cursor::packlist::{imported_info, CursorPackInfo};
+use crate::export::cursor::packdirs::{bundled_pack_dir, pack_dir};
 use crate::export::pipeline::ffio::png_dims;
 
 /// Validate `path` is a folder containing at least one recognized cursor PNG, then copy the
@@ -26,7 +28,7 @@ pub fn import_cursor_pack(path: String) -> Result<CursorPackInfo, String> {
     let id = unique_id(&slugify(&name));
     write_pack(&pack_dir(&id), &id, &name, &sprites, hotspots_json.as_deref())
         .map_err(|e| { let _ = std::fs::remove_dir_all(pack_dir(&id)); format!("failed to import pack: {e}") })?;
-    Ok(CursorPackInfo { id, name, builtin: false })
+    Ok(imported_info(id.clone(), name, &pack_dir(&id)))
 }
 
 /// Every `(filename, bytes)` in `src` that both names a recognized cursor kind and decodes as a
@@ -65,12 +67,18 @@ fn slugify(name: &str) -> String {
     }
 }
 
-/// `base`, or the first of `base_2`, `base_3`, ... not already present under `cursors_dir()`.
+/// `base`, or the first of `base_2`, `base_3`, ... that no pack already answers to.
+///
+/// BOTH sources are checked: an imported folder under `cursors_dir()`, and a BUNDLED pack of that
+/// id. Bundled packs win at resolution time (`packdirs::resolve_pack_dir`), so handing an import
+/// a bundled id would silently make the import unreachable - the user would pick their own pack
+/// and get the shipped one.
 fn unique_id(base: &str) -> String {
-    if !pack_dir(base).exists() {
+    let taken = |id: &str| pack_dir(id).exists() || bundled_pack_dir(id).is_some();
+    if !taken(base) {
         return base.to_string();
     }
-    (2..).map(|n| format!("{base}_{n}")).find(|id| !pack_dir(id).exists()).unwrap()
+    (2..).map(|n| format!("{base}_{n}")).find(|id| !taken(id)).unwrap()
 }
 
 /// Write the new pack folder at `dir`: each recognized sprite PNG, `hotspots.json` (the source

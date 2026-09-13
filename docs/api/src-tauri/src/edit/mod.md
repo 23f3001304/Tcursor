@@ -21,3 +21,7 @@ The load-or-create entry point (`load_or_seed`, self-locking against `edit::lock
 ## commands
 
 Three Tauri IPC command handlers covering the full read-mutate-save lifecycle; the only code in the `edit` module that touches the Tauri command bus directly. Key items: `get_edit` (delegates fully to the self-locking `seed::load_or_seed`), `apply_edit_op` (takes `edit::lock::doc_lock` once, covering both `seed_lock::load_or_seed_locked` and its own apply+save), `save_edit` (takes the same lock directly and overwrites `edit.json` with a caller-supplied doc for bulk frontend mutations).
+
+## remap_doc
+
+`remap_doc(doc, &TimeMap)`: every region list moved onto the output clock (durations and ids untouched, collapsed regions dropped, trim/cuts/speed consumed) before the renderer builds its tracks. Mirrored by `src/lib/remapDoc.ts`.

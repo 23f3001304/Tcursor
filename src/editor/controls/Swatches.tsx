@@ -46,6 +46,9 @@ export function Swatches<T>({
           key={item.key}
           type="button"
           disabled={disabled}
+          // A swatch has no text, so it needs both: the name for a screen reader and the same
+          // name on hover for everyone else (benchmark tell 5 - no unlabelled icon-only controls).
+          title={item.ariaLabel ?? item.key}
           aria-label={item.ariaLabel ?? item.key}
           className={`${BTN_CLASS[variant]} ${isSelected(item.value) ? "on" : ""}`}
           style={{ background: item.css }}

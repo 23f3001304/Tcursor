@@ -1,9 +1,14 @@
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 
-// 1. iOS-style Switch component with spring animation
+// The panel pass moved this switch's paint out of inline styles and into `.sw` (controls.css):
+// the track is a plane (raised when off, the app's one accent when on) with no border at all, so
+// an inline `background` can no longer beat the stylesheet's own hover state. What stays inline is
+// the thumb's position, which Motion animates.
+//
 // `disabled` (T34 L3): a switch whose OFF state the backend would reject must read as unavailable,
 // not silently snap back - see LayoutInspector's panel-visibility rows.
 export function Switch({ on, onChange, ariaLabel, disabled, title }: { on: boolean; onChange: (v: boolean) => void; ariaLabel?: string; disabled?: boolean; title?: string }) {
+  const still = useReducedMotion();
   return (
     <button
       type="button"
@@ -14,37 +19,12 @@ export function Switch({ on, onChange, ariaLabel, disabled, title }: { on: boole
       title={title}
       disabled={disabled}
       onClick={() => onChange(!on)}
-      style={{
-        width: 38,
-        height: 22,
-        borderRadius: 999,
-        background: on ? "var(--e-fg)" : "var(--e-soft)",
-        border: `1px solid ${on ? "var(--e-fg)" : "var(--e-border)"}`,
-        position: "relative",
-        cursor: disabled ? "default" : "pointer",
-        opacity: disabled ? 0.45 : 1,
-        padding: 0,
-        display: "inline-flex",
-        alignItems: "center",
-        transition: "background-color 0.14s ease, border-color 0.14s ease",
-        outline: "none"
-      }}
     >
       <motion.span
-        layout
+        className="sw-thumb"
+        layout={!still}
         transition={{ type: "tween", duration: 0.16, ease: [0.4, 0, 0.2, 1] }}
-        style={{
-          width: 16,
-          height: 16,
-          borderRadius: "50%",
-          // Neutral switch: on = zinc-white track with a near-black thumb; off = a muted
-          // (--e-dim) thumb on the soft track, so the off state reads clearly muted rather
-          // than as a bright floating dot.
-          background: on ? "#09090b" : "var(--e-dim)",
-          position: "absolute",
-          left: on ? 19 : 3,
-          boxShadow: "0 1px 2px rgba(0,0,0,0.1)"
-        }}
+        style={{ left: on ? 20 : 3 }}
       />
     </button>
   );

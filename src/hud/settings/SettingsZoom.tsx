@@ -46,6 +46,10 @@ export function SettingsZoom({ value, onChange }: { value: ZoomSettings; onChang
       <Advanced open={adv} onToggle={setAdv}>
         <Range label="Amount" value={value.target_scale} min={1.2} max={4} step={0.1} onChange={(v) => set("target_scale", v)} fmt={(v) => `${v.toFixed(1)}x`} />
         <Range label="Smoothness" value={value.smoothness} min={0.04} max={0.3} step={0.01} onChange={(v) => set("smoothness", v)} fmt={(v) => v.toFixed(2)} />
+        <Range label="Camera smoothing" value={value.camera_smoothing_ms} min={0} max={400} step={10} onChange={(v) => set("camera_smoothing_ms", Math.round(v))} fmt={(v) => (v === 0 ? "Off" : `${v} ms`)} />
+        <span className="sf-hint" style={{ display: "block", marginTop: -6 }}>
+          Smooths the auto-zoom camera's path. Higher is calmer but lags the cursor - 120 ms is a good start.
+        </span>
         <Range label={value.smart_hold ? "Idle release" : "Hold"} value={value.hold_ms} min={600} max={5000} step={100} onChange={(v) => set("hold_ms", Math.round(v))} fmt={(v) => `${(v / 1000).toFixed(1)} s`} />
         <div className="sf"><div className="sf-row"><span className="sf-label">Shrink camera on zoom</span>
           <Switch on={value.camera_shrink} onChange={(v) => set("camera_shrink", v)} /></div></div>

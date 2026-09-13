@@ -23,7 +23,7 @@ Map progress `p` (clamped to `[0,1]`) through the curve named by an easing wire-
 It mirrors `crate::export::camera::ease`, not `export::easing::ease`: `camera::ease` is the one the export actually runs (`CameraSim`, `LayoutTrack`, `SpotlightSim`), and it is the one whose `Smooth` is smoothstep and whose `Spring` really overshoots.
 
 - `linear` - identity.
-- `spring` - ease-out-back (`k = 1.70158`): overshoots slightly past 1, then settles.
+- `spring` / `spring(stiffness,damping[,mass])` - a real damped harmonic oscillator, delegated to `spring` (`src/lib/spring.ts`), which mirrors `export::spring`. `springOf` resolves both spellings - the bare word means `SPRING_DEFAULT` - and it is checked BEFORE the named curves so a parameterised spring cannot fall through to smooth. Underdamped params overshoot past 1 and ring down; critical and overdamped ones are monotone.
 - `ease_in` / `ease_out` / `ease_in_out` - quadratic accelerate / decelerate / symmetric.
 - `cubic(x1,y1,x2,y2)` - a custom bezier, delegated to `evalCubic` (`src/lib/cubicBezier.ts`), which mirrors `export::cubic::eval`.
 - anything else - smoothstep (`p^2(3-2p)`), the `smooth` default. An unparseable name landing here matches `valid_easing`'s coercion on the backend, so a bad string renders as the same curve it will be stored as.

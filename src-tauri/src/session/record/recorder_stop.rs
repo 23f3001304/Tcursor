@@ -59,9 +59,10 @@ fn stop_blocking(app: &tauri::AppHandle) -> Result<RecordingResult, String> {
     if let Some(t) = running.system_thread { let _ = t.join(); }
 
     // Inputs first: these are cheap and must survive a video finalize failure.
+    let paths = crate::session::paths::ProjectPaths { folder: std::path::PathBuf::from(&running.folder) };
     save_inputs(running.mouse, running.keyboard, running.cursor,
         &running.events_path, &running.actions_path, &running.typing_path, &running.cursor_path,
-        running.screen, running.started_unix_ms);
+        &paths, running.screen, running.started_unix_ms);
 
     // Stop + finalize the video pipeline (GPU: end capture + finish the MP4; ffmpeg: WM_QUIT +
     // join). A finalize failure comes back as `stopped.error` INSTEAD of short-circuiting: the

@@ -43,13 +43,16 @@ pub(crate) fn valid_layout(s: &str) -> String {
 }
 
 /// Coerce an easing wire-name to something `easing_from` can reconstruct: one of the six named
-/// curves, or a well-formed custom `cubic(x1,y1,x2,y2)` re-emitted in canonical form (which also
-/// applies the x-clamp). Anything else degrades to "smooth" rather than being stored as garbage.
+/// curves, or a well-formed `cubic(x1,y1,x2,y2)` / `spring(stiffness,damping[,mass])` re-emitted
+/// in canonical form (which also applies the range clamps, and fills in a spring's default mass).
+/// Anything else degrades to "smooth" rather than being stored as garbage.
 pub(crate) fn valid_easing(s: &str) -> String {
     match s {
         "linear" | "smooth" | "spring" | "ease_in" | "ease_out" | "ease_in_out" => s.to_string(),
-        _ => crate::export::cubic::parse_cubic(s)
-            .map(|(x1, y1, x2, y2)| crate::export::cubic::format_cubic(x1, y1, x2, y2))
+        _ => crate::export::spring::parse_spring(s)
+            .map(|(k, c, m)| crate::export::spring::format_spring(k, c, m))
+            .or_else(|| crate::export::cubic::parse_cubic(s)
+                .map(|(x1, y1, x2, y2)| crate::export::cubic::format_cubic(x1, y1, x2, y2)))
             .unwrap_or_else(|| "smooth".into()),
     }
 }
@@ -67,6 +70,12 @@ mod tests {
         // Garbage still degrades to the tuned default.
         assert_eq!(valid_easing("cubic(1,2)"), "smooth");
         assert_eq!(valid_easing("wobble"), "smooth");
+        // A parameterised spring canonicalises the same way, filling in the default mass and
+        // clamping to the published ranges; the bare word keeps meaning SPRING_DEFAULT.
+        assert_eq!(valid_easing("spring"), "spring");
+        assert_eq!(valid_easing("spring(300,10)"), "spring(300.000,10.000,1.000)");
+        assert_eq!(valid_easing("spring(99999,-4,50)"), "spring(2000.000,0.000,10.000)");
+        assert_eq!(valid_easing("spring(170)"), "smooth");
     }
 
     #[test]

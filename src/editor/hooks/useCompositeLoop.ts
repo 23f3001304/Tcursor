@@ -6,10 +6,12 @@ import { camAt } from "../stage/camera";
 import { type CamPose } from "../stage/cameraMoves";
 import { activeCamDraft, frameCamLayout } from "../stage/frameCam";
 import { drawPreview } from "../stage/previewCanvas";
-import { requestFxOverlay, type FxCamRect } from "../stage/fxOverlay";
-import { fxCamRect, fxFrameGeometry } from "../stage/fxGeometry";
+import type { StageBgState } from "../stage/stageBg";
+import { fxFrameGeometry } from "../stage/fxGeometry";
 import { drawMirroredRipples, overlayNeedsClicks } from "../stage/ripplePreview";
-import { fxCacheKey, fxResponseAction, spotParamsKey, timeBucket } from "./fxCacheKey";
+import { fxRequestTick } from "./fxRequestTick";
+import { outOf, type TimeMap } from "../../lib/remap";
+import { isCutJump, playbackAction } from "../stage/playbackRemap";
 import { resolveSpotlight, newSpotlightSimState, spotAlphaPlan, type SpotlightSimState } from "../stage/spotlightPreview";
 import { layoutAt } from "../timeline/layoutTrack";
 import type { CursorSpritesState } from "./useCursorSprites";
@@ -21,7 +23,6 @@ import type { CursorSpritesState } from "./useCursorSprites";
 // independent cuts: cap the request cadence well under 60fps (FX_BUCKET_MS, still visually smooth
 // for a soft spotlight/ripple), and render at reduced resolution (FX_SCALE - soft gradients are
 // invisible when upscaled), which shrinks the per-pixel loop, the PNG, and the decode all at once.
-const FX_BUCKET_MS = 40; // ~25fps cap on backend FX-overlay requests
 const FX_SCALE = 0.5; // internal render resolution factor vs the canvas; blit upscales automatically
 
 /** Single rAF loop: reads the live time, keeps the webcam/audio roughly synced, composites the
@@ -32,7 +33,7 @@ export function useCompositeLoop({
   screenRef, webcamRef, audioRef, canvasRef,
   playRef, timeRef, onTimeRef,
   trackRef, layoutRef, layoutPresetsRef, layoutSegsRef, cameraMovesRef, zoomsRef, zoomSettingsRef, dragPoseRef, arrangingRef, clicksRef, effectsRef, clickfxRef, kindsRef, cursorRef,
-  spritesRef, trailRef, dirtyRef, bgImgRef, spotSimRef,
+  spritesRef, trailRef, dirtyRef, bgRef, spotSimRef, mapRef,
 }: {
   // The hidden media elements + the canvas they composite onto; then the clock (is it playing,
   // where is the playhead, and how to report it back).
@@ -57,8 +58,9 @@ export function useCompositeLoop({
   spritesRef: RefObject<CursorSpritesState>;
   trailRef: RefObject<[number, number][]>;
   dirtyRef: RefObject<boolean>;
-  bgImgRef: RefObject<HTMLImageElement | null>;
+  bgRef: RefObject<StageBgState | null>;
   spotSimRef: RefObject<SpotlightSimState>; // owned by Stage.tsx: also reset on a paused effects-content edit (gate 2, spotEffectsKeyRef)
+  mapRef: RefObject<TimeMap>; // the clip-to-output clock map (useTimeMap): regions and the camera track are read on the output clock
 }) {
   const lastReportRef = useRef(0);
   const lastFrameTRef = useRef(0);
@@ -81,12 +83,22 @@ export function useCompositeLoop({
       const sv = screenRef.current, c = canvasRef.current, play = playRef.current;
       // Paused + nothing changed: skip compositing entirely so the editor isn't burning 60fps
       // redrawing a static frame (the idle/interaction-lag fix). Playback always composites.
-      if (sv && c && (play || dirtyRef.current)) {
+      // Playing into a cut (or from before the trim-in): jump every media element to the gap's end
+      // and skip this frame's composite, so no frame from inside the cut ever shows. The next tick
+      // lands on the cut's end and `isCutJump` keeps the sims from resetting as they do for a seek.
+      const map = mapRef.current;
+      const cut = sv && play ? playbackAction(map, sv.currentTime * 1000).seekTo : null;
+      if (cut !== null) { for (const m of [sv, webcamRef.current, audioRef.current]) if (m) m.currentTime = cut / 1000; }
+      if (sv && c && cut === null && (play || dirtyRef.current)) {
         dirtyRef.current = false;
         const t = play ? sv.currentTime * 1000 : timeRef.current;
+        // Two clocks: the media, the clicks and the cursor run on clip time `t`; zooms, layouts,
+        // effects, the camera track and a video background are on the output clock, read at `tOut`.
+        const tOut = outOf(map, t);
+        if (play) { const rate = playbackAction(map, t).rate; for (const m of [sv, webcamRef.current, audioRef.current]) if (m && m.playbackRate !== rate) m.playbackRate = rate; }
         // Discontinuous jump (seek/re-sync), not natural playback advance - resets the trail AND
         // the spotlight sim (gate 1; gate 2 is Stage.tsx's spotEffectsKeyRef, for a paused edit).
-        if (Math.abs(t - lastFrameTRef.current) > 200 || t < lastFrameTRef.current) { trailRef.current.length = 0; spotSimRef.current = newSpotlightSimState(); }
+        if ((Math.abs(t - lastFrameTRef.current) > 200 || t < lastFrameTRef.current) && !isCutJump(map, lastFrameTRef.current, t)) { trailRef.current.length = 0; spotSimRef.current = newSpotlightSimState(); }
         lastFrameTRef.current = t;
         if (play) {
           // Throttle the React state update to ~16fps - it re-renders the whole editor tree. The
@@ -100,23 +112,23 @@ export function useCompositeLoop({
         if (ctx) {
           try {
             const sp = spritesRef.current, cs = cursorRef.current, cf = clickfxRef.current;
-            const cam = camAt(trackRef.current, t);
+            const cam = camAt(trackRef.current, tOut);
             const cur = { style: cs.style, size: cs.size, clickBounce: cs.click_bounce, bounceIntensity: cs.bounce_intensity,
-              motionBlur: cs.motion_blur, kinds: kindsRef.current, sprites: sp.sprites, hots: sp.hots, canvasH: sp.canvasH, recent: trailRef.current };
+              motionBlur: cs.motion_blur, kinds: kindsRef.current, sprites: sp.sprites, hots: sp.hots, canvasH: sp.canvasH, captured: sp.captured, busy: sp.busy, busyFrames: sp.busyFrames, recent: trailRef.current };
             // The active layout at this exact frame time (cross-faded across a layout-segment
             // boundary); falls back to the static layout when presets haven't loaded or there
             // are no segments. Used for both the base draw below and the FX screen-rect math.
-            const baseLayout = layoutAt(layoutSegsRef.current, layoutPresetsRef.current, t, [c.width, c.height]) ?? layoutRef.current;
+            const baseLayout = layoutAt(layoutSegsRef.current, layoutPresetsRef.current, tOut, [c.width, c.height]) ?? layoutRef.current;
             // What drives the webcam PiP this frame (keyframe/drag override, else the smart
             // zoom action) - see frameCamLayout, which mirrors step_camera's ordering.
-            const frameLayout = frameCamLayout(baseLayout, t, cam.scale, cameraMovesRef.current,
+            const frameLayout = frameCamLayout(baseLayout, tOut, cam.scale, cameraMovesRef.current,
               activeCamDraft(dragPoseRef.current, arrangingRef.current), zoomsRef.current, zoomSettingsRef.current, c.width, c.height);
             // Draw the base frame (background + screen + webcam + cursor) WITHOUT FX
             if (!offscreenRef.current) offscreenRef.current = document.createElement("canvas");
             if (!layerRef.current) layerRef.current = document.createElement("canvas");
             drawPreview(ctx, c.width, c.height, sv, webcamRef.current, cam,
-              frameLayout, bgImgRef.current, clicksRef.current, t, cur, offscreenRef.current,
-              layerRef.current, layoutPresetsRef.current?.inset_w);
+              frameLayout, bgRef.current, clicksRef.current, t, cur, offscreenRef.current,
+              layerRef.current, layoutPresetsRef.current?.inset_w, tOut);
             // Panel/zoom mapping for the FX-overlay request AND the ripple draw below - mirrors
             // drawPreview's crop; see fxGeometry.ts for the math and why cw/ch are rounded.
             const { fxW, fxH, screenScale, map: mapFn } = fxFrameGeometry(c.width, c.height, frameLayout, cam, FX_SCALE);
@@ -129,7 +141,7 @@ export function useCompositeLoop({
             const spot = { effects: effectsRef.current, on: cf.spotlight,
               params: { dim: cf.spotlight_dim, radius: cf.spotlight_radius, feather: cf.spotlight_feather,
                 mode: cf.spotlight_mode, tint: cf.spotlight_tint } };
-            const resolvedSpot = resolveSpotlight(spot, t, spotSimRef.current);
+            const resolvedSpot = resolveSpotlight(spot, tOut, spotSimRef.current);
             // The spotlight's fade is applied HERE, at 60fps, instead of being re-rendered by the
             // backend at FX_BUCKET_MS - which is why it used to pop on/off instead of fading (a
             // 250ms fade got ~2 overlay updates, fewer when a request outlived it). `separable`
@@ -144,47 +156,8 @@ export function useCompositeLoop({
               ctx.drawImage(fxImg, 0, 0, c.width, c.height);
               ctx.restore();
             }
-            const camRect: FxCamRect = fxCamRect(frameLayout, fxW, fxH);
-            const spotParamsStr = spotParamsKey(resolvedSpot, screenScale, plan.separable);
-            const cursorStr = cpos ? `${Math.round(cpos[0])}-${Math.round(cpos[1])}` : "none";
-            // "" for a mirrored style (ripplePreview.ts draws it instead) - the real click list
-            // only for an unmirrored one, which still falls back to this overlay (see fxCacheKey.ts).
-            const clicksStr = overlayNeedsClicks(cf.style) ? clicksRef.current.map(clk => `${clk.t}-${clk.x}-${clk.y}`).join(";") : "";
-            const fxParamsStr = `${cf.style}-${cf.color.join(",")}-${cf.intensity}-${cf.enabled}-${cf.spotlight_dim_camera}`;
-            const camStr = camRect ? camRect.rect.map(v => Math.round(v)).join(",") + `-${Math.round(camRect.radius)}` : "none";
-            // cursorStr alone would invalidate the cache at full 60fps during playback - timeBucket
-            // caps how often that's allowed to trigger a backend round-trip (see the file banner).
-            const cacheKey = fxCacheKey(timeBucket(t, FX_BUCKET_MS), cursorStr, spotParamsStr, clicksStr, fxParamsStr, camStr);
-            fxWantRef.current = cacheKey; // every tick, fired or not - lets `.then` detect staleness below
-
-            if (!fxInflightRef.current && cacheKey !== fxLastTRef.current) {
-              fxInflightRef.current = true;
-              // Reuses the tick's ONE resolveSpotlight call (above) - resolving again would double-advance the sim.
-              // `requestAlpha` is 1 on the separable path (a reference, alpha-independent overlay)
-              // and the live alpha otherwise; `separable` is captured so the response latches the
-              // basis its own pixels were rendered at, not whatever the plan says by then.
-              const separable = plan.separable;
-              const reqSpot = resolvedSpot ? { ...resolvedSpot, alpha: plan.requestAlpha } : null;
-              requestFxOverlay(fxW, fxH, clicksRef.current, t, cpos, reqSpot, cf, mapFn, screenScale, camRect)
-                .then(url => {
-                  fxInflightRef.current = false;
-                  const action = fxResponseAction(cacheKey, fxWantRef.current, url);
-                  // Stale (wanted key moved on): drop it unlatched, next tick reissues for real.
-                  if (action.kind === "stale") return;
-                  // Any RESOLVED response - even a definite "off" -> `null`, the common no-fx
-                  // case - is a valid terminal state: latch so the loop stops re-requesting until
-                  // the key changes. Only a REJECTED request (`.catch` below) stays retryable.
-                  fxLastTRef.current = cacheKey;
-                  if (action.imageUrl) {
-                    const img = new Image();
-                    img.onload = () => { fxOverlayImgRef.current = img; fxSeparableRef.current = separable; dirtyRef.current = true; };
-                    img.src = action.imageUrl;
-                  } else {
-                    fxOverlayImgRef.current = null; fxSeparableRef.current = false; dirtyRef.current = true; // nothing active at this key
-                  }
-                })
-                .catch(() => { fxInflightRef.current = false; }); // failure: unlatched, retried
-            }
+            fxRequestTick({ fxLastTRef, fxWantRef, fxInflightRef, fxOverlayImgRef, fxSeparableRef, dirtyRef },
+              { frameLayout, fxW, fxH, screenScale, mapFn, cpos, resolvedSpot, plan, cf, clicks: clicksRef.current, t });
           } catch (e) { if (import.meta.env.DEV) console.error("drawPreview", e); }
         }
       }

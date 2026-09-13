@@ -1,8 +1,10 @@
 /** The minimal shape `useEditorKeymap` reads off a `KeyboardEvent` - kept separate from the DOM
  *  type so `keyAction` is trivially unit-testable with plain object literals. */
-export interface KeyLike { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; repeat: boolean }
+export interface KeyLike { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; repeat: boolean; shiftKey?: boolean }
 
-export type KeyAction = "delete" | "zoom" | "spotlight" | "play" | "overlay" | null;
+export type KeyAction =
+  | "delete" | "zoom" | "spotlight" | "play" | "overlay" | "deselect"
+  | null;
 
 /** Minimal shape `useEditorKeymap` needs off `document.activeElement` - kept separate from the
  *  DOM type for the same reason as `KeyLike`: trivially unit-testable with plain objects. */
@@ -40,6 +42,8 @@ export function ownsSpace(t: TargetLike): boolean {
  *  undo, so Ctrl+Z APPEARED to undo by adding a zoom instead. Shift is deliberately NOT in the
  *  guard set - `?` is Shift+/ on a US layout, and the browser already delivers the shifted
  *  character in `.key`, so matching `"?"` directly handles it without special-casing `shiftKey`.
+ *  Tab is the one key that DOES read `shiftKey`, because Shift+Tab carries no distinct `.key`
+ *  and has to stay the browser's own reverse traversal.
  *
  *  Zoom/spotlight/overlay also guard against key-repeat (holding Z/S must not spam regions at OS
  *  repeat rate, and holding `?` must not flicker the ShortcutsOverlay open/closed at the same
@@ -53,6 +57,10 @@ export function keyAction(e: KeyLike, hasSel: boolean): KeyAction {
   if (k === "z") return e.repeat ? null : "zoom";
   if (k === "s") return e.repeat ? null : "spotlight";
   if (k === "delete" || k === "backspace") return hasSel ? "delete" : null;
+  // Escape drops the selection.
+  // Nothing to drop means nothing to swallow - a surface that owns Escape for its own dismiss
+  // still sees the event.
+  if (k === "escape") return hasSel ? "deselect" : null;
   if (k === " ") return "play";
   return null;
 }
@@ -77,6 +85,8 @@ export function resolveKeyAction(e: KeyLike, ctx: { hasSel: boolean; modalOpen: 
   if (e.key === "?") return (ctx.modalOpen && !ctx.shortcutsOpen) ? null : keyAction(e, ctx.hasSel);
   if (ctx.modalOpen) return null;
   const action = keyAction(e, ctx.hasSel);
+  // Only bare Space backs off for a control that owns it. Ctrl+Space ("maximize") is a chord no
+  // button or ARIA widget claims, so a focused Switch does not swallow it.
   if (action === "play" && ownsSpace(ctx.target)) return null;
   return action;
 }

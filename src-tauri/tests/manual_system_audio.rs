@@ -14,7 +14,7 @@ fn record_two_seconds_of_system_audio() {
     // work (query, WavWriter::create, build_input_stream, play()) that happens before the
     // first callback can fire.
     let open_ms = clock.now_ms();
-    let h = SystemAudio::loopback(out.to_str().unwrap(), Arc::new(AtomicBool::new(false)), started.clone(), clock.clone()).unwrap();
+    let h = SystemAudio::loopback(out.to_str().unwrap(), Arc::new(AtomicBool::new(false)), started.clone(), clock.clone(), None).unwrap();
     std::thread::sleep(std::time::Duration::from_secs(2));
     h.stop().unwrap();
     let r = hound::WavReader::open(&out).unwrap();

@@ -177,6 +177,43 @@ export const previewBg = (folder: string) => invoke<string>("preview_bg", { fold
 
 `Promise<string>` - a `data:image/png;base64,...` URL of the export background (mesh/gradient), so the canvas preview paints the exact same background the export uses. The frontend decodes it into an `<img>` the compositor draws under the screen.
 
+## GradientStops
+
+```ts
+export interface GradientStops { from: [number, number, number]; mid: [number, number, number] | null; to: [number, number, number]; angle_deg: number }
+```
+
+A gradient tile's actual stops (two, or three when `mid` is set) and its angle. *Why the tile carries values and not just an id:* selecting a gradient preset writes `gradient_from`/`gradient_mid`/`gradient_to`/`gradient_angle_deg` straight into settings, so the panel needs the numbers. Shipping them on the tile keeps the Rust table (`settings::wallpapers::GRADIENT_WALLPAPERS`) the only copy - the TypeScript mirror that used to live in `backgroundPresets.ts` was removed with this change precisely because it could drift from the render.
+
+## BackgroundThumb
+
+```ts
+export interface BackgroundThumb { id: string; name: string; kind: "mesh" | "gradient"; group: string; png_base64: string; gradient?: GradientStops }
+```
+
+One background-picker tile, rendered at 96x54 by the EXPORT's own background code, so a tile is a true miniature of what picking it produces.
+
+- `id` - written to `background.mesh` for a wallpaper; selection state only for a gradient.
+- `name` - the tile's label.
+- `kind` - which `BackgroundKind` the tile applies.
+- `group` - the picker section this tile belongs to: a wallpaper group (`Ribbons`, `Folds`, `Gradients`, `Metal`, `Scenic`, and whatever else ships later) or `Presets` for the procedural gradients.
+- `png_base64` - the tile image, or EMPTY when the backend could not decode it (no ffmpeg). The grid then paints a plain swatch: the wallpaper is still selectable and still renders at export time, so hiding the tile would remove a working choice.
+- `gradient` - present on gradient tiles only.
+
+## backgroundThumbs
+
+```ts
+export const backgroundThumbs = () => invoke<BackgroundThumb[]>("background_thumbs")
+```
+
+### Inputs
+
+None.
+
+### Returns
+
+`Promise<BackgroundThumb[]>` - every bundled wallpaper (grouped, in section order) then every gradient preset, in the order the panel shows them. Rendered once per process in Rust (a `OnceLock`), so calling this on every `BackgroundPanel` mount costs a clone after the first time.
+
 ## FxOverlayParams
 
 ```ts

@@ -1,25 +1,28 @@
 import { memo, useRef, useState, type RefObject } from "react";
-import type { CamSample, ClickSample, CursorSpriteDto, CursorKindSample, PreviewLayout, LayoutPresets } from "../../lib/ipc";
+import type { CamSample, ClickSample, CursorPackDto, CursorKindSample, CursorLayerDto, PreviewLayout, LayoutPresets } from "../../lib/ipc";
 import type { CursorSettings, ClickFxSettings, ZoomSettings } from "../../hud/settings/settings";
 import type { Aspect, CameraMove, EditDoc, EditOp, EffectRegion, LayoutSeg, Zoom } from "../../lib/edit";
-import type { Tab } from "../shell/Rail";
+import type { Tab } from "../shell/panelTabs";
 import { camAt } from "./camera";
 import { type CamPose } from "./cameraMoves";
 import { newSpotlightSimState, type SpotlightSimState } from "./spotlightPreview";
 import { useReticleDrag } from "./useReticleDrag";
 import { useStageInvalidation } from "./useStageInvalidation";
+import type { StageBg, StageBgState } from "./stageBg";
 import { useArrangeDrag } from "./arrange/useArrangeDrag";
 import { ArrangeOverlay } from "./arrange/ArrangeOverlay";
 import { useCompositeLoop } from "../hooks/useCompositeLoop";
 import { useCursorSprites } from "../hooks/useCursorSprites";
 import { useMediaPlayback } from "../hooks/useMediaPlayback";
 import { useSyncRefs } from "../hooks/useSyncRefs";
+import { outOf, type TimeMap } from "../../lib/remap";
+import { stageCursor } from "./stageCursor";
 import { mapCanvasClickToZoomTarget, mapZoomTargetToCanvasPoint } from "./zoomTargetMapper";
 import { CamDragHandle } from "./CamDragHandle";
 import { ZoomReticle } from "./ZoomReticle";
 import { StageToolbar } from "./StageToolbar";
 import { StageMedia } from "./StageMedia";
-import { Spin } from "../controls/Spin";
+import { StageEmpty } from "./StageEmpty";
 
 const MEDIA_ERR = ["", "aborted", "network", "decode", "src not supported (asset protocol blocked?)"];
 // Fallback backing-store size before `layout.canvas` loads (matches the old hardcoded default,
@@ -34,12 +37,12 @@ const DEFAULT_CANVAS: [number, number] = [1280, 720];
  *  hygiene pass) - still re-renders every tick while playing (`timeMs` genuinely drives the
  *  reticle/dirty-tracking), but skips re-rendering for unrelated `Editor` state as long as the
  *  caller passes stable callback props. */
-export const Stage = memo(function Stage({ src, webcamSrc, track, layout, layoutPresets, layoutSegs, cameraMoves, zooms, zoomSettings, clicks, bgUrl, cursorSprites, cursorKinds, osCursorInVideo, cursor, effects, clickfx, audioSrc, muted, volume, timeMs, playing, moveMode, aimPoint, aimMode, arrangeSeg, camDraftRef, tab, onTab, aspect, onAspect, aspectLocked, onTime, onDuration, onZoomAt, onAimAt, onApply, onRetryMedia }: {
+export const Stage = memo(function Stage({ src, webcamSrc, track, layout, layoutPresets, layoutSegs, cameraMoves, zooms, zoomSettings, clicks, bg, map, cursorSprites, cursorKinds, cursorLayer, osCursorInVideo, cursor, effects, clickfx, audioSrc, muted, volume, timeMs, playing, moveMode, aimPoint, aimMode, arrangeSeg, camDraftRef, tab, onTab, aspect, onAspect, aspectLocked, onTime, onDuration, onZoomAt, onAimAt, onApply, onRetryMedia }: {
   src: string; webcamSrc: string; track: CamSample[]; layout: PreviewLayout | null;
   layoutPresets: LayoutPresets | null; layoutSegs: LayoutSeg[]; cameraMoves: CameraMove[];
   zooms: Zoom[]; zoomSettings: ZoomSettings;
-  clicks: ClickSample[]; bgUrl: string;
-  cursorSprites: CursorSpriteDto[]; cursorKinds: CursorKindSample[]; osCursorInVideo: boolean; cursor: CursorSettings;
+  clicks: ClickSample[]; bg: StageBg; map: TimeMap;
+  cursorSprites: CursorPackDto | null; cursorKinds: CursorKindSample[]; cursorLayer: CursorLayerDto | null; osCursorInVideo: boolean; cursor: CursorSettings;
   effects: EffectRegion[]; clickfx: ClickFxSettings;
   audioSrc: string; muted: boolean; volume: number; timeMs: number;
   playing: boolean; moveMode: boolean;
@@ -69,18 +72,20 @@ export const Stage = memo(function Stage({ src, webcamSrc, track, layout, layout
   const audio = useRef<HTMLAudioElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [err, setErr] = useState<string | null>(null);
-  const bgImg = useRef<HTMLImageElement | null>(null);
+  const bgImg = useRef<StageBgState | null>(null); // the still PNG + any moving asset, owned by useStageInvalidation
   const dirtyRef = useRef(true); // paused: recomposite once per change, not 60fps over a static frame
   // The backing-store size (canvas width/height + .e-stage's aspect-ratio) follows the resolved
   // aspect from the backend (`layout.canvas`) - every fraction in this file (camera rects, click
   // positions, drag mapping) is relative to this same basis, so it must stay a single source.
   const [canvasW, canvasH] = layout?.canvas ?? DEFAULT_CANVAS;
 
-  // Plain-OS fallback, mirroring Rust cursorset::draw: System on a video with no baked cursor
-  // draws the synthetic one plainly - arrow only (empty kind track), no bounce, no trail. The raw
-  // path itself comes from camera_track, which Rust already leaves unsmoothed in this mode.
-  const plainOs = cursor.style === "system" && !osCursorInVideo;
-  const effCursor: CursorSettings = plainOs ? { ...cursor, style: "enhanced", click_bounce: false, motion_blur: 0 } : cursor;
+  // "System" on a recording that captured the real cursor as its own layer composites THAT
+  // (mirroring Rust `captured::draws_captured`); the style stays "system" so `drawCursorSprite`
+  // takes the captured branch. Only a PRE-LAYER recording with no baked cursor falls back to the
+  // plain-OS synthetic arrow (empty kind track, no bounce, no trail); the raw path itself comes
+  // from camera_track, which Rust already leaves unsmoothed in that mode.
+  const { captured, plainOs, effCursor } = stageCursor(cursor, osCursorInVideo, cursorLayer);
+  const tOut = outOf(map, timeMs); const mapRef = useRef(map); mapRef.current = map; // the track and every region sit on the output clock; the playhead is clip time
   const {
     playRef, timeRef, onTimeRef, trackRef, layoutRef,
     clicksRef, effectsRef, clickfxRef, kindsRef, cursorRef,
@@ -115,15 +120,15 @@ export const Stage = memo(function Stage({ src, webcamSrc, track, layout, layout
   // discards it (the effect below).
   const trailRef = useRef<[number, number][]>([]);
   const onSpriteLoaded = () => { dirtyRef.current = true; };
-  const spritesRef = useCursorSprites(cursorSprites, onSpriteLoaded);
+  const spritesRef = useCursorSprites(cursorSprites, captured, onSpriteLoaded);
   // Created here (not inside useCompositeLoop) so it can ALSO be reset below, on a paused effects
   // edit the loop's own discontinuous-jump gate can't see (that gate only fires on a moving `t`).
   const spotSimRef = useRef<SpotlightSimState>(newSpotlightSimState());
 
   // The background decode + all three "recomposite / drop the draft now" gates (see the hook's
   // own doc comment) - extracted to keep this file under its line budget, like useReticleDrag.
-  useStageInvalidation({ bgUrl, bgImgRef: bgImg, dirtyRef, effects, spotSimRef, timeMs, playRef, camDraftRef,
-    drawDeps: [timeMs, playing, track, layout, arrange.presets, layoutSegs, cameraMoves, zooms, zoomSettings, clicks, effects, cursor, clickfx, cursorKinds, arranging] });
+  useStageInvalidation({ bg, bgRef: bgImg, dirtyRef, effects, spotSimRef, timeMs: tOut, playRef, camDraftRef,
+    drawDeps: [timeMs, playing, track, layout, arrange.presets, layoutSegs, cameraMoves, zooms, zoomSettings, clicks, effects, cursor, clickfx, cursorKinds, captured, arranging] });
 
   useMediaPlayback({ screenRef: screen, webcamRef: webcam, audioRef: audio, playing, src, muted, volume, audioSrc, timeMs, playRef });
 
@@ -131,7 +136,7 @@ export const Stage = memo(function Stage({ src, webcamSrc, track, layout, layout
     screenRef: screen, webcamRef: webcam, audioRef: audio, canvasRef: canvas,
     playRef, timeRef, onTimeRef,
     trackRef, layoutRef, layoutPresetsRef, layoutSegsRef, cameraMovesRef, zoomsRef, zoomSettingsRef, dragPoseRef: camDraftRef, arrangingRef, clicksRef, effectsRef, clickfxRef, kindsRef, cursorRef,
-    spritesRef, trailRef, dirtyRef, bgImgRef: bgImg, spotSimRef,
+    spritesRef, trailRef, dirtyRef, bgRef: bgImg, spotSimRef, mapRef,
   });
 
   // Inverse-map a pointer position through the current zoom crop + screen rect to a 0..1
@@ -140,7 +145,7 @@ export const Stage = memo(function Stage({ src, webcamSrc, track, layout, layout
     const c = canvas.current, sv = screen.current; if (!c || !sv) return null;
     if (sv.videoWidth <= 0 || sv.videoHeight <= 0) return null;
     return mapCanvasClickToZoomTarget({ clientX, clientY, canvasElement: c, layout: layoutRef.current,
-      cam: camAt(trackRef.current, timeRef.current) });
+      cam: camAt(trackRef.current, outOf(mapRef.current, timeRef.current)) });
   };
   // Clicking the preview adds a zoom focused on that point - EXCEPT in aim mode, where it re-aims
   // the already-selected Region zoom instead (the two are mutually exclusive click meanings), and
@@ -159,14 +164,14 @@ export const Stage = memo(function Stage({ src, webcamSrc, track, layout, layout
   // ramps). Hidden during playback: the reticle is an editing affordance, not a playback overlay.
   const shownAim = liveAim ?? aimPoint;
   const reticle = shownAim && !playing && !arranging
-    ? mapZoomTargetToCanvasPoint({ tx: shownAim[0], ty: shownAim[1], canvasW, canvasH, layout, cam: camAt(track, timeMs) })
+    ? mapZoomTargetToCanvasPoint({ tx: shownAim[0], ty: shownAim[1], canvasW, canvasH, layout, cam: camAt(track, tOut) })
     : null;
 
   return (
     <div className="e-stagewrap">
       <StageToolbar tab={tab} onTab={onTab} aspect={aspect} onAspect={onAspect} aspectLocked={aspectLocked} />
       <div className="e-stage" style={{ aspectRatio: `${canvasW} / ${canvasH}` }}>
-        {!src && !err && <div className="e-stage-empty"><Spin size={20} /><span>Preparing preview</span></div>}
+        {!src && !err && <StageEmpty />}
         <canvas ref={canvas} className="e-canvas" width={canvasW} height={canvasH} onClick={onCanvasClick}
           title={arranging ? "Drag the panel frames to arrange this layout" : aimMode ? "Click to aim this zoom" : "Click to add a zoom here"}
           style={{ display: src ? "block" : "none", cursor: arranging ? "default" : aimMode ? "crosshair" : "zoom-in" }} />
@@ -174,7 +179,7 @@ export const Stage = memo(function Stage({ src, webcamSrc, track, layout, layout
           onPointerDown={aimMode ? onReticleDown : undefined} />}
         {moveMode && !arranging && (
           <CamDragHandle layout={layout} layoutPresets={arrange.presets} layoutSegs={layoutSegs} cameraMoves={cameraMoves}
-            timeMs={timeMs} playing={playing} canvasW={canvasW} canvasH={canvasH} canvasRef={canvas} camDraftRef={camDraftRef} dirtyRef={dirtyRef} />
+            timeMs={tOut} playing={playing} canvasW={canvasW} canvasH={canvasH} canvasRef={canvas} camDraftRef={camDraftRef} dirtyRef={dirtyRef} />
         )}
         {arrangeSeg && arrange.panels && (
           <ArrangeOverlay seg={arrangeSeg} panels={arrange.panels} camMoves={cameraMoves} guideX={arrange.guideX}

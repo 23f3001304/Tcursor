@@ -82,6 +82,7 @@ pub fn open(
     paused: Arc<AtomicBool>,
     started: Arc<AtomicU64>,
     clock: Arc<dyn Clock>,
+    level: Option<Arc<LevelSlot>>,
 ) -> anyhow::Result<CpalMicHandle>
 ```
 
@@ -94,6 +95,7 @@ Opens a named or default input device, builds an audio callback that writes samp
 - `paused: Arc<AtomicBool>` - Shared pause flag. *Why:* when set the callback drops incoming samples so paused time is excluded from the WAV without stopping and restarting the stream.*
 - `started: Arc<AtomicU64>` - Written exactly once, on the first non-paused callback, with `capture_ms(clock.now_ms(), info)`. *Why:* the recorder reads this atom to know the mic's epoch and compute A/V sync offsets; `0` means "not yet started".*
 - `clock: Arc<dyn Clock>` - Provides `now_ms()` inside the callback. *Why injectable:* tests substitute a `FakeClock` to control timing without real hardware.*
+- `level: Option<Arc<LevelSlot>>` - Receives each block's RMS for the HUD's live meter. *Why a slot and not a callback that emits:* this runs on a realtime callback thread, which may not block, allocate or emit; `LevelSlot::push` is a single relaxed `fetch_max`, and the owning thread does the emitting. `None` skips the measurement entirely (`default_input`, tests).*
 
 ### Implementation
 
@@ -102,8 +104,8 @@ Opens a named or default input device, builds an audio callback that writes samp
 3. Create `WavWriter` at `wav_path` for the discovered format.
 4. Clone `writer` into `w2` for the callback closure.
 5. Build the callback depending on `sample_format`:
-   - `F32`: if `paused`, return early. If `started == 0`, stamp it with `capture_ms(clock.now_ms(), info)`. Clamp each sample to `[-1.0, 1.0]`, scale to `i16::MAX`, write via `WavWriter::write`.
-   - `I16`: if `paused`, return early. If `started == 0`, stamp. Write `data` directly via `WavWriter::write`.
+   - `F32`: if `paused`, return early. If `started == 0`, stamp it with `capture_ms(clock.now_ms(), info)`. Push `block_rms_f32(data)` to `level`. Clamp each sample to `[-1.0, 1.0]`, scale to `i16::MAX`, write via `WavWriter::write`.
+   - `I16`: if `paused`, return early. If `started == 0`, stamp. Push `block_rms_i16(data)` to `level`. Write `data` directly via `WavWriter::write`.
    - Other formats: bail with an unsupported-format error before the stream is started. *Why bail before play:* prevents a half-open stream leaking resources.*
 6. Call `stream.play()` to begin receiving callbacks.
 7. Return `CpalMicHandle { stream, writer }`.
@@ -118,7 +120,7 @@ Opens a named or default input device, builds an audio callback that writes samp
 pub fn default_input(wav_path: &str) -> anyhow::Result<CpalMicHandle>
 ```
 
-Convenience wrapper around `open` using the system default device, no pause (`AtomicBool::new(false)`), a zero-initialized start counter (`AtomicU64::new(0)`), and a real `SystemClock`. Intended for integration tests and simple command-line usage where shared state is not needed.
+Convenience wrapper around `open` using the system default device, no pause (`AtomicBool::new(false)`), a zero-initialized start counter (`AtomicU64::new(0)`), a real `SystemClock`, and no level slot. Intended for integration tests and simple command-line usage where shared state is not needed.
 
 ### Inputs
 

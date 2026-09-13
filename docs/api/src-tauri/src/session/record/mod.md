@@ -8,7 +8,15 @@ Submodule overviews for the `record` group, plus the two shared items the whole 
 pub type Notify = Arc<dyn Fn(&str) + Send + Sync>;
 ```
 
-A one-way notification from a recording thread to the app: the reason string is what the HUD shows the user. *Why an `Arc<dyn Fn>` and not an `AppHandle`:* the capture/encode pipeline then carries no Tauri types, stays constructible in tests, and the one place that knows about events is `recorder::emitter`. Two are built per recording - `record-warning` (a degraded but still-running take, e.g. an audio input that would not open) and `record-ended-early` (the OS ended the capture, or - on the legacy ffmpeg path only - its dimensions changed mid-record; `CAPTURE_CLOSED` and `DISPLAY_CHANGED` are the two reason strings sent through the latter).
+A one-way notification from a recording thread to the app: the reason string is what the HUD shows the user. *Why an `Arc<dyn Fn>` and not an `AppHandle`:* the capture/encode pipeline then carries no Tauri types, stays constructible in tests, and the one place that knows about events is `emit`. Two are built per recording - `record-warning` (a degraded but still-running take, e.g. an audio input that would not open) and `record-ended-early` (the OS ended the capture, or - on the legacy ffmpeg path only - its dimensions changed mid-record; `CAPTURE_CLOSED` and `DISPLAY_CHANGED` are the two reason strings sent through the latter).
+
+## Level
+
+```rust
+pub type Level = Arc<dyn Fn(f32) + Send + Sync>;
+```
+
+A repeating audio-level report from a capture thread to the HUD's meter: the 0..1 RMS of the loudest block since the previous report, roughly every `recorder_threads::LEVEL_POLL_MS`. Same `Arc<dyn Fn>` shape and the same reason as `Notify` - the capture side keeps no Tauri types. Two are built per recording, one per source; `emit::level_emitter` is the only thing that turns one into an `audio-level` event.
 
 ## CAPTURE_CLOSED
 
@@ -28,7 +36,11 @@ The reason passed to the same `Notify` when the capture's OWN dimensions change 
 
 ## recorder
 
-Recording state plus the Start/Pause/Resume commands. Owns a `Mutex<Option<Running>>` as managed state; each command locks briefly, modifies or consumes the `Running` value, and returns. Key items: `Recorder` (managed-state singleton, with the `stopping` flag that keeps a start out of a stop's teardown window), `Running` (holds all live resources for one session), `emitter` (builds a `Notify` over an `AppHandle`), `start_recording` (creates folder, starts all threads), `pause_recording` / `resume_recording` (stamp the `PauseTotals` ledger and flip the shared `paused` flag).
+Recording state plus the Start/Pause/Resume commands. Owns a `Mutex<Option<Running>>` as managed state; each command locks briefly, modifies or consumes the `Running` value, and returns. Key items: `Recorder` (managed-state singleton, with the `stopping` flag that keeps a start out of a stop's teardown window), `Running` (holds all live resources for one session), `start_recording` (creates folder, starts all threads), `pause_recording` / `resume_recording` (stamp the `PauseTotals` ledger and flip the shared `paused` flag).
+
+## emit
+
+The group's two frontend event bridges, split out of `recorder.rs` (at its line cap) when the level feed was added. Key items: `emitter` (wraps an `AppHandle` in a `Notify` for `record-warning` / `record-ended-early`), `level_emitter` (wraps one in a `Level` that emits `audio-level`, tagged with its source).
 
 ## recorder_stop
 
@@ -40,7 +52,7 @@ The `CloseRequested` safety net (task-6, ruling R6): if the main window tries to
 
 ## recorder_threads
 
-Thread-spawning helpers and persistence logic factored out of `recorder.rs` to keep that file under the 200-line cap. Key items: `save_inputs` (stops each input tracker and writes `events.json`, `actions.json`, `typing.json`, `cursor.json` before the video thread is joined), `save_session_files` (`sync.json` + `project.tcursor` + recents), `spawn_mic_thread` / `spawn_system_thread` (spawn the audio holder threads, or return `None` when that input is off), `audio_warning` (the `record-warning` message for an input that would not open).
+Thread-spawning helpers and persistence logic factored out of `recorder.rs` to keep that file under the 200-line cap. Key items: `save_inputs` (stops each input tracker and writes `events.json`, `actions.json`, `typing.json`, `cursor.json` before the video thread is joined), `save_session_files` (`sync.json` + `project.tcursor` + recents), `spawn_mic_thread` / `spawn_system_thread` (spawn the audio holder threads, or return `None` when that input is off), `poll_until_stopped` (the shared 50ms stop-poll loop, which is also what reports each source's level), `LEVEL_POLL_MS`, `audio_warning` (the `record-warning` message for an input that would not open).
 
 ## recording_session
 

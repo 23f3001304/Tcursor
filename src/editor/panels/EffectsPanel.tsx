@@ -1,6 +1,6 @@
 import { PanelHeader } from "./PanelHeader";
 import type { ClickFxSettings, ClickFxStyle, SpotlightMode, VideoFxMode } from "../../hud/settings/settings";
-import { Switch, Slider, Picker, Swatches, type SwatchItem } from "../controls/Controls";
+import { Switch, Slider, Picker, Swatches, Disclosure, type SwatchItem } from "../controls/Controls";
 import { EffectPills } from "./EffectPills";
 
 const STYLES: { value: ClickFxStyle; label: string }[] = [
@@ -71,88 +71,99 @@ export function EffectsPanel({
 
   return (
     <div className="e-panel e-insp">
-      <PanelHeader title="Effects" lede="Drag pills to the timeline, or tune click ripples and spotlight." onClose={onClose} />
+      <PanelHeader title="Effects" lede="Add to the timeline, or tune the always-on effects." onClose={onClose} />
 
+      {/* What you can add, first: these four are the panel's primary act. */}
       <EffectPills onAddZoom={onAddZoom} onAddSpotlight={onAddSpotlight} onAddLayout={onAddLayout} onAddCameraMove={onAddCameraMove} />
 
-      {/* Click ripples */}
-      <div className="e-sec">
+      {/* Then each always-on effect, as a switch with everything it enables directly under it. */}
+      <div className="e-grp">
+        <span className="e-sechead">Clicks</span>
         <div className="e-switchrow">
           <span>Click animations</span>
-          <Switch on={settings.enabled} onChange={(v) => set("enabled", v)} />
+          <Switch on={settings.enabled} onChange={(v) => set("enabled", v)} ariaLabel="Click animations" />
         </div>
+        {settings.enabled && (
+          <>
+            {/* Style and colour side by side: one is a dropdown and the other five swatches, both
+                short, and stacked they cost 96px of a panel that has none to spare. */}
+            <div className="e-two">
+              <div className="e-field">
+                <span className="e-fl">Ripple Style</span>
+                <Picker value={settings.style} options={STYLES} onChange={(v) => set("style", v)} ariaLabel="Ripple Style" />
+              </div>
+              <div className="e-field">
+                <span className="e-fl">Ripple Color</span>
+                <Swatches items={swatchItems(SWATCHES)} isSelected={(c) => rgb(c) === rgb(settings.color)}
+                  onSelect={(c) => set("color", c)} disabled={styleless} />
+              </div>
+            </div>
+            <div className="e-field">
+              <Slider min={0.2} max={1.0} step={0.05} value={settings.intensity} disabled={styleless}
+                onChange={(v) => set("intensity", v)} ariaLabel="Intensity" label="Intensity" formatValue={(v) => `${Math.round(v * 100)}%`} />
+            </div>
+          </>
+        )}
       </div>
 
-      {settings.enabled && (
-        <>
-          <div className="e-field">
-            <span className="e-fl">Ripple Style</span>
-            <Picker value={settings.style} options={STYLES} onChange={(v) => set("style", v)} ariaLabel="Ripple Style" />
-          </div>
-
-          <div className="e-field">
-            <span className="e-fl">Ripple Color</span>
-            <Swatches items={swatchItems(SWATCHES)} isSelected={(c) => rgb(c) === rgb(settings.color)}
-              onSelect={(c) => set("color", c)} disabled={styleless} />
-          </div>
-
-          <div className="e-field">
-            <Slider min={0.2} max={1.0} step={0.05} value={settings.intensity} disabled={styleless}
-              onChange={(v) => set("intensity", v)} ariaLabel="Intensity" label="Intensity" formatValue={(v) => `${Math.round(v * 100)}%`} />
-          </div>
-        </>
-      )}
-
-      {/* Spotlight options */}
-      <div className="e-sec">
-        <div className="e-switchrow">
-          <span>Spotlight always on</span>
-          <Switch on={settings.spotlight} onChange={(v) => set("spotlight", v)} />
-        </div>
-      </div>
-
-      {settings.spotlight && (
-        <>
-          <div className="e-field">
-            <span className="e-fl">Spotlight Mode</span>
-            <Picker value={settings.spotlight_mode} options={MODES} onChange={(v) => set("spotlight_mode", v)} ariaLabel="Spotlight Mode" />
-          </div>
-
-          <div className="e-field">
-            <span className="e-fl">Tint</span>
-            <Swatches items={swatchItems(TINTS)} isSelected={(c) => rgb(c) === rgb(settings.spotlight_tint)}
-              onSelect={(c) => set("spotlight_tint", c)} />
-          </div>
-
-          <div className="e-field">
-            <Slider min={0.2} max={0.9} step={0.05} value={settings.spotlight_dim}
-              onChange={(v) => set("spotlight_dim", v)} ariaLabel="Dim Override" label="Dim Override" formatValue={(v) => `${Math.round(v * 100)}%`} />
-          </div>
-
-          <div className="e-field">
-            <Slider min={0.05} max={0.3} step={0.01} value={settings.spotlight_radius}
-              onChange={(v) => set("spotlight_radius", v)} ariaLabel="Radius Override" label="Radius Override" formatValue={(v) => `${Math.round(v * 100)}%`} />
-          </div>
-
-          <div className="e-field">
-            <Slider min={0.02} max={0.25} step={0.01} value={settings.spotlight_feather}
-              onChange={(v) => set("spotlight_feather", v)} ariaLabel="Feather" label="Feather" formatValue={(v) => `${Math.round(v * 100)}%`} />
-          </div>
-
+      {/* The two always-on effects that are NOT this panel's primary act. A spotlight you want for
+          one moment is the Spotlight Highlight pill above; this group is the always-on version,
+          and the video effect is hotkey-driven - both are set once per project at most. Together
+          they are 450px with everything open, which is more than the panel's whole budget, so they
+          are what goes under its one disclosure. */}
+      <Disclosure id="effects">
+        <div className="e-grp">
+          <span className="e-sechead">Spotlight</span>
           <div className="e-switchrow">
-            <span>Dim webcam</span>
-            <Switch on={settings.spotlight_dim_camera} onChange={(v) => set("spotlight_dim_camera", v)} />
+            <span>Spotlight always on</span>
+            <Switch on={settings.spotlight} onChange={(v) => set("spotlight", v)} ariaLabel="Spotlight always on" />
           </div>
-        </>
-      )}
-
-      {/* Video effect - a separate, hotkey-activated overlay; independent of the spotlight toggle. */}
-      <div className="e-sec">
-        <div className="e-field" style={{ marginBottom: 0 }}>
-          <span className="e-fl">Video FX Mode</span>
-          <Picker value={settings.video_fx_mode} options={VMODES} onChange={(v) => set("video_fx_mode", v)} ariaLabel="Video FX Mode" />
+          {settings.spotlight && (
+            <>
+              <div className="e-two">
+                <div className="e-field">
+                  <span className="e-fl">Spotlight Mode</span>
+                  <Picker value={settings.spotlight_mode} options={MODES} onChange={(v) => set("spotlight_mode", v)} ariaLabel="Spotlight Mode" />
+                </div>
+                <div className="e-field">
+                  <span className="e-fl">Tint</span>
+                  <Swatches items={swatchItems(TINTS)} isSelected={(c) => rgb(c) === rgb(settings.spotlight_tint)}
+                    onSelect={(c) => set("spotlight_tint", c)} />
+                </div>
+              </div>
+              <div className="e-two">
+                <div className="e-field">
+                  <Slider min={0.2} max={0.9} step={0.05} value={settings.spotlight_dim}
+                    onChange={(v) => set("spotlight_dim", v)} ariaLabel="Dim Override" label="Dim Override" formatValue={(v) => `${Math.round(v * 100)}%`} />
+                </div>
+                <div className="e-field">
+                  <Slider min={0.05} max={0.3} step={0.01} value={settings.spotlight_radius}
+                    onChange={(v) => set("spotlight_radius", v)} ariaLabel="Radius Override" label="Radius Override" formatValue={(v) => `${Math.round(v * 100)}%`} />
+                </div>
+              </div>
+              <div className="e-field">
+                <Slider min={0.02} max={0.25} step={0.01} value={settings.spotlight_feather}
+                  onChange={(v) => set("spotlight_feather", v)} ariaLabel="Feather" label="Feather" formatValue={(v) => `${Math.round(v * 100)}%`} />
+              </div>
+              <div className="e-switchrow">
+                <span>Dim webcam</span>
+                <Switch on={settings.spotlight_dim_camera} onChange={(v) => set("spotlight_dim_camera", v)} ariaLabel="Dim webcam" />
+              </div>
+            </>
+          )}
         </div>
-      </div>
+
+        {/* A separate, hotkey-activated overlay, independent of both switches above. Four modes,
+            but with two-word names that will not fit a four-up segmented row at 320px, so this one
+            stays a dropdown. */}
+        <div className="e-grp">
+          <span className="e-sechead">Video effect</span>
+          <div className="e-field">
+            <span className="e-fl">Video FX Mode</span>
+            <Picker value={settings.video_fx_mode} options={VMODES} onChange={(v) => set("video_fx_mode", v)} ariaLabel="Video FX Mode" />
+          </div>
+        </div>
+      </Disclosure>
     </div>
   );
 }

@@ -101,6 +101,9 @@ impl ScreenPipe {
 
     /// Join the decode thread, surfacing a stored decode error. Drops the receiver first
     /// so a thread still trying to send (decoder outran the consumer) can't hang the join.
+    /// The frame `next` last delivered (held through EOF), for output frames that re-use it.
+    pub fn held(&self) -> Option<&[u8]> { self.cur.as_ref().map(|(b, _)| b.as_slice()) }
+
     pub fn join(self) -> Result<()> {
         let ScreenPipe { rx, handle, err, .. } = self;
         drop(rx);
@@ -162,8 +165,12 @@ impl WebcamPipe {
 mod tests;
 
 pub mod pipeline_decode;
+pub mod bg_pipe;
+pub mod plan_walk;
 pub mod exporter;
 pub mod run;
 pub mod ffio;
 pub mod audio_mux;
+pub mod audio_segments;
+pub mod silence;
 pub mod timeline;

@@ -4,6 +4,8 @@ The editor preview's Canvas2D compositor: given the screen `<video>`, the webcam
 
 ## DrawCam
 
+**Time remap.** `drawPreview` gained an optional last argument `bgTimeMs`: a video background runs on the OUTPUT clock (the exporter feeds it one frame per output frame), so the composite loop passes `tOut` for it while `now` stays clip time for the cursor, the clicks and the trail. Omitted, `now` is used for both, as before.
+
 ```ts
 export interface DrawCam { scale: number; cx: number; cy: number; curx: number; cury: number }
 ```
@@ -16,7 +18,7 @@ The camera pose for one frame, interpolated from the backend `CamSample` track b
 export function drawPreview(
   ctx: CanvasRenderingContext2D, w: number, h: number,
   screen: HTMLVideoElement, webcam: HTMLVideoElement | null, cam: DrawCam,
-  layout: PreviewLayout | null, bg: HTMLImageElement | null, clicks: ClickSample[], now: number,
+  layout: PreviewLayout | null, bg: StageBgState | null, clicks: ClickSample[], now: number,
   cursor: DrawCursor | null, offscreen: HTMLCanvasElement, layer: HTMLCanvasElement,
   insetW: number = 1
 ): void
@@ -31,7 +33,11 @@ Composites one preview frame onto `ctx` (a `w`x`h` canvas).
 - `webcam` - the webcam `<video>` or `null`. *Why:* drawn as the PiP panel (cover-fit, rounded) on top of the zoomed result when present and non-empty.
 - `cam: DrawCam` - the interpolated camera pose. *Why:* defines the whole-frame crop rectangle (`cw = w/scale`, centred on the panel-local `cx`/`cy`, clamped into the frame) that both the base image and the cursor project through.
 - `layout: PreviewLayout | null` - the export framing (screen rect + radius + webcam rect) as fractions. *Why:* so the preview frames the screen/webcam exactly like the export; `null` uses an inset fallback.
-- `bg: HTMLImageElement | null` - the decoded export background. *Why:* painted under the screen (onto the offscreen buffer) once loaded, else a gradient placeholder.
+- `bg: StageBgState | null` - the whole background state (`stage/stageBg.ts`): the decoded export background, plus the `<video>` or decoded GIF frames when the doc's background is an imported moving asset. *Why:* painted under the screen onto the offscreen buffer by `drawBackground`, which blits the still PNG (already cover-fitted, blurred and dimmed by Rust - nothing to redo here) or draws this frame of the moving asset cover-fitted with the dim over it. A gradient placeholder until something has loaded.
+
+  *Why a state object and not an image:* it replaced a bare `HTMLImageElement`, so this function's argument count - and `Stage`'s and `useCompositeLoop`'s prop counts - did not grow when video backgrounds landed. All three files sit within a few lines of the 200-line cap.
+
+  Preview/export parity for a MOVING background is "the same frame within one output frame", not pixel-identical: this side resamples through the browser's decoder, the export through ffmpeg's `-r`.
 - `clicks: ClickSample[]`, `now: number` - the click track and current output time (ms). *Why:* passed through to `drawCursorSprite` for its click-bounce dip animation (ripples themselves are drawn by the backend FX overlay, not here).
 - `cursor: DrawCursor | null` - the cursor inputs, or `null` to skip. *Why:* drawn (Enhanced only) at the zoom-projected cursor position with bounce + motion trail, scaled by the screen panel's own size and clipped to its on-screen rect (see `insetW`) - matching the export, which doesn't scale cursor size with the CAMERA zoom either.
 - `offscreen: HTMLCanvasElement` - a reusable buffer canvas the caller owns (resized here to `w`x`h` if needed). *Why:* the background+screen composite must exist as one image before the whole-frame crop can read a sub-rect of it; owning this in the caller (`useCompositeLoop`) avoids allocating a new canvas every frame.
@@ -48,7 +54,7 @@ Composites one preview frame onto `ctx` (a `w`x`h` canvas).
 2. On `offscreen`: paint the background (image or gradient), then draw the screen video's *full current frame* into the screen rect, clipped to a rounded rect with a drop shadow - through `paintPanel` at the layout's interpolated `screenAlpha`. No zoom crop happens here.
 3. Compute the whole-frame zoom crop `(cx0, cy0, cw, ch)` from `cam.scale` and the panel-local `cam.cx`/`cam.cy`, clamped into `[0, w]`x`[0, h]` - the same math as the export's `coordmap::crop`.
 4. `ctx.drawImage(offscreen, cx0, cy0, cw, ch, 0, 0, w, h)` - crop+resize the *entire* offscreen buffer onto the visible canvas in one call.
-5. Skip the cursor entirely when `screenAlpha < 0.5`, mirroring `cursorset::draw`'s own gate (`if screen.alpha < 0.5 { return; }`) - the export stops drawing the synthetic cursor once the screen panel is more than half faded out, so a cross-fade into `camera_only` must not leave a cursor hanging over a panel that is no longer there. Otherwise: project the cursor's panel-local position through the same crop; derive `panel = panelFactor(dw / w, insetW)` and `clip = panelClipRect({x:dx,y:dy,w:dw,h:dh}, {cx0,cy0,cw,ch}, w, h)` (`cursorPanel.ts`) from the SAME pre-zoom panel rect and crop, and pass both to `drawCursorSprite`.
+5. Skip the cursor entirely when `screenAlpha < 0.5`, mirroring `cursorset::draw`'s own gate (`if screen.alpha < 0.5 { return; }`) - the export stops drawing the synthetic cursor once the screen panel is more than half faded out, so a cross-fade into `camera_only` must not leave a cursor hanging over a panel that is no longer there. Otherwise: project the cursor's panel-local position through the same crop; derive `panel = panelFactor(dw / w, insetW)` and `clip = panelClipRect({x:dx,y:dy,w:dw,h:dh}, {cx0,cy0,cw,ch}, w, h)` (`cursorPanel.ts`) from the SAME pre-zoom panel rect and crop, plus `capturedScale = contentScale(panel, insetW * w, cursor.captured?.srcW ?? 0)` for the captured cursor, and pass all three to `drawCursorSprite`. *Why a third number:* the synthetic sprites are authored against the output canvas and scale by `panel`, while the CAPTURED bitmaps are in the recording's own source pixels and have to shrink with the content (`insetW` is a canvas fraction, scaled up here to share `srcW`'s unit).
 6. Draw the webcam PiP on `ctx` through `paintPanel` at the layout's interpolated `camAlpha` (rounded rect from `layout.cam`; the bottom-right-circle fallback applies only when there is NO `layout` at all - a layout that exists and simply hides the webcam, `screen_only` or the static `preview_layout` before presets land, must draw nothing rather than that hardcoded bubble) - unzoomed, on top of the zoomed result. When `layout.cam`'s ring width (`cam[5]`, a fraction of output width) is `> 0`, also stroke the export ring/border: a band `ringPx` wide in `ring_color` (`cam[6..9]`, RGB 0..255), traced just inside the panel edge to match `shader.wgsl`/`compositor.rs`'s inside-only SDF band - achieved by stroking a path inset by `ringPx/2` with `lineWidth = ringPx`, so the centered stroke's outer half lands on the true edge and its inner half sits `ringPx` further in.
 
 ### paintPanel
@@ -71,4 +77,4 @@ Painting those layers into a scratch canvas and blitting it once reproduces the 
 - Private helpers in this file: `paintPanel` (above), `coverDraw` (centre-crop cover fit) and `roundRect` (rounded-rect path).
 - The FX overlay (spotlight + click ripples) is rendered separately by the backend (`preview_fx.rs`, via `fxOverlay.ts`/`useCompositeLoop.ts`) and blitted on top after this function returns - it is not part of `drawPreview`.
 - The cursor type (`DrawCursor`) is documented in `cursorPreview.ts`, where it's actually defined.
-- The cursor's panel scale/clip math (`panelFactor`/`panelClipRect`) is documented in `cursorPanel.ts`, where it's actually defined - pulled out as pure functions so this exact export mirror is unit-tested directly.
+- The cursor's panel scale/clip math (`panelFactor`/`panelClipRect`/`contentScale`) is documented in `cursorPanel.ts`, where it's actually defined - pulled out as pure functions so this exact export mirror is unit-tested directly.

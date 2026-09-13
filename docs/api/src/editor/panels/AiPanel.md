@@ -2,6 +2,8 @@
 
 Left panel rendered when the "AI Director" rail tab is active. Displays a real Engine picker (Ollama models installed locally) with honest loading/empty/error states, the auto-edit run button, an inline error line, and either a staggered Motion list summarizing what the AI director does (before the first run) or a live terminal-style log of what it actually did (once `log` has lines).
 
+**Flow (panel pass, 2026-09-13).** Two groups: the choice and the action (Engine, Auto-edit, progress, error), then the outcome under a heading that reads "What it does" before a run and "Run" once there are log lines. Nothing moved and nothing was renamed; the grouping is what makes the run button read as belonging to the engine above it rather than floating between two unrelated blocks. The log box and the error line are raised planes now, not bordered boxes - the error keeps its red text and gains a 3px accent edge instead of a tinted, outlined card.
+
 ## AiPanel
 
 ```tsx

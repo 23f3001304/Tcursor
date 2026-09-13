@@ -13,6 +13,7 @@ pub fn save_inputs(
     actions_path: &Path,
     typing_path: &Path,
     cursor_path: &Path,
+    paths: &crate::session::paths::ProjectPaths,
     screen: ScreenInfo,
     started_unix_ms: u64,
 )
@@ -24,9 +25,10 @@ Stops each active input tracker and writes its data to disk. Called synchronousl
 
 - `mouse: Option<MouseTracker>` - `Some` when a mouse tracker was started; `None` skips this track. *Why Option:* mouse tracking may be absent in test or minimal builds.
 - `keyboard: Option<KeyboardTracker>` - `Some` when a keyboard tracker was started. *Why Option:* stops and splits into `(actions, typing)` in one call; either or both tracks may be absent.
-- `cursor: Option<CursorTypeTracker>` - `Some` only when `CursorStyle::Enhanced` was active. *Why Option:* Enhanced mode is the only mode that draws a synthetic cursor requiring shape data; System and Hidden modes skip this tracker entirely.
+- `cursor: Option<CursorTypeTracker>` - the cursor tracker. `Some` on EVERY take now, whatever the style: capture is always cursor-free, so the shape track AND the captured OS-cursor layer both have to be sampled live for any style to be selectable later. (Still an `Option` because a spawn failure, or a minimal/test build, can legitimately have no tracker.)
 - `events_path: &Path` - destination for `events.json`. *Why Path not String:* the serialization helpers in `EventLog` take `&Path`; avoids re-allocation.
 - `actions_path / typing_path / cursor_path: &Path` - destinations for `actions.json`, `typing.json`, `cursor.json` respectively.
+- `paths: &ProjectPaths` - used ONLY for the captured cursor layer, whose several files (`cursor/layer.json` plus one PNG per shape) are not worth threading through as separate path arguments. Built by `recorder_stop` from `Running::folder`.
 - `screen: ScreenInfo` - capture dimensions and origin embedded in `EventLog`. *Why passed here:* `EventLog` must describe the screen geometry used during recording so the exporter can map pixel coordinates correctly.
 - `started_unix_ms: u64` - Unix epoch time (ms) of recording start, embedded in `EventLog`. *Why:* the exporter and future tools can correlate events to wall-clock time.
 
@@ -38,7 +40,7 @@ Stops each active input tracker and writes its data to disk. Called synchronousl
 
 1. If `mouse` is `Some`: call `tracker.stop()` to drain the event queue, construct `EventLog { started_unix_ms, screen, events }`, call `log.save(events_path)`. Log any error to stderr and continue.
 2. If `keyboard` is `Some`: call `kb.stop()` which returns `(actions, typing)`. Save `ActionLog { actions }` to `actions_path` and `TypingLog { ms: typing }` to `typing_path`. Use `.ok()` on the typing save since typing data is best-effort. *Why stop returns both:* the keyboard tracker collects both action events and raw keystroke timestamps on one hook; a single stop call drains both queues atomically.
-3. If `cursor` is `Some`: call `c.stop()` to get `samples`, save `CursorTrack { samples }` to `cursor_path`. Log error to stderr.
+3. If `cursor` is `Some`: call `c.stop()` to get `(samples, layer)`. Save `CursorTrack { samples }` to `cursor_path`, then `layer.save(paths)` for the captured OS-cursor layer. Both log to stderr and continue - best-effort like every other input log, and a project with no layer still opens, it just falls back to the plain arrow for System exactly like a pre-layer recording.
 
 ## save_session_files
 
@@ -76,6 +78,7 @@ pub fn spawn_mic_thread(
     clock: Arc<dyn Clock>,
     started: Arc<AtomicU64>,
     warn: Notify,
+    level: Option<Level>,
 ) -> Option<JoinHandle<()>>
 ```
 
@@ -90,6 +93,7 @@ Spawns a dedicated thread that owns and drives a `CpalMic` handle. Returns `None
 - `clock: Arc<dyn Clock>` - used inside `CpalMic::open` to stamp `started` with the first sample's capture time, cancelling device input latency. *Why Arc<dyn Clock>:* injectable for tests; `SystemClock` is the production instance.
 - `started: Arc<AtomicU64>` - written by `CpalMic` at the first captured sample. *Why AtomicU64:* read back in the stop path without a lock; SeqCst is used on both sides.
 - `warn: Notify` - called with `audio_warning("microphone", e)` if the device will not open.
+- `level: Option<Level>` - called with this source's peak RMS on every poll wake, feeding the HUD's wave meter. Dropped to `None` when the device did not open, so the meter reads the absence of reports as "not capturing" and can never be told otherwise.
 
 ### Returns
 
@@ -99,8 +103,8 @@ Spawns a dedicated thread that owns and drives a `CpalMic` handle. Returns `None
 
 1. `let id = mic_id?` - short-circuits to `None` if mic is off.
 2. Spawn thread named `"mic"`.
-3. Inside the thread: open `CpalMic` with the device id, path, pause flag, started counter, and clock. Store the handle, or - on failure - delete any header-only `mic.wav` the aborted open left behind, fire `warn`, and store `None`. *Why store `None` rather than abort:* a mic failure is non-fatal; recording continues without audio. *Why delete the file:* `CpalMic::open` creates the WAV before building the input stream, so a `build_input_stream` failure leaves a zero-sample `mic.wav` that `export::pipeline::timeline` would treat as real audio (`paths.mic().exists()`) and mux at a bogus offset.
-4. Loop sleeping 50ms until `stop` is set. *Why 50ms not 2ms:* audio is driven by the cpal callback, not this loop; the loop only needs to keep the handle alive and check for stop.
+3. Inside the thread: create a `LevelSlot` and open `CpalMic` with the device id, path, pause flag, started counter, clock and that slot. Store the handle, or - on failure - delete any header-only `mic.wav` the aborted open left behind, fire `warn`, and store `None`. *Why store `None` rather than abort:* a mic failure is non-fatal; recording continues without audio. *Why delete the file:* `CpalMic::open` creates the WAV before building the input stream, so a `build_input_stream` failure leaves a zero-sample `mic.wav` that `export::pipeline::timeline` would treat as real audio (`paths.mic().exists()`) and mux at a bogus offset.
+4. Run `poll_until_stopped` with the slot and (only if the device opened) `level`.
 5. On stop: call `handle.stop()` to flush and close the wav file.
 
 ## spawn_system_thread
@@ -114,6 +118,7 @@ pub fn spawn_system_thread(
     clock: Arc<dyn Clock>,
     started: Arc<AtomicU64>,
     warn: Notify,
+    level: Option<Level>,
 ) -> Option<JoinHandle<()>>
 ```
 
@@ -128,6 +133,7 @@ Spawns a dedicated thread that owns and drives a `SystemAudio` loopback handle. 
 - `clock: Arc<dyn Clock>` - forwarded into `SystemAudio::loopback`, which stamps `started` from inside the data callback at the first non-empty packet - mirroring the mic's in-callback pattern (see `spawn_mic_thread`) instead of stamping at stream-open. *Why not stamp here anymore:* stream-open (config negotiation + `stream.play()`) measurably precedes when samples actually start arriving; stamping in the callback removes that gap the same way the mic path removes its device latency.
 - `started: Arc<AtomicU64>` - passed straight into `SystemAudio::loopback`, which owns the stamping. *Why SeqCst store:* read back in the stop path; must be globally visible before the `join` returns.
 - `warn: Notify` - called with `audio_warning("system", e)` if loopback will not open.
+- `level: Option<Level>` - the system source's own level sink, same handling as `spawn_mic_thread`'s. It is what makes the meter's back stroke real audio rather than decoration.
 
 ### Returns
 
@@ -137,8 +143,8 @@ Spawns a dedicated thread that owns and drives a `SystemAudio` loopback handle. 
 
 1. `if !enabled { return None; }`.
 2. Spawn thread named `"system-audio"`.
-3. Inside the thread: call `SystemAudio::loopback(&system_path, paused, started, clock)`, moving `started`/`clock` in directly - `loopback` itself stamps `started` at the first non-empty callback packet. On success, store the handle. On failure, delete any header-only `system.wav`, fire `warn`, and store `None`. *Why store `None` on error:* same as mic - non-fatal; recording continues without system audio.
-4. Loop sleeping 50ms until `stop` is set.
+3. Inside the thread: create a `LevelSlot` and call `SystemAudio::loopback(&system_path, paused, started, clock, Some(slot))`, moving `started`/`clock` in directly - `loopback` itself stamps `started` at the first non-empty callback packet. On success, store the handle. On failure, delete any header-only `system.wav`, fire `warn`, and store `None`. *Why store `None` on error:* same as mic - non-fatal; recording continues without system audio.
+4. Run `poll_until_stopped` with the slot and (only if loopback opened) `level`.
 5. Call `handle.stop()` to flush and close the wav file. *Why `SystemAudioHandle` is `!Send`:* cpal streams contain platform handles that must be released on the same thread they were created on; owning the handle in the thread that opened it satisfies this invariant.
 
 ## audio_warning
@@ -158,3 +164,23 @@ The `record-warning` reason for an audio input that would not open - the selecte
 ### Behaviors
 
 - `audio_warning_names_the_input_and_carries_the_cause`: the message contains both the input name and the underlying error text.
+
+## LEVEL_POLL_MS
+
+```rust
+pub const LEVEL_POLL_MS: u64 = 50;
+```
+
+How often a capture thread wakes, and therefore how often it reports its level. This is the poll interval both audio threads already used to notice `stop`, reused as the meter's feed rate so nothing extra runs during a take. 20 reports a second is a meter, not a stream; the HUD's `useAudioLevels` treats a source with no report for 400ms as no longer capturing.
+
+## poll_until_stopped
+
+```rust
+fn poll_until_stopped(stop: &AtomicBool, slot: &Arc<LevelSlot>, level: &Option<Level>)
+```
+
+The `stop`-polling loop both audio threads run, reporting `slot`'s peak on every wake once a `level` sink is attached. Shared so the mic and system threads cannot drift apart in either their shutdown latency or their meter cadence.
+
+*Why the emit happens here and not in the audio callback:* the callback runs on a realtime thread, which may not block, allocate or do IPC. It only does a single relaxed `fetch_max` into `LevelSlot`; this loop, which already existed and already sleeps for exactly the right interval, does the emitting.
+
+*Why 50ms and not 2ms:* audio is driven by the cpal callback, not this loop; the loop only needs to keep the handle alive, check for stop, and pace the meter.

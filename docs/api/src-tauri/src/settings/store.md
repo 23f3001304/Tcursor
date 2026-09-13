@@ -30,16 +30,19 @@ The settings `start_recording` froze into the recording folder. Defaults on a mi
 pub fn os_cursor_in_video(paths: &ProjectPaths) -> bool
 ```
 
-Whether this recording's video has the OS cursor baked into its pixels: `record_snapshot(paths).cursor.style.captures_os_cursor()`.
+Whether this recording's video has the OS cursor baked into its pixels: `record_snapshot(paths).cursor.style.captures_os_cursor() && !CursorLayer::exists(paths)`.
 
-*Why it must be derived, not stored:* `captures_os_cursor` is a capture-time decision (it tells WGC whether to composite the cursor), but the editor lets the user change `cursor.style` afterwards. Picking `System` on a recording made in `Enhanced` used to turn the synthetic cursor off while there was no real one in the video either - so the cursor disappeared entirely. Deriving the answer from the snapshot recovers the truth for every existing recording, with no manifest field and no migration.
+**True only for a PRE-LAYER `System` recording.** Capture is now always cursor-free (`recorder.rs` passes `with_cursor: false` for every style) and the real cursor is recorded as its own layer instead, so the only recordings with a baked cursor are the ones made before that change. A cursor layer on disk is the marker that the take came after it, and it beats the style every time; without one, the record-time style is the only evidence there is, and back then `System` did mean baked pixels.
 
-*Why a missing snapshot answers `true`:* it fails closed. `true` means "draw no synthetic cursor", which is the pre-existing behavior; guessing `false` could paint a second cursor on top of a real one.
+*Why it must be derived, not stored:* `captures_os_cursor` was a capture-time decision, but the editor lets the user change `cursor.style` afterwards. Picking `System` on a recording made in `Enhanced` used to turn the synthetic cursor off while there was no real one in the video either - so the cursor disappeared entirely. Deriving the answer recovers the truth for every existing recording, with no manifest field and no migration.
+
+*Why a missing snapshot answers `true`:* it fails closed (on a project with no layer). `true` means "draw no synthetic cursor", which is the pre-existing behavior; guessing `false` could paint a second cursor on top of a real one.
 
 ### Behaviors
 
-- `os_cursor_in_video_is_derived_from_the_record_time_snapshot` - a snapshot written with `System` reports `true`; `Enhanced` and `Hidden` report `false`.
-- `a_missing_snapshot_reports_a_baked_cursor` - a folder with no `settings.json` reports `true`.
+- `os_cursor_in_video_is_derived_from_the_record_time_snapshot` - with no layer present, a snapshot written with `System` reports `true`; `Enhanced` and `Hidden` report `false`.
+- `a_cursor_layer_means_the_video_is_clean_whatever_the_style_was` - the full 2x2 matrix (System/Enhanced x layer/no-layer): only System-without-a-layer reports `true`.
+- `a_missing_snapshot_reports_a_baked_cursor` - a folder with no `settings.json` and no layer reports `true`.
 
 ## config_path
 

@@ -1,21 +1,20 @@
 import { memo, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
-  IconZoomIn,
-  IconWand,
   IconPlayerSkipBack,
   IconPlayerPlay,
   IconPlayerPause,
   IconPlayerSkipForward,
   IconVolume,
   IconVolumeOff,
-  IconArrowBarToLeft,
-  IconArrowBarToRight,
-  IconX,
 } from "@tabler/icons-react";
 import { fmt, fmtPrecise } from "../timeline/time";
 import { Slider } from "../controls/Controls";
-import type { Aspect } from "../../lib/edit";
+import type { Aspect, EditDoc, EditOp } from "../../lib/edit";
+import type { ClickSample } from "../../lib/ipcPreview";
+import type { Range } from "../timeline/useRangeSelect";
+import { PLAY_SPRING, PLAY_TAP, PRESS_TAP } from "./transportMotion";
+import { TransportTools } from "./TransportTools";
 
 /** Cycle order + short chip labels for the aspect selector - mirrors the Rust `Aspect` enum.
  *  Exported: StageToolbar's aspect quick-toggle cycles the exact same sequence, so both controls
@@ -25,16 +24,6 @@ export const ASPECT_LABEL: Record<Aspect, string> = {
   source: "Source", wide_16x9: "16:9", vertical_9x16: "9:16", square_1x1: "1:1", classic_4x3: "4:3",
 };
 /** The tap/hover spring the zoom/wand buttons use. */
-const TAP_SPRING = { whileHover: { scale: 1.04 }, whileTap: { scale: 0.98 }, transition: { type: "tween" as const, duration: 0.12, ease: [0.4, 0, 0.2, 1] as const } };
-/** Play's own press feedback (design/premium-pass D3) - a real spring, not a tween, so the hero
- *  button has more snap than the quiet chrome around it; the same spring `.e-export` now uses. */
-const PLAY_SPRING = { type: "spring" as const, stiffness: 500, damping: 30 };
-const PLAY_TAP = { scale: 0.94 };
-/** The app-wide press spring (design/premium-pass D6) for the plain `.e-tg` icon buttons here
- *  that had no press feedback at all - reuses PLAY_SPRING's identical stiffness/damping, just a
- *  gentler scale than the hero Play button. (`.e-tbtn`/`.e-chip` siblings already have their own
- *  CSS hover-lift + `:active` press - deliberately left alone, see editor.css.) */
-const PRESS_TAP = { scale: 0.96 };
 
 // `React.memo`'d (render hygiene pass) - `timeMs` still ticks every frame during playback (the
 // time readout genuinely needs it live), so this can't skip re-rendering ENTIRELY, but memo still
@@ -43,6 +32,9 @@ const PRESS_TAP = { scale: 0.96 };
 export const Transport = memo(function Transport({
   timeMs,
   dur,
+  outTimeMs,
+  outDur,
+  plain,
   playing,
   onPlay,
   onSeek,
@@ -62,9 +54,17 @@ export const Transport = memo(function Transport({
   onMute,
   volume,
   onVolume,
+  clicks,
+  range,
+  setRange,
+  onApply,
+  onDetectSilences,
 }: {
-  timeMs: number;
-  dur: number;
+  timeMs: number; // clip time (the raw recording's clock)
+  dur: number; // the raw clip's length: the seek range
+  outTimeMs: number; // output time: what the viewer sees, cuts skipped and speed applied
+  outDur: number; // the exported length
+  plain: boolean; // no cuts and no speed spans: the two clocks agree, so only one is shown
   playing: boolean;
   onPlay: () => void;
   onSeek: (ms: number) => void;
@@ -86,6 +86,13 @@ export const Transport = memo(function Transport({
   onMute: () => void;
   volume: number; // 0..100 preview-audio volume (owned by Editor, applied to the <audio> element)
   onVolume: (v: number) => void;
+  // The three inputs the Cut / Speed tools need, threaded straight to `TransportTools`: the
+  // recording's clicks (the range-less fallback's lookahead), the ruler's selection, and the op sink.
+  clicks: ClickSample[];
+  range: Range | null;
+  setRange: (r: Range | null) => void;
+  onApply: (op: EditOp) => Promise<EditDoc | null>;
+  onDetectSilences: () => void;
 }) {
   const [showVolumeSlider, setShowVolumeSlider] = useState(false);
   // Export in progress, or no clip loaded yet - play/trim/aspect are either unsafe (would change
@@ -99,28 +106,9 @@ export const Transport = memo(function Transport({
 
   return (
     <div className="e-transport">
-      {/* Left: trim start/end to the playhead (the timeline edge handles do the same), a reset that
-          appears once trimmed, then a divider + timeline tools. */}
-      <div className="e-tgroup">
-        <button onClick={onTrimIn} className="e-tbtn" disabled={locked} title="Trim the start to the playhead (cut everything before it)">
-          <IconArrowBarToLeft size={15} /><span>In</span>
-        </button>
-        <button onClick={onTrimOut} className="e-tbtn" disabled={locked} title="Trim the end to the playhead (cut everything after it)">
-          <IconArrowBarToRight size={15} /><span>Out</span>
-        </button>
-        {trimmed && (
-          <motion.button onClick={onResetTrim} className="e-tg on" disabled={locked} title="Reset the trim range"
-            whileTap={locked ? undefined : PRESS_TAP} transition={PLAY_SPRING}><IconX size={15} /></motion.button>
-        )}
-        <div className="e-tdiv" />
-        <motion.button className="e-tg" title="Add a zoom region here (Z)" onClick={onAddZoom} {...TAP_SPRING}>
-          <IconZoomIn size={16} />
-        </motion.button>
-        <motion.button className="e-tg" title="Run the AI director to auto-edit this clip" onClick={onAutoedit} disabled={aiRunning || exporting}
-          data-director-anchor="wand" {...(aiRunning || exporting ? {} : TAP_SPRING)}>
-          <IconWand size={16} />
-        </motion.button>
-      </div>
+      <TransportTools locked={locked} trimmed={trimmed} onTrimIn={onTrimIn} onTrimOut={onTrimOut} onResetTrim={onResetTrim}
+        onAddZoom={onAddZoom} onAutoedit={onAutoedit} aiRunning={aiRunning} exporting={exporting}
+        timeMs={timeMs} dur={dur} clicks={clicks} range={range} setRange={setRange} onApply={onApply} onDetectSilences={onDetectSilences} />
       <div className="e-tdiv" />
 
       {/* Center: transport + single time readout. Play is the hero - a dedicated spring (scale
@@ -142,7 +130,10 @@ export const Transport = memo(function Transport({
           whileTap={PRESS_TAP} transition={PLAY_SPRING}>
           <IconPlayerSkipForward size={16} />
         </motion.button>
-        <span className="e-time">{fmtPrecise(timeMs)}<span className="sep"> / </span><span className="tot">{fmt(dur)}</span></span>
+        {/* Output time large (what the viewer will see); clip time as fine print only when a cut or a
+            speed span makes the two clocks differ - every lane on the timeline still sits on clip time. */}
+        <span className="e-time">{fmtPrecise(outTimeMs)}<span className="sep"> / </span><span className="tot">{fmt(outDur)}</span>
+          {!plain && <span className="e-time-clip" title="Clip time, the raw recording's clock">{fmtPrecise(timeMs)}</span>}</span>
       </div>
       <div className="e-tdiv" />
 

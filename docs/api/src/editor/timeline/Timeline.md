@@ -1,6 +1,6 @@
 # src/editor/timeline/Timeline.tsx
 
-Multi-track (Filmora-style) bottom timeline: an adaptive ruler, a filmstrip clip, and a scrolling stack of LABELED lanes (Task 36, restructured in the T36 fix-up below) - the zoom track, effect (spotlight) layer rows, layout-segment rows, the camera-move lane, and the system/mic audio waveforms - with a playhead spanning the clip. Zoom/effect/layout pills drag/resize via `useRegionDrag` and share one row-rendering component, `RegionRows.tsx`; selecting one opens the matching inspector.
+Multi-track (Filmora-style) bottom timeline: an adaptive ruler (`timelineRuler.tsx`), a filmstrip clip, and a scrolling stack of LABELED lanes (Task 36, restructured in the T36 fix-up below) - the Time lane, the zoom track, effect (spotlight) layer rows, layout-segment rows, the camera-move lane, and the system/mic audio waveforms - with a playhead spanning the clip. Zoom/effect/layout pills drag/resize via `useRegionDrag` and share one row-rendering component, `RegionRows.tsx`; selecting one opens the matching inspector.
 
 ## Timeline
 
@@ -14,6 +14,7 @@ export const Timeline: React.MemoExoticComponent<(props: {
   thumbs: string[]; waves: { system: string; mic: string }; wavesReady: boolean;
   hasWebcam: boolean;
   layoutPresets: LayoutPresets | null;
+  range: Range | null; setRange: (r: Range | null) => void;
 }) => JSX.Element>
 ```
 
@@ -32,6 +33,7 @@ Renders the ruler, filmstrip, labeled track stack, and spring-animated playhead.
 - `waves: { system, mic }` - waveform PNG asset URLs (from `ensureWaveform`); `""` hides that track once resolved.
 - `wavesReady: boolean` - whether the `waves` fetch has resolved (`useEditorData`). Passed to each `AudioTrack` as `loading={!wavesReady}` so a still-fetching waveform shows a shimmer skeleton instead of silently hiding the same as a genuinely-absent one.
 - `hasWebcam: boolean` - `hasWebcamSignal(layout)` (`../hooks/editorData.ts`), passed straight through to `CameraLane` (see its own doc) to gate the empty-lane hint off for a webcam-less recording.
+- `range: [number, number] | null` / `setRange` (time remap, T7) - the ruler's Shift+drag selection in clip ms, owned by `Editor.tsx` and threaded through `SlotProps`. The timeline only DRAWS it (`RangeOverlay`) and lets the ruler edit it; the transport's Cut and Speed are what act on it. See `useRangeSelect.md`.
 - `layoutPresets: LayoutPresets | null` (T34 L4) - the Layout lane's thumbnail source: `useLayoutLaneRegions` (`layoutLane.tsx`) resolves each layout pill's own panels through it (`resolvedPanelsFor`, T34 L2) so its pill can draw a small schematic of what it actually looks like, not just its preset's name. `null` until `useEditorData`'s first `previewLayouts` fetch lands - every pill falls back to a plain aspect-ratio icon until then (`LayoutThumb.tsx`).
 
 ### Behavior
@@ -42,7 +44,13 @@ Renders the ruler, filmstrip, labeled track stack, and spring-animated playhead.
 
 *This only works because `src-tauri/tauri.conf.json`'s main window sets `"dragDropEnabled": false`.* That key defaults to **true**, which puts Tauri's own native OS-level drag-drop handler in front of the webview: `dragstart` still fires on the palette card (the drag is real, and the OS reports one item), but the webview page never receives `dragover`/`drop`, so this handler simply never ran and pills could not be dragged onto the timeline at all. Nothing in the app listens for Tauri's native file-drop events (`onDragDropEvent`/`tauri://drag-*`), so turning the native path off costs nothing. It is a build-time config value - changing it needs a rebuild, not a page reload.
 
-**Ruler.** `rulerTicks(dur)` (adaptive) renders `<span>`s in `.e-ruler` positioned at `(at / dur) * 100%`.
+**Ruler (moved out, time remap T7).** `<Ruler dur trackRef onSeek range setRange />` (`./timelineRuler.tsx`) renders `rulerTicks(dur)` exactly as this file used to, and adds two gestures of its own: a plain drag scrubs (the same `seekAt`/`scheduleSeek`/`flushSeek` contract as the body), a Shift+drag selects a range. `seekAt` and its rAF coalescing moved to that file as `useSeek` and are now called from BOTH surfaces, so the ruler and the track body cannot drift into two different x-to-ms mappings - both measure `trackRef` (`.e-tlbody`), which is the same content width as `.e-ruler`. The extraction was what made room for the Time lane and the cut overlay inside this file's 200-line cap.
+
+**Time lane (time remap T7).** `<TimeLane doc dur sel onSel onApply track />` is pushed FIRST into `lanes` - nearest the filmstrip, because cuts and speed spans are the clip's own structure rather than a decoration laid over it - and only when `doc.cuts.length || doc.speed.length`, so an untouched recording does not carry an empty row. One row, height `ROW_H`, gutter label "Time", `active: isSel(doc.speed)`. See `TimeLane.md`.
+
+**Cut overlay (time remap T7).** `<CutOverlay cuts dur sel onSel />` renders inside `.e-trackswrap` as a SIBLING of `.e-tracks`, not inside the Time lane's row and not inside the scroll container: a cut removes time from every lane at once, so it is drawn across the whole stack (the trim overlay's idiom, one plane down), and a sibling keeps it aligned with the lane viewport once that viewport scrolls. See `CutOverlay.md`.
+
+**Range overlay (time remap T7).** `<RangeOverlay range dur />` renders inside `.e-tlbody` alongside `TrimOverlay`, so the selection reads against the lanes it will act on rather than only against the 18px ruler the gesture started on.
 
 **Filmstrip.** `<Filmstrip thumbs={thumbs} />` fills the clip with the frame thumbnails.
 
@@ -64,7 +72,9 @@ Renders the ruler, filmstrip, labeled track stack, and spring-animated playhead.
 
 **Trim overlay.** `<TrimOverlay trim={doc.trim} dur={dur} trackRef={track} onApply={onApply} />` renders last (highest paint order) inside `.e-tlbody`: dims the head/tail outside `doc.trim`'s resolved range (`resolveTrim`) and provides two draggable edge handles that commit `SetTrim` on release. See `TrimOverlay.md`.
 
-**Playhead (Task D2 restyle).** A `motion.div.e-ph` at `left: pct%` inside `.e-tlbody` (so it shares the track body's width/origin and stays aligned with ticks + pills), transitioning instantly while `playing` else a `0.12s` tween, `initial={false}`. `.e-ph` itself stays `pointer-events: none` (body scrubbing must pass through it untouched) and is now the 2px accent LINE itself (editor.css), with two Motion-owned children: `.e-ph-glow` (a blurred bar behind the line) and `.e-ph-head` (a 12px triangular grab head, `clip-path: polygon(...)`). The glow's `opacity` animates on `phDragging` - a small piece of REAL state (`useState`, not the `scrubbing` ref) set `true`/`false` alongside `scrubbing.current` in the track body's own pointerdown/up/lost-capture handlers - so it lights up only while a scrub (of any kind, including a body click-drag, not just a grab of the head itself) is actually in progress, and fades back out on release; `scrubbing` itself stays a ref (unaffected by this - a pointermove burst still never triggers a Timeline re-render). The head's `whileHover={{ scale: 1.15 }}` is a Motion spring (`stiffness: 420, damping: 22`), not a CSS transition, per the global motion-language rule. It sets `pointer-events: auto` and `cursor: grab` - the ONE interactive part of the playhead - and does NOT call `stopPropagation`, so its own `pointerdown` bubbles straight up through the `pointer-events: none` ancestor to `.e-tlbody`'s scrub handler (bubbling isn't blocked by an ancestor's `pointer-events: none`, only its own hit-testing is), scrubbing exactly like dragging the body - no extra event wiring needed.
+**Playhead.** `<Playhead pct playing dragging />` (`Playhead.tsx`), rendered inside `.e-tlbody` so it shares the track body's width and origin and stays aligned with ticks and pills. Timeline hands it three values and owns none of its rendering: the line, the glow and the drag ripple all live there, and so do the wave-motif restyle (the triangular grab head is now the brand's dot - the mark rotated 90 degrees) and the reduced-motion rule (the ripple alone is dropped). It was extracted when the motif added the ripple, because this file sits at its line cap.
+
+`dragging` is `phDragging` - a small piece of REAL state (`useState`, not the `scrubbing` ref), set `true`/`false` alongside `scrubbing.current` in the track body's own pointerdown/up/lost-capture handlers - so the glow lights only while a scrub (of any kind, including a body click-drag, not just a grab of the head itself) is actually in progress. `scrubbing` itself stays a ref, so a pointermove burst still never triggers a Timeline re-render. The head remains the ONE interactive part of an otherwise `pointer-events: none` playhead, and still does NOT call `stopPropagation`, so its `pointerdown` bubbles straight up through the `pointer-events: none` ancestor to `.e-tlbody`'s scrub handler (bubbling is not blocked by an ancestor's `pointer-events: none`, only its own hit-testing is), scrubbing exactly like dragging the body - no extra event wiring needed.
 
 ### Notes
 

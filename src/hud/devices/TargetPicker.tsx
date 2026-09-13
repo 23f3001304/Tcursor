@@ -58,7 +58,7 @@ export function TargetPicker({ targets, value, open, onToggle, onPick }: {
     <div className={`dd ${open ? "open" : ""}`} ref={ref}>
       <motion.button className="dd-trigger" onClick={onToggle} whileTap={PRESS_TAP} transition={PRESS_SPRING}>
         <span className="ico"><Monitor /></span>
-        <span className="dd-label">{selected?.meta.title ?? "—"}</span>
+        <span className="dd-label">{selected?.meta.title ?? "-"}</span>
         <span className="chev"><Chevron /></span>
       </motion.button>
       {open && (

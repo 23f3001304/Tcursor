@@ -104,8 +104,8 @@ Mutates `doc` in place by dispatching on `op`. The single write point for all `E
 3. **RemoveZoom** - single `retain` pass; no reindexing of remaining zooms.
 4. **ClearZooms** - `doc.zooms.clear()`; drops every zoom in one call with no per-id lookup, unlike the single-target `RemoveZoom`.
 5. **SetTrim** - full field replacement; `Trim` has two fields that are always logically coupled.
-6. **AddCut** - push; no overlap check here since overlap rendering is a display concern.
-7. **SetSpeed** - generate id via `next_speed_id` (same max-suffix strategy, prefix `s`), push `Speed`. The caller supplies ordering.
+6. **AddCut / AddCuts / UpdateCut / RemoveCut / SetSpeed / UpdateSpeed / RemoveSpeed** - delegated whole to `edit::ops::timeops::apply_time_op` before the match below (see `timeops.md`): fresh ids, and the doc normalised after every write (cuts merged, speed spans kept disjoint, factors clamped). `AddCuts` is one op so a Remove silences batch is one undo step.
+7. *(moved)* `next_speed_id` and `next_cut_id` live in `timeops`.
 8. **UpdateLayoutSeg** - linear scan by `id`; writes only the `Some` fields (`start_ms`/`end_ms` clamped to the clip, `layout`/`easing`/`easing_out` validated same as above), then also runs `region::clamp_order` on `start_ms`/`end_ms` (M5), same as `UpdateZoom`.
 9. **SetArrangement / ClearArrangement** - delegated whole to `edit::ops::arrangement::apply_arrangement`, the same shape the effect ops use.
 

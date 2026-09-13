@@ -1,30 +1,33 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PanelHeader } from "./PanelHeader";
 import type { EditDoc } from "../../lib/edit";
 import type { BackgroundSettings } from "../../hud/settings/settings";
-import { Slider, Swatches, type SwatchItem } from "../controls/Controls";
-import { COLOR_PRESETS, GRADIENT_PRESETS, ACCENTS, type GradientPreset } from "./backgroundPresets";
+import { backgroundThumbs, type BackgroundThumb } from "../../lib/ipc";
+import { ColorInput, Disclosure, Segmented, Slider, Swatches, type SwatchItem } from "../controls/Controls";
+import { COLOR_PRESETS, ACCENTS, DEFAULT_BG } from "./backgroundPresets";
+import { WallpaperRow, wallpaperGroups } from "./WallpaperGrid";
+import { GradientTab } from "./GradientTab";
+import { BackgroundAssetCard } from "./BackgroundAssetCard";
 
-type BgTab = "default" | "color" | "gradient";
+type BgTab = "wallpapers" | "color" | "gradient";
+// Three exclusive kinds, so a segmented row rather than a dropdown (panel-design benchmark (b)2).
+const TABS: { value: BgTab; label: string }[] = [
+  { value: "wallpapers", label: "Wallpapers" }, { value: "color", label: "Color" }, { value: "gradient", label: "Gradient" },
+];
 const rgb = (c: [number, number, number]) => `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
-const DEFAULT_BG: BackgroundSettings = {
-  kind: "mesh", solid: [24, 24, 30],
-  gradient_from: [36, 41, 56], gradient_to: [88, 64, 120], gradient_angle_deg: 135, blur: 0,
-};
 
-// `ariaLabel` uses each preset's own name (COLOR_PRESETS/ACCENTS carry one; the gradients don't,
-// so those swatches fall back to Swatches' default - their CSS gradient string).
+// `ariaLabel` uses each preset's own name (COLOR_PRESETS/ACCENTS carry one).
 const COLOR_ITEMS: SwatchItem<[number, number, number]>[] = COLOR_PRESETS.map((p) => ({ key: rgb(p.rgb), css: rgb(p.rgb), value: p.rgb, ariaLabel: p.name }));
-const GRADIENT_ITEMS: SwatchItem<GradientPreset>[] = GRADIENT_PRESETS.map((g, i) => ({
-  key: `g${i}`, css: `linear-gradient(${g.angle}deg, ${rgb(g.from)}, ${rgb(g.to)})`, value: g,
-}));
 const ACCENT_ITEMS: SwatchItem<[number, number, number]>[] = ACCENTS.map((p) => ({ key: rgb(p.rgb), css: rgb(p.rgb), value: p.rgb, ariaLabel: p.name }));
 
 export function BackgroundPanel({
+  folder,
   doc,
   onSaveSettings,
   onClose,
 }: {
+  /** The recording's folder: an imported background lives inside it (`background/<file>`). */
+  folder: string;
   doc: EditDoc;
   onSaveSettings: (nextSettings: EditDoc["settings"]) => void;
   onClose: () => void;
@@ -34,15 +37,25 @@ export function BackgroundPanel({
   const padPct = Math.round((app.screen?.pad ?? 0.03125) * 100);
   const radiusPx = Math.round((app.screen?.screen_radius ?? 0.016) * 1000);
   // Which preset grid is showing. Derived from the saved kind so reopening the panel lands on
-  // the right tab, but merely BROWSING to the "default" tab never saves - only picking a
-  // color/gradient swatch (or the "default" tab's own mesh swatch) below does.
-  const [tab, setTab] = useState<BgTab>(bg.kind === "solid" ? "color" : bg.kind === "gradient" ? "gradient" : "default");
+  // the right tab, but merely BROWSING a tab never saves - only picking a tile/colour does.
+  // `image`/`video` land on Wallpapers too: that is where the asset card lives, so reopening
+  // the panel on an imported background shows the thing that is actually selected.
+  const [tab, setTab] = useState<BgTab>(bg.kind === "solid" ? "color" : bg.kind === "gradient" ? "gradient" : "wallpapers");
+  // Rendered once per process in Rust, so this refetch on every mount is a cheap clone. An error
+  // (no ffmpeg, command missing) leaves the list empty: the grids still render their tiles, just
+  // without artwork, so nothing becomes unselectable.
+  const [thumbs, setThumbs] = useState<BackgroundThumb[]>([]);
+  useEffect(() => {
+    let live = true;
+    backgroundThumbs().then((t) => { if (live) setThumbs(t); }).catch(() => {});
+    return () => { live = false; };
+  }, []);
 
   const setBg = (patch: Partial<BackgroundSettings>) =>
     onSaveSettings({ ...doc.settings, background: { ...bg, ...patch } });
 
   const handleReset = () => {
-    setTab("default");
+    setTab("wallpapers");
     onSaveSettings({
       ...doc.settings,
       background: DEFAULT_BG,
@@ -67,78 +80,101 @@ export function BackgroundPanel({
 
   return (
     <div className="e-panel e-insp">
-      <PanelHeader title="Background" lede="Frame padding, corner radius, and background style."
+      <PanelHeader title="Background" lede="What sits behind the screen, and its frame."
         onReset={handleReset} onClose={onClose} />
 
-      {/* Background Type Selector */}
-      <div className="e-field">
+      {/* What the background IS, first: the kind, then the choices of that kind. */}
+      <div className="e-grp">
         <span className="e-sechead">Background Type</span>
-        <div className="e-seg">
-          {(["default", "color", "gradient"] as BgTab[]).map((t) => (
-            <button key={t} type="button" className={tab === t ? "on" : ""}
-              onClick={() => setTab(t)} style={{ textTransform: "capitalize" }}>
-              {t}
-            </button>
-          ))}
-        </div>
+        <Segmented value={tab} options={TABS} onChange={setTab} ariaLabel="Background Type" />
       </div>
 
-      {tab === "default" && (
-        // No "Presets" header here (unlike the color/gradient tabs below) - `mesh` is a single
-        // bundled image (`BackgroundKind::Mesh` in Rust, see `settings.ts`'s doc comment), not a
-        // data-driven set like COLOR_PRESETS/GRADIENT_PRESETS that backgroundPresets.ts could
-        // expand, so a section label over the one swatch just restated the tab name for no
-        // reason. The swatch itself still renders at the same size/position every other preset
-        // tab uses, via the shared `.e-preset-grid`/`.e-preset-circle` classes.
-        <div className="e-field">
-          <div className="e-preset-grid">
-            <button type="button" className={`e-preset-circle ${bg.kind === "mesh" ? "on" : ""}`}
-              title="Default" style={{ background: "linear-gradient(135deg, #242938, #58406f)" }}
-              onClick={() => setBg({ kind: "mesh" })} />
-          </div>
+      {/* One ROW per wallpaper group (Ribbons / Folds / Gradients / Metal / Scenic), in the order
+          the backend lists them; Classic (the legacy bundled mesh, id "") leads the first one,
+          since it is what every pre-library project already renders. The five groups plus Custom
+          are one block at 8px, not six sections at 16 - they are one library, read top to bottom.
+          The user's own file is the last row rather than a section of its own: it is one more way
+          to choose a background. Picking a wallpaper leaves `asset` alone, so coming back to that
+          row restores it without a re-import. */}
+      {tab === "wallpapers" && (
+        <div className="e-grp e-rowstack">
+          {wallpaperGroups(thumbs).map((g) => (
+            <WallpaperRow key={g.name} label={g.name} tiles={g.tiles}
+              selectedId={bg.kind === "mesh" ? bg.mesh : null}
+              onSelect={(id) => setBg({ kind: "mesh", mesh: id })} />
+          ))}
+          <BackgroundAssetCard folder={folder} asset={bg.asset} kind={bg.kind}
+            onPick={(k) => setBg({ kind: k })}
+            onImported={(i) => setBg({ kind: i.kind, asset: i.rel_path })}
+            onRemoved={() => setBg({ kind: "mesh", asset: null })} />
         </div>
       )}
 
       {tab === "color" && (
-        <div className="e-field">
+        <div className="e-grp">
           <span className="e-sechead">Presets</span>
           <Swatches items={COLOR_ITEMS} variant="preset"
             isSelected={(c) => bg.kind === "solid" && rgb(bg.solid) === rgb(c)}
             onSelect={(c) => setBg({ kind: "solid", solid: c })} />
+          <div className="e-colorrow">
+            <ColorInput value={bg.solid} label="Custom" ariaLabel="Custom background color"
+              onChange={(c) => setBg({ kind: "solid", solid: c })} />
+          </div>
         </div>
       )}
 
-      {tab === "gradient" && (
-        <div className="e-field">
-          <span className="e-sechead">Presets</span>
-          <Swatches items={GRADIENT_ITEMS} variant="preset"
-            isSelected={(g) => bg.kind === "gradient" && rgb(bg.gradient_from) === rgb(g.from) && rgb(bg.gradient_to) === rgb(g.to)}
-            onSelect={(g) => setBg({ kind: "gradient", gradient_from: g.from, gradient_to: g.to, gradient_angle_deg: g.angle })} />
+      {tab === "gradient" && <GradientTab bg={bg} thumbs={thumbs} setBg={setBg} />}
+
+      {/* Everything below is TUNING - it adjusts a background you have already chosen - so it
+          lives under the panel's one disclosure. That is not a preference: with five wallpaper
+          rows plus Custom the panel's visible stack is 576px of a 620px slot, and Look, Frame and
+          Accent together are another 215. Choosing stays in sight; tuning is one click away and
+          remembered, so a user who tunes often never sees it closed again.
+          Blur is a one-off pass over the STATIC background buffer, so on a video background it
+          would only ever reach the first frame - a control that visibly does nothing reads as
+          broken, so it is replaced by the reason it is absent. Dim is a black overlay over
+          whatever has pixels, so it sits with Blur rather than inside any one tab. */}
+      <Disclosure id="background">
+        <div className="e-grp">
+          <span className="e-sechead">Look</span>
+          <div className="e-two">
+            <div className="e-field">
+              {bg.kind === "video" ? (
+                <span className="e-hintline">Blur applies to still backgrounds.</span>
+              ) : (
+                <Slider min={0} max={100} step={5} value={Math.round(bg.blur * 100)} onChange={(v) => setBg({ blur: v / 100 })} ariaLabel="Background Blur"
+                  label="Background Blur" formatValue={(v) => `${Math.round(v)}%`} />
+              )}
+            </div>
+            <div className="e-field">
+              <Slider min={0} max={80} step={1} value={Math.round(bg.dim * 100)} onChange={(v) => setBg({ dim: v / 100 })} ariaLabel="Dim"
+                label="Dim" formatValue={(v) => `${Math.round(v)}%`} />
+            </div>
+          </div>
         </div>
-      )}
 
-      {/* Accent Colors */}
-      <div className="e-field">
-        <span className="e-sechead">Accent Colors</span>
-        <Swatches items={ACCENT_ITEMS} variant="accent"
-          isSelected={(c) => rgb(doc.settings.ui.accent) === rgb(c)} onSelect={setAccent} />
-      </div>
+        {/* Then the frame the screen sits in. */}
+        <div className="e-grp">
+          <span className="e-sechead">Frame</span>
+          <div className="e-two">
+            <div className="e-field">
+              <Slider min={0} max={80} step={1} value={radiusPx} onChange={setRadius} ariaLabel="Corner Radius"
+                label="Corner Radius" formatValue={(v) => `${Math.round(v)}px`} />
+            </div>
+            <div className="e-field">
+              <Slider min={0} max={25} step={1} value={padPct} onChange={setPad} ariaLabel="Padding"
+                label="Padding" formatValue={(v) => `${Math.round(v)}%`} />
+            </div>
+          </div>
+        </div>
 
-      {/* Custom Sliders */}
-      <div className="e-field">
-        <Slider min={0} max={100} step={5} value={Math.round(bg.blur * 100)} onChange={(v) => setBg({ blur: v / 100 })} ariaLabel="Background Blur"
-          label="Background Blur" formatValue={(v) => `${Math.round(v)}%`} />
-      </div>
-
-      <div className="e-field">
-        <Slider min={0} max={80} step={1} value={radiusPx} onChange={setRadius} ariaLabel="Corner Radius"
-          label="Corner Radius" formatValue={(v) => `${Math.round(v)}px`} />
-      </div>
-
-      <div className="e-field">
-        <Slider min={0} max={25} step={1} value={padPct} onChange={setPad} ariaLabel="Padding"
-          label="Padding" formatValue={(v) => `${Math.round(v)}%`} />
-      </div>
+        {/* Last: the editor's own accent, which is not part of the background at all. */}
+        <div className="e-grp">
+          <span className="e-sechead">Accent Colors</span>
+          <Swatches items={ACCENT_ITEMS} variant="accent"
+            isSelected={(c) => rgb(doc.settings.ui.accent) === rgb(c)} onSelect={setAccent} />
+        </div>
+      </Disclosure>
     </div>
   );
 }

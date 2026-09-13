@@ -74,15 +74,15 @@ The virtual camera state at one frame.
 
 ```rust
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Easing { Smooth, Linear, Spring { stiffness: f32, damping: f32 }, EaseIn, EaseOut, EaseInOut,
-    Cubic { x1: f32, y1: f32, x2: f32, y2: f32 } }
+pub enum Easing { Smooth, Linear, Spring { stiffness: f32, damping: f32, mass: f32 }, EaseIn, EaseOut,
+    EaseInOut, Cubic { x1: f32, y1: f32, x2: f32, y2: f32 } }
 ```
 
 Selects the interpolation curve for zoom, layout cross-fade, and camera-move animations.
 
 - `Smooth` - default S-curve (`easing::ease` uses ease-out cubic `1-(1-t)^3`; `camera::ease` uses smoothstep `3t^2-2t^3`). *Why default:* decelerates into the target so it "lands" naturally.
 - `Linear` - constant velocity.
-- `Spring { stiffness: f32, damping: f32 }` - ease-out-back (a small overshoot past 1, then settle) in `camera::ease`; the params are currently unused.
+- `Spring { stiffness: f32, damping: f32, mass: f32 }` - a REAL damped harmonic oscillator (`export::spring`, full rationale in `spring.md`): underdamped params overshoot past 1 and ring down, critical and overdamped ones are monotone. The response is remapped onto the spring's own settle time, so `dur_ms` still owns the wall-clock length and the parameters own only the shape. Carried on the wire as `spring(stiffness,damping[,mass])`, exactly like `Cubic`'s `cubic(...)`. *This replaced a fixed ease-out-back curve that ignored both fields* - see `SPRING_DEFAULT` for the look change that came with it.
 - `EaseIn` - quadratic accelerate (`t^2`): slow start, fast finish.
 - `EaseOut` - quadratic decelerate (`t*(2-t)`): fast start, slow finish.
 - `EaseInOut` - quadratic symmetric (`2t^2` up to 0.5, then `1-2(1-t)^2`): slow-fast-slow.
@@ -94,6 +94,23 @@ Selects the interpolation curve for zoom, layout cross-fade, and camera-move ani
 - `src-tauri/src/export/types.rs` - `ZoomConfig.easing` and `ZoomRegion.easing` store it.
 - `src-tauri/src/export/camera/moves.rs` - camera-move keyframes resolve their `easing` wire-name to this via `easing_from`.
 
+## SPRING_DEFAULT
+
+```rust
+pub const SPRING_DEFAULT: Easing = Easing::Spring { stiffness: 100.0, damping: 10.0, mass: 1.0 };
+```
+
+What the bare wire word `"spring"` means - the parameters a `Zoom`/`LayoutSeg` that just says `"spring"` gets. This is **Motion's own default spring**: `zeta = 0.5`, a gentle overshoot to ~1.16 that settles without a second bounce.
+
+*Why not react-spring's 170/26, the previous value of this constant:* that is `zeta = 0.997` - critically damped to the eye, no overshoot at all - which would have made `"spring"` indistinguishable from `"smooth"` and silently broken the ZoomInspector's "Punchy" preset and `fromedit_spring_tests::spring_layout_transition_overshoots_the_destination_scene`, which encodes "a spring transition overshoots its destination" as a product property.
+
+*The look DID still change:* the old fixed ease-out-back peaked at 1.100 and this peaks at 1.163, differing by up to 0.38 mid-curve. Any existing doc using `"spring"` renders differently - that is the intended outcome of making the parameters real, and a doc that wants a specific feel can now say so with `spring(stiffness,damping)`.
+
+### Used by
+
+- `src-tauri/src/export/render/fromedit.rs` - `easing_from` returns this for the bare wire-name `"spring"`; a `spring(...)` string carries its own parameters instead (see `render/fromedit.md`).
+- `src/lib/spring.ts` - `SPRING_DEFAULT` mirrors it, so the preview and the curve cards resolve the bare word to the same oscillator.
+
 ## ZoomConfig
 
 ```rust
@@ -102,6 +119,7 @@ pub struct ZoomConfig {
     pub target_scale: f32, pub zoom_in_ms: u32, pub zoom_out_ms: u32, pub idle_release_ms: u32,
     pub clicks_to_trigger: u32, pub merge_window_ms: u32, pub merge_radius_px: u32,
     pub follow_damping: f32, pub dead_zone_px: u32, pub easing: Easing,
+    pub smoothing_ms: u32,
 }
 ```
 
@@ -115,14 +133,16 @@ All tuneable parameters for click-zoom behavior. Populated from user settings; k
 - `merge_window_ms: u32` - time window for multi-click trigger. Default: 600.
 - `merge_radius_px: u32` - spatial radius for click merging. Default: 240.
 - `follow_damping: f32` - per-frame exponential step size for `CameraSim` (0=instant, higher=slower follow). Default: 0.10.
-- `dead_zone_px: u32` - cursor must exceed this distance from center before the camera follows (hold phase). Default: 60. *Note: the actual dead band is computed proportionally from frame size in `CameraSim::step`; this field is reserved for a future per-pixel override.*
+- `dead_zone_px: u32` - cursor must exceed this distance from center before the camera follows (hold phase). Default: 60. *Note: unread. `CameraSim::step` has no dead band any more (a `follow_cursor` region aims at the cursor every step, an anchored one at its anchor); the field is kept for the settings file's shape.*
 - `easing: Easing` - curve for zoom transitions. Default: `Easing::Smooth`.
+- `smoothing_ms: u32` - settle time, in ms, of the opt-in critically damped post-pass `CameraSim::step` applies to its own output (`camera/smoothing.md`). **Default: 0 = off, and off is bit-identical to the camera before the filter existed** (`jank_filter_tests::smoothing_off_is_bit_identical` pins a fingerprint of all 721 samples of the probe scene). Set from the user-facing settings field `ZoomSettings::camera_smoothing_ms` via `to_zoom_config` (see `settings/model.md`) - a field distinct from `smoothness`, which already means the CURSOR low-pass (`CursorSettings::follow_alpha`), and from `follow_damping`, the hold-phase chase rate. Useful values measured on the probe scene: 120ms cuts the worst spike by 72% for ~33ms of lag, 250ms by 86% for ~83ms.
 
 ### Used by
 
 - `src-tauri/src/export/camera/autozoom.rs` - `generate` reads most fields to decide trigger, hold, and release timing.
 - `src-tauri/src/export/camera/mod.rs` - `CameraSim::step` reads `follow_damping` and `target_scale`.
 - `src-tauri/src/export/pipeline/exporter.rs` - receives `cfg` from settings and passes it to both `generate` and `CameraSim::step`.
+- `src-tauri/src/settings/model.rs` (`ZoomSettings::to_zoom_config`) - sets `smoothing_ms` from the user-facing `camera_smoothing_ms` field.
 
 ## ZoomRegion
 
@@ -161,7 +181,7 @@ A single resolved zoom event, baked from either auto-generated click detection o
 ```rust
 #[derive(Clone, Debug)]
 pub enum Background {
-    Gradient { from: Rgb, to: Rgb, angle_deg: f32 },
+    Gradient { from: Rgb, mid: Option<Rgb>, to: Rgb, angle_deg: f32 },
     Solid(Rgb),
     Image(PathBuf),
 }
@@ -169,7 +189,7 @@ pub enum Background {
 
 The background fill behind the screen panel.
 
-- `Gradient { from, to, angle_deg }` - linear gradient. Default: dark navy (36, 41, 56) to purple (88, 64, 120) at 135 degrees.
+- `Gradient { from, mid, to, angle_deg }` - linear gradient. `mid` is an optional middle stop that sits at the ramp's midpoint (`t = 0.5`); `None` is the two-stop ramp, bit-identical to what this variant rendered before the field existed. Default: dark navy (36, 41, 56) to purple (88, 64, 120) at 135 degrees, no middle stop.
 - `Solid(Rgb)` - flat color fill.
 - `Image(PathBuf)` - user-supplied background image. *Why:* allows custom wallpapers without a code change.
 

@@ -1,0 +1,190 @@
+/* Shared editor controls, restyled for the panel pass (2026-09-13 panel-design benchmark).
+   Imported once by `Controls.tsx`, which every panel and inspector goes through.
+
+   Three rules run through everything below:
+     1. Surfaces read by LIGHTNESS, not strokes. A control rests on --e-raised, hovers one step
+        lighter (--e-raised-hi), and a groove or well drops to --e-bg. No control in this file
+        carries a 1px border any more; the rules that did were deleted from editor.css.
+     2. ONE accent (--e-primary), used only for an on/selected state - the Switch's engaged track,
+        a selected option's tick. Colour swatches are the one exception and keep a neutral --e-fg
+        ring: their content IS colour, so a red ring would fight what it is marking.
+     3. One motion language: press spring (Motion, scale .96), hover lift y -1, everything else a
+        tween at or under 160ms. Nothing here animates a layout property in CSS.
+     4. 24px is the floor for anything you can click, drag or type into (usability pass,
+        2026-09-13). The readout button, its edit field, the slider's own hit strip and the switch
+        track were all 19-23px and are now 24; nothing in this sheet is smaller. */
+.editor {
+  /* The hover step above --e-raised. Same 3-4% lightness jump the elevation system already uses
+     between --e-surface and --e-surface-alt, so hover reads as "one plane up", not as a tint. */
+  --e-raised-hi: #232327;
+}
+
+/* ---- Slider ------------------------------------------------------------------------------
+   The rail is a groove (one plane DOWN, --e-bg) so the filled part reads as substance in a
+   channel rather than a bar on a bar; the thumb is the only raised thing and carries the shadow. */
+.e-slider-rail { width: 100%; height: 4px; border-radius: 999px; background: var(--e-bg); position: relative; }
+.e-slider-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; }
+.e-slider-thumb { position: absolute; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px;
+  border-radius: 50%; background: var(--e-fg); border: none;
+  box-shadow: 0 1px 2px rgba(0,0,0,.5), 0 2px 8px rgba(0,0,0,.35); }
+
+/* ---- Slider readout (SliderValue.tsx) ------------------------------------------------------
+   Name left, value right, on the label's own row. The value is a button until clicked, then an
+   input: same box either way, so committing does not shift the row. */
+.e-fl-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.e-val { flex: none; height: 24px; padding: 0 5px; border: none; border-radius: 6px;
+  background: transparent; color: var(--e-fg); font: inherit; font-size: 12px; font-weight: 560;
+  font-variant-numeric: tabular-nums; letter-spacing: -0.01em; text-align: right;
+  transition: background-color .14s ease; }
+.e-val:hover:not(:disabled) { background: var(--e-raised); }
+.e-val:disabled { color: var(--e-dim); cursor: default; }
+.e-val-edit { flex: none; width: 74px; height: 24px; padding: 0 5px; box-sizing: border-box;
+  border: none; border-radius: 6px; background: var(--e-bg); color: var(--e-fg); font: inherit;
+  font-size: 12px; font-weight: 560; font-variant-numeric: tabular-nums; text-align: right; }
+
+/* ---- Segmented (Segmented.tsx) -------------------------------------------------------------
+   Exclusive states, all of them visible: a sunken track with one raised slot that glides between
+   segments (Motion `layoutId`, dropped under reduced motion). The slot is the ONLY raised plane
+   here - an accent fill would spend the one accent on something that is not a selection marker. */
+.e-segmented { display: flex; gap: 2px; padding: 3px; border-radius: var(--e-r);
+  background: var(--e-bg); width: 100%; box-sizing: border-box; }
+.e-segment { position: relative; flex: 1; min-width: 0; height: 28px; padding: 0 6px; border: none;
+  background: transparent; color: var(--e-mut); border-radius: 7px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: color .14s ease; }
+.e-segment:hover:not(.on) { color: var(--e-fg); }
+.e-segment.on { color: var(--e-fg); }
+.e-segment-slot { position: absolute; inset: 0; border-radius: 7px; background: var(--e-raised);
+  box-shadow: var(--e-inset-hi), var(--e-shadow-1); }
+.e-segment-label { position: relative; z-index: 1; font-size: 12px; font-weight: 540;
+  letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---- Picker --------------------------------------------------------------------------------
+   Kept for long lists only (models, packs, easing curves); 2-to-4 exclusive states use Segmented
+   above. Closed button and menu are both raised planes with no stroke; the chosen option is a
+   3px accent tick rather than a filled row, so the menu stays quiet while scanning it. */
+.e-picker-btn { width: 100%; height: 34px; background: var(--e-raised); border: none;
+  border-radius: var(--e-r); padding: 0 11px; display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; cursor: pointer; color: var(--e-fg); font-family: inherit; font-size: 12.5px; font-weight: 500;
+  text-align: left; outline: none; box-sizing: border-box; box-shadow: var(--e-inset-hi);
+  transition: background-color .14s ease; }
+.e-picker-btn > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.e-picker-btn:hover { background: var(--e-raised-hi); }
+.e-picker-menu { background: var(--e-raised); border-radius: var(--e-r); box-shadow: var(--e-shadow-2); }
+.e-picker-opt { position: relative; width: 100%; min-height: 30px; box-sizing: border-box; padding: 6px 8px 6px 12px;
+  display: flex; align-items: center; background: transparent; color: var(--e-mut); border: none;
+  border-radius: 7px; cursor: pointer; font-family: inherit; font-size: 12.5px; font-weight: 500;
+  text-align: left; transition: background-color .14s ease, color .14s ease; }
+.e-picker-opt:hover { background: var(--e-raised-hi); color: var(--e-fg); }
+.e-picker-opt.on { color: var(--e-fg); font-weight: 600; }
+.e-picker-opt.on::before { content: ""; position: absolute; left: 3px; top: 8px; bottom: 8px; width: 3px;
+  border-radius: 2px; background: var(--e-primary); }
+.e-picker-menu::-webkit-scrollbar { width: 11px; }
+.e-picker-menu::-webkit-scrollbar-track { background: transparent; }
+.e-picker-menu::-webkit-scrollbar-thumb { background: var(--e-dim); border-radius: 999px;
+  border: 3px solid var(--e-raised); background-clip: padding-box; min-height: 40px; }
+.e-picker-menu:hover::-webkit-scrollbar-thumb { background: var(--e-mut); background-clip: padding-box; }
+
+/* ---- Switch --------------------------------------------------------------------------------
+   The engaged track is where this sheet spends its one accent. Switch.tsx keeps only the thumb's
+   animated `left` inline, so the hover rule below is not fighting an inline `background`. */
+.sw { position: relative; width: 40px; height: 24px; flex: none; padding: 0; border: none;
+  border-radius: 999px; background: var(--e-raised); box-shadow: var(--e-inset-hi);
+  display: inline-flex; align-items: center; cursor: pointer;
+  transition: background-color .16s ease; }
+.sw:hover:not(.on):not(:disabled) { background: var(--e-raised-hi); }
+.sw.on { background: var(--e-primary); }
+.sw:disabled { opacity: .45; cursor: default; }
+.sw-thumb { position: absolute; width: 17px; height: 17px; border-radius: 50%; background: var(--e-fg);
+  box-shadow: 0 1px 2px rgba(0,0,0,.45); }
+.sw.on .sw-thumb { background: #fff; }
+
+/* ---- NumberField ---------------------------------------------------------------------------- */
+.e-numfield { display: flex; align-items: center; background: var(--e-raised); border: none;
+  border-radius: var(--e-r); height: 34px; padding: 0 4px; width: 100%; box-sizing: border-box;
+  box-shadow: var(--e-inset-hi); transition: background-color .14s ease; }
+.e-numfield:hover { background: var(--e-raised-hi); }
+.e-numstep { background: transparent; opacity: .55; cursor: pointer;
+  transition: background-color .12s ease, opacity .12s ease, transform .1s ease; }
+.e-numstep:hover:not(:disabled) { background: var(--e-bg); opacity: 1; }
+.e-numstep:active:not(:disabled) { transform: scale(.88); }
+.e-numstep:disabled { opacity: .22; cursor: default; }
+
+/* ---- Swatches -------------------------------------------------------------------------------
+   Three variants, one selection language: a neutral --e-fg ring with a --e-bg gap. Neutral, not
+   the accent, because these buttons ARE colours (see rule 2 at the top of this file). */
+.e-preset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(34px, 1fr)); gap: 8px; }
+.e-preset-circle, .e-accent-circle, .e-swatch-sm { border: none; outline: none; padding: 0; cursor: pointer;
+  border-radius: 50%; box-shadow: var(--e-inset-hi), 0 1px 2px rgba(0,0,0,.4);
+  transition: transform .14s ease, box-shadow .14s ease; }
+.e-preset-circle { width: 100%; aspect-ratio: 1; }
+.e-accent-circle, .e-swatch-sm { width: 24px; height: 24px; }
+.e-preset-circle:hover, .e-accent-circle:hover, .e-swatch-sm:hover:not(:disabled) { transform: translateY(-1px); }
+.e-preset-circle:active, .e-accent-circle:active, .e-swatch-sm:active { transform: translateY(0); }
+.e-preset-circle.on, .e-accent-circle.on, .e-swatch-sm.on {
+  box-shadow: 0 0 0 2px var(--e-surface), 0 0 0 4px var(--e-fg); }
+.e-accent-list, .e-swatch-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.e-swatch-sm:disabled { opacity: .4; cursor: default; }
+
+/* ---- ColorInput -----------------------------------------------------------------------------
+   The native `<input type="color">` trigger dressed as a panel well. The 1px inner ring is not a
+   card border: it is what keeps a near-white colour from bleeding into the plane behind it. */
+.e-colorpick { display: flex; flex-direction: column; align-items: center; gap: 5px; cursor: pointer; }
+.e-colorpick input[type="color"] {
+  width: 34px; height: 34px; padding: 0; cursor: pointer; background: none; border: none;
+  border-radius: var(--e-r-sm);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.14), 0 1px 2px rgba(0,0,0,.4);
+  transition: transform .14s ease; }
+.e-colorpick:hover input[type="color"] { transform: translateY(-1px); }
+.e-colorpick input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+.e-colorpick input[type="color"]::-webkit-color-swatch { border: none; border-radius: 7px; }
+.e-colorpick span { font-size: 11px; font-weight: var(--e-text-hint-weight); color: var(--e-dim); }
+
+/* ---- TileRow (TileRow.tsx) -------------------------------------------------------------------
+   A preset library as ONE scrolling strip per group instead of a wrapping grid. The 4px scrollbar
+   lane is reserved at ALL times and only its thumb fades in on hover: growing the scrollbar on
+   hover would shove every tile up 4px, which is exactly the kind of twitch this pass is removing.
+   The row scrolls, never the panel - `overscroll-behavior-x: contain` stops a fling at the end of
+   a strip from turning into a page scroll. */
+.e-tilerow-wrap { display: flex; flex-direction: column; min-width: 0; }
+.e-tilerow-label { font-size: 11px; line-height: 1; font-weight: 500; color: var(--e-dim);
+  margin: 0 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* `.e-tile-strip` (panels.css, the cursor packs) is the same idiom at a bigger tile, so it shares
+   every rule here that is about the SCROLLER rather than the tile. */
+.e-tilerow, .e-tile-strip { display: flex; overflow-x: auto; overflow-y: hidden;
+  overscroll-behavior-x: contain; scroll-snap-type: x mandatory;
+  scrollbar-width: thin; scrollbar-color: transparent transparent; }
+.e-tilerow { gap: 6px; }
+.e-tilerow:hover, .e-tile-strip:hover { scrollbar-color: var(--e-mut) transparent; }
+.e-tilerow::-webkit-scrollbar, .e-tile-strip::-webkit-scrollbar { height: 4px; }
+.e-tilerow::-webkit-scrollbar-track, .e-tile-strip::-webkit-scrollbar-track { background: transparent; }
+.e-tilerow::-webkit-scrollbar-thumb, .e-tile-strip::-webkit-scrollbar-thumb {
+  background: transparent; border-radius: 999px; transition: background-color .14s ease; }
+.e-tilerow:hover::-webkit-scrollbar-thumb, .e-tile-strip:hover::-webkit-scrollbar-thumb { background: var(--e-mut); }
+/* Same card language as `.e-tile` (panels.css): a raised plane, one lightness step on hover, a 2px
+   inset accent ring when chosen, and never a tint or dim over the tile's own picture. */
+.e-rowtile { position: relative; flex: none; width: 64px; height: 36px; padding: 0; border: none;
+  border-radius: var(--e-r-sm); background: var(--e-raised); overflow: hidden; cursor: pointer;
+  outline: none; scroll-snap-align: start;
+  transition: background-color .14s ease, box-shadow .14s ease; }
+.e-rowtile:hover { background: var(--e-raised-hi); }
+.e-rowtile.on { box-shadow: inset 0 0 0 2px var(--e-primary); }
+.e-rowtile:focus-visible { box-shadow: inset 0 0 0 2px var(--e-fg); }
+.e-rowtile.on:focus-visible { box-shadow: inset 0 0 0 2px var(--e-primary), inset 0 0 0 4px var(--e-fg); }
+.e-rowtile-cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 9px 4px 3px;
+  font-size: 10px; line-height: 1.1; font-weight: 500; color: #fff; text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; opacity: 0;
+  background: linear-gradient(180deg, rgba(0,0,0,0), rgba(0,0,0,.74)); transition: opacity .14s ease; }
+.e-rowtile:hover .e-rowtile-cap, .e-rowtile:focus-visible .e-rowtile-cap { opacity: 1; }
+
+/* ---- Disclosure (Disclosure.tsx) --------------------------------------------------------------
+   One per panel, at its end. No plane and no rule above it: a dim word at section-heading weight,
+   plus a chevron that turns. The body's own top gap sits on `.e-more-inner` so the height tween
+   has nothing but height to animate. */
+.e-more-btn { display: flex; align-items: center; gap: 6px; width: 100%; height: 28px; padding: 0;
+  border: none; background: none; cursor: pointer; font: inherit; font-size: 11px; font-weight: 600;
+  color: var(--e-dim); text-align: left; transition: color .14s ease; }
+.e-more-btn:hover { color: var(--e-fg); }
+.e-more-chev { display: inline-flex; }
+.e-more-body { overflow: hidden; }
+.e-more-inner { padding-top: 14px; }

@@ -1,4 +1,5 @@
 use super::*;
+use crate::settings::cursor::{CursorSettings, CursorStyle};
 
 #[test]
 fn defaults_match_tuned_zoom_and_round_trip() {
@@ -49,7 +50,7 @@ fn partial_json_fills_defaults() {
     // old JSON without appearance loads the per-mode defaults
     assert_eq!(back.appearance, crate::settings::appearance::AppearanceSettings::default());
     // old JSON without cursor loads the System default (cursor stays baked-in)
-    assert_eq!(back.cursor, crate::settings::model::CursorSettings::default());
+    assert_eq!(back.cursor, crate::settings::cursor::CursorSettings::default());
     assert_eq!(back.cursor.style, CursorStyle::System);
     assert_eq!(back.cursor.pack, "default"); // old JSON without cursor.pack loads the built-in id
     assert_eq!(CursorSettings::default().bounce_intensity, 0.5);
@@ -67,4 +68,18 @@ fn partial_json_fills_defaults() {
     assert_eq!(back.audio_mic_volume, 1.0);
     assert_eq!(back.audio_sys_volume, 1.0);
     assert_eq!(back.ai_model, "");
+    // old JSON without camera_smoothing_ms loads 0 (smoothing off, bit-identical export)
+    assert_eq!(back.zoom.camera_smoothing_ms, 0);
+}
+
+#[test]
+fn camera_smoothing_ms_round_trips_into_zoom_config() {
+    // (a) a JSON ZoomSettings missing the field deserializes with 0.
+    let z: ZoomSettings = serde_json::from_str("{}").unwrap();
+    assert_eq!(z.camera_smoothing_ms, 0);
+    assert_eq!(z.to_zoom_config().smoothing_ms, 0);
+
+    // (b) an explicit value carries through to_zoom_config unchanged.
+    let z = ZoomSettings { camera_smoothing_ms: 120, ..ZoomSettings::default() };
+    assert_eq!(z.to_zoom_config().smoothing_ms, 120);
 }

@@ -99,7 +99,14 @@ impl RawDecoder {
         video: &Path, rate: f64, input_rate: bool, seek_ms: Option<u64>,
         cover_scale: Option<(u32, u32)>, target_dims: Option<(u32, u32)>, pix_fmt: &str, frame_bytes: usize
     ) -> Result<Self> {
-        let args = decode_args(video, rate, input_rate, seek_ms, cover_scale, target_dims, pix_fmt);
+        Self::spawn_args(decode_args(video, rate, input_rate, seek_ms, cover_scale, target_dims, pix_fmt), frame_bytes)
+    }
+
+    /// `spawn` for a caller that builds its OWN argument list - the background stream
+    /// (`pipeline::bg_pipe`), whose `-stream_loop -1 -an` shape does not fit `decode_args`'
+    /// parameters and should not distort them. Everything downstream (stderr drain, EOF
+    /// classification, kill-on-drop) is identical, which is the point of sharing this half.
+    pub fn spawn_args(args: Vec<String>, frame_bytes: usize) -> Result<Self> {
         let mut child = ffcmd("ffmpeg")
             .args(&args)
             .stdout(Stdio::piped())

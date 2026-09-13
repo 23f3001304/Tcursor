@@ -1,6 +1,8 @@
 # src/editor/inspectors/LayoutInspector.tsx
 
-Left-panel inspector for the selected timeline layout segment. Timing and transition controls apply `update_layout_seg`; the arrangement controls apply `set_arrangement` / `clear_arrangement`. Everything goes through `onApply`, which persists the doc and bumps the preview, so edits show live.
+Inspector for the selected timeline layout segment. Timing and transition controls apply `update_layout_seg`; the arrangement controls apply `set_arrangement` / `clear_arrangement`. Everything goes through `onApply`, which persists the doc and bumps the preview, so edits show live.
+
+Sections, in DOM order (pinned by `inspectorShape.test.tsx`): **Timing**, **Composition**, **Transition**, then Remove - the shared reading order from `InspectorShape.md`. Composition holds everything that decides what the frame contains (the preset, the arrangement, the two visibility switches), which is why "Arrange on stage" and the switches now sit under the preset row that seeds them rather than above the timing fields.
 
 ## LayoutInspector
 
@@ -14,11 +16,11 @@ export function LayoutInspector({ seg, dur, presets, arrangeOn, onApply, onArran
 ### Controls
 
 - **Header thumbnail** (T34 L4) - `PanelHeader`'s `thumb` slot renders `LayoutThumb` (`../timeline/LayoutThumb.tsx`) at 48x28 from the SAME `panels` (`resolvedPanelsFor(seg, presets)`) this file already computes for the visibility switches below, so the schematic and the switches can never disagree about what's actually shown.
-- **Start from** (T34 L3, replaces the old Preset picker) - `Camera` / `Presenter` / `Screen only` / `Camera only`, as a chip row. `"screen"` stays deliberately absent for two reasons now: it IS the empty default (reached by deleting the pill or leaving a gap), and it is the one layout the timeline hides as a pill - starting from it would make the very segment being edited vanish from the track.
+- **Start from** (T34 L3, replaces the old Preset picker) - `Camera` / `Presenter` / `Screen only` / `Camera only`, as a `SegRow` of thumbnail planes: a 2-up grid where each plane draws a `LayoutThumb` of **that preset's own resolved panels** (`presets[name].screen` / `.cam`) over its name, so the row previews real compositions instead of naming them. The selected plane is one lightness step up and carries the gliding `--e-layout` tick. `"screen"` stays deliberately absent for two reasons: it IS the empty default (reached by deleting the pill or leaving a gap), and it is the one layout the timeline hides as a pill - starting from it would make the very segment being edited vanish from the track. Every plane is disabled until `presets` loads, since without them there is no arrangement to seed.
 - **Arrange on stage** - enters stage arrange mode for this segment (`useArrangeMode.md`). Replaced by a `--e-dim` hint line while the mode is already on, since selecting the pill enters it anyway and the button would be a no-op.
-- **Custom arrangement, based on X** + **Reset to preset** - shown only once the segment carries an `arrangement`. Reset is `clear_arrangement`, the one way back to a plain preset-driven segment.
+- **Custom, based on X** + **Reset to preset** - shown only once the segment carries an `arrangement`. The provenance line is the Composition section's right-aligned readout (`Section`'s `value`), not a row of its own, so it reads as state rather than as another setting; Reset is `clear_arrangement`, the one way back to a plain preset-driven segment, and its tooltip says so.
 - **Show screen** / **Show webcam** - per-panel visibility. Re-showing restores the panel at whatever it currently RESOLVES to, which for one the arrangement hid is its provenance preset's own placement (L1: a hidden panel still resolves to a real rect, just at alpha 0). The switch for the LAST visible panel is DISABLED (`Switch`'s new `disabled` prop, with a "One panel has to stay visible" title) rather than live-but-ignored: `set_arrangement` rejects a write that would blank the frame, and a rejected op still resolves, so a switch that only early-returned would look like it worked and would leave a phantom undo step behind.
-- **Start / End** - the segment's `[start, end)` span, in seconds.
+- **Start / End** - the segment's `[start, end)` span, in seconds (`TimingRow`). The header lede reports the same span as clock time plus its length.
 - **Transition** + its curve - the ENTRY cross-fade, which STARTS at `start_ms`.
 - **Exit transition** + **Exit Curve** - the exit cross-fade, which COMPLETES at `end_ms`. `0` is a hard cut; a segment created by `add_layout_seg` starts at 350ms, the same as its entry (`NEW_LAYOUT_TRANSITION_MS`, `api.md`), and only a doc saved before this field existed loads at `0`. The curve row only appears once the duration is non-zero, since `easing_out` means nothing at `0`.
 - **Delete layout**.
@@ -29,7 +31,7 @@ Two ops, back to back: `update_layout_seg { layout }` then `set_arrangement { sc
 
 The `layout` name has to move too, not just the poses: it is what selects the appearance block the poses resolve against - radius, ring, webcam shape - so poses from one preset resolved under another preset's block would not be the preset the chip names.
 
-**It is a starting point, not a binding.** After the click the segment carries its OWN arrangement, and the preset name survives only as editable provenance ("based on Presenter"). The hint under the row says so, and points at the way back (*"Reset to preset puts it back on a plain preset"* - chip then Reset is two clicks to any plain preset, since the chip moves `seg.layout` first). It deliberately does not claim the two render identically: under `CamAspect::Wide`, converting one of the big-camera presets legitimately widens the webcam to the user's configured 16:9, because `scene::resolve` draws those three presets as a square regardless of the configured width while an arrangement honours it. That divergence is a pre-existing quirk of the preset path (documented and pinned by L1's `a_wide_webcam_widens_the_big_camera_presets_which_resolve_draws_square`), and the arrangement is the side that is right - so the UI must not promise pixel-identity it would not deliver.
+**It is a starting point, not a binding.** After the click the segment carries its OWN arrangement, and the preset name survives only as editable provenance ("Custom, based on Presenter"). The hint under the row says so, and the Reset chip's tooltip points at the way back (preset then Reset is two clicks to any plain preset, since picking a preset moves `seg.layout` first). It deliberately does not claim the two render identically: under `CamAspect::Wide`, converting one of the big-camera presets legitimately widens the webcam to the user's configured 16:9, because `scene::resolve` draws those three presets as a square regardless of the configured width while an arrangement honours it. That divergence is a pre-existing quirk of the preset path (documented and pinned by L1's `a_wide_webcam_widens_the_big_camera_presets_which_resolve_draws_square`), and the arrangement is the side that is right - so the UI must not promise pixel-identity it would not deliver.
 
 ### What the Exit section actually does
 
@@ -37,7 +39,7 @@ The exit blends from this segment toward whatever the track resolves after it - 
 
 Its visible effect is narrower than it looks, and deliberately so: when a gapless successor has its own entry transition, that entry WINS the overlap and the exit stands down (see `export/scene/layout.md`). Only one blend runs at a time, so back-to-back segments stay seamless. The exit therefore shows up when a segment falls back into a GAP, or hands off to a successor that hard-cuts in - which are exactly the two cases that used to pop.
 
-Both curve rows are the shared `CurveEditor`, so an exit can be hand-drawn as a custom `cubic(...)` just like an entry.
+Both curves are the shared `CurveEditor` (see `CurveEditor.md`), so an exit can be shaped by hand into a custom `cubic(...)` just like an entry. The two blocks pass different `label`s ("Transition curve" and "Exit Curve") so the rows read as two settings; their gliding ticks stay apart because `SegRow` namespaces its shared element per instance.
 
 ### Notes
 

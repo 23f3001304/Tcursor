@@ -1,8 +1,8 @@
-import { IconTrash } from "@tabler/icons-react";
 import { PanelHeader } from "../panels/PanelHeader";
 import type { EditDoc, EditOp, EffectRegion } from "../../lib/edit";
 import type { Settings } from "../../hud/settings/settings";
 import { Switch, Picker, NumberField, Slider } from "../controls/Controls";
+import { Hint, InspectorShell, RemoveButton, Section, TimingRow, secOf, spanLede } from "./InspectorShape";
 
 const MODE_OPTIONS = [
   { value: "global", label: "Use Global Default" },
@@ -14,20 +14,13 @@ const MODE_OPTIONS = [
   { value: "vignette", label: "Vignette" },
 ];
 
-/** One overridable spotlight param: an enable/disable switch on its own row, then the Slider's
- *  own `label`/`formatValue` readout ("Dim 65%" - or "Dim Default (90%)" while off) sourced from
- *  the LIVE value, not the committed prop (fix round 2 - this used to render a static `<b>` next
- *  to the switch instead, which never moved during a drag). The switchrow says "Override", not
- *  `label` again - the Slider's own row already prints the field name once (fix round 3: this
- *  used to print `label` in BOTH rows, e.g. "Dim" over "Dim 65%"); the Switch keeps the real name
- *  via `aria-label` so it's still unambiguous non-visually. While NOT overridden, the slider
- *  reads back its own `disabled` styling (opacity halved, thumb dims, no pointer/keyboard
- *  interaction - see Slider.tsx) - the fix here is real disablement, not just the ambiguous
- *  always-interactive look ux audit #22 flagged. The outer wrapper is a plain `<div>`, not a
- *  `<label>` (fix round 4): a `<label>` forwards any click inside it to its first labelable
- *  control, so releasing a Slider drag also fired the Switch's click handler and silently wiped
- *  the override. Both `Switch` and `Slider` carry their own `aria-label`, so no label semantics
- *  are lost. */
+/** One overridable spotlight param: the Override switch directly above the slider it enables, and
+ *  the Slider's own live readout ("Dim 65%", or "Dim Default (90%)" while off) on the label row.
+ *  The switch row says "Override", not `label` again - the slider's row already prints the field
+ *  name once. While NOT overridden the slider reads back its own `disabled` styling and refuses
+ *  pointer/keyboard input. The outer wrapper is a plain `<div>`, not a `<label>`: a `<label>`
+ *  forwards any click inside it to its first labelable control, so releasing a Slider drag also
+ *  fired the Switch and silently wiped the override. Both carry their own `aria-label`. */
 function OverrideField({ label, value, defaultValue, min, max, step, onToggle, onChange }: {
   label: string; value: number | undefined; defaultValue: number;
   min: number; max: number; step: number;
@@ -47,68 +40,57 @@ function OverrideField({ label, value, defaultValue, min, max, step, onToggle, o
   );
 }
 
-/** Inspector for the selected effect region (spotlight). v1 edits start/end + delete; the
- *  spotlight's look comes from Settings (per-region params are a later addition). Shown in the
- *  left panel in place of the tab content while an effect region is selected. */
+/** Inspector for the selected effect region (spotlight): when it runs, how it looks, how it fades
+ *  in and out. The per-region dim/radius/feather each override the global Settings default. */
 export function EffectInspector({ effect, dur, settings, onApply, onDimCamera, onClose }: {
   effect: EffectRegion; dur: number; settings: Settings; onApply: (op: EditOp) => Promise<EditDoc | null>;
   onDimCamera: (v: boolean) => void; onClose: () => void;
 }) {
-  const sec = (ms: number) => +(ms / 1000).toFixed(2);
   const upd = (patch: { start_ms?: number; end_ms?: number; fade_in_ms?: number; fade_out_ms?: number; mode?: string; dim?: number; radius?: number; feather?: number }) =>
     void onApply({ op: "update_effect", id: effect.id, ...patch });
-
-  const defaultDim = settings.clickfx.spotlight_dim;
-  const defaultRadius = settings.clickfx.spotlight_radius;
-  const defaultFeather = settings.clickfx.spotlight_feather;
+  const span = secOf(effect.end_ms - effect.start_ms);
+  const d = settings.clickfx;
 
   return (
-    <div className="e-panel e-insp">
-      <PanelHeader title="Spotlight" lede="Dims everything but the cursor for this span. Drag the block on the timeline to move it." closeTitle="Deselect" onClose={onClose} />
+    <InspectorShell kind="fx">
+      <PanelHeader title="Spotlight" lede={spanLede(effect.start_ms, effect.end_ms)} closeTitle="Deselect" onClose={onClose} />
 
-      <div className="e-field2">
-        <label className="e-field"><span className="e-fl">Start</span>
-          <NumberField min={0} max={sec(effect.end_ms)} value={sec(effect.start_ms)}
-            onChange={(v) => upd({ start_ms: Math.round(v * 1000) })} /></label>
-        <label className="e-field"><span className="e-fl">End</span>
-          <NumberField min={sec(effect.start_ms)} max={sec(dur)} value={sec(effect.end_ms)}
-            onChange={(v) => upd({ end_ms: Math.round(v * 1000) })} /></label>
-      </div>
+      <Section title="Timing">
+        <TimingRow startMs={effect.start_ms} endMs={effect.end_ms} durMs={dur}
+          onStart={(start_ms) => upd({ start_ms })} onEnd={(end_ms) => upd({ end_ms })} />
+        <Hint>Dims everything but the cursor for this span. Drag the block on the timeline to move it.</Hint>
+      </Section>
 
-      <div className="e-field2">
-        <label className="e-field"><span className="e-fl">Fade in</span>
-          <NumberField step={0.05} min={0} max={sec(effect.end_ms - effect.start_ms)} value={sec(effect.fade_in_ms)}
-            onChange={(v) => upd({ fade_in_ms: Math.round(v * 1000) })} /></label>
-        <label className="e-field"><span className="e-fl">Fade out</span>
-          <NumberField step={0.05} min={0} max={sec(effect.end_ms - effect.start_ms)} value={sec(effect.fade_out_ms)}
-            onChange={(v) => upd({ fade_out_ms: Math.round(v * 1000) })} /></label>
-      </div>
-
-      <label className="e-field">
-        <span className="e-fl">Spotlight Mode</span>
-        <Picker value={effect.mode || "global"} options={MODE_OPTIONS} onChange={(v) => upd({ mode: v })} ariaLabel="Spotlight Mode" />
-      </label>
-
-      <OverrideField label="Dim" value={effect.dim} defaultValue={defaultDim} min={0.2} max={0.9} step={0.05}
-        onToggle={(on) => upd({ dim: on ? defaultDim : -1 })} onChange={(v) => upd({ dim: v })} />
-
-      <OverrideField label="Radius" value={effect.radius} defaultValue={defaultRadius} min={0.05} max={0.30} step={0.01}
-        onToggle={(on) => upd({ radius: on ? defaultRadius : -1 })} onChange={(v) => upd({ radius: v })} />
-
-      <OverrideField label="Feather" value={effect.feather} defaultValue={defaultFeather} min={0.02} max={0.25} step={0.01}
-        onToggle={(on) => upd({ feather: on ? defaultFeather : -1 })} onChange={(v) => upd({ feather: v })} />
-
-      <div className="e-field" style={{ marginTop: 4 }}>
+      <Section title="Look">
+        <label className="e-field">
+          <span className="e-fl">Spotlight Mode</span>
+          <Picker value={effect.mode || "global"} options={MODE_OPTIONS} onChange={(mode) => upd({ mode })} ariaLabel="Spotlight Mode" />
+        </label>
+        <OverrideField label="Dim" value={effect.dim} defaultValue={d.spotlight_dim} min={0.2} max={0.9} step={0.05}
+          onToggle={(on) => upd({ dim: on ? d.spotlight_dim : -1 })} onChange={(dim) => upd({ dim })} />
+        <OverrideField label="Radius" value={effect.radius} defaultValue={d.spotlight_radius} min={0.05} max={0.30} step={0.01}
+          onToggle={(on) => upd({ radius: on ? d.spotlight_radius : -1 })} onChange={(radius) => upd({ radius })} />
+        <OverrideField label="Feather" value={effect.feather} defaultValue={d.spotlight_feather} min={0.02} max={0.25} step={0.01}
+          onToggle={(on) => upd({ feather: on ? d.spotlight_feather : -1 })} onChange={(feather) => upd({ feather })} />
         <div className="e-switchrow">
           <span>Dim webcam</span>
-          <Switch on={settings.clickfx.spotlight_dim_camera} onChange={onDimCamera} />
+          <Switch on={d.spotlight_dim_camera} onChange={onDimCamera} ariaLabel="Dim webcam" />
         </div>
-        <span className="e-lede" style={{ marginTop: 4 }}>Off keeps the webcam PiP lit while the spotlight dims everything else. Applies to all spotlights.</span>
-      </div>
+        <Hint>Off keeps the webcam PiP lit while the spotlight dims everything else. Applies to all spotlights.</Hint>
+      </Section>
 
-      <button className="e-del" onClick={() => { void onApply({ op: "remove_effect", id: effect.id }); onClose(); }}>
-        <IconTrash size={15} />Delete spotlight
-      </button>
-    </div>
+      <Section title="Fades">
+        <div className="e-field2">
+          <label className="e-field"><span className="e-fl">Fade in</span>
+            <NumberField step={0.05} min={0} max={span} value={secOf(effect.fade_in_ms)}
+              onChange={(v) => upd({ fade_in_ms: Math.round(v * 1000) })} /></label>
+          <label className="e-field"><span className="e-fl">Fade out</span>
+            <NumberField step={0.05} min={0} max={span} value={secOf(effect.fade_out_ms)}
+              onChange={(v) => upd({ fade_out_ms: Math.round(v * 1000) })} /></label>
+        </div>
+      </Section>
+
+      <RemoveButton label="Delete spotlight" onClick={() => { void onApply({ op: "remove_effect", id: effect.id }); onClose(); }} />
+    </InspectorShell>
   );
 }

@@ -1,0 +1,118 @@
+/* The six inspectors' own surface. Imported by shell/PropertiesSlot.tsx, which is the only thing
+   that mounts them, so these rules load with the editor but stay out of editor.css's shared
+   vocabulary. Anything here is inspector-only: `.e-aimbtn`, `.e-del` and the old `.e-sec-hint`
+   moved out of editor.css wholesale (no other caller), while shared classes the inspectors also
+   use (.e-field, .e-seg, .e-ghostbtn, .e-chip, .e-switchrow) stay defined there and are only
+   re-skinned here under a `.e-insp` ancestor, so the panels keep theirs untouched.
+
+   One shape, top to bottom: PanelHeader (what it is) -> Timing (when it is) -> the kind's own
+   sections (how it looks) -> the transition curve (how it moves) -> a quiet Remove. Three planes
+   (--e-surface panel < --e-raised control < one lightness step for "selected"), no bordered boxes,
+   one accent per inspector (--insp-accent, the clip kind's own lane color) used only for
+   interactive and selected state. */
+
+/* The lane accent each inspector borrows, so the panel and the pill it is editing agree. */
+.e-insp-zoom { --insp-accent: var(--e-zoom); }
+.e-insp-fx { --insp-accent: var(--e-fx); }
+.e-insp-layout { --insp-accent: var(--e-layout); }
+.e-insp-cam { --insp-accent: var(--e-cam); }
+.e-insp-speed { --insp-accent: var(--e-speed); }
+.e-insp-cut { --insp-accent: var(--e-mut); }
+
+/* Section: 20px rhythm, an 11px --e-dim title and an optional right-aligned tabular readout on the
+   same row (the panel's one place for a derived value: the matched preset, the time a cut removes,
+   whether the composition is custom). */
+.e-isec { margin-top: var(--e-sp-4); }
+.e-phead + .e-isec { margin-top: 0; }
+.e-isec-head { display: flex; align-items: baseline; justify-content: space-between;
+  gap: var(--e-sp-1); margin-bottom: 10px; }
+.e-isec-head h3 { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--e-dim); white-space: nowrap; }
+.e-isec-val { min-width: 0; font-size: 11px; font-weight: 560; color: var(--e-mut);
+  font-variant-numeric: tabular-nums; text-align: right;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.e-isec > .e-field:last-child, .e-isec > .e-field2:last-child { margin-bottom: 0; }
+/* One-line caption under a section's controls - hint rung, never bold, never a boxed callout. */
+.e-ihint { margin: var(--e-sp-1) 0 0; font-size: var(--e-text-hint-size);
+  font-weight: var(--e-text-hint-weight); line-height: var(--e-text-hint-lh); color: var(--e-dim); }
+
+/* Empty state: one quiet sentence, centred in the column. The right sidebar sits in this state
+   most of the time, so it has to read as a calm label, not a missing panel. */
+.e-insp-empty { margin: auto; padding: 0 20px; max-width: 26ch; text-align: center;
+  font-size: var(--e-text-hint-size); font-weight: var(--e-text-hint-weight);
+  line-height: var(--e-text-hint-lh); color: var(--e-dim); }
+
+/* Segmented choice row: one raised plane per option rather than buttons inside a box. The active
+   plane is one lightness step up and carries the accent tick, which is a single Motion element
+   shared by the row (`layoutId`), so picking another option glides it there. */
+.e-preseg { display: flex; flex-wrap: wrap; gap: 5px; }
+.e-preseg-b { position: relative; flex: 1 1 auto; min-width: 0; box-sizing: border-box;
+  padding: 8px 10px 11px; border: none; border-radius: var(--e-r-sm);
+  background: var(--e-raised); color: var(--e-mut); box-shadow: var(--e-inset-hi); cursor: pointer;
+  font-size: var(--e-text-body-size); font-weight: var(--e-text-body-weight);
+  transition: background-color .14s ease, color .14s ease; }
+.e-preseg-b:hover:not(:disabled) { color: var(--e-fg); background: color-mix(in srgb, #fff 2.5%, var(--e-raised)); }
+.e-preseg-b.on { color: var(--e-fg); background: color-mix(in srgb, #fff 5%, var(--e-raised)); }
+.e-preseg-b:disabled { opacity: .4; cursor: default; }
+.e-preseg-t { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.e-preseg-tick { position: absolute; left: 30%; right: 30%; bottom: 5px; height: 2px;
+  border-radius: 2px; background: var(--insp-accent, var(--e-fg)); }
+
+/* Layout presets: the same planes, each holding a literal mini-canvas of that preset's own
+   resolved panels (LayoutThumb, the schematic the timeline pill draws) instead of a word alone. */
+.e-preseg.thumbs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.e-preseg.thumbs .e-preseg-b { display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 10px 6px 13px; }
+.e-preseg-thumb { display: block; flex: none; }
+
+/* Aim on stage: a plane, not an outlined button; `on` tints it with the inspector's accent. */
+.e-aimbtn { margin-top: var(--e-sp-1); min-height: 38px; padding: 10px 12px; width: 100%; box-sizing: border-box;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  border: none; border-radius: var(--e-r-sm); background: var(--e-raised); color: var(--e-mut);
+  font-size: var(--e-text-body-size); font-weight: var(--e-text-body-weight);
+  box-shadow: var(--e-inset-hi); cursor: pointer;
+  transition: background-color .14s ease, color .14s ease; }
+.e-aimbtn:hover:not(:disabled) { color: var(--e-fg); background: color-mix(in srgb, #fff 3%, var(--e-raised)); }
+.e-aimbtn.on { color: var(--e-fg); background: color-mix(in srgb, var(--insp-accent) 20%, var(--e-raised)); }
+.e-aimbtn:disabled { opacity: .45; cursor: not-allowed; }
+
+/* The two shared raised buttons an inspector still uses, restated as planes so no stroked box
+   survives inside the column. Scoped to .e-insp: the panels keep editor.css's outlined version. */
+.e-insp .e-ghostbtn { padding: 10px; border: none; border-radius: var(--e-r-sm);
+  background: var(--e-raised); box-shadow: var(--e-inset-hi); }
+.e-insp .e-ghostbtn:hover { color: var(--e-fg); transform: none;
+  background: color-mix(in srgb, #fff 3%, var(--e-raised)); box-shadow: var(--e-inset-hi); }
+.e-insp .e-chip { border: none; background: var(--e-raised); box-shadow: var(--e-inset-hi); }
+.e-insp .e-chip:hover { background: color-mix(in srgb, #fff 3%, var(--e-raised)); }
+.e-insp-reset { margin-top: 10px; }
+
+/* Remove, last: a ghost that only reddens on hover. A filled red slab would be the loudest thing
+   in a panel whose whole job is quiet chrome. */
+.e-del { margin-top: var(--e-sp-4); width: 100%; box-sizing: border-box; min-height: 40px; padding: 11px 12px;
+  border: none; border-radius: var(--e-r-sm); background: transparent; color: var(--e-dim);
+  font-size: var(--e-text-body-size); font-weight: var(--e-text-body-weight);
+  display: flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer;
+  transition: background-color .14s ease, color .14s ease; }
+.e-del svg { flex: none; opacity: .85; }
+.e-del:hover { background: rgba(239, 68, 68, .10); color: #f87171; }
+
+/* Transition curve: the named-curve row above ONE canvas. The canvas is a plane one step lighter
+   with no border; `preserveAspectRatio="none"` stretches the 100x160 curve box across the panel,
+   so every stroke is non-scaling (uniform px width) and the two handles are HTML dots laid over
+   it rather than circles inside it, which the stretch would squash into ellipses. */
+.e-curve-row { margin-bottom: 0; }
+.e-curve-box { position: relative; margin-top: var(--e-sp-1); height: 96px;
+  border-radius: var(--e-r); background: var(--e-raised); box-shadow: var(--e-inset-hi);
+  touch-action: none; }
+.e-curve-svg { display: block; width: 100%; height: 100%; }
+.e-curve-grid { stroke: var(--e-divider); stroke-dasharray: 3 3; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.e-curve-arm { stroke: var(--e-line-strong); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.e-curve-path { fill: none; stroke: var(--e-fg); stroke-width: 2; stroke-linecap: round;
+  vector-effect: non-scaling-stroke; }
+.e-curve-h { position: absolute; width: 8px; height: 8px; margin: -4px 0 0 -4px; padding: 0;
+  border: none; border-radius: 50%; background: var(--insp-accent, var(--e-fg)); cursor: grab;
+  box-shadow: 0 0 0 3px var(--e-raised); transition: box-shadow .14s ease; }
+.e-curve-h:hover, .e-curve-h.grab { box-shadow: 0 0 0 3px var(--e-raised),
+  0 0 0 5px color-mix(in srgb, var(--insp-accent, var(--e-fg)) 40%, transparent); }
+.e-curve-h.grab { cursor: grabbing; }
+.e-curve-box + .e-field2 { margin-top: var(--e-sp-2); }

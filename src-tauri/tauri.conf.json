@@ -43,7 +43,7 @@
     "shortDescription": "Auto-zoom screen recorder",
     "longDescription": "TCursor turns raw screen captures into polished, intentional-looking demos — automatic cursor-follow zooms, a built-in editor, and an AI director.",
     "licenseFile": "installer/eula.rtf",
-    "resources": ["resources/ffmpeg.exe", "resources/ffprobe.exe"],
+    "resources": ["resources/ffmpeg.exe", "resources/ffprobe.exe", "assets/cursorpacks", "assets/cursors"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

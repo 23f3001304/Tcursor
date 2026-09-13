@@ -18,10 +18,10 @@ Fixed horizontal size of the HUD bar window while idle; only its height varies, 
 ## RECORDING_WIDTH
 
 ```ts
-export const RECORDING_WIDTH: number  // 538
+export const RECORDING_WIDTH: number  // 579
 ```
 
-Horizontal size of the bar window while recording (D5, user-reported 2026-09-02: the idle 980px window used to be kept for the recording pill too, ballooning the invisible always-on-top hit-blocking slack around a much narrower actual content width). Computed, not eyeballed: a sum of named constants each traceable to a real `hud.css` value (`.row`'s padding/gap, `.grip`, `.camtoggle`, `.recmeter`'s fixed-width `.wave`, `.timer`'s `min-width`, `.paused-chip`) plus a couple of measured (not CSS-exact) text-width terms for variable labels (the paused chip's "PAUSED", the Pause/Resume button, the Stop button) and a small safety margin covering that imprecision. Sized for the row's WIDEST state - paused, with the "Resume" label rather than "Pause" - so a pause/resume toggle mid-recording never triggers a second resize. Recomputed for gate-feedback item 2 (2026-09-02) when `.recmeter`'s `.wave` shrank from 80px to 63px (the compact-meter redesign) - was 555, now 538.
+Horizontal size of the bar window while recording (D5, user-reported 2026-09-02: the idle 980px window used to be kept for the recording pill too, ballooning the invisible always-on-top hit-blocking slack around a much narrower actual content width). Computed, not eyeballed: a sum of named constants each traceable to a real `hud.css` value (`.row`'s padding/gap, `.grip`, `.camtoggle`, `.timer`'s `min-width`, `.paused-chip`) or to the component that owns it (`RECMETER_W` takes `RecMeter.tsx`'s exported `METER_W` **by import**, not by a copied number, so the window and the meter can never disagree about the meter's width), plus a couple of measured (not CSS-exact) text-width terms for variable labels (the paused chip's "PAUSED", the Pause/Resume button, the Stop button) and a small safety margin covering that imprecision. Sized for the row's WIDEST state - paused, with the "Resume" label rather than "Pause" - so a pause/resume toggle mid-recording never triggers a second resize. It has moved with the meter twice: 555 when the meter was an 80px bar strip, 538 at 63px, and 579 now that the wave meter's `METER_W` is 104px.
 
 ### Used by
 

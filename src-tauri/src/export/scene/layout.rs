@@ -172,3 +172,6 @@ pub fn anchor_regions(raw: Vec<ZoomRegion>, track: &LayoutTrack, sw: u32, sh: u3
 #[cfg(test)]
 #[path = "layout_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "layout_fit_tests.rs"]
+mod fit_tests;

@@ -15,6 +15,8 @@ pub trait Compositor: Send + Sync {
         scene: &Scene,
         out: &mut Vec<u8>,
     );
+
+    fn set_bg_dynamic(&self, _dynamic: bool) {}
 }
 ```
 
@@ -35,9 +37,17 @@ Common interface for software and hardware compositors.
 
 Nothing (`()`). The impl resizes `out` to `out_w * out_h * 4` bytes and fully overwrites it with BGRA pixels.
 
+### set_bg_dynamic
+
+Tells the compositor whether `bg` now CHANGES every frame - that is, whether the background is a video/GIF asset (`export::scene::background::video_source` is the single answer to that question). Asserted by `FrameRenderer::new` and re-asserted by `reload_edit`, since an edit can flip a still background into a moving one and back.
+
+*Why it exists:* `GpuCompositor` caches `bg` in a texture and re-uploads only when a sampled content key changes (`gpu_compositor_tex::bg_key`, ~4096 strided pixels). A video frame that moves only a small region can hash equal to its predecessor, which would freeze the background on a stale upload. With this set, that path uploads unconditionally and skips computing the key at all.
+
+*Why a defaulted no-op rather than a required method:* `CpuCompositor` copies `bg` into its base buffer every frame regardless, so it has nothing to do - and a default keeps every existing implementation and test call site untouched.
+
 ### Used by
 
-- `src-tauri/src/export/render/mod.rs` - `FrameRenderer::composite_at` calls `self.compositor.composite_into(...)` once per output frame.
+- `src-tauri/src/export/render/mod.rs` - `FrameRenderer::composite_at` calls `self.compositor.composite_into(...)` once per output frame; `new` and `render/bg.rs`'s `reload_edit` call `set_bg_dynamic`.
 - `src-tauri/src/export/gpu/gpu_compositor.rs` - `GpuCompositor` implements this trait.
 
 ## CpuCompositor

@@ -14,7 +14,7 @@ const zoom = (over: Partial<Zoom> = {}): Zoom => ({
 });
 const settings = (over: Partial<ZoomSettings> = {}): ZoomSettings => ({
   enabled: true, target_scale: TS, hold_ms: 2200, smoothness: 0.1, clicks: 1,
-  camera_shrink: true, camera_shrink_min: 0.62, smart_hold: true, smart_follow: false, ...over,
+  camera_shrink: true, camera_shrink_min: 0.62, smart_hold: true, smart_follow: false, camera_smoothing_ms: 0, ...over,
 });
 
 describe("zoomProgress", () => {

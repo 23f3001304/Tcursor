@@ -23,6 +23,16 @@ pub(super) fn bg_key(bg: &[u8]) -> u64 {
     h
 }
 
+/// Does this frame's background need uploading to the GPU?
+///
+/// A STATIC background uploads only when its content key moved - that is the whole point of
+/// `bg_key`, and it saves an ~8 MB texture write on every frame of a normal export. A DYNAMIC one
+/// (a video/GIF asset, `background::video_source`) uploads unconditionally, because the key is a
+/// ~4096-pixel SAMPLE: a video frame that moves only a small region can hash equal to the frame
+/// before it, and the difference between "probably changed" and "changed" is a background frozen
+/// on screen. The caller skips computing the key at all in that case, so this is also cheaper.
+pub(super) fn should_upload(key_changed: bool, dynamic: bool) -> bool { key_changed || dynamic }
+
 /// Build the screen/webcam/bg textures, the uniform buffer, and the bind group for one
 /// `(sw, sh, ww, wh)` size combination. Called only when `composite_into` detects a
 /// size change (or on the first frame) - `bg_key` always starts `None` so the
@@ -60,7 +70,17 @@ pub(super) fn build_resources(
 
 #[cfg(test)]
 mod tests {
-    use super::bg_key;
+    use super::{bg_key, should_upload};
+
+    /// The upload rule itself. A video background must re-upload even when the sampled key
+    /// repeats; a static one must still upload only on a real change.
+    #[test]
+    fn a_dynamic_background_always_uploads_a_static_one_only_on_change() {
+        assert!(should_upload(false, true));
+        assert!(should_upload(true, true));
+        assert!(should_upload(true, false));
+        assert!(!should_upload(false, false));
+    }
 
     /// The key must move when the background's PIXELS move (an edit rebuilds `bg` at the same
     /// dimensions, so length alone can never tell) and must be stable for an identical buffer.

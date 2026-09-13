@@ -56,18 +56,72 @@ export const listOllamaModels = () => invoke<string[]>("list_ollama_models");
  *  URL (cropped + dark-inverted like the export), the hotspot (0..1 of the cropped sprite), and
  *  the original canvas height for uniform scaling. */
 export interface CursorSpriteDto { kind: string; url: string; hot: [number, number]; canvas_h: number }
-export const cursorSprites = (folder: string) => invoke<CursorSpriteDto[]>("cursor_sprites", { folder });
+/** How a pack animates its busy cursor (pack format v2), mirroring Rust `BusySpec`. `frames` is
+ *  how many explicit `busy_NN.png` files the pack ships - `0` means `anim` synthesises the
+ *  animation from the single `busy.png` instead. */
+export interface BusySpecDto { anim: "spin" | "flip" | "pulse"; fps: number; frames: number }
+/** The recording's selected cursor pack, ready to draw: one sprite per kind, the pack's explicit
+ *  busy frames (empty unless it ships them), and its declared busy animation (null for the
+ *  embedded set and any v1 pack). `busy` + `busy_frames` are what let the preview run the same
+ *  `busyPose` the export does. */
+export interface CursorPackDto {
+  sprites: CursorSpriteDto[]; busy_frames: CursorSpriteDto[]; busy: BusySpecDto | null;
+}
+export const cursorSprites = (folder: string) => invoke<CursorPackDto>("cursor_sprites", { folder });
 /** One cursor-shape change at output time `t` (ms); `kind` is the lowercase cursor-type name. */
 export interface CursorKindSample { t: number; kind: string }
 export const cursorKinds = (folder: string) => invoke<CursorKindSample[]>("cursor_kinds", { folder });
+/** One captured OS cursor bitmap: its layer id, pixel size, hotspot in pixels, and the recorded
+ *  PNG as a data URL. This is the real cursor that was on screen, not a sprite-pack stand-in. */
+export interface CapturedCursorDto { id: number; w: number; h: number; hx: number; hy: number; url: string }
+/** The recording's captured OS-cursor layer: the bitmaps plus `[t, id]` samples (output ms)
+ *  saying which was showing, and the recorded video's own pixel size. The bitmaps are in SOURCE
+ *  pixels, so `src_w` is what scales them relative to the screen content (`contentScale`); it is
+ *  `0` only when the backend could not probe the video. `null` for a pre-layer recording. */
+export interface CursorLayerDto {
+  cursors: CapturedCursorDto[]; track: [number, number][]; src_w: number; src_h: number;
+}
+export const cursorLayer = (folder: string) => invoke<CursorLayerDto | null>("cursor_layer", { folder });
 /** One selectable cursor pack: `id` persists into `CursorSettings.pack`, `name` is shown in the
- *  picker, `builtin` marks the embedded set (not stored on disk, always first in the list). */
-export interface CursorPackInfo { id: string; name: string; builtin: boolean }
+ *  picker, `builtin` marks a pack the user cannot delete (the embedded set, always first, or one
+ *  bundled with the app). `dir` is the pack's folder, so the grid loads each tile's sprite through
+ *  the asset protocol rather than the backend base64ing every pack's nine PNGs into one reply.
+ *  `files` maps each kind wire name to its filename inside `dir`, already alias-resolved (the
+ *  embedded pack spells its arrow `pointer.png`) and already carrying the busy-is-arrow
+ *  substitution, so the grid never has to know either rule; a kind the pack does not ship is
+ *  absent. `busy` is the pack's busy animation, so a hovered tile previews it with the same
+ *  `busyPose` the export runs. */
+export interface CursorPackInfo {
+  id: string; name: string; builtin: boolean; dir: string;
+  files: Record<string, string>; busy: BusySpecDto | null;
+}
 /** Built-in pack first, then every imported pack under the app's cursors folder. */
 export const listCursorPacks = () => invoke<CursorPackInfo[]>("list_cursor_packs");
 /** Import a folder (arrow.png/ibeam.png/.../hotspots.json) as a new cursor pack; rejects if it
  *  has no recognized cursor PNGs. Returns the new pack so the caller can select it immediately. */
 export const importCursorPack = (path: string) => invoke<CursorPackInfo>("import_cursor_pack", { path });
+
+/** An imported background file (`settings::bg_asset::BackgroundAssetInfo`). `rel_path` is always
+ *  relative to the project folder and forward-slashed (`background/<file>`) - what
+ *  `settings.background.asset` stores, and the reason a project stays portable. `duration_ms` is
+ *  null for a still; a video's is what the preview loops on. */
+export interface BackgroundAssetInfo { rel_path: string; kind: "image" | "video"; width: number; height: number; duration_ms: number | null }
+/** Copy the user's chosen image/video into `<project>/background/` (keeping its name, deduped),
+ *  thumbnail it, and describe it. Rejects anything that is not png/jpg/jpeg/webp/gif/mp4/webm/mov. */
+export const importBackgroundAsset = (projectDir: string, srcPath: string) =>
+  invoke<BackgroundAssetInfo>("import_background_asset", { projectDir, srcPath });
+/** What the panel shows for the asset already named in `edit.json`; `null` when the file is gone
+ *  (project moved without its `background/` folder, file deleted outside the app). */
+export const backgroundAssetInfo = (projectDir: string, relPath: string) =>
+  invoke<BackgroundAssetInfo | null>("background_asset_info", { projectDir, relPath });
+
+/** Remove silences: the recording's quiet stretches (mic AND system when both exist) as clip-time
+ *  spans, padded and clamped into the trim, for one `add_cuts` (one undo step). */
+export const detectSilences = (folder: string) => invoke<[number, number][]>("detect_silences", { folder });
+/** Delete an imported background and its thumbnail. Does NOT touch `edit.json`: the caller clears
+ *  `background.asset` in its own save, which is the only writer of the doc. */
+export const removeBackgroundAsset = (projectDir: string, relPath: string) =>
+  invoke<void>("remove_background_asset", { projectDir, relPath });
 /** Filmstrip thumbnail file paths (wrap each with `fileSrc`); one cached ffmpeg pass. */
 export const ensureThumbs = (folder: string, count: number) => invoke<string[]>("ensure_thumbs", { folder, count });
 /** A cached waveform PNG path for the system or mic track ("" if that source wasn't recorded). */

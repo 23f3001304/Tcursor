@@ -18,7 +18,7 @@ Edits the `zoom` group of `Settings`.
 
 ### Props
 
-- `value: ZoomSettings` - current zoom settings (all nine fields). *Why:* controlled component; the parent (Preferences) owns and persists state.
+- `value: ZoomSettings` - current zoom settings (all ten fields). *Why:* controlled component; the parent (Preferences) owns and persists state.
 - `onChange: (v: ZoomSettings) => void` - receives a fully replaced `ZoomSettings`. *Why:* immutable replacement keeps the parent's persistence path uniform; no partial-update logic is needed in the parent.
 
 ### Behavior
@@ -48,6 +48,7 @@ Renders `<section className="sec">` with heading "Auto-zoom". Holds one piece of
 
    - **Amount** (Range 1.2-4, step 0.1) - writes `value.target_scale`, formatted as `"2.2x"`. *Why 1.2 minimum:* below 1.2 the zoom is visually imperceptible.
    - **Smoothness** (Range 0.04-0.30, step 0.01) - writes `value.smoothness`, formatted as raw decimal. Lower values produce faster, snappier zoom motion; higher values produce slow easing. *Why inverted intuition:* the value is used as a spring coefficient internally, so smaller = faster.
+   - **Camera smoothing** (Range 0-400 ms, step 10) - writes `value.camera_smoothing_ms`, formatted as `"Off"` at 0 or `"{v} ms"` otherwise. Followed by an `.sf-hint` note: "Smooths the auto-zoom camera's path. Higher is calmer but lags the cursor - 120 ms is a good start." *Why immediately after Smoothness:* both controls tune the camera's motion, but this one drives an independent critically-damped post-pass (`ZoomConfig::smoothing_ms`, `export/camera/smoothing.md`) rather than the follow-damping spring `smoothness` (above) controls - keeping them adjacent avoids the two being mistaken for the same knob. Not to be confused with `CursorSettings.smoothness` (the unrelated cursor low-pass, edited on the Cursor tab).
    - **Hold / Idle release** (Range 600-5000 ms, step 100) - writes `value.hold_ms`, formatted as seconds (e.g., `"2.2 s"`). The label changes to "Idle release" when `value.smart_hold` is true, because in smart mode the hold extends dynamically and this value sets the idle threshold instead of a fixed duration.
    - **Shrink camera on zoom** (Switch) - writes `value.camera_shrink`. *Why:* when zoomed in, the webcam overlay may cover content; shrinking it keeps the screen panel visible.
    - **Min camera size** (Range 0.3-1.0, step 0.02) - visible only when `value.camera_shrink` is true. Writes `value.camera_shrink_min`, displayed as a percentage. *Why conditional:* the slider is meaningless when camera_shrink is off.

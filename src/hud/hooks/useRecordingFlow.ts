@@ -30,7 +30,7 @@ export function settleStop(
 ): StopOutcome {
   if (screen.status === "rejected") return { err: `Recording failed: ${screen.reason}` };
   const camWarn = cam.status === "rejected"
-    ? "Webcam track didn't finish — video saved without the camera overlay."
+    ? "Webcam track didn't finish. Video saved without the camera overlay."
     : undefined;
   return { folder: screen.value.folder, camWarn };
 }

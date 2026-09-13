@@ -14,14 +14,20 @@ look is now a real CSS class instead of scattered inline `style={{...}}` objects
 export type SwatchVariant = "preset" | "accent" | "small"
 ```
 
-Which existing look to render, unchanged pixel-for-pixel from before this component existed:
-- `"preset"` - `.e-preset-grid`/`.e-preset-circle` (BackgroundPanel's color/gradient grids - a
-  6-column grid, box-shadow selection ring).
-- `"accent"` - `.e-accent-list`/`.e-accent-circle` (BackgroundPanel's accent row - a flex row of
-  fixed 24px circles, same box-shadow ring).
+Which look to render:
+- `"preset"` - `.e-preset-grid`/`.e-preset-circle` (BackgroundPanel's color grid). Since the panel
+  pass the grid is `repeat(auto-fill, minmax(34px, 1fr))` rather than a fixed 6 columns, so it
+  fills the panel's width instead of leaving dead space on the right at other panel widths.
+- `"accent"` - `.e-accent-list`/`.e-accent-circle` (BackgroundPanel's accent row - a wrapping flex
+  row of 24px circles).
 - `"small"` (default) - `.e-swatch-row`/`.e-swatch-sm` (EffectsPanel's ripple-color/tint,
-  CameraRingField's ring-color - a flex row of 22px circles, border-based selection: 2px `--e-fg`
-  when selected vs 1px `--e-border` otherwise).
+  CameraRingField's ring-color - a wrapping flex row of 24px circles).
+
+**One selection language across all three (panel pass).** A neutral `--e-fg` ring with an `--e-surface`
+gap, replacing the old split between a box-shadow ring on two variants and a 2px border on the third.
+Neutral, deliberately, and the one exception to the panels' "the accent marks selected state" rule:
+these buttons ARE colours, so an accent ring would fight the content it is marking. The borders are
+gone; a swatch is a plane with a shadow, and the selected one is ringed.
 
 ## SwatchItem
 

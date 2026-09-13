@@ -1,5 +1,7 @@
 # src-tauri/src/export/render/fromedit.rs
 
+Since the time remap the doc this reads has already been through `edit::remap_doc` (in `render_edit::EditState::load`): trim, cuts and speed are consumed and every span below is on the output clock.
+
 Inverse of `edit::seed`: reconstructs the exporter's raw `ZoomRegion` list and `SetLayout` action track from a persisted `EditDoc`, so the exporter renders the user's saved plan instead of regenerating it from click events. Trim, cuts, and speed changes are intentionally not applied here. The round-trip proof test `regions_round_trip_through_edit_doc` demonstrates lossless `seed <-> export` conversion.
 
 ## regions_from_doc
@@ -30,8 +32,37 @@ Pure inverse of `seed::zooms_from_regions`. Rebuilds one `ZoomRegion` per `Zoom`
 - `regions_round_trip_through_edit_doc` - regions -> `seed::zooms_from_regions` -> `EditDoc` -> `regions_from_doc` returns field-identical regions. This is the proof of losslessness.
 - `empty_zooms_make_no_regions` - default `EditDoc` produces an empty vec.
 - `cursor_target_defaults_to_screen_center` - `ZoomTarget::Cursor` anchor becomes `(sw/2, sh/2)` (and `follow_cursor` becomes `true`, which is what makes that value inert).
-- `easing_unknown_or_spring_falls_back_to_config` - "spring" and unknown easing strings fall back to the config's easing; "smooth", "linear", "ease_in", "ease_out", and "ease_in_out" are reconstructed exactly.
-- A `cubic(x1,y1,x2,y2)` string is also reconstructed exactly, into `Easing::Cubic` (via `export::cubic::parse_cubic`) - it is the fallback arm's FIRST try, so only a genuinely unparseable name reaches `cfg_easing`. That is what makes a custom curve survive the doc round trip where `Spring` cannot: the string carries the whole shape.
+- See `easing_from` below for how the `easing` field is reconstructed, including the "spring" fix.
+
+## easing_from
+
+```rust
+pub fn easing_from(name: &str, cfg_easing: Easing) -> Easing
+```
+
+Maps an easing wire-name (from a `Zoom.easing` or `LayoutSeg.easing`/`easing_out` string) back to `Easing`. Named curves map directly; the two PARAMETERISED forms - `spring(stiffness,damping[,mass])` and `cubic(x1,y1,x2,y2)` - reconstruct their whole shape via `export::spring::parse_spring` / `export::cubic::parse_cubic`; anything else falls back to `cfg_easing`.
+
+### Inputs
+
+- `name: &str` - the wire-name easing string.
+- `cfg_easing: Easing` - the fallback for a name this function cannot reconstruct. Every caller today passes `Easing::Smooth` (a seeded doc's config, or `LayoutTrack::from_segs`'s literal `Easing::Smooth`).
+
+### Returns
+
+`Easing` - the reconstructed curve, or `cfg_easing` when `name` is neither a known curve nor a parseable spring or cubic.
+
+### Implementation
+
+1. `"smooth"` / `"linear"` / `"spring"` / `"ease_in"` / `"ease_out"` / `"ease_in_out"` map directly to their `Easing` variant. The bare `"spring"` carries no parameters, so it maps to `SPRING_DEFAULT` (`export/types.md`).
+2. Anything else tries `export::spring::parse_spring` FIRST, then `export::cubic::parse_cubic`; a match reconstructs `Easing::Spring` / `Easing::Cubic` exactly, mass defaulting to 1. *Why spring first:* the two prefixes are disjoint, so the order is only about cost, and a failed `parse_spring` is a cheap prefix miss.
+3. Otherwise returns `cfg_easing`.
+
+### Behaviors worth knowing
+
+- **Preview/export divergence bug (fixed):** `"spring"` used to have no arm, fall into the `_` branch, fail `parse_cubic`, and silently return `cfg_easing` (`Easing::Smooth` in practice) - so the "Punchy" zoom preset or the CurveEditor's Spring card overshot in the live preview but rendered as a plain Smooth ease in the export. `spring_maps_to_a_real_spring_variant` pins the mapping, including that `spring(300,10)` and `spring(300,10,2)` reconstruct exactly and `spring(300)` (wrong arity) falls back.
+- The spring tests live in the sibling `fromedit_spring_tests.rs` (split out so both files stay under the size limit): `spring_ease_matches_the_ts_mirror_and_overshoots` pins numeric parity with `src/lib/spring.test.ts` through `camera::ease` AND that overshoot tracks the damping ratio; `spring_layout_transition_overshoots_the_destination_scene` proves it end-to-end through `LayoutTrack::from_segs`, and that `spring(300,10)` (zeta 0.289) extrapolates further past the destination scene than `spring(170,26)` (zeta 0.997), which barely passes it.
+- `easing_unknown_falls_back_to_config` - an unrecognized string falls back to `cfg_easing`; "smooth"/"linear" reconstruct exactly.
+- A `cubic(x1,y1,x2,y2)` string is also reconstructed exactly, into `Easing::Cubic` - it is the fallback arm's FIRST try, so only a genuinely unparseable name reaches `cfg_easing`. That is what makes a custom curve survive the doc round trip: the string carries the whole shape - and since `spring(...)` landed, so does a spring's stiffness/damping/mass.
 
 ## layout_segs_from_doc
 

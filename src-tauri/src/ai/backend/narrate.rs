@@ -37,7 +37,7 @@ fn zoom_label(at_ms: u32, scale: f32, log: &EventLog, shift: i64) -> String {
         // with what the transcript itself showed the model.
         Some(e) => {
             let p = to_frame(&log.screen, e.x, e.y);
-            format!("Zoomed into the {} — you clicked there · {}", region(p.x, p.y, log.screen.w, log.screen.h), mmss(at_ms))
+            format!("Zoomed into the {}, you clicked there · {}", region(p.x, p.y, log.screen.w, log.screen.h), mmss(at_ms))
         }
         None => format!("Zoomed in at {} · {:.1}×", mmss(at_ms), scale),
     }

@@ -11,11 +11,14 @@ export function Field({ label, hint, children }: { label: string; hint?: string;
   );
 }
 
-/** iOS-style on/off switch. */
+/** iOS-style on/off switch. `hsw` (not `sw`): the editor's `Switch` owns `.sw` in
+ *  `editor/controls/controls.css` and both sheets ship in the one bundle, so a shared name let the
+ *  editor's rule (painted with editor-only tokens the HUD never defines) win here and the track
+ *  lost its colour in both states. */
 export function Switch({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
   return (
-    <button type="button" className={`sw ${on ? "on" : ""}`} role="switch" aria-checked={on} onClick={() => onChange(!on)}>
-      <span className="sw-knob" />
+    <button type="button" className={`hsw ${on ? "on" : ""}`} role="switch" aria-checked={on} onClick={() => onChange(!on)}>
+      <span className="hsw-knob" />
     </button>
   );
 }

@@ -40,7 +40,7 @@ export function Switch({
 })
 ```
 
-An iOS-style boolean toggle rendered as `<button role="switch" aria-checked={on}>` with a `.sw-knob` thumb inside. Applies `.on` to the button when `on` is true.
+An iOS-style boolean toggle rendered as `<button role="switch" aria-checked={on}>` with a `.hsw-knob` thumb inside. Applies `.on` to the button when `on` is true. The class is `hsw`, not `sw`: the editor's `Switch` owns `.sw` in `editor/controls/controls.css`, both stylesheets ship in the one bundle, and the shared name let the editor's rule (painted with `--e-primary` and `--e-raised-hi`, tokens only `.editor` defines) win over this one, so the HUD's toggles showed no colour in either state.
 
 ### Props
 

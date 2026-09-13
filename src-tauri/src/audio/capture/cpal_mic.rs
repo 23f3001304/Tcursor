@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use crate::audio::level::{block_rms_f32, block_rms_i16, LevelSlot};
 use crate::audio::wav_writer::WavWriter;
 use crate::domain::time::Clock;
 
@@ -37,13 +38,16 @@ impl CpalMic {
     /// incoming samples are dropped so paused time is excluded from the WAV.
     /// `started` is stamped once with the first sample's CAPTURE time (see
     /// `capture_ms`), cancelling the device input latency so the mic lines up with
-    /// the screen without a manual offset.
+    /// the screen without a manual offset. `level`, when given, receives each block's
+    /// RMS for the HUD's live meter - a lock-free push only, never an emit, because
+    /// this runs on a realtime callback thread.
     pub fn open(
         device_name: Option<&str>,
         wav_path: &str,
         paused: Arc<AtomicBool>,
         started: Arc<AtomicU64>,
         clock: Arc<dyn Clock>,
+        level: Option<Arc<LevelSlot>>,
     ) -> anyhow::Result<CpalMicHandle> {
         let host = cpal::default_host();
         let device = match device_name {
@@ -63,6 +67,7 @@ impl CpalMic {
             WavWriter::create(wav_path, sample_rate, channels)?,
         )));
         let w2 = writer.clone();
+        let lv = level.clone();
         let err_fn = |e| eprintln!("mic stream error: {e}");
 
         let stream = match config.sample_format() {
@@ -73,6 +78,7 @@ impl CpalMic {
                     if started.load(Ordering::SeqCst) == 0 {
                         started.store(capture_ms(clock.now_ms(), info), Ordering::SeqCst);
                     }
+                    if let Some(l) = lv.as_ref() { l.push(block_rms_f32(data)); }
                     let s: Vec<i16> = data.iter()
                         .map(|&x| (x.clamp(-1.0, 1.0) * i16::MAX as f32) as i16).collect();
                     if let Some(w) = w2.lock().unwrap().as_mut() { w.write(&s); }
@@ -85,6 +91,7 @@ impl CpalMic {
                     if started.load(Ordering::SeqCst) == 0 {
                         started.store(capture_ms(clock.now_ms(), info), Ordering::SeqCst);
                     }
+                    if let Some(l) = level.as_ref() { l.push(block_rms_i16(data)); }
                     if let Some(w) = w2.lock().unwrap().as_mut() { w.write(data); }
                 },
                 err_fn, None)?,
@@ -96,6 +103,6 @@ impl CpalMic {
 
     pub fn default_input(wav_path: &str) -> anyhow::Result<CpalMicHandle> {
         Self::open(None, wav_path, Arc::new(AtomicBool::new(false)),
-            Arc::new(AtomicU64::new(0)), Arc::new(crate::domain::time::SystemClock::new()))
+            Arc::new(AtomicU64::new(0)), Arc::new(crate::domain::time::SystemClock::new()), None)
     }
 }

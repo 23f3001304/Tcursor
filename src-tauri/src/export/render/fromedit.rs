@@ -1,25 +1,30 @@
 // Inverse of `edit::seed`: rebuild the exporter's raw `ZoomRegion`s and the
 // `SetLayout` action track from a persisted `EditDoc`, so export renders the saved
 // plan instead of regenerating it. A seeded doc round-trips byte-identical (proven
-// by the test below). Trim/cuts/speed are intentionally not applied here.
+// by the test below). Trim/cuts/speed arrive already applied: `render_edit::EditState::load` runs
+// the doc through `edit::remap_doc` first, so every span here is on the output clock.
 use crate::actions::model::{ActionEvent, ActionKind, LayoutId};
 use crate::edit::model::{EditDoc, Zoom, ZoomTarget};
-use crate::export::types::{Easing, FramePoint, ZoomRegion};
+use crate::export::types::{Easing, FramePoint, ZoomRegion, SPRING_DEFAULT};
 
-/// Map an easing wire-name back to `Easing`. The `Spring` stiffness/damping params
-/// are NOT carried by a `Zoom`, so fall back to `cfg` for anything the string cannot
-/// reconstruct (only the tuned default `Smooth` is ever seeded).
+/// Map an easing wire-name back to `Easing`. The bare word `"spring"` carries no parameters, so
+/// it means `SPRING_DEFAULT`; a `spring(stiffness,damping[,mass])` string carries its own, exactly
+/// like `cubic(...)`. Anything the string cannot reconstruct falls back to `cfg` (only the tuned
+/// default `Smooth` is ever seeded).
 pub fn easing_from(name: &str, cfg_easing: Easing) -> Easing {
     match name {
         "smooth" => Easing::Smooth,
         "linear" => Easing::Linear,
+        "spring" => SPRING_DEFAULT,
         "ease_in" => Easing::EaseIn,
         "ease_out" => Easing::EaseOut,
         "ease_in_out" => Easing::EaseInOut,
-        // A custom `cubic(x1,y1,x2,y2)` string carries its whole curve, so it reconstructs exactly.
-        _ => crate::export::cubic::parse_cubic(name)
-            .map(|(x1, y1, x2, y2)| Easing::Cubic { x1, y1, x2, y2 })
-            .unwrap_or(cfg_easing), // "spring" (params lost) or unknown -> config's easing
+        // A parameterised string carries its whole curve, so it reconstructs exactly.
+        _ => crate::export::spring::parse_spring(name)
+            .map(|(stiffness, damping, mass)| Easing::Spring { stiffness, damping, mass })
+            .or_else(|| crate::export::cubic::parse_cubic(name)
+                .map(|(x1, y1, x2, y2)| Easing::Cubic { x1, y1, x2, y2 }))
+            .unwrap_or(cfg_easing), // unknown -> config's easing
     }
 }
 
@@ -88,3 +93,6 @@ pub fn layout_segs_from_doc(doc: &EditDoc) -> Option<Vec<ActionEvent>> {
 #[cfg(test)]
 #[path = "fromedit_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "fromedit_spring_tests.rs"]
+mod spring_tests;

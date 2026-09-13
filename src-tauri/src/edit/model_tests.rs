@@ -11,7 +11,7 @@ fn sample_doc() -> EditDoc {
         version: 1,
         trim: Trim { in_ms: 100, out_ms: 5000 },
         clip_ms: 5000,
-        cuts: vec![Cut { start_ms: 500, end_ms: 1000 }],
+        cuts: vec![Cut { id: "c0".into(), start_ms: 500, end_ms: 1000 }],
         zooms: vec![Zoom { id: "z1".into(), start_ms: 200, end_ms: 800, target: ZoomTarget::Cursor, scale: 2.2, easing: "ease".into(), zoom_in_ms: 350, zoom_out_ms: 450, layer: 0, cam_action: None }],
         speed: vec![Speed { id: "s1".into(), start_ms: 1000, end_ms: 2000, factor: 2.0 }],
         layout: vec![LayoutSeg { id: "l1".into(), start_ms: 0, end_ms: 5000, layout: "screen".into(), transition_ms: 350, easing: "smooth".into(),

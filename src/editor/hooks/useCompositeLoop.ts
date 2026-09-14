@@ -10,10 +10,12 @@ import type { StageBgState } from "../stage/stageBg";
 import { fxFrameGeometry } from "../stage/fxGeometry";
 import { drawMirroredRipples, overlayNeedsClicks } from "../stage/ripplePreview";
 import { fxRequestTick } from "./fxRequestTick";
+import { exactKey, type ExactFrame } from "./useExactFrame";
 import { outOf, type TimeMap } from "../../lib/remap";
 import { isCutJump, playbackAction } from "../stage/playbackRemap";
 import { resolveSpotlight, newSpotlightSimState, spotAlphaPlan, type SpotlightSimState } from "../stage/spotlightPreview";
 import { layoutAt } from "../timeline/layoutTrack";
+import { newTilt, resetTilt, tiltFromCam } from "../stage/cursorTilt";
 import type { CursorSpritesState } from "./useCursorSprites";
 
 // The FX overlay (spotlight + click effects) is a full IPC round-trip: shader render, a per-pixel
@@ -33,7 +35,7 @@ export function useCompositeLoop({
   screenRef, webcamRef, audioRef, canvasRef,
   playRef, timeRef, onTimeRef,
   trackRef, layoutRef, layoutPresetsRef, layoutSegsRef, cameraMovesRef, zoomsRef, zoomSettingsRef, dragPoseRef, arrangingRef, clicksRef, effectsRef, clickfxRef, kindsRef, cursorRef,
-  spritesRef, trailRef, dirtyRef, bgRef, spotSimRef, mapRef,
+  spritesRef, trailRef, dirtyRef, bgRef, spotSimRef, mapRef, exactRef, editGenRef,
 }: {
   // The hidden media elements + the canvas they composite onto; then the clock (is it playing,
   // where is the playhead, and how to report it back).
@@ -61,6 +63,9 @@ export function useCompositeLoop({
   bgRef: RefObject<StageBgState | null>;
   spotSimRef: RefObject<SpotlightSimState>; // owned by Stage.tsx: also reset on a paused effects-content edit (gate 2, spotEffectsKeyRef)
   mapRef: RefObject<TimeMap>; // the clip-to-output clock map (useTimeMap): regions and the camera track are read on the output clock
+  /** The export's frame for the paused instant, if `useExactFrame` has fetched it, and the edit
+   *  generation the key must carry - drawn over everything below when its key matches this tick. */
+  exactRef: RefObject<ExactFrame | null>; editGenRef: RefObject<number>;
 }) {
   const lastReportRef = useRef(0);
   const lastFrameTRef = useRef(0);
@@ -76,6 +81,9 @@ export function useCompositeLoop({
   // `paintPanel`). Separate from `offscreenRef`, which holds the base scene the panel draws INTO;
   // only allocated/touched on the frames a layout transition is actually running.
   const layerRef = useRef<HTMLCanvasElement | null>(null);
+  // The cursor's motion-lean filter (`cursorTilt.ts`, the mirror of Rust `Cursor`'s own). Lives
+  // here rather than in the draw because it is STATE advanced once per tick, like the trail.
+  const tiltRef = useRef(newTilt());
 
   useEffect(() => {
     let raf = 0;
@@ -98,7 +106,8 @@ export function useCompositeLoop({
         if (play) { const rate = playbackAction(map, t).rate; for (const m of [sv, webcamRef.current, audioRef.current]) if (m && m.playbackRate !== rate) m.playbackRate = rate; }
         // Discontinuous jump (seek/re-sync), not natural playback advance - resets the trail AND
         // the spotlight sim (gate 1; gate 2 is Stage.tsx's spotEffectsKeyRef, for a paused edit).
-        if ((Math.abs(t - lastFrameTRef.current) > 200 || t < lastFrameTRef.current) && !isCutJump(map, lastFrameTRef.current, t)) { trailRef.current.length = 0; spotSimRef.current = newSpotlightSimState(); }
+        const dtMs = t - lastFrameTRef.current; // this tick's own elapsed CLIP time, for the tilt filter
+        if ((Math.abs(dtMs) > 200 || t < lastFrameTRef.current) && !isCutJump(map, lastFrameTRef.current, t)) { trailRef.current.length = 0; resetTilt(tiltRef.current); spotSimRef.current = newSpotlightSimState(); }
         lastFrameTRef.current = t;
         if (play) {
           // Throttle the React state update to ~16fps - it re-renders the whole editor tree. The
@@ -114,7 +123,10 @@ export function useCompositeLoop({
             const sp = spritesRef.current, cs = cursorRef.current, cf = clickfxRef.current;
             const cam = camAt(trackRef.current, tOut);
             const cur = { style: cs.style, size: cs.size, clickBounce: cs.click_bounce, bounceIntensity: cs.bounce_intensity,
-              motionBlur: cs.motion_blur, kinds: kindsRef.current, sprites: sp.sprites, hots: sp.hots, canvasH: sp.canvasH, captured: sp.captured, busy: sp.busy, busyFrames: sp.busyFrames, recent: trailRef.current };
+              motionBlur: cs.motion_blur, kinds: kindsRef.current, sprites: sp.sprites, hots: sp.hots, canvasH: sp.canvasH, captured: sp.captured, busy: sp.busy, busyFrames: sp.busyFrames,
+              // The glass cursor material: the pack's own (`material`) and the pack-independent
+              // back setting, so the live canvas approximates what the export refracts.
+              material: sp.material, back: cs.back, tiltDeg: 0, recent: trailRef.current };
             // The active layout at this exact frame time (cross-faded across a layout-segment
             // boundary); falls back to the static layout when presets haven't loaded or there
             // are no segments. Used for both the base draw below and the FX screen-rect math.
@@ -123,6 +135,12 @@ export function useCompositeLoop({
             // zoom action) - see frameCamLayout, which mirrors step_camera's ordering.
             const frameLayout = frameCamLayout(baseLayout, tOut, cam.scale, cameraMovesRef.current,
               activeCamDraft(dragPoseRef.current, arrangingRef.current), zoomsRef.current, zoomSettingsRef.current, c.width, c.height);
+            // The cursor's motion lean, from the camera track's own 0..1 cursor position - the
+            // same signal Rust's `Cursor` feeds its filter. The screen panel's aspect is what puts
+            // `cury` (a fraction of its HEIGHT) into the same reference-px unit as `curx`.
+            const sr = frameLayout?.screen;
+            const aspect = sr && sr[3] > 0 ? (sr[2] * c.width) / (sr[3] * c.height) : 16 / 9;
+            cur.tiltDeg = tiltFromCam(tiltRef.current, cam.curx, cam.cury, aspect, dtMs, cs.tilt);
             // Draw the base frame (background + screen + webcam + cursor) WITHOUT FX
             if (!offscreenRef.current) offscreenRef.current = document.createElement("canvas");
             if (!layerRef.current) layerRef.current = document.createElement("canvas");
@@ -131,11 +149,14 @@ export function useCompositeLoop({
               layerRef.current, layoutPresetsRef.current?.inset_w, tOut);
             // Panel/zoom mapping for the FX-overlay request AND the ripple draw below - mirrors
             // drawPreview's crop; see fxGeometry.ts for the math and why cw/ch are rounded.
-            const { fxW, fxH, screenScale, map: mapFn } = fxFrameGeometry(c.width, c.height, frameLayout, cam, FX_SCALE);
+            // `map` takes PANEL fractions (the cursor track is already span-mapped in Rust);
+            // `mapCanvas` takes CANVAS fractions, which is what a `ClickSample` carries - the two
+            // only differ once a mid-take display switch has cropped the picture.
+            const { fxW, fxH, screenScale, map: mapFn, mapCanvas } = fxFrameGeometry(c.width, c.height, frameLayout, cam, FX_SCALE);
             const cpos = mapFn(cam.curx, cam.cury);
             // Client-side click ripples (sweep-2, see ripplePreview.ts) - BEFORE the overlay blit
             // below, so an active spotlight's dim composites on top of it like everything else.
-            drawMirroredRipples(ctx, clicksRef.current, t, cf.enabled, cf.style, cf.color, cf.intensity, mapFn, fxW, fxH, c.width, c.height);
+            drawMirroredRipples(ctx, clicksRef.current, t, cf.enabled, cf.style, cf.color, cf.intensity, mapCanvas, fxW, fxH, c.width, c.height);
             // resolveSpotlight runs EXACTLY once per tick (it advances spotSimRef in place), and now
             // runs BEFORE the blit rather than after it, because the blit needs this frame's alpha.
             const spot = { effects: effectsRef.current, on: cf.spotlight,
@@ -157,7 +178,13 @@ export function useCompositeLoop({
               ctx.restore();
             }
             fxRequestTick({ fxLastTRef, fxWantRef, fxInflightRef, fxOverlayImgRef, fxSeparableRef, dirtyRef },
-              { frameLayout, fxW, fxH, screenScale, mapFn, cpos, resolvedSpot, plan, cf, clicks: clicksRef.current, t });
+              { frameLayout, fxW, fxH, screenScale, mapFn: mapCanvas, cpos, resolvedSpot, plan, cf, clicks: clicksRef.current, t });
+            // Paused on an instant the Rust renderer has answered for: the export's own frame goes
+            // over the whole composite (owner ruling 2026-09-14 - the export is the reference).
+            // Keyed on the instant AND the edit generation, so a frame from a scrubbed-past
+            // instant or an older doc is never drawn; playing never draws it at all.
+            const ex = exactRef.current;
+            if (!play && ex && ex.key === exactKey(t, editGenRef.current)) ctx.drawImage(ex.img, 0, 0, c.width, c.height);
           } catch (e) { if (import.meta.env.DEV) console.error("drawPreview", e); }
         }
       }

@@ -22,23 +22,24 @@ The eased progress value, `~0` at `p=0` and `~1` at `p=1` (with `Spring`, and a 
 ## static_cam_pose
 
 ```rust
-pub fn static_cam_pose(rect: RectF, ow: f32, oh: f32) -> CamPose
+pub fn static_cam_pose(panel: &Panel, ow: f32, oh: f32) -> CamPose
 ```
 
-Converts the camera panel's un-overridden (layout-resolved) rect into a `CamPose` - the inverse of `rect_from_center` (`export/scene/mod.rs`), i.e. "what the webcam would show with zero `camera_moves`". This is `CameraMoveTrack::sample`'s `live` argument: recomputed every frame from that frame's own scene, it is the pose the keyframe track eases OUT of entering its span and back INTO leaving it (Task 27), so an exit blend follows a layout cross-fade that is still in flight.
+Converts the camera panel's un-overridden (layout-resolved) panel into a `CamPose` - the inverse of `rect_from_center` + `override_camera` (`export/scene/mod.rs`), i.e. "what the webcam would show with zero `camera_moves`". This is `CameraMoveTrack::sample`'s `live` argument: recomputed every frame from that frame's own scene, it is the pose the keyframe track eases OUT of entering its span and back INTO leaving it (Task 27), so an exit blend follows a layout cross-fade that is still in flight - and, since keyframe shapes, the shape a `"layout"` keyframe inherits.
 
 ### Inputs
 
-- `rect: RectF` - the RESOLVED camera panel's rect (output pixels), taken BEFORE any `camera_moves` override is applied. *Why before:* the override replaces `scene.camera` itself, so this must be read from `scene.camera.rect` right after `track.scene_at`/`shrink_camera` resolve it, and before `override_camera` runs.
+- `panel: &Panel` - the RESOLVED camera panel (output pixels), taken BEFORE any `camera_moves` override is applied. *Why before:* the override replaces `scene.camera` itself, so this must be read from `scene.camera` right after `track.scene_at`/`shrink_camera` resolve it, and before `override_camera` runs. *Why the panel, not just its rect:* the pose now carries the panel's shape too (`radius`).
 - `ow: f32`, `oh: f32` - output frame dimensions in pixels. *Why:* same basis `rect_from_center` converts a `CamPose` back into a rect with, so the two are exact inverses.
 
 ### Returns
 
-`CamPose { x: (rect.x + rect.w * 0.5) / ow, y: (rect.y + rect.h * 0.5) / oh, size: rect.h / oh }` - the rect's center as fractions of `ow`/`oh`, and its height as a fraction of `oh` (mirrors `rect_from_center`'s `size * oh = h`).
+`CamPose { x: (r.x + r.w * 0.5) / ow, y: (r.y + r.h * 0.5) / oh, size: r.h / oh, round: Some(panel.radius / min(r.w, r.h).max(0.001)) }` - the rect's center as fractions of `ow`/`oh`, its height as a fraction of `oh` (mirrors `rect_from_center`'s `size * oh = h`), and its corner radius as a fraction of the short side (mirrors `override_camera`'s `round * min(w, h)`; `0.5` for a circle or a Wide stadium).
 
 ### Used by
 
-- `src-tauri/src/export/render/mod.rs` - `step_camera` computes this from the pre-override `scene.camera.rect` and passes it to `CameraMoveTrack::sample` as the implicit start pose.
+- `src-tauri/src/export/render/mod.rs` - `step_camera` computes this from the pre-override `scene.camera` and passes it to `CameraMoveTrack::sample` as the live pose.
+- `src/editor/stage/cameraMoves.ts` - `liveCamPose` is the TS mirror, so the preview inherits the same shape.
 
 ## fit_durations
 

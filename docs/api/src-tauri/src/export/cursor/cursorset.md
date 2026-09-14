@@ -41,6 +41,29 @@ Two more fields carry pack format v2's animated busy state, both resolved once a
 - `busy: Option<BusySpec>` - the selected pack's busy animation, `None` for a still one.
 - `busy_frames: Vec<CursorSprite>` - decoded `busy_NN.png` frames when the pack ships them, empty otherwise. Indexed by `BusyPose::frame`, so an out-of-range index simply falls back to `set`'s busy sprite. Decoded here, not per frame: an explicit-frame pack is a handful of extra PNG decodes at renderer-build time and zero work afterwards.
 
+### CursorPrep::glass
+
+```rust
+pub glass: bool,
+pub masks: HashMap<CursorType, std::sync::Arc<crate::export::fx::fx_lens::LensMask>>,
+pub drags: Vec<crate::export::fx::fx_lens::DragSpan>,
+```
+
+The three fields the **glass cursor material** needs, all resolved once here for the same reason the sprites are: they are cheap at renderer-build time and would be per-frame work otherwise.
+
+- `glass` - this pack declares `material: "glass"`. Resolved once because `pack::is_glass` reads `pack.json` off disk and `composite_at` asks every frame.
+- `masks` - each kind's silhouette as a lens mask (`fx_lens::mask_of`). Empty unless `glass`; nine buffers of at most 16 KB.
+- `drags` - every left-button press paired with its release, for the cursor back's text-selection stretch. Built even for a plain pack, since the back is pack-independent; the alternative is re-scanning the whole event log per frame.
+
+`draw` takes its glass branch on `glass`, handing off to `cursormorph::draw_glass` (which cross-fades two states and blits at `fx_lens::SPRITE_ALPHA`) instead of `cursordraw::apply_enhanced`. Plain packs are byte-for-byte unchanged.
+
+### CursorPrep::masks
+
+See `CursorPrep::glass`.
+
+### CursorPrep::drags
+
+See `CursorPrep::glass`.
 
 ## draws_synthetic
 
@@ -150,12 +173,12 @@ Returns the sprite for the cursor type active at `ev_t`, falling back to Arrow i
 ```rust
 pub fn draw(cp: &mut CursorPrep, out: &mut [u8], ow: u32, oh: u32, cur: FramePoint,
             cam: Camera, screen: &Panel, inset_w: f32, ev_t: u32, out_t: u32, c: &CursorSettings,
-            os_cursor_in_video: bool)
+            os_cursor_in_video: bool, tilt_deg: f32)
 ```
 
 Per-frame synthetic cursor draw, clipped to the screen panel.
 
-**Plain-OS mode.** When `c.plain_os(os_cursor_in_video)` - i.e. the doc asks for `System` but the video has no baked cursor - the draw is stripped back to what a real OS cursor looks like: the **Arrow** sprite regardless of the recorded type track, no click bounce, no motion trail. (The other half of the mode, the raw un-smoothed path, is applied upstream by `CursorSettings::follow_alpha_at`/`idealize_at` when the `Cursor` is built or reloaded.)
+**Plain-OS mode.** When `c.plain_os(os_cursor_in_video)` - i.e. the doc asks for `System` but the video has no baked cursor - the draw is stripped back to what a real OS cursor looks like: the **Arrow** sprite regardless of the recorded type track, no click bounce, no motion trail. (The other half of the mode, the raw un-smoothed path, is applied upstream by `CursorSettings::smoothness_at`/`idealize_at` when the `Cursor` is built or reloaded.)
 
 *Why Arrow rather than the recorded type track:* the track may not exist at all - a `Hidden` recording never ran the type tracker - and "System" promises a plain pointer, not Enhanced-minus-polish. Always-Arrow makes the fallback look the same whatever the recording style was.
 
@@ -174,6 +197,7 @@ Per-frame synthetic cursor draw, clipped to the screen panel.
 - `out_t: u32` - current frame OUTPUT time, the clock pack v2's busy animation runs on. Plain-OS mode ignores it: a real OS cursor has no synthesised animation either.
 - `c: &CursorSettings` - the LIVE cursor display settings (size, motion blur, click bounce, bounce intensity, and the `style` that plain-OS mode keys off).
 - `os_cursor_in_video: bool` - record-time truth, threaded from `FrameRenderer`. *Why here as well as in `prep`:* `prep` decides whether there is anything to draw; this decides how to draw it, and only this one is re-evaluated per frame.
+- `tilt_deg: f32` - this frame's motion lean (`Cursor::tilt_deg`, already 0 when the setting is off), **added** to whatever rotation the pose already carries. *Why composed rather than a second transform:* `blit_transformed` rotates about the hotspot exactly once, so a busy ring spinning while the cursor is thrown across the screen does both at the same time and at the same anchor - two passes would resample the sprite twice and drift. Forced to 0 in plain-OS mode alongside the bounce and the trail (belt and braces: `CursorSettings::tilt_at` has already switched the filter off upstream).
 
 ### Returns
 
@@ -182,7 +206,12 @@ Per-frame synthetic cursor draw, clipped to the screen panel.
 ### Implementation
 
 1. Call `frame_placement` for the position, panel factor and clip box; return immediately on `None` (screen panel more than half faded).
-2. Call `posed(..)` for the sprite AND its busy pose - or force Arrow with a still pose in plain-OS mode. On `Some(spr)`, call `cursordraw::apply_enhanced` with trail cap 6, the pose, and all cursor settings from `c`.
+2. A glass pack takes the `cursormorph::draw_glass` path with `morph_at`'s busy angle **plus** `tilt_deg`, so the placed box, the cross-fade and the lens mask all lean together.
+3. Otherwise call `posed(..)` for the sprite AND its busy pose - or force Arrow with a still pose in plain-OS mode - add `tilt_deg` to that pose's `angle_deg`, and on `Some(spr)` call `cursordraw::apply_enhanced` with trail cap 6, the pose, and all cursor settings from `c`. A non-zero lean makes the pose non-identity, so the draw takes `cursorxform`'s bilinear path; an upright cursor still takes the nearest-neighbour fast path exactly as before.
+
+### Behaviors
+
+- `a_tilted_cursor_is_the_same_sprite_rotated_about_its_hotspot` - the untilted ink box is exactly the sprite's placed box; a 6-degree lean widens and shortens it to the rotated rectangle's own extents (within the bilinear sampler's one-pixel skirt), and both boxes stay centred on the cursor point, so a leaning cursor does not drift off what it is pointing at.
 
 ## frame_placement
 
@@ -212,3 +241,4 @@ Where a cursor goes this frame, whichever cursor it is. Extracted from `draw` so
 `None` when `screen.alpha < 0.5` - no screen panel, no cursor.
 
 **Dark-theme invert is gated on `pack::theme_inverts`** (2026-09-13): only the embedded default set is flipped; a bundled or imported pack keeps its own colours.
+

@@ -8,6 +8,9 @@ struct Uniforms {
     screen_min: vec2<f32>, screen_max: vec2<f32>,
     cam_min: vec2<f32>, cam_max: vec2<f32>,
     zoom_center: vec2<f32>,
+    // The screen texture sub-rect the screen panel shows, in texture UV: (0,0)..(1,1) normally,
+    // and one mid-take display switch's fitted rect per span - cropping the capture's black bars.
+    src_min: vec2<f32>, src_max: vec2<f32>,
     inv_scale: f32,
     screen_r: f32, camera_r: f32,
     screen_a: f32, camera_a: f32,
@@ -89,7 +92,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     var color = textureSample(bg_tex, samp, base_uv);
     // Screen panel: in the zoomed base scene.
     if (u.screen_a > 0.001 && inside(base_uv, u.screen_min, u.screen_max)) {
-        let suv = (base_uv - u.screen_min) / (u.screen_max - u.screen_min);
+        // Panel-local UV, then through the source sub-rect: the panel always shows the WHOLE of
+        // `src`, which is the whole texture unless a display switch cropped it (same rect the CPU
+        // compositor passes to `resize_crop`, and the same one `coordmap::to_panel` maps through).
+        let puv = (base_uv - u.screen_min) / (u.screen_max - u.screen_min);
+        let suv = u.src_min + puv * (u.src_max - u.src_min);
         let cov = rrect_cov(base_uv, u.screen_min, u.screen_max, u.screen_w, u.screen_h, u.screen_r) * u.screen_a;
         color = mix(color, screen_rgb(suv), cov);
     }

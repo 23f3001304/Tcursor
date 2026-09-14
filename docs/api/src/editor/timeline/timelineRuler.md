@@ -32,7 +32,7 @@ export function Ruler({ dur, trackRef, onSeek, range, setRange }: {
 - **Shift+drag selects a range.** `useRangeSelect` (`./useRangeSelect.ts`) is offered the `pointerdown` first; when it claims it, nothing else runs. See that file's doc for the gesture itself.
 - **A plain drag scrubs.** The ruler captures the pointer, `seekAt`s immediately, then `scheduleSeek`s each move while the primary button is held and `flushSeek`es on release or lost capture - the exact contract `.e-tlbody` has, so the strip above the tracks behaves like the tracks.
 
-`title` names both ("Drag to scrub. Shift+drag to choose a range."), which is the one place the gesture is discoverable outside `ShortcutsOverlay`. `editor.css` gives `.e-ruler` `cursor: pointer`, `user-select: none` and `touch-action: none` so the shift-drag does not also run the browser's own text selection.
+`title` names both ("Drag to scrub. Shift+drag to choose a range."), which is the one place the gesture is discoverable outside `ShortcutsOverlay`. `timeline.css` gives `.e-ruler` `cursor: pointer`, `user-select: none` and `touch-action: none` so the shift-drag does not also run the browser's own text selection.
 
 ## RangeOverlay
 
@@ -40,7 +40,7 @@ export function Ruler({ dur, trackRef, onSeek, range, setRange }: {
 export function RangeOverlay({ range, dur }: { range: Range | null; dur: number }): JSX.Element | null
 ```
 
-One `.e-range` div spanning the selection across the whole track body - rendered by `Timeline.tsx` inside `.e-tlbody`, next to `TrimOverlay`, so the selection reads against the lanes it will act on rather than only against the 18px ruler the gesture started on. A translucent `--e-primary` wash at 12% with a 1px accent edge at each end (editor.css), no border and no handles: the gesture that made it is how it is changed, and Escape is how it goes away. `pointer-events: none`, so scrubbing and pill drags pass straight through it. `null` when there is no range, when `dur <= 0`, or when the range is empty.
+One `.e-range` div spanning the selection across the whole track body - rendered by `Timeline.tsx` inside `.e-tlbody`, next to `TrimOverlay`, so the selection reads against the lanes it will act on rather than only against the 18px ruler the gesture started on. A translucent `--e-primary` wash at 12% with a 1px accent edge at each end (timeline.css), no border and no handles: the gesture that made it is how it is changed, and Escape is how it goes away. `pointer-events: none`, so scrubbing and pill drags pass straight through it. `null` when there is no range, when `dur <= 0`, or when the range is empty.
 
 Static CSS, no Motion - nothing here animates.
 

@@ -47,6 +47,14 @@ pub(crate) fn valid_layout(s: &str) -> String
 
 Coerces a layout preset wire-name to one of `screen` / `camera` / `presenter` / `screen_only` / `camera_only`; anything else becomes `"screen"` (which is also the "empty means default" fallback the layout track uses for gaps).
 
+## valid_cam_shape
+
+```rust
+pub(crate) fn valid_cam_shape(s: &str) -> String
+```
+
+Coerces a camera-move keyframe's wire shape (`CameraMove::shape`) to one of `"layout"`, `"circle"`, `"rounded"`, `"rect"`; anything else becomes `"layout"` - inherit the layout's webcam shape, which is what every keyframe written before shapes existed means - rather than being stored as garbage the track would then have to interpret. Applied by `AddCameraMove` and `UpdateCameraMove` (`api.md`).
+
 ## valid_easing
 
 ```rust

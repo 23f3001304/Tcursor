@@ -40,4 +40,4 @@ Stays a stable MODULE-scope function, not a per-render closure: `panels` rides o
 export const layoutExtraStyle = (l: { transition_ms: number; transition_out_ms: number }, s: number, e: number) => React.CSSProperties
 ```
 
-Unchanged from its pre-T34-L4 home in `Timeline.tsx`: the `--fin`/`--fout` fade-ramp CSS vars (`transitionRampPct`, `./layers.ts`) `RegionRows` merges onto the layout pill's inline style, driving `.e-layblk::before`/`::after`'s gradient widths (`editor.css`).
+Unchanged from its pre-T34-L4 home in `Timeline.tsx`: the `--fin`/`--fout` fade-ramp CSS vars (`transitionRampPct`, `./layers.ts`) `RegionRows` merges onto the layout pill's inline style, driving `.e-layblk::before`/`::after`'s gradient widths (`timeline.css`).

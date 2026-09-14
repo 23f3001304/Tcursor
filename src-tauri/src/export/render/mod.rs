@@ -11,7 +11,6 @@ use crate::export::coordmap::inset_rect;
 use crate::export::cursor::Cursor;
 use crate::export::pipeline::ffio::probe_dims;
 use crate::export::fx::fx_state::{self, FxRenderer};
-use crate::export::scene::layout::LayoutTrack;
 use crate::export::render::render_edit::EditState;
 use crate::export::pipeline::timeline::build_timeline;
 use crate::export::{settings::Resolution, types::{Layout, ZoomConfig, ZoomRegion}};
@@ -29,9 +28,17 @@ pub struct FrameRenderer {
     settings: Settings,
     cfg: ZoomConfig,
     layout: Layout,
-    track: LayoutTrack, // sampled at OUT_T (its segments come from `doc.layout`)
+    // Sampled at OUT_T: one `LayoutTrack` per SOURCE SPAN (segments from `doc.layout`), so a
+    // mid-take display switch re-shapes the screen panel and eases into it (`spans.rs`).
+    track: spans::SpanTrack,
+    /// Scratch nv12 frame for a display switch's cross-dissolve - only ever touched inside the
+    /// 350 ms window (`screen_mix`), where it holds the blended screen the compositor draws.
+    mix_buf: Vec<u8>,
     cam_moves: CameraMoveTrack,
+    /// Zoom regions with RAW canvas-space anchors (`fromedit::regions_from_doc`), and the scratch
+    /// buffer `step_camera` re-anchors them into each frame's own screen panel through.
     regions: Vec<ZoomRegion>,
+    frame_regions: Vec<ZoomRegion>,
     bg: Vec<u8>,
     compositor: Box<dyn Compositor>,
     fx: Box<dyn FxRenderer>,
@@ -62,6 +69,7 @@ impl FrameRenderer {
     pub fn new(paths: &ProjectPaths, layout: Layout, fps: u32, resolution: Resolution, preview_cap: Option<u32>) -> Result<(Self, RenderMeta)> {
         let log = EventLog::load(&paths.events()).context("load events.json")?;
         let (sw, sh) = probe_dims(&paths.video())?;
+        let (sw, sh, screen_crop) = meta::even_screen(sw, sh); // the decoders crop to this (`ffio_decoder`)
         let seed = crate::edit::seed::load_or_seed(paths);
         let mut layout = layout;
         layout.resolve(seed.aspect, resolution, sw, sh, preview_cap);
@@ -70,7 +78,7 @@ impl FrameRenderer {
         let video_start = tl.frames[0];
         let video_end = (*tl.frames.last().unwrap_or(&video_start)).max(video_start + 1);
         let full_dur_ms = (video_end - video_start) as u32;
-        let es = EditState::load(paths, &actions, &layout, sw, sh, tl.events_ms as i64 - video_start as i64, full_dur_ms);
+        let es = EditState::load(paths, &actions, &layout, sw, sh, tl.events_ms as i64 - video_start as i64, video_start, full_dur_ms);
         let screen_bytes = (sw as usize * sh as usize) * 3 / 2; // nv12: Y plane + half-res interleaved UV
         // ONE webcam decode box for the whole export, at the SOURCE's own aspect and big enough
         // for every mode's panel; each panel cover-crops it to its own aspect at composite time
@@ -98,36 +106,74 @@ impl FrameRenderer {
         let os_cur = crate::settings::store::os_cursor_in_video(paths);
         let cprep = crate::export::cursor::cursorset::prep(&es.settings.cursor, &log.events, cursor_track, dark, os_cur);
         let captured = crate::export::cursor::captured::CapturedCursors::load(paths);
-        let mut cursor = Cursor::new(log.events, log.screen, es.settings.cursor.follow_alpha_at(os_cur)); // moves the log in after cprep borrowed it
+        let mut cursor = Cursor::new(log.events, log.screen, es.settings.cursor.smoothness_at(os_cur)); // moves the log in after cprep borrowed it
         cursor.set_idealize(es.settings.cursor.idealize_at(os_cur));
-        let meta = RenderMeta { tl, video_start, video_end, out_w, out_h, sw, sh, screen_bytes, webcam_w, webcam_h, audio_offset_ms,
+        cursor.set_tilt(es.settings.cursor.tilt_at(os_cur));
+        let meta = RenderMeta { tl, video_start, video_end, out_w, out_h, sw, sh, screen_bytes, screen_crop, webcam_w, webcam_h, audio_offset_ms,
             trim: seed.trim, mic_volume: es.settings.audio_mic_volume, sys_volume: es.settings.audio_sys_volume };
-        Ok((Self { settings: es.settings, cfg: es.cfg, layout, track: es.track, cam_moves: es.cam_moves, regions: es.regions,
+        Ok((Self { settings: es.settings, cfg: es.cfg, layout, track: es.track, mix_buf: Vec::new(),
+            cam_moves: es.cam_moves, regions: es.regions, frame_regions: Vec::new(),
             bg, compositor, fx, sim, spot_sim, cursor, cprep, captured, actions, effects: es.effects, has_webcam,
             os_cursor_in_video: os_cur, sw, sh, events_ms, video_start, map: es.map, full_dur_ms }, meta))
     }
 
-    /// Rewind the forward-only camera + cursor state so this (cached) renderer can be
-    /// reused to preview an arbitrary T by fast-forwarding `step_camera` from the start.
-    pub fn composite_at(&mut self, pose: &FramePose, screen: &[u8],
+    /// Composite one frame. `prev` is the screen frame the caller latched before the display
+    /// switch this frame is inside (`FramePose::hold`/`mix`), or `None` outside a switch - it is
+    /// blended into the current frame's span rect BEFORE compositing (`screen_mix`), which is what
+    /// keeps the cross-dissolve on one code path for the CPU compositor, the GPU one, the preview
+    /// and the export alike.
+    pub fn composite_at(&mut self, pose: &FramePose, screen: &[u8], prev: Option<&[u8]>,
                         webcam: Option<(&[u8], u32, u32)>, out: &mut Vec<u8>) {
         let (ow, oh) = (self.layout.out_w, self.layout.out_h);
+        let screen = match (pose.mix, prev) {
+            (Some(m), Some(p)) => {
+                screen_mix::blend_into(&mut self.mix_buf, screen, p, self.sw, self.sh,
+                    m.prev_src, pose.scene.src, m.alpha);
+                &self.mix_buf[..]
+            }
+            _ => screen,
+        };
         self.compositor.composite_into(screen, self.sw, self.sh, webcam,
             pose.cam, &self.bg, &self.layout, &pose.scene, out);
-        fx_state::render(&*self.fx, out, ow, oh, &self.settings.clickfx,
-            self.cursor.events(), &self.actions, &self.effects, &pose.scene, pose.cam, pose.cur, &self.cursor.screen(), self.has_webcam,
-            self.sw, self.sh, pose.out_t, pose.ev_t, &self.settings.hotkeys, &mut self.spot_sim);
         // The real captured cursor wins whenever the live style is System and this recording has
         // a layer; otherwise the synthetic stack (Enhanced, or the plain arrow on a pre-layer
         // recording) runs exactly as before. Both take the same placement arguments.
         let inset_w = inset_rect(self.sw, self.sh, &self.layout).2 as f32;
         let sc = &pose.scene.screen;
-        if crate::export::cursor::captured::draws_captured(self.settings.cursor.style, self.captured.is_some()) {
-            if let Some(cc) = &self.captured { cc.draw(out, ow, oh, pose.cur, pose.cam, sc, inset_w, self.sw, pose.ev_t); }
+        let captured = crate::export::cursor::captured::draws_captured(self.settings.cursor.style, self.captured.is_some());
+        // The glass cursor material is placed BEFORE the FX pass (which renders it) even though
+        // the sprite it belongs to is blitted AFTER - see `fx_lensbuild::lenses_at`. A real
+        // captured OS cursor never gets one: it is the cursor that was actually on screen.
+        let lens = (!captured).then(|| self.lenses(pose, ow, oh, sc, inset_w)).flatten();
+        fx_state::render(&*self.fx, out, ow, oh, &self.settings.clickfx,
+            self.cursor.events(), &self.actions, &self.effects, &pose.scene, pose.cam, pose.cur, &self.cursor.screen(), self.has_webcam,
+            pose.out_t, pose.ev_t, &self.settings.hotkeys, &mut self.spot_sim, lens);
+        if captured {
+            // The SPAN's width, not the canvas's: the captured bitmap is in source pixels and the
+            // panel shows `src.w` of them, so that is what one source pixel measures on screen.
+            let src_w = pose.scene.src.w.max(1.0) as u32;
+            if let Some(cc) = &self.captured { cc.draw(out, ow, oh, pose.cur, pose.cam, sc, inset_w, src_w, pose.ev_t); }
         } else if let Some(cp) = &mut self.cprep {
             crate::export::cursor::cursorset::draw(cp, out, ow, oh, pose.cur, pose.cam,
-                sc, inset_w, pose.ev_t, pose.out_t, &self.settings.cursor, self.os_cursor_in_video);
+                sc, inset_w, pose.ev_t, pose.out_t, &self.settings.cursor, self.os_cursor_in_video,
+                self.cursor.tilt_deg());
         }
+    }
+
+    /// The glass lens + cursor back for this frame, or `None` when neither is asked for. One line
+    /// of plumbing kept out of `composite_at` so that function stays readable; everything it
+    /// decides lives in `fx_lensbuild`.
+    fn lenses(&self, pose: &FramePose, ow: u32, oh: u32, sc: &crate::export::scene::Panel,
+              inset_w: f32) -> Option<crate::export::fx::fx_lens::Lenses> {
+        use crate::export::fx::fx_lensbuild::{lenses_at, wants_lens, LensFrame};
+        let c = &self.settings.cursor;
+        let plain_os = c.plain_os(self.os_cursor_in_video);
+        if !wants_lens(self.cprep.as_ref(), c, plain_os) { return None; }
+        let info = self.cursor.screen();
+        let f = LensFrame { cur: pose.cur, cam: pose.cam, ow, oh, screen: sc, inset_w,
+            info: &info, src: pose.scene.src, ev_t: pose.ev_t, out_t: pose.out_t,
+            tilt_deg: self.cursor.tilt_deg() };
+        lenses_at(self.cprep.as_ref()?, c, f, plain_os)
     }
 }
 // Small read-only accessors used only by preview commands outside the renderer (never by the
@@ -139,3 +185,6 @@ mod step;
 pub mod bg;
 pub mod render_edit;
 pub mod fromedit;
+// The take's source spans (a mid-take display switch) and the cross-dissolve at a switch.
+pub mod spans;
+pub mod screen_mix;

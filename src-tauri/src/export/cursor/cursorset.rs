@@ -32,6 +32,14 @@ pub struct CursorPrep {
     /// Decoded `busy_NN.png` frames when the pack ships them; empty otherwise. Indexed by
     /// `BusyPose::frame`, so an out-of-range index simply falls back to `set`'s busy sprite.
     pub busy_frames: Vec<CursorSprite>,
+    /// This pack declares `material: "glass"` - resolved ONCE here because `pack::is_glass` reads
+    /// `pack.json` off disk and `composite_at` asks per frame.
+    pub glass: bool,
+    /// Each kind's alpha as a lens mask, empty unless `glass`. Built here for the same reason the
+    /// sprites are: it is a handful of buffer copies at renderer-build time and nothing per frame.
+    pub masks: HashMap<CursorType, std::sync::Arc<crate::export::fx::fx_lens::LensMask>>,
+    /// Every left-button press paired with its release, for the cursor back's selection stretch.
+    pub drags: Vec<crate::export::fx::fx_lens::DragSpan>,
 }
 
 /// Invert RGB in place (black<->white) for a dark-theme cursor; alpha untouched.
@@ -70,7 +78,13 @@ pub fn prep(cursor: &CursorSettings, events: &[MouseEvent], track: CursorTrack, 
         .map(|mut spr| { if dark { invert_rgb(&mut spr.bgra); } spr })
         .collect();
     let busy = crate::export::cursor::pack::busy_spec(&cursor.pack);
-    Some(CursorPrep { set, track, click_ms, recent: VecDeque::new(), busy, busy_frames })
+    let glass = crate::export::cursor::pack::is_glass(&cursor.pack);
+    let masks = if glass {
+        set.iter().map(|(k, s)| (*k, std::sync::Arc::new(
+            crate::export::fx::fx_lens::mask_of(&cursor.pack, *k, s)))).collect()
+    } else { HashMap::new() };
+    let drags = crate::export::fx::fx_lens::drag_spans(events);
+    Some(CursorPrep { set, track, click_ms, recent: VecDeque::new(), busy, busy_frames, glass, masks, drags })
 }
 
 /// The sprite and transform for this frame: normally the type track's own sprite, still. For the
@@ -109,10 +123,14 @@ pub fn sprite_for<'a>(set: &'a HashMap<CursorType, CursorSprite>, track: &Cursor
 /// (alpha < 0.5). `cur` is the cursor in base/output coords; it is projected through `cam`,
 /// scaled to the panel size (so a small PiP screen gets a small cursor), and clipped to the
 /// panel's on-screen rect so it never spills onto the background or the webcam.
+///
+/// `tilt_deg` is this frame's motion lean (`Cursor::tilt_deg`, already 0 when the setting is off),
+/// composed with whatever rotation the pose already carries: a busy ring spinning while the cursor
+/// is thrown across the screen does both at once, about the same hotspot.
 #[allow(clippy::too_many_arguments)]
 pub fn draw(cp: &mut CursorPrep, out: &mut [u8], ow: u32, oh: u32, cur: FramePoint,
             cam: Camera, screen: &Panel, inset_w: f32, ev_t: u32, out_t: u32, c: &CursorSettings,
-            os_cursor_in_video: bool) {
+            os_cursor_in_video: bool, tilt_deg: f32) {
     let Some((pos, panel, clip)) = frame_placement(cur, cam, ow, oh, screen, inset_w) else { return };
     // Plain-OS: the recorded type track may not even exist (a Hidden recording has none), and
     // "System" promises a plain arrow rather than Enhanced-minus-polish - so always Arrow, and
@@ -120,15 +138,28 @@ pub fn draw(cp: &mut CursorPrep, out: &mut [u8], ow: u32, oh: u32, cur: FramePoi
     // LIVE doc settings, not cached on the prep, so switching style in the editor takes effect
     // in the warm preview immediately (the prep itself is only rebuilt on a full renderer build).
     let plain_os = c.plain_os(os_cursor_in_video);
-    let (spr, pose) = if plain_os {
+    let tilt = if plain_os { 0.0 } else { tilt_deg }; // belt and braces: the filter is off there too
+    // A glass pack's sprite is the LENS's edge, not the picture: the FX pass has already bent the
+    // frame through its silhouette, so the pack's own pixels go on at `SPRITE_ALPHA` and contribute
+    // only their baked highlights and rim - and its STATES cross-fade rather than snap, because
+    // they are objects (a disc, a pill) rather than pictures of pointers. Plain packs take the path
+    // below, blitting one opaque sprite exactly as before.
+    if cp.glass && !plain_os {
+        let (prev, kind, m, angle) = crate::export::fx::fx_lensbuild::morph_at(cp, ev_t, out_t);
+        crate::export::cursor::cursormorph::draw_glass(cp, out, ow, oh, pos, prev, kind, m,
+            angle + tilt, panel, clip, ev_t, c, crate::export::fx::fx_lens::SPRITE_ALPHA);
+        return;
+    }
+    let (spr, mut pose) = if plain_os {
         (cp.set.get(&CursorType::Arrow), BusyPose::still())
     } else {
         posed(&cp.set, &cp.track, cp.busy, &cp.busy_frames, ev_t, out_t)
     };
+    pose.angle_deg += tilt;
     if let Some(spr) = spr {
         let (blur, bounce) = if plain_os { (0.0, false) } else { (c.motion_blur, c.click_bounce) };
         crate::export::cursor::cursordraw::apply_enhanced(out, ow, oh, spr, pos, &mut cp.recent, 6,
-            &cp.click_ms, ev_t, c.size, blur, bounce, c.bounce_intensity, panel, clip, pose);
+            &cp.click_ms, ev_t, c.size, blur, bounce, c.bounce_intensity, panel, clip, pose, 1.0);
     }
 }
 

@@ -47,10 +47,19 @@ pub fn bounce_scale(click_ms: &[u32], t_ms: u32, enabled: bool, intensity: f32) 
 /// `clip`: output bounds (x0,y0,x1,y1) the blit is confined to (the screen panel rect).
 fn blit(out: &mut [u8], ow: u32, oh: u32, spr: &CursorSprite,
         top_left: (f32, f32), scale: f32, alpha_mul: f32, clip: (i32, i32, i32, i32)) {
-    let tw = (spr.w as f32 * scale).max(1.0).round() as i32;
-    let th = (spr.h as f32 * scale).max(1.0).round() as i32;
-    let tx0 = top_left.0.round() as i32;
-    let ty0 = top_left.1.round() as i32;
+    blit_into(out, ow, oh, spr,
+        [top_left.0, top_left.1, spr.w as f32 * scale, spr.h as f32 * scale], alpha_mul, clip);
+}
+
+/// `blit` with the destination rect given outright as `[x0, y0, w, h]` instead of derived from a
+/// uniform scale, so a caller can STRETCH the sprite - which is what `cursormorph` does to dissolve
+/// one glass cursor state into the next through a single interpolated box.
+pub fn blit_into(out: &mut [u8], ow: u32, oh: u32, spr: &CursorSprite,
+                 dest: [f32; 4], alpha_mul: f32, clip: (i32, i32, i32, i32)) {
+    let tw = dest[2].max(1.0).round() as i32;
+    let th = dest[3].max(1.0).round() as i32;
+    let tx0 = dest[0].round() as i32;
+    let ty0 = dest[1].round() as i32;
 
     // Confine to the clip rect (screen panel) as well as the frame.
     let ox_start = tx0.max(0).max(clip.0);
@@ -95,7 +104,7 @@ fn blit(out: &mut [u8], ow: u32, oh: u32, spr: &CursorSprite,
 pub fn draw_cursor(out: &mut [u8], ow: u32, oh: u32, spr: &CursorSprite,
                    pos: (f32, f32), recent: &[(f32, f32)],
                    size_px: f32, blur: f32, bounce: f32, clip: (i32, i32, i32, i32)) {
-    draw_cursor_posed(out, ow, oh, spr, pos, recent, size_px, blur, bounce, clip, BusyPose::still());
+    draw_cursor_posed(out, ow, oh, spr, pos, recent, size_px, blur, bounce, clip, BusyPose::still(), 1.0);
 }
 
 /// `draw_cursor` plus pack v2's busy transform (`busy::busy_pose`), applied about the hotspot.
@@ -103,11 +112,16 @@ pub fn draw_cursor(out: &mut [u8], ow: u32, oh: u32, spr: &CursorSprite,
 /// nearest-neighbour path below, byte-for-byte as before pack v2 existed; only a real rotation or
 /// scale reaches `cursorxform`. The motion trail is never transformed - it is a fading echo of
 /// where the cursor WAS, and spinning each ghost independently reads as noise.
+///
+/// `alpha` scales the whole sprite's opacity (1.0 = opaque, as every pack drew before 2026-09-14).
+/// A glass pack passes `fx_lens::SPRITE_ALPHA` so its baked highlights sit ON the live refraction
+/// the FX pass just drew, instead of hiding it. The trail is scaled by it too - a trail brighter
+/// than the cursor leading it looks like a bug.
 #[allow(clippy::too_many_arguments)]
 pub fn draw_cursor_posed(out: &mut [u8], ow: u32, oh: u32, spr: &CursorSprite,
                          pos: (f32, f32), recent: &[(f32, f32)],
                          size_px: f32, blur: f32, bounce: f32, clip: (i32, i32, i32, i32),
-                         pose: BusyPose) {
+                         pose: BusyPose, alpha: f32) {
     // Scale by the full canvas so every pack cursor keeps its authored relative size
     // (a wide resize arrow stays wide, not stretched to the pointer's height).
     let scale = (size_px * bounce / spr.canvas_h as f32).max(0.0001);
@@ -125,19 +139,19 @@ pub fn draw_cursor_posed(out: &mut [u8], ow: u32, oh: u32, spr: &CursorSprite,
             let dist = (rp.0 - last_draw.0).hypot(rp.1 - last_draw.1);
             if dist < 1.5 { continue; }
             let fade = 1.0 - i as f32 / n as f32;
-            let alpha = (blur * fade * 0.5).clamp(0.0, 1.0);
+            let a = (blur * fade * 0.5).clamp(0.0, 1.0) * alpha;
             let rtl = (rp.0 - hx, rp.1 - hy);
-            blit(out, ow, oh, spr, rtl, scale, alpha, clip);
+            blit(out, ow, oh, spr, rtl, scale, a, clip);
             last_draw = *rp;
         }
     }
 
     // Draw the main cursor on top - fast path unless the busy animation asked for a transform.
     if pose.is_identity() {
-        blit(out, ow, oh, spr, top_left, scale, 1.0, clip);
+        blit(out, ow, oh, spr, top_left, scale, alpha, clip);
     } else {
         crate::export::cursor::cursorxform::blit_transformed(
-            out, ow, oh, spr, pos, scale, pose.angle_deg, pose.scale, clip);
+            out, ow, oh, spr, pos, scale, pose.angle_deg, pose.scale, clip, alpha);
     }
 }
 
@@ -158,13 +172,15 @@ pub fn apply_enhanced(
     panel: f32,
     clip: (i32, i32, i32, i32),
     pose: BusyPose,
+    alpha: f32,
 ) {
     if recent.len() >= trail_cap { recent.pop_front(); }
     recent.push_back(pos_px);
     let bounce = bounce_scale(click_ms, ev_t, click_bounce, bounce_intensity);
     let size_px = size.clamp(0.4, 3.0) * oh as f32 * 0.033 * panel;
     let trail: Vec<(f32, f32)> = recent.iter().rev().skip(1).copied().collect();
-    draw_cursor_posed(out, ow, oh, spr, pos_px, &trail, size_px, blur.clamp(0.0, 1.0), bounce, clip, pose);
+    draw_cursor_posed(out, ow, oh, spr, pos_px, &trail, size_px, blur.clamp(0.0, 1.0), bounce, clip, pose,
+        alpha.clamp(0.0, 1.0));
 }
 
 #[cfg(test)]

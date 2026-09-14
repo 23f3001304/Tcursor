@@ -15,7 +15,7 @@ Shape of a single selectable item.
 
 ### Used by
 
-- `src/hud/Hud.tsx` - builds `DropOption[]` arrays from `mics` and `cameras` and passes them to its two `<Dropdown>` instances (camera, mic). The display/window target selector uses `TargetPicker` instead - see `src/hud/devices/TargetPicker.md` - since a target needs richer, grouped rendering than a flat `DropOption` list supports.
+- `src/hud/components/IdleCard.tsx` - the camera and mic rows (`row`), fed `DropOption[]` arrays `Hud` builds from `cameras` and `mics`. The display/window target is not a dropdown at all: the screen row flips the card to `TargetSheet` (`src/hud/devices/TargetSheet.md`), since two monitors are told apart by a map, not a list.
 
 ## Dropdown
 
@@ -40,6 +40,7 @@ Renders a trigger button and, when `open` is true, a floating option list below 
 - `open` (`boolean`) - controlled open/closed state driven by the parent's `menu` string. *Why controlled:* `Hud` needs to know which dropdown is open to compute the window height.
 - `onToggle` (`() => void`) - called when the trigger button is clicked, or when an outside click is detected while open. *Why a single callback:* the parent manages the `menu` toggle; Dropdown just signals intent.
 - `onPick` (`(id: string) => void`) - called with the chosen option's `id` when the user clicks a list item. *Why only the id:* the label is derivable from the id; passing just the key keeps the callback narrow.
+- `row?: boolean` - render the trigger as the idle card's full-width source row (`.dd-row`: a raised 46px plane with a 34px icon lead) instead of the compact ghost `.dd-trigger`. The menu then opens full width under the row.
 
 ### Behavior
 

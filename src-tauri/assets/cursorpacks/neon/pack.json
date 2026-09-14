@@ -1,6 +1,7 @@
 {
   "id": "neon",
   "name": "Neon",
+  "category": "Glass and glow",
   "version": 2,
   "builtin": true,
   "busy": {

@@ -191,10 +191,23 @@ fn read_hotspots(path: &Path) -> HashMap<String, (f32, f32)>
 ## Meta
 
 ```rust
-pub(crate) struct Meta { id: String, name: String, busy: Option<BusySpec> }
+pub(crate) struct Meta { id: String, name: String, category: Option<String>, busy: Option<BusySpec> }
 ```
 
-`pack.json` as written by `pack_import` (v1: `{id, name}`) or shipped with a bundled pack (v2: `+ version`, `busy`). Unknown keys - `builtin`, `generated`, `version` itself - are ignored: where a pack came from is decided by which folder it was found in, never by what its own JSON claims, and the presence of `busy` is a better version signal than the number beside it.
+`pack.json` as written by `pack_import` (v1: `{id, name}`) or shipped with a bundled pack (v2: `+ version`, `busy`, `category`). Unknown keys - `builtin`, `generated`, `version` itself - are ignored: where a pack came from is decided by which folder it was found in, never by what its own JSON claims, and the presence of `busy` is a better version signal than the number beside it.
+
+`category` is the STYLE the editor's picker groups the pack by, and it IS trusted to the pack's own JSON - unlike `builtin` - because it is a claim about the artwork rather than about provenance. It is `Option` here and resolved to a real string by `packlist::category_or_imported`, so a v1 manifest (every pack a user imports) needs no migration. `assets/cursorpacks/README.md` documents the field for whoever adds the next pack.
+
+### Meta::material
+
+```rust
+#[serde(default)]
+pub(crate) material: Option<String>,
+```
+
+How the renderer TREATS a pack's sprites, as opposed to what they depict. Absent - the only state until 2026-09-14, and still the state of every pack but one - is a plain alpha blit. `"glass"` makes each sprite a LENS: the FX pass refracts the recorded frame through its silhouette and the sprite's own pixels are then blitted at `fx_lens::SPRITE_ALPHA`.
+
+Documented for pack authors in `assets/cursorpacks/README.md`, which also states the consequence: artwork for a glass pack should be a CLEAR lens with highlights and a rim, because whatever it paints opaquely is frame the lens cannot bend.
 
 ## read_meta
 
@@ -202,5 +215,26 @@ pub(crate) struct Meta { id: String, name: String, busy: Option<BusySpec> }
 pub(crate) fn read_meta(dir: &Path) -> Option<Meta>
 ```
 
-Parse `dir/pack.json`, or `None` on any error. `pub(crate)` because `packlist` reads the same file for its own half of the job (id, name, busy) while this file reads it for resolution.
+Parse `dir/pack.json`, or `None` on any error. `pub(crate)` because `packlist` reads the same file for its own half of the job (id, name, category, busy) while this file reads it for resolution.
 
+## material
+
+```rust
+pub fn material(pack_id: &str) -> Option<String>
+```
+
+The `material` `pack_id` declares, or `None` for the embedded set and any pack that names none.
+
+Reads `pack.json` off disk, so a caller that needs it per frame caches the answer - `cursorset::prep` resolves it once into `CursorPrep::glass`, and `packlist::read_pack_meta` carries it to the frontend on `CursorPackInfo`.
+
+## is_glass
+
+```rust
+pub fn is_glass(pack_id: &str) -> bool
+```
+
+Whether `pack_id`'s sprites are lenses rather than pictures (`material: "glass"`). Same disk read as `material`; same caching rule.
+
+### Used by
+
+- `src-tauri/src/export/cursor/cursorset.rs` - `prep`, once per renderer build, to set `CursorPrep::glass` and decide whether to build the lens masks at all.

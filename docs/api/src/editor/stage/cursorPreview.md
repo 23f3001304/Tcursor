@@ -14,6 +14,7 @@ export interface DrawCursor {
   captured: CapturedLayer | null;
   busy: BusySpec | null;
   busyFrames: HTMLImageElement[];
+  tiltDeg: number;
   recent: [number, number][];
 }
 ```
@@ -26,6 +27,36 @@ Everything needed to draw the export cursor: the recording's cursor `style`/`siz
 
 - `src/editor/stage/previewCanvas.ts` - `drawPreview` passes the zoom-projected cursor position through to `drawCursorSprite`.
 - `src/editor/hooks/useCursorSprites.ts` - builds `CapturedLayer` from the `cursor_layer` DTO.
+
+### DrawCursor::material
+
+```ts
+material: string | null;
+back: string;
+```
+
+The two halves of the **glass cursor material**, threaded in by `useCompositeLoop` from the pack DTO and the doc's cursor settings respectively.
+
+- `material` - `"glass"` when the pack's sprites are LENSES (Rust `fx_lens`). The sprite is then drawn at `cursorGlass.ts::GLASS_ALPHA`, and its states CROSS-FADE through one interpolated box instead of snapping.
+- `back` - `CursorSettings.back`. `"glass"` draws the disc/pill behind the cursor.
+
+Both live on `DrawCursor` rather than being read from a hook inside the draw, for the same reason every other field does: the draw is a pure function of what it is handed, so `previewCanvas.ts` can call it for a live frame and a test can call it for a fixed one.
+
+The geometry and the numbers are in `cursorGlass.ts`, which also documents everything the canvas deliberately does NOT do (no refraction, no frost, no shadow, no click squash, no selection stretch).
+
+### DrawCursor::back
+
+See `DrawCursor::material`.
+
+### DrawCursor::tiltDeg
+
+```ts
+tiltDeg: number;
+```
+
+This frame's **motion lean** in degrees (`cursorTilt.ts`), the mirror of what Rust hands `cursorset::draw` as `tilt_deg`. Composed with whatever rotation the busy pose already carries, so a spinning busy cursor thrown across the screen does both at once about the same hotspot - one transform, not two.
+
+*Why it arrives as a number rather than being computed here:* the lean is a filter over time, advanced exactly once per tick, and the draw must stay a pure function of what it is handed. `useCompositeLoop` owns the filter state (next to the motion trail's, and reset on the same discontinuities) and calls `cursorTilt.ts`'s `tiltFromCam` once per frame.
 
 ## cursorAt
 
@@ -107,9 +138,11 @@ Draws the cursor sprite at the already-projected canvas position `p`, scaled by 
 6. Maintain `c.recent` (a ring of up to 6 positions), resetting it if the cursor jumped more than `outH * 0.2` in one frame (a scene cut / seek, not real motion).
 7. `ctx.save()`/clip to `clip`/restore around the actual drawing: if `c.motionBlur > 0`, blit a fading trail from `c.recent` (oldest = most transparent) before the final blit at `p`.
 
-### The busy state animates
+### The busy state animates, and the cursor leans
 
-When the active kind is `"busy"` and the pack declares an animation, `busyPose(c.busy, now)` gives this frame's pose - `now` is the OUTPUT clock, the same basis the export passes `busy_pose`, so a paused preview shows exactly the frame the export would write. A pack shipping explicit `busy_NN.png` frames uses `c.busyFrames[pose.frame]` as the image and is drawn still (`busyPose` returns the identity for it); otherwise the single busy sprite is drawn under `drawPosed`'s transform.
+When the active kind is `"busy"` and the pack declares an animation, `busyPose(c.busy, now)` gives this frame's spin - `now` is the OUTPUT clock, the same basis the export passes `busy_pose`, so a paused preview shows exactly the frame the export would write. A pack shipping explicit `busy_NN.png` frames uses `c.busyFrames[spin.frame]` as the image and carries no synthesised rotation (`busyPose` returns the identity for it).
+
+`c.tiltDeg` is then **added** to that spin's angle, giving the one pose everything is drawn under: for an ordinary upright cursor the pose is still the identity and the draw is the plain `drawImage` it always was; a lean alone, a spin alone, or both together all go through `drawPosed` once. The glass cross-fade's outgoing sprite is posed too, matching Rust `cursormorph::draw_glass`, so a state change mid-throw does not leave one of the two shapes standing upright.
 
 The motion trail is never posed: like the export, it blits the untransformed sprite, because spinning each fading ghost independently reads as noise rather than motion.
 
@@ -120,6 +153,7 @@ function drawPosed(ctx: CanvasRenderingContext2D, q: [number, number], pose: Bus
   blit: (q: [number, number]) => void): void
 ```
 
-Run `blit` under the busy pose's rotation/scale about the cursor point `q` - the canvas mirror of Rust `cursorxform::blit_transformed`, which rotates about the sprite's hotspot and leaves it on the anchor. Same anchor as the untransformed draw, so an animating busy cursor never drifts off the cursor point.
+Run `blit` under the pose's rotation/scale about the cursor point `q` - the canvas mirror of Rust `cursorxform::blit_transformed`, which rotates about the sprite's hotspot and leaves it on the anchor. Same anchor as the untransformed draw, so a spinning or leaning cursor never drifts off the point it is pointing at.
 
 Geometrically identical to the export, not pixel-identical: this leans on Canvas2D's own resampling rather than reimplementing the bilinear loop, which is the existing arrangement for every other part of the preview.
+

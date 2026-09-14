@@ -1,13 +1,15 @@
 use serde::{Deserialize, Serialize};
-use crate::edit::model::{CameraMove, EditDoc, Trim, Zoom, ZoomTarget};
-use crate::edit::ops::region::{auto_layer, clamp_order, dur_bound, valid_easing, valid_layout};
+use crate::edit::model::{CameraMove, EditDoc, Trim, Zoom, ZoomTarget, DEFAULT_CAM_ROUNDNESS};
+use crate::edit::ops::region::{auto_layer, clamp_order, dur_bound, valid_cam_shape, valid_easing, valid_layout};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "snake_case", tag = "op")]
 pub enum EditOp {
     AddZoom { at_ms: u32, dur_ms: u32 },
     AddZoomFull { at_ms: u32, dur_ms: u32, scale: f32 },
-    UpdateZoom { id: String, start_ms: Option<u32>, end_ms: Option<u32>, scale: Option<f32>, target: Option<ZoomTarget>, easing: Option<String>, zoom_in_ms: Option<u32>, zoom_out_ms: Option<u32>, layer: Option<u32> },
+    UpdateZoom { id: String, start_ms: Option<u32>, end_ms: Option<u32>, scale: Option<f32>, target: Option<ZoomTarget>, easing: Option<String>, zoom_in_ms: Option<u32>, zoom_out_ms: Option<u32>, layer: Option<u32>,
+        /// `Some(true)` marks the zoom as smart-typing; `apply_edit_op` then refits its end.
+        smart_typing: Option<bool> },
     RemoveZoom { id: String },
     /// Remove every zoom at once - the AI director's opening "rethink" step (the frontend reveals it
     /// as the mechanical auto-zooms clearing before the smart ones land).
@@ -44,8 +46,14 @@ pub enum EditOp {
     AddEffect { kind: crate::edit::model::EffectKind, start_ms: u32, end_ms: u32 },
     UpdateEffect { id: String, start_ms: Option<u32>, end_ms: Option<u32>, fade_in_ms: Option<u32>, fade_out_ms: Option<u32>, mode: Option<String>, dim: Option<f32>, radius: Option<f32>, feather: Option<f32>, layer: Option<u32> },
     RemoveEffect { id: String },
-    AddCameraMove { t_ms: u32, x: f32, y: f32, size: f32 },
-    UpdateCameraMove { id: String, t_ms: Option<u32>, x: Option<f32>, y: Option<f32>, size: Option<f32>, easing: Option<String> },
+    /// Adding at an instant that already holds a keyframe UPDATES that keyframe in place (one
+    /// keyframe per instant): a slider that commits twice before the doc round-trips must not
+    /// stack a stale duplicate the sampler would then prefer. `shape`/`roundness` default to
+    /// `"layout"` (inherit) / `DEFAULT_CAM_ROUNDNESS` when absent.
+    AddCameraMove { t_ms: u32, x: f32, y: f32, size: f32,
+        #[serde(default)] shape: Option<String>, #[serde(default)] roundness: Option<f32> },
+    UpdateCameraMove { id: String, t_ms: Option<u32>, x: Option<f32>, y: Option<f32>, size: Option<f32>, easing: Option<String>,
+        #[serde(default)] shape: Option<String>, #[serde(default)] roundness: Option<f32> },
     RemoveCameraMove { id: String },
 }
 
@@ -84,7 +92,7 @@ pub fn apply(doc: &mut EditDoc, op: EditOp) {
             let existing: Vec<(u32, u32, u32)> = doc.zooms.iter().map(|z| (z.start_ms, z.end_ms, z.layer)).collect();
             let layer = auto_layer(&existing, start_ms, end_ms);
             doc.zooms.push(Zoom { id, start_ms, end_ms,
-                target: ZoomTarget::Cursor, scale: 2.0, easing: "smooth".into(), zoom_in_ms: 350, zoom_out_ms: 450, layer, cam_action: None });
+                target: ZoomTarget::Cursor, scale: 2.0, easing: "smooth".into(), zoom_in_ms: 350, zoom_out_ms: 450, layer, cam_action: None, smart_typing: false });
         }
         EditOp::AddZoomFull { at_ms, dur_ms, scale } => {
             let id = next_zoom_id(doc);
@@ -93,9 +101,9 @@ pub fn apply(doc: &mut EditDoc, op: EditOp) {
             let existing: Vec<(u32, u32, u32)> = doc.zooms.iter().map(|z| (z.start_ms, z.end_ms, z.layer)).collect();
             let layer = auto_layer(&existing, start_ms, end_ms);
             doc.zooms.push(Zoom { id, start_ms, end_ms,
-                target: ZoomTarget::Cursor, scale, easing: "smooth".into(), zoom_in_ms: 350, zoom_out_ms: 450, layer, cam_action: None });
+                target: ZoomTarget::Cursor, scale, easing: "smooth".into(), zoom_in_ms: 350, zoom_out_ms: 450, layer, cam_action: None, smart_typing: false });
         }
-        EditOp::UpdateZoom { id, start_ms, end_ms, scale, target, easing, zoom_in_ms, zoom_out_ms, layer } => {
+        EditOp::UpdateZoom { id, start_ms, end_ms, scale, target, easing, zoom_in_ms, zoom_out_ms, layer, smart_typing } => {
             let dur = dur_bound(doc);
             if let Some(z) = doc.zooms.iter_mut().find(|z| z.id == id) {
                 if let Some(v) = start_ms { z.start_ms = v.min(dur); }
@@ -107,6 +115,7 @@ pub fn apply(doc: &mut EditDoc, op: EditOp) {
                 if let Some(v) = zoom_in_ms { z.zoom_in_ms = v; }
                 if let Some(v) = zoom_out_ms { z.zoom_out_ms = v; }
                 if let Some(v) = layer { z.layer = v; }
+                if let Some(v) = smart_typing { z.smart_typing = v; }
             }
         }
         EditOp::RemoveZoom { id } => {
@@ -151,15 +160,20 @@ pub fn apply(doc: &mut EditDoc, op: EditOp) {
             crate::edit::ops::arrangement::apply_arrangement(doc, op),
         op @ (EditOp::AddEffect { .. } | EditOp::UpdateEffect { .. } | EditOp::RemoveEffect { .. }) =>
             crate::edit::ops::effects::apply_effect(doc, op),
-        EditOp::AddCameraMove { t_ms, x, y, size } => {
+        EditOp::AddCameraMove { t_ms, x, y, size, shape, roundness } => {
+            let t_ms = t_ms.min(dur_bound(doc));
+            let (shape, roundness) = (valid_cam_shape(shape.as_deref().unwrap_or("layout")),
+                roundness.unwrap_or(DEFAULT_CAM_ROUNDNESS).clamp(0.0, 0.5));
+            if let Some(m) = doc.camera_moves.iter_mut().find(|m| m.t_ms == t_ms) {
+                (m.x, m.y, m.size, m.shape, m.roundness) = (clamp01(x), clamp01(y), clamp01(size), shape, roundness);
+                return;
+            }
             let id = next_cam_id(doc);
-            let dur = dur_bound(doc);
             doc.camera_moves.push(CameraMove {
-                id, t_ms: t_ms.min(dur), x: clamp01(x), y: clamp01(y), size: clamp01(size),
-                easing: "smooth".into() });
+                id, t_ms, x: clamp01(x), y: clamp01(y), size: clamp01(size), easing: "smooth".into(), shape, roundness });
             doc.camera_moves.sort_by_key(|m| m.t_ms);
         }
-        EditOp::UpdateCameraMove { id, t_ms, x, y, size, easing } => {
+        EditOp::UpdateCameraMove { id, t_ms, x, y, size, easing, shape, roundness } => {
             let dur = dur_bound(doc);
             let mut resort = false;
             if let Some(m) = doc.camera_moves.iter_mut().find(|m| m.id == id) {
@@ -168,6 +182,8 @@ pub fn apply(doc: &mut EditDoc, op: EditOp) {
                 if let Some(v) = y { m.y = clamp01(v); }
                 if let Some(v) = size { m.size = clamp01(v); }
                 if let Some(v) = easing { m.easing = valid_easing(&v); }
+                if let Some(v) = shape { m.shape = valid_cam_shape(&v); }
+                if let Some(v) = roundness { m.roundness = v.clamp(0.0, 0.5); }
             }
             if resort { doc.camera_moves.sort_by_key(|m| m.t_ms); }
         }

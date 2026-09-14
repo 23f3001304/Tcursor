@@ -47,6 +47,11 @@ pub struct Zoom {
     /// `ZoomSettings::resolved_cam_action`, so docs written before this existed are unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cam_action: Option<crate::settings::model::CamZoomAction>,
+    /// Smart typing duration (owner, 2026-09-14): the end follows the typing after the start.
+    /// `edit::commands::apply_edit_op` refits `end_ms` (`ops::smart_zoom`) whenever this is
+    /// switched on or the start moves, so the doc always carries a concrete `end_ms` and the
+    /// timeline, the preview and the export need no new path. Docs written before it read `false`.
+    #[serde(default)] pub smart_typing: bool,
 }
 
 fn oldest_version() -> u32 { 1 }
@@ -92,12 +97,21 @@ pub struct LayoutSeg {
 fn default_layout_transition_ms() -> u32 { 350 }
 fn default_layout_easing() -> String { "smooth".into() }
 
+/// A keyframe's `shape` is one of `"layout"` (inherit the layout's webcam shape - what every
+/// keyframe written before shapes existed means), `"circle"`, `"rounded"` (corner radius
+/// `roundness`, a fraction of the panel's short side, 0..0.5) or `"rect"`.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct CameraMove {
     pub id: String, pub t_ms: u32, pub x: f32, pub y: f32, pub size: f32,
     #[serde(default = "default_cam_easing")] pub easing: String,
+    #[serde(default = "default_cam_shape")] pub shape: String,
+    #[serde(default = "default_cam_roundness")] pub roundness: f32,
 }
+/// The corner radius a keyframe gets when switched to `"rounded"` - a fraction of the short side.
+pub const DEFAULT_CAM_ROUNDNESS: f32 = 0.12;
 fn default_cam_easing() -> String { "smooth".into() }
+fn default_cam_shape() -> String { "layout".into() }
+fn default_cam_roundness() -> f32 { DEFAULT_CAM_ROUNDNESS }
 
 /// An editable effect region on the timeline. v1 covers Spotlight; the kind grows over phases.
 /// Params default from settings for now (per-region overrides are a later addition).

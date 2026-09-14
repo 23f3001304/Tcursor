@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { CursorPackInfo } from "../../lib/ipc";
 import { fileSrc } from "../../lib/ipc";
+import { CategorySection, defaultOpenIndex } from "../controls/Controls";
 import { busyPose } from "../stage/cursorBusy";
 import { GlyphPlate, PackTile } from "./PackTile";
+import { packCategories } from "./packCategories";
 
 // The nine cursor states, in the order a hovered tile walks through them. Same wire names the
 // backend uses for the PNG filenames, so a tile's sprite path is just `<dir>/<kind>.png`.
@@ -68,41 +70,42 @@ function CursorPack({ pack, selected, onPick }: {
   const img = useRef<HTMLImageElement | null>(null);
   useHoverCycle(pack, hovered, img);
   return (
-    <PackTile selected={selected} onPick={onPick} label={pack.name}
-      title={pack.builtin ? `${pack.name} (built in)` : pack.name}
+    // No "(built in)" suffix any more: the SECTION says where a pack comes from and what it looks
+    // like, so the tooltip would only repeat the heading above it.
+    <PackTile selected={selected} onPick={onPick} label={pack.name} title={pack.name}
       onHoverStart={() => setHovered(true)} onHoverEnd={() => setHovered(false)}>
       <GlyphPlate src={spriteSrc(pack, KINDS[0], 0)} imgRef={img} />
     </PackTile>
   );
 }
 
-/** The pack picker: built-in packs first under a dim group label, then the imported ones. Each
- *  tile rests on the pack's arrow and, while hovered, walks its nine states so the user sees what
- *  they are choosing before choosing it.
+/** The pack picker: one collapsible section per STYLE (Classic, Glass and glow, Playful, Drawn,
+ *  Retro, Imported), each holding a wrapping grid of tiles three to a row. Each tile rests on the
+ *  pack's arrow and, while hovered, walks its nine states so the user sees what it draws before
+ *  choosing it.
  *
- *  One STRIP per group since the usability pass: fifteen built-in packs four-up was four rows of
- *  the panel, which is most of the Cursor panel's budget spent before Size and Motion get a look
- *  in. Sideways, the same fifteen cost one. Every tile stays a plain button in the tab order, so
- *  Tab still reaches each pack in visual order and the browser scrolls the focused one into view. */
+ *  Sections, not the sideways strips the usability pass shipped: the owner's read of those was
+ *  that a picture library you have to flick through hides most of itself, and that "built in vs
+ *  imported" was not a difference anyone is choosing between. A category is. Only the section
+ *  holding the current pack opens by itself, so the panel is shorter than the strips were AND
+ *  every tile in it is fully visible with its name under it. */
 export function CursorPackGrid({ packs, selected, onPick }: {
   packs: CursorPackInfo[]; selected: string; onPick: (id: string) => void;
 }) {
-  const groups: [string, CursorPackInfo[]][] = [
-    ["Built in", packs.filter((p) => p.builtin)],
-    ["Imported", packs.filter((p) => !p.builtin)],
-  ];
+  const cats = packCategories(packs);
+  const open = defaultOpenIndex(cats.map((c) => c.packs.some((p) => p.id === selected)));
   return (
-    <>
-      {groups.filter(([, list]) => list.length > 0).map(([label, list]) => (
-        <div key={label} className="e-tile-section">
-          <span className="e-tile-group">{label}</span>
-          <div className="e-tile-strip">
-            {list.map((p) => (
+    <div className="e-secstack">
+      {cats.map((c, i) => (
+        <CategorySection key={c.name} id={`cursorpack.${c.name}`} label={c.name} count={c.packs.length}
+          selectedName={c.packs.find((p) => p.id === selected)?.name ?? null} defaultOpen={i === open}>
+          <div className="e-tile-grid">
+            {c.packs.map((p) => (
               <CursorPack key={p.id} pack={p} selected={selected === p.id} onPick={() => onPick(p.id)} />
             ))}
           </div>
-        </div>
+        </CategorySection>
       ))}
-    </>
+    </div>
   );
 }

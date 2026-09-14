@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTimeMap } from "./hooks/useTimeMap";
 import { useSilences } from "./hooks/useSilences";
 import { applyEditOp, fileSrc, DEFAULT_PROXY_HEIGHT } from "../lib/ipc";
@@ -9,7 +9,8 @@ import { TopBar } from "./shell/TopBar";
 import { EditorDialogs } from "./shell/EditorDialogs";
 import { useUndoToast } from "./shell/Toast";
 import { ResizeEdges } from "./controls/ResizeEdges";
-import type { Tab } from "./shell/panelTabs";
+import { TAB_IDS, type Tab } from "./shell/panelTabs";
+import { readPanelTab, writePanelTab } from "./shell/panelState";
 import { ClassicShell } from "./shell/ClassicShell";
 import type { ShellProps } from "./shell/slotProps";
 import type { Range } from "./timeline/useRangeSelect";
@@ -35,7 +36,10 @@ import "./editor.css";
 export function Editor({ folder, onClose }: { folder: string; onClose: () => void }) {
   const [timeMs, setTimeMs] = useState(0);
   const [rev, setRev] = useState(0);
-  const [tab, setTab] = useState<Tab>("ai");
+  // Which panel the rail is showing, or `null` for "collapsed". Seeded from (and written back to)
+  // localStorage, so an editor reopens the way the user left it - collapsed included.
+  const [tab, setTab] = useState<Tab | null>(() => readPanelTab(TAB_IDS));
+  useEffect(() => { writePanelTab(tab); }, [tab]);
   const [sel, setSel] = useState<string | null>(null);
   // The ruler's Shift+drag selection, in clip ms - UI state like `sel`, shared because the timeline
   // draws it and the transport's Cut/Speed act on it (useRangeSelect.ts).

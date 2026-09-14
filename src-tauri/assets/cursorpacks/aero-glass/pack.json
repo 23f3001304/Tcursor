@@ -1,6 +1,7 @@
 {
   "id": "aero-glass",
   "name": "Aero Glass",
+  "category": "Glass and glow",
   "version": 2,
   "builtin": true,
   "busy": {

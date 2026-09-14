@@ -1,5 +1,6 @@
-// FX pass: sample the composited frame, dim outside the spotlight, draw click
-// rings (ripple) / discs (pulse). Logical-RGBA; Bgra8Unorm handles byte order.
+// FX pass: sample the composited frame, dim outside the spotlight, then hand it to `clicks()` in
+// the sibling fx_clicks.wgsl (concatenated onto this file by fx_gpu.rs) for the click styles.
+// Logical-RGBA; Bgra8Unorm handles byte order.
 // Style ids - must mirror fx_uniforms::style_id() exactly.
 const FX_RIPPLE: f32 = 1.0;
 const FX_PULSE: f32 = 2.0;
@@ -29,9 +30,17 @@ struct FxU {
   d: vec4<f32>,                 // spot_mode_id, time_s, keep_camera_lit(0/1), cam_radius(px)
   tint: vec4<f32>,              // r, g, b 0..1, _pad
   color: vec4<f32>,             // rgb 0..1, _pad
+  color2: vec4<f32>,            // rgb 0..1 (the tint rotated 30 deg of hue, Neon's 2nd tube), _pad
   hits: array<vec4<f32>, 16>,   // x, y, progress, _pad
   e: vec4<f32>,                 // video_mode_id, alpha, t, _pad
   cam: vec4<f32>,               // camera-exclusion rect (px): min_x, min_y, max_x, max_y
+  // The glass cursor material (fx_lens.wgsl). Both shapes are off when their `on` slot is 0.
+  lens_a: vec4<f32>,            // sprite lens box (px): centre x, centre y, w, h
+  lens_b: vec4<f32>,            // busy angle (rad), on(0/1), click squash, ink progress (<0 = none)
+  lens_c: vec4<f32>,            // ink origin (px): x, y, _pad, _pad
+  back_a: vec4<f32>,            // cursor-back rounded rect (px): min_x, min_y, max_x, max_y
+  back_b: vec4<f32>,            // corner radius(px), on(0/1), click squash, ink progress
+  back_c: vec4<f32>,            // ink origin (px): x, y, ring-instead-of-drop(0/1), _pad
 };
 @group(0) @binding(0) var frame_tex: texture_2d<f32>;
 @group(0) @binding(1) var samp: sampler;
@@ -49,8 +58,7 @@ fn vs_main(@builtin(vertex_index) vi: u32) -> VsOut {
   return out;
 }
 
-fn hash1(x: f32) -> f32 { return fract(sin(x * 127.1) * 43758.5453); }
-fn hash2(p: vec2<f32>) -> f32 { return fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453); }
+fn hash2(p: vec2<f32>) -> f32{ return fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453); }
 fn noise2(p: vec2<f32>) -> f32 {
   let i = floor(p); let f = fract(p); let u2 = f * f * (3.0 - 2.0 * f);
   return mix(mix(hash2(i), hash2(i + vec2<f32>(1.0, 0.0)), u2.x),
@@ -92,14 +100,17 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
   let n = i32(u.a.w);
   var uv = in.uv;
   let px = in.uv * dims;
-  // Shockwave warps the sampled UV radially near each expanding ring.
+  // Shockwave warps the sampled UV radially near each expanding ring. The band formula is
+  // unchanged; only its radius now eases like every other click radius (`fx_ease`), because the
+  // ring fx_clicks.wgsl draws sits ON this band - let one ease and not the other and the glass
+  // separates from its own highlight.
+  var disp = vec2<f32>(0.0, 0.0);
   if (style == FX_SHOCKWAVE) {
-    var disp = vec2<f32>(0.0, 0.0);
     for (var i = 0; i < n; i = i + 1) {
       let h = u.hits[i];
       let dir = px - h.xy;
       let d = length(dir);
-      let radius = clamp(h.z, 0.0, 1.0) * oh * 0.09;
+      let radius = fx_ease(clamp(h.z, 0.0, 1.0)) * oh * 0.09;
       let band = clamp(1.0 - abs(d - radius) / max(oh * 0.03, 1.0), 0.0, 1.0);
       let amp = oh * 0.02 * band * (1.0 - clamp(h.z, 0.0, 1.0));
       disp = disp + normalize(dir + vec2<f32>(0.0001, 0.0)) * amp;
@@ -107,6 +118,16 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     uv = uv - disp / dims;
   }
   var color = textureSample(frame_tex, samp, uv).rgb;
+  // Chromatic dispersion across the band: R and B come from 2 px either side of the displaced
+  // point ALONG the displacement, G from the displaced point itself. Away from the band `disp`
+  // is zero, so the offset is zero and all three channels are the plain sample. The branch is on
+  // a uniform (`style`), which keeps the extra samples off every other style AND keeps the
+  // implicit-derivative uniformity analysis happy.
+  if (style == FX_SHOCKWAVE) {
+    let ofs = disp / max(length(disp), 0.0001) * 2.0 / dims;
+    color = vec3<f32>(textureSample(frame_tex, samp, uv + ofs).r, color.g,
+                      textureSample(frame_tex, samp, uv - ofs).b);
+  }
   if (u.e.y > 0.001) {
     let vmode = u.e.x;
     let va = u.e.y;
@@ -164,37 +185,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     }
   }
   color = mix(color, pre_spot, u.d.z * rrect_cov(px, u.cam.xy, u.cam.zw, u.d.w));
-  for (var i = 0; i < n; i = i + 1) {
-    let h = u.hits[i];
-    let a = clamp(1.0 - h.z, 0.0, 1.0) * clamp(u.c.z, 0.0, 1.0);
-    let d = distance(px, h.xy);
-    if (style == FX_RIPPLE) {
-      let radius = clamp(h.z, 0.0, 1.0) * oh * 0.06;
-      let thick = max(oh * 0.006, 1.0);
-      color = mix(color, u.color.rgb, a * clamp((thick - abs(d - radius)) / thick, 0.0, 1.0));
-    } else if (style == FX_PULSE) {
-      color = mix(color, u.color.rgb, a * clamp(oh * 0.02 - d, 0.0, 1.0));
-    } else if (style == FX_GLOW) {
-      let r = oh * 0.05 * (0.6 + 0.8 * clamp(h.z, 0.0, 1.0));
-      color = color + u.color.rgb * exp(-(d * d) / (r * r)) * a;
-    } else if (style == FX_NEON) {
-      let radius = clamp(h.z, 0.0, 1.0) * oh * 0.07;
-      let thick = max(oh * 0.01, 1.0);
-      let cov = clamp((thick - abs(d - radius)) / thick, 0.0, 1.0);
-      color = color + u.color.rgb * cov * a * 1.4 + vec3<f32>(1.0, 1.0, 1.0) * cov * a * 0.25;
-    } else if (style == FX_SHOCKWAVE) {
-      let radius = clamp(h.z, 0.0, 1.0) * oh * 0.09;
-      let thick = max(oh * 0.008, 1.0);
-      color = color + u.color.rgb * clamp((thick - abs(d - radius)) / thick, 0.0, 1.0) * a * 0.5;
-    } else if (style == FX_PARTICLES) {
-      for (var k = 0; k < 12; k = k + 1) {
-        let ang = hash1(f32(k)) * 6.2831853;
-        let sp = (0.4 + hash1(f32(k) + 7.0)) * oh * 0.10;
-        let prog = clamp(h.z, 0.0, 1.0);
-        let pos = h.xy + vec2<f32>(cos(ang), sin(ang)) * sp * prog + vec2<f32>(0.0, oh * 0.06 * prog * prog);
-        color = color + u.color.rgb * clamp(oh * 0.004 - distance(px, pos), 0.0, 1.0) * a;
-      }
-    }
-  }
+  color = clicks(color, px, oh, style, n); // fx_clicks.wgsl - every click style lives there
+  // Last, so the glass sits over the spotlight and the click styles, and the sprite blit that
+  // follows this whole pass lands on top of it. What it REFRACTS is `frame_tex` (it has to
+  // re-sample, and only the uploaded frame can be re-sampled) - same trade Shockwave makes above.
+  // The spotlight is centred on the cursor, so the undimmed sample is a fraction of a percent off.
+  color = lens_fx(color, px);              // fx_lens.wgsl - the glass cursor material
   return vec4<f32>(min(color, vec3<f32>(1.0, 1.0, 1.0)), 1.0);
 }

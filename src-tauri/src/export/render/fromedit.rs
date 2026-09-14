@@ -1,7 +1,8 @@
 // Inverse of `edit::seed`: rebuild the exporter's raw `ZoomRegion`s and the
 // `SetLayout` action track from a persisted `EditDoc`, so export renders the saved
-// plan instead of regenerating it. A seeded doc round-trips byte-identical (proven
-// by the test below). Trim/cuts/speed arrive already applied: `render_edit::EditState::load` runs
+// plan instead of regenerating it. A seeded doc round-trips field for field (proven by the test
+// below) except the click anchor, which a seeded zoom no longer carries - it follows the cursor
+// (`seed::zooms_from_regions`). Trim/cuts/speed arrive already applied: `render_edit::EditState::load` runs
 // the doc through `edit::remap_doc` first, so every span here is on the output clock.
 use crate::actions::model::{ActionEvent, ActionKind, LayoutId};
 use crate::edit::model::{EditDoc, Zoom, ZoomTarget};
@@ -29,8 +30,8 @@ pub fn easing_from(name: &str, cfg_easing: Easing) -> Easing {
 }
 
 /// Anchor for a zoom: `Fixed` carries the screen-local press point the seed stored;
-/// `Cursor` (only a user- or AI-added target; seeded docs are all `Fixed`) has no stored
-/// point, so default to screen center (`anchor_regions` then re-anchors into panel).
+/// `Cursor` (every seeded zoom, and any user- or AI-added one) has no stored
+/// point, so default to screen center (`step_camera` re-anchors a `Fixed` one per frame).
 /// A `Cursor` region also sets `follow_cursor`, so `CameraSim` aims at the live cursor
 /// and never reads this fallback - it exists only to keep the field total.
 fn anchor_for(z: &Zoom, sw: u32, sh: u32) -> FramePoint {
@@ -47,7 +48,7 @@ fn anchor_for(z: &Zoom, sw: u32, sh: u32) -> FramePoint {
 /// PURE inverse of `seed::zooms_from_regions`: one raw `ZoomRegion` per `Zoom`.
 /// `zoom_in_ms`/`zoom_out_ms` are read straight off each `Zoom` (per-region editable);
 /// `cfg` is kept only as the `easing_from` fallback. `sw`/`sh` only matter for the
-/// `Cursor` fallback; `Fixed` anchors (every seeded zoom) are reproduced exactly.
+/// `Cursor` fallback; `Fixed` anchors (a Region-targeted zoom) are reproduced exactly.
 pub fn regions_from_doc(doc: &EditDoc, sw: u32, sh: u32) -> Vec<ZoomRegion> {
     let cfg = doc.settings.zoom.to_zoom_config();
     doc.zooms

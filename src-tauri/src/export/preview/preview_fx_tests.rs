@@ -27,7 +27,7 @@ fn render_empty(w: u32, h: u32) -> usize {
     with_fx(w, h, |fx| {
         let mut buf = vec![0u8; (w * h * 4) as usize];
         fx.apply(&mut buf, w, h, &FxState { style: ClickFxStyle::None, color: [0, 0, 0],
-            intensity: 1.0, hits: vec![], spot: None, video: None });
+            intensity: 1.0, hits: vec![], spot: None, video: None, lens: None });
         buf.len()
     })
 }

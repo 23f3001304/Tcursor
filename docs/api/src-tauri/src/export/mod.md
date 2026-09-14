@@ -28,7 +28,7 @@ wgpu device/pipeline initialization, GPU availability probe, and texture upload 
 
 ## cursor
 
-Stateful cursor position tracker that interpolates between mouse samples and applies an exponential low-pass filter to suppress jitter. Key items: `Cursor` struct (owns its event log), `Cursor::new`, `Cursor::at(t_ms) -> FramePoint`, `Cursor::events`.
+The cursor's per-frame position: the raw interpolated recording, or the rest/move path model's polished route (`cursor/path.rs`), which pins every rest and click and shapes only the glide between them. Key items: `Cursor` struct (owns its event log), `Cursor::new`, `Cursor::at(t_ms) -> FramePoint`, `Cursor::events`.
 
 ## render
 

@@ -14,6 +14,8 @@ export interface SlotProps { /* ~70 fields - see the source */ }
 
 Everything the four editor types need between them: the doc, the selection, the panel tab, the playhead and transport state, the preview data `useEditorData` fetched, the callbacks `useEditorCallbacks` / `useTimelineActions` / `useTrimActions` built, and the AI director's live state.
 
+**The panel tab is nullable (2026-09-14).** `tab: Tab | null` and `setTab: Dispatch<SetStateAction<Tab | null>>`, where `null` means the panel column is collapsed - a real resting state, not an error one (`panelState.md`). `onTab` is unchanged in shape but changed in meaning: it is no longer "show this tab" but "the user pressed this tab", and `ClassicShell` resolves that through `nextTab` so a second press on the open tab closes.
+
 ### Why a bundle and not props
 
 Before M1a, `Editor.tsx` composed `Stage`, `Transport`, `Timeline` and `EditorPanels` itself, so each of those took its own props at the one call site. After M1a nobody knows at compile time which editors exist or how many - the tree decides - so the values have to reach `EditorSlot` and be spread out there. Passing them as one object is what let `Editor.tsx` drop back under its line cap (the JSX it lost was ~45 lines; the literal that replaced it is ~12).
@@ -35,7 +37,7 @@ Anything derivable from `doc`: the aspect, the zooms, layout segments, camera mo
 
 What `Editor.tsx` actually passes. It differs from `SlotProps` at both ends:
 
-- `onTab` is one of two fields the shell supplies itself: it is the stage toolbar's quick-open, which has to find or create a `panel` area, and only `EditorShell` knows the tree.
+- `onTab` is one of two fields the shell supplies itself: only the shell knows whether the pressed tab is the one already showing, which is what decides between opening and collapsing (`nextTab`, `panelState.ts`).
 - `modalOpen` is added on rather than folded into `SlotProps`, so the editors never see it. It is true while any dialog, overlay or the AI director's scrim owns the screen - the same boolean `Editor.tsx` already computes for `useEditorKeymap` - and the shell's own keyboard (`Ctrl+Space` to maximize, A3) goes inert behind it exactly as every shortcut in `keymap.ts` does. Only the shell has a keymap of its own, so only the shell is given the flag.
 
 `onDetectSilences: () => void` (from `useSilences` in `Editor.tsx`) is the transport's Remove silences.

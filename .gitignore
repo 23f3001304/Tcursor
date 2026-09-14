@@ -30,3 +30,12 @@ src-tauri/resources/*.exe
 *.njsproj
 *.sln
 *.sw?
+
+# Raw asset-generator outputs (tools/assetgen): 1024px sprites, contact sheets and probes are
+# regenerated on demand; only the built packs under src-tauri/assets are part of the repository.
+tools/assetgen/packs/
+tools/assetgen/*_sheet.png
+tools/assetgen/probe_*.png
+
+# Python bytecode from the asset generator
+__pycache__/

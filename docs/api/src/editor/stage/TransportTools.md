@@ -37,6 +37,16 @@ export function TransportTools({ locked, trimmed, onTrimIn, onTrimOut, onResetTr
 
 Trim start/end to the playhead (the timeline edge handles do the same), a reset that appears once trimmed (Motion press spring), then a divider and the timeline tools: **Cut** (`IconCut`), **Speed 2x** (`IconPlayerTrackNext`), add a zoom, run the AI director. The wand is disabled while a run or an export is in progress so a double click cannot fire two interleaved reveals, and carries `data-director-anchor="wand"` for the director's fake pointer. `locked` is the transport's own `exporting || dur <= 0` and disables Cut and Speed too - neither is meaningful with no clip, and neither may change the doc mid-export.
 
+### Magnetic pull (micro-interaction pass, 2026-09-14)
+
+Trim In and Trim Out lean toward a pointer that comes within 28px of them, through [useMagnetic](../effects/useMagnetic.md). They are the only tools in this group that are a *decision* rather than a toggle, and they are the pair Play is flanked by - so the three of them lean together as the pointer crosses the bar, which is the whole reason the effect is worth having here and nowhere else in the group.
+
+The `x`/`y` MotionValues go **straight onto the buttons**: every press in the transport is scale-only, so nothing is claiming the translate channel and no wrapper element is needed anywhere (see `useMagnetic.md`, "The `x`/`y` channel must be free"). `motion.button` plus a `style` is all these two gain - the press spring the look pass took off them stays off.
+
+`locked` passes `strength: 0`, which makes the hook a full no-op - no listener, no spring - so a pill that will ignore the click does not lean toward the pointer inviting one. That is the same rule the press spring already follows one paragraph up.
+
+The two hooks are one `pointermove` listener each on `window`, rAF-coalesced, and both disappear entirely when `interface_effects` is off or the OS asks for reduced motion.
+
 ### Cut and Speed
 
 Both run the same two lines: take `actionSpan(range, timeMs, clicks, dur)`, apply one op over it when it is non-empty (`add_cut`, or `set_speed` at factor 2), then clear the range. Clearing is what makes the gesture read as "choose, then act" rather than leaving a stale selection that the next press would silently reuse.

@@ -11,6 +11,7 @@ use crate::actions::model::ActionEvent;
 use crate::edit::model::EffectRegion;
 use crate::export::camera::moves::CameraMoveTrack;
 use crate::export::remap::TimeMap;
+use crate::export::render::spans::{self, SpanTrack};
 use crate::export::scene::layout::LayoutTrack;
 use crate::export::types::{Layout, ZoomConfig, ZoomRegion};
 use crate::session::paths::ProjectPaths;
@@ -26,7 +27,10 @@ pub(crate) struct EditState {
     pub map: TimeMap,
     pub settings: Settings,
     pub cfg: ZoomConfig,
-    pub track: LayoutTrack,
+    /// One `LayoutTrack` per SOURCE SPAN, so the screen panel takes each span's own aspect and a
+    /// mid-take display switch eases between them (`render::spans`). A take that never switched
+    /// has one span and one track, i.e. the plain layout track it always was.
+    pub track: SpanTrack,
     pub regions: Vec<ZoomRegion>,
     pub effects: Vec<EffectRegion>,
     pub cam_moves: CameraMoveTrack,
@@ -41,22 +45,30 @@ impl EditState {
     /// `full_dur_ms` is the clip's length: the `TimeMap` (trim, cuts, speed) is built from the doc and
     /// every region list is moved onto the output clock (`remap_doc`) BEFORE any track is built, which
     /// is why no evaluator knows about cuts or speed. The map rides along for the exporter's plan.
-    pub(crate) fn load(paths: &ProjectPaths, actions: &[ActionEvent], layout: &Layout, sw: u32, sh: u32, shift: i64, full_dur_ms: u32) -> Self {
+    pub(crate) fn load(paths: &ProjectPaths, actions: &[ActionEvent], layout: &Layout, sw: u32, sh: u32,
+                       shift: i64, video_start: u64, full_dur_ms: u32) -> Self {
         let raw = crate::edit::seed::load_or_seed(paths);
         let map = TimeMap::build(&raw.trim, &raw.cuts, &raw.speed, full_dur_ms);
         let doc = crate::edit::remap_doc::remap_doc(&raw, &map);
         let settings = doc.settings.clone();
         let cfg = settings.zoom.to_zoom_config();
-        let track = if doc.layout.is_empty() {
-            // The recorded layout switches sit on the clip clock; move them like every region.
-            let acts: Vec<ActionEvent> = crate::edit::seed::actions_on_output_clock(actions, shift).into_iter()
-                .map(|a| ActionEvent { t: map.out_of(a.t), kind: a.kind }).collect();
-            LayoutTrack::new(&acts, &settings.appearance, layout.out_w, layout.out_h, sw, sh, TRANSITION_MS)
-        } else {
-            LayoutTrack::from_segs(&doc.layout, &settings.appearance, layout.out_w, layout.out_h, sw, sh)
-        };
-        let regions = crate::export::scene::layout::anchor_regions(
-            crate::export::render::fromedit::regions_from_doc(&doc, sw, sh), &track, sw, sh);
+        // The recorded layout switches sit on the clip clock; move them like every region.
+        let acts: Vec<ActionEvent> = crate::edit::seed::actions_on_output_clock(actions, shift).into_iter()
+            .map(|a| ActionEvent { t: map.out_of(a.t), kind: a.kind }).collect();
+        // One track PER SPAN: `resolve` shapes the screen panel from the source size it is handed,
+        // so a span on a 16:10 display resolves a 16:10 panel and the switch eases between the two
+        // resolved scenes through `Scene::lerp`. `(sw, sh)` (the whole canvas) is span 0's size, so
+        // a take with no switch builds exactly one track from exactly the old arguments.
+        let track = SpanTrack::build(
+            spans::spans_for(paths, (sw, sh), video_start, &map),
+            |ssw, ssh| if doc.layout.is_empty() {
+                LayoutTrack::new(&acts, &settings.appearance, layout.out_w, layout.out_h, ssw, ssh, TRANSITION_MS)
+            } else {
+                LayoutTrack::from_segs(&doc.layout, &settings.appearance, layout.out_w, layout.out_h, ssw, ssh)
+            });
+        // RAW canvas-space anchors: `step_camera` re-anchors them into each frame's own screen
+        // panel (`layout::anchor_frame`), so a layout transition mid-zoom carries the aim with it.
+        let regions = crate::export::render::fromedit::regions_from_doc(&doc, sw, sh);
         let cam_moves = CameraMoveTrack::from_doc(&doc.camera_moves);
         EditState { map, settings, cfg, track, regions, effects: doc.effects.clone(), cam_moves }
     }

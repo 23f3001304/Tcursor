@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef } from "react";
-import { LAYERS, initialVoiceState, layerPath, voiceFrame } from "../math/voiceWave";
+import { LAYERS, ceilFor, initialVoiceState, layerPath, voiceFrame } from "../math/voiceWave";
 import { useReducedMotion } from "./useReducedMotion";
 import "../../wave.css";
 
@@ -50,7 +50,7 @@ export function VoiceWave({ w = 104, h = 30, read, live }: {
       const dt = (now - prev) / 1000;
       prev = now;
       const { mic, sys } = read();
-      st = voiceFrame(st, mic, sys, dt);
+      st = voiceFrame(st, mic, sys, dt, ceilFor(h));
       if (reduced && Math.abs(st.amp - drawnAmp) < STILL_EPSILON_PX) return;
       drawnAmp = st.amp;
       for (let i = 0; i < LAYERS.length; i++) {

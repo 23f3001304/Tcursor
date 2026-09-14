@@ -97,6 +97,10 @@ The largest CENTRED sub-rect of a `sw x sh` source that has the `pw x ph` panel'
 - `cover_rect_crops_the_mismatched_axis_for_every_panel_aspect` (unit test): 16:9 source into a square panel crops the sides; into a 16:9 panel it is the whole frame; a square source into a 16:9 panel crops top/bottom; a portrait source into a square panel crops top/bottom; degenerate zero dims clamp instead of dividing by zero.
 - `a_wide_webcam_in_a_square_panel_shows_the_centre_not_a_squash` (unit test): a 12x4 webcam striped blue|green|red composited into a 4x4 square panel shows GREEN at the panel centre - the middle third at true proportions, not all three stripes squashed together.
 
+### The screen panel's source rect
+
+`composite_into` draws the whole of `scene.src` into the screen panel - the whole canvas normally, one display switch's fitted rect per span. A mid-take display switch keeps ONE encoder canvas and fits every later frame into it, so the file carries baked black bars from the switch on. The render undoes that by showing only the active SOURCE SPAN's `src` rect (`export::render::spans`). The CPU path passes that rect straight to `resize_crop` (`Source::Crop`); the GPU path normalizes it into `src_min`/`src_max` and the shader samples through it. The raw-copy fast path is gated on the rect being the WHOLE canvas: a span that crops would otherwise be copied out complete with the bars the crop exists to remove.
+
 ## select_compositor
 
 ```rust

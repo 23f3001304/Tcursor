@@ -11,6 +11,9 @@ export interface CursorSpritesState {
   busy: BusySpec | null;
   /** Decoded `busy_NN.png` frames when the pack ships them, empty otherwise. */
   busyFrames: HTMLImageElement[];
+  /** The pack's `material` (`"glass"` or null) - what the preview needs to draw a lens pack's
+   *  sprite at the same alpha the export blits it at. */
+  material: string | null;
   /** The recording's captured OS-cursor layer, decoded - null when it has none, or when the
    *  live style is not "system" (the caller decides; see Stage). */
   captured: CapturedLayer | null;
@@ -27,6 +30,7 @@ export function useCursorSprites(
     canvasH: new Map(),
     busy: null,
     busyFrames: [],
+    material: null,
     captured: null,
   });
   // Callers (Stage) pass an inline `() => { dirtyRef.current = true; }` that's a new function
@@ -56,7 +60,9 @@ export function useCursorSprites(
     const busyFrames = (cursorPack?.busy_frames ?? []).map((f) => decode(f.url));
     const busy = cursorPack?.busy ?? null;
 
-    spritesRef.current = { ...spritesRef.current, sprites, hots, canvasH, busy, busyFrames };
+    const material = cursorPack?.material ?? null;
+
+    spritesRef.current = { ...spritesRef.current, sprites, hots, canvasH, busy, busyFrames, material };
   }, [cursorPack]);
 
   // The captured layer decodes on its OWN effect: it is a property of the recording (fetched once

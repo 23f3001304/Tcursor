@@ -13,20 +13,22 @@
      4. 24px is the floor for anything you can click, drag or type into (usability pass,
         2026-09-13). The readout button, its edit field, the slider's own hit strip and the switch
         track were all 19-23px and are now 24; nothing in this sheet is smaller. */
-.editor {
-  /* The hover step above --e-raised. Same 3-4% lightness jump the elevation system already uses
-     between --e-surface and --e-surface-alt, so hover reads as "one plane up", not as a tint. */
-  --e-raised-hi: #232327;
-}
+/* The hover step above --e-raised (`--e-raised-hi`) is the same 3-4% lightness jump the elevation
+   system uses between --e-surface and --e-surface-alt, so hover reads as "one plane up", not as a
+   tint. It is declared with the rest of the palette in editor.css - one per theme, since "up" from
+   an already-white light --e-raised is a step DOWN in lightness. */
 
 /* ---- Slider ------------------------------------------------------------------------------
    The rail is a groove (one plane DOWN, --e-bg) so the filled part reads as substance in a
    channel rather than a bar on a bar; the thumb is the only raised thing and carries the shadow. */
-.e-slider-rail { width: 100%; height: 4px; border-radius: 999px; background: var(--e-bg); position: relative; }
+/* Inset by half the 14px thumb on each side (Slider.tsx's THUMB mirrors the number for its pointer
+   math), so a thumb parked at 0 or at the maximum sits inside the control instead of half over the
+   panel's edge, where an `overflow: hidden` ancestor clipped it (owner's screenshots, 2026-09-14). */
+.e-slider-rail { width: calc(100% - 14px); margin: 0 7px; height: 4px; border-radius: 999px; background: var(--e-bg); position: relative; }
 .e-slider-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; }
 .e-slider-thumb { position: absolute; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px;
   border-radius: 50%; background: var(--e-fg); border: none;
-  box-shadow: 0 1px 2px rgba(0,0,0,.5), 0 2px 8px rgba(0,0,0,.35); }
+  box-shadow: var(--e-shadow-thumb); }
 
 /* ---- Slider readout (SliderValue.tsx) ------------------------------------------------------
    Name left, value right, on the label's own row. The value is a button until clicked, then an
@@ -70,7 +72,13 @@
   transition: background-color .14s ease; }
 .e-picker-btn > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .e-picker-btn:hover { background: var(--e-raised-hi); }
-.e-picker-menu { background: var(--e-raised); border-radius: var(--e-r); box-shadow: var(--e-shadow-2); }
+/* The menu is PORTALLED to the editor root and positioned in viewport coordinates by
+   `popoverPlace.ts` (`Picker.tsx` writes `left`/`top`/`width` inline), so it can open near the foot
+   of a scrolling panel, inside `.e-panel-slot` or inside the inspector column - all three used to
+   clip it - and flips upward when the window has no room below. z-index has to clear the modals
+   (100): three dialogs hold Pickers of their own. */
+.e-picker-menu { background: var(--e-raised); border-radius: var(--e-r); box-shadow: var(--e-shadow-2);
+  z-index: 130; }
 .e-picker-opt { position: relative; width: 100%; min-height: 30px; box-sizing: border-box; padding: 6px 8px 6px 12px;
   display: flex; align-items: center; background: transparent; color: var(--e-mut); border: none;
   border-radius: 7px; cursor: pointer; font-family: inherit; font-size: 12.5px; font-weight: 500;
@@ -96,8 +104,8 @@
 .sw.on { background: var(--e-primary); }
 .sw:disabled { opacity: .45; cursor: default; }
 .sw-thumb { position: absolute; width: 17px; height: 17px; border-radius: 50%; background: var(--e-fg);
-  box-shadow: 0 1px 2px rgba(0,0,0,.45); }
-.sw.on .sw-thumb { background: #fff; }
+  box-shadow: var(--e-shadow-sw); }
+.sw.on .sw-thumb { background: var(--e-on-fill); }
 
 /* ---- NumberField ---------------------------------------------------------------------------- */
 .e-numfield { display: flex; align-items: center; background: var(--e-raised); border: none;
@@ -115,7 +123,7 @@
    the accent, because these buttons ARE colours (see rule 2 at the top of this file). */
 .e-preset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(34px, 1fr)); gap: 8px; }
 .e-preset-circle, .e-accent-circle, .e-swatch-sm { border: none; outline: none; padding: 0; cursor: pointer;
-  border-radius: 50%; box-shadow: var(--e-inset-hi), 0 1px 2px rgba(0,0,0,.4);
+  border-radius: 50%; box-shadow: var(--e-inset-hi), var(--e-shadow-dot);
   transition: transform .14s ease, box-shadow .14s ease; }
 .e-preset-circle { width: 100%; aspect-ratio: 1; }
 .e-accent-circle, .e-swatch-sm { width: 24px; height: 24px; }
@@ -124,6 +132,11 @@
 .e-preset-circle.on, .e-accent-circle.on, .e-swatch-sm.on {
   box-shadow: 0 0 0 2px var(--e-surface), 0 0 0 4px var(--e-fg); }
 .e-accent-list, .e-swatch-row { display: flex; flex-wrap: wrap; gap: 10px; }
+/* Inside a two-up column (`.e-two`, ~139px at the 320px panel) five 24px dots at a 10px gap are
+   160px, so the fifth wrapped alone under the row (owner's screenshot, 2026-09-14): 22px dots at
+   6px are 134px and the row stays one line. */
+.e-two .e-swatch-row { gap: 6px; }
+.e-two .e-swatch-sm { width: 22px; height: 22px; }
 .e-swatch-sm:disabled { opacity: .4; cursor: default; }
 
 /* ---- ColorInput -----------------------------------------------------------------------------
@@ -133,49 +146,12 @@
 .e-colorpick input[type="color"] {
   width: 34px; height: 34px; padding: 0; cursor: pointer; background: none; border: none;
   border-radius: var(--e-r-sm);
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,.14), 0 1px 2px rgba(0,0,0,.4);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--e-step) 14%, transparent), var(--e-shadow-dot);
   transition: transform .14s ease; }
 .e-colorpick:hover input[type="color"] { transform: translateY(-1px); }
 .e-colorpick input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
 .e-colorpick input[type="color"]::-webkit-color-swatch { border: none; border-radius: 7px; }
 .e-colorpick span { font-size: 11px; font-weight: var(--e-text-hint-weight); color: var(--e-dim); }
-
-/* ---- TileRow (TileRow.tsx) -------------------------------------------------------------------
-   A preset library as ONE scrolling strip per group instead of a wrapping grid. The 4px scrollbar
-   lane is reserved at ALL times and only its thumb fades in on hover: growing the scrollbar on
-   hover would shove every tile up 4px, which is exactly the kind of twitch this pass is removing.
-   The row scrolls, never the panel - `overscroll-behavior-x: contain` stops a fling at the end of
-   a strip from turning into a page scroll. */
-.e-tilerow-wrap { display: flex; flex-direction: column; min-width: 0; }
-.e-tilerow-label { font-size: 11px; line-height: 1; font-weight: 500; color: var(--e-dim);
-  margin: 0 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* `.e-tile-strip` (panels.css, the cursor packs) is the same idiom at a bigger tile, so it shares
-   every rule here that is about the SCROLLER rather than the tile. */
-.e-tilerow, .e-tile-strip { display: flex; overflow-x: auto; overflow-y: hidden;
-  overscroll-behavior-x: contain; scroll-snap-type: x mandatory;
-  scrollbar-width: thin; scrollbar-color: transparent transparent; }
-.e-tilerow { gap: 6px; }
-.e-tilerow:hover, .e-tile-strip:hover { scrollbar-color: var(--e-mut) transparent; }
-.e-tilerow::-webkit-scrollbar, .e-tile-strip::-webkit-scrollbar { height: 4px; }
-.e-tilerow::-webkit-scrollbar-track, .e-tile-strip::-webkit-scrollbar-track { background: transparent; }
-.e-tilerow::-webkit-scrollbar-thumb, .e-tile-strip::-webkit-scrollbar-thumb {
-  background: transparent; border-radius: 999px; transition: background-color .14s ease; }
-.e-tilerow:hover::-webkit-scrollbar-thumb, .e-tile-strip:hover::-webkit-scrollbar-thumb { background: var(--e-mut); }
-/* Same card language as `.e-tile` (panels.css): a raised plane, one lightness step on hover, a 2px
-   inset accent ring when chosen, and never a tint or dim over the tile's own picture. */
-.e-rowtile { position: relative; flex: none; width: 64px; height: 36px; padding: 0; border: none;
-  border-radius: var(--e-r-sm); background: var(--e-raised); overflow: hidden; cursor: pointer;
-  outline: none; scroll-snap-align: start;
-  transition: background-color .14s ease, box-shadow .14s ease; }
-.e-rowtile:hover { background: var(--e-raised-hi); }
-.e-rowtile.on { box-shadow: inset 0 0 0 2px var(--e-primary); }
-.e-rowtile:focus-visible { box-shadow: inset 0 0 0 2px var(--e-fg); }
-.e-rowtile.on:focus-visible { box-shadow: inset 0 0 0 2px var(--e-primary), inset 0 0 0 4px var(--e-fg); }
-.e-rowtile-cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 9px 4px 3px;
-  font-size: 10px; line-height: 1.1; font-weight: 500; color: #fff; text-align: center;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; opacity: 0;
-  background: linear-gradient(180deg, rgba(0,0,0,0), rgba(0,0,0,.74)); transition: opacity .14s ease; }
-.e-rowtile:hover .e-rowtile-cap, .e-rowtile:focus-visible .e-rowtile-cap { opacity: 1; }
 
 /* ---- Disclosure (Disclosure.tsx) --------------------------------------------------------------
    One per panel, at its end. No plane and no rule above it: a dim word at section-heading weight,

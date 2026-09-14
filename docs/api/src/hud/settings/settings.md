@@ -119,6 +119,27 @@ Holds one `ModeAppearance` for each of the five layout modes. The keys match `Mo
 - `src/hud/settings/settings.ts` - `Settings.appearance`
 - `src/hud/preferences/appearanceFields.ts` - `DEFAULT_APPEARANCE`
 - `src/hud/settings/SettingsAppearance.tsx` - indexed by the active `ModeKey`
+- `src/editor/panels/LayoutsPanel.tsx` - indexed by the picked layout, and snapshotted whole into a `LayoutPreset`
+
+## LayoutPreset
+
+```ts
+export interface LayoutPreset { id: string; name: string; appearance: AppearanceSettings }
+```
+
+One saved "look" - a name plus a snapshot of **all five** layouts' appearance. Wire form of Rust's `LayoutPreset` (`src-tauri/src/settings/model.rs`).
+
+- `id: string` - opaque and stable (`lp1`, `lp2`, ... - `nextPresetId` in `src/editor/panels/layoutPresets.ts`). Renaming changes `name` only, so a row keeps its identity across a rename.
+- `name: string` - what the user typed, trimmed. Unique case-insensitively across the list AND the built-in "Default" row (`presetNameError`), and capped at 40 characters so a row never has to ellipsise at 320px.
+- `appearance: AppearanceSettings` - all five layouts at once. A look is deliberately not per-layout: a coherent look is the relationship BETWEEN the layouts a recording cuts among, and applying one is therefore a single write of `settings.appearance`.
+
+Global by design: presets live in the app config, not in a recording's `edit.json`, which is what lets the Layouts panel apply the same look to a project recorded months later.
+
+### Used by
+
+- `src/hud/settings/settings.ts` - `Settings.layout_presets`
+- `src/editor/panels/layoutPresets.ts` - `BUILTIN_PRESET` and the four list helpers
+- `src/editor/panels/LayoutPresetList.tsx` - one row per entry
 
 ## ThemeMode
 
@@ -137,7 +158,7 @@ Controls the HUD color scheme. `"system"` defers to the OS `prefers-color-scheme
 ## InterfaceSettings
 
 ```ts
-export interface InterfaceSettings { theme: ThemeMode; accent: [number, number, number]; animated_brand: boolean }
+export interface InterfaceSettings { theme: ThemeMode; accent: [number, number, number]; animated_brand: boolean; interface_effects: boolean }
 ```
 
 General UI appearance settings.
@@ -145,12 +166,14 @@ General UI appearance settings.
 - `theme: ThemeMode` - color scheme selection.
 - `accent: [number, number, number]` - RGB triplet (0-255) for the accent color applied as `--accent`. *Why a tuple:* compact JSON representation; formatted to `rgb()` at display time by `applyTheme`.
 - `animated_brand: boolean` (Task 39) - the living-brand feel knob: whether `TcursorMark` (`src/lib/TcursorMark.tsx`) flows/pulses for its recording/exporting/directing states, in the HUD titlebar and the editor's `TopBar`. `false` and the OS `prefers-reduced-motion` both fall the mark back to its static idle rendering (the setting and the OS preference are independent gates - either alone is enough to disable the animation).
+- `interface_effects: boolean` (micro-interaction pass, 2026-09-14) - the editor's own micro-interactions: the click ripple under every pointerdown in the chrome, and the magnetic pull the Play button and the Trim pills exert on a nearby pointer (`src/editor/effects/`). Mirrors Rust `InterfaceSettings::interface_effects`, which defaults it `true` so a config written before the field existed still loads with the feature on. Off, the ripple overlay unmounts entirely and the magnetic hook adds no listener; `prefers-reduced-motion` is an independent gate, as with `animated_brand`. Nothing here reaches the **export** - the recording's own click effects are `ClickFxSettings`.
 
 ### Used by
 
 - `src/hud/settings/settings.ts` - `Settings.ui`
 - `src/hud/preferences/applyTheme.ts` - consumes `theme`/`accent`
-- `src/hud/settings/SettingsInterface.tsx` - renders theme, accent, and (Task 39) the animated-brand switch
+- `src/hud/settings/SettingsInterface.tsx` - renders theme, accent, the animated-brand switch (Task 39) and the interface-effects switch
+- `src/editor/effects/InterfaceEffects.tsx` - reads `interface_effects` through `getSettings()` on mount and on every window focus
 - `src/hud/Hud.tsx` - reads `animated_brand` (mirrored into its own `animatedBrand` state) to gate the titlebar mark
 - `src/editor/Editor.tsx` - reads `doc.settings.ui.animated_brand` to gate `TopBar`'s `brandState`
 
@@ -176,6 +199,7 @@ export interface CursorSettings {
   smoothness: number;
   path_idealize: number;
   motion_blur: number;
+  tilt: number;
   click_bounce: boolean;
   bounce_intensity: number;
   pack: string;
@@ -189,6 +213,7 @@ Cursor rendering and animation parameters. Mirrors the Rust `CursorSettings` (`s
 - `smoothness: number` - 0..1 strength of motion smoothing applied to the raw recorded cursor path (default `0.6`). *Why:* raw OS cursor samples can be jittery; smoothing trades a touch of positional lag for a calmer glide, independent of the stronger reshaping `path_idealize` does below.
 - `path_idealize: number` - 0..1 strength of straightening wandering paths into clean eased strokes between clicks (`0` = raw path, the default; `1` = fully idealized). Mirrors Rust `CursorSettings::path_idealize`; see `Cursor::set_idealize` (`src-tauri/src/export/cursor/mod.rs`) for the anchor-easing mechanism. *Why a separate knob from `smoothness`:* smoothing damps jitter without changing the path's shape, while idealizing reshapes the path itself into deliberate strokes - part of the broader design direction of idealizing UI motion (cursor glide, agentic AI reveals) for a more premium, intentional feel, which needs its own strength dial rather than riding on the jitter-smoothing one.
 - `motion_blur: number` - strength of the motion-blur trail (0 = off).
+- `tilt: number` - 0..1 motion lean (default `0.35`): how far a fast cursor tips into its own travel, and overshoots once coming back upright when it stops. Scales the 6-degree cap; `0` switches the filter off. Mirrors Rust `CursorSettings::tilt` (`src-tauri/src/settings/cursor.rs`); the live preview computes the same angle through `src/editor/stage/cursorTilt.ts`, pinned against Rust's own five instants. *Why a separate knob from `motion_blur`:* the trail says where the cursor has been, the lean says how hard it is being thrown - a user who wants one rarely wants both at full strength.
 - `click_bounce: boolean` - whether a spring-bounce animation plays on click.
 - `bounce_intensity: number` - magnitude of the bounce when `click_bounce` is true.
 - `pack: string` - selected cursor sprite pack id. `"default"` is the built-in set (byte-identical to before this field existed); any other value is an imported pack's id (`CursorPackInfo.id` from `listCursorPacks`/`importCursorPack` in `src/lib/ipc.ts`).
@@ -196,8 +221,8 @@ Cursor rendering and animation parameters. Mirrors the Rust `CursorSettings` (`s
 ### Used by
 
 - `src/hud/settings/settings.ts` - `Settings.cursor`
-- `src/hud/settings/SettingsCursor.tsx` - renders style/size/blur/bounce controls (not `pack`, `smoothness`, or `path_idealize` - those are editor-only, see `CursorPanel`)
-- `src/editor/panels/CursorPanel.tsx` - renders the pack picker + import button, plus the `smoothness`/`path_idealize` sliders, in addition to the same style/size/blur/bounce controls
+- `src/hud/settings/SettingsCursor.tsx` - renders style/size/blur/tilt/bounce controls (not `pack`, `smoothness`, or `path_idealize` - those are editor-only, see `CursorPanel`)
+- `src/editor/panels/CursorPanel.tsx` - renders the pack picker + import button, plus the `smoothness`/`path_idealize` sliders, in addition to the same style/size/blur/tilt/bounce controls
 
 ## ClickFxStyle
 
@@ -425,6 +450,7 @@ export interface Settings {
   audio_mic_volume: number;
   audio_sys_volume: number;
   ai_model: string;
+  layout_presets: LayoutPreset[];
 }
 ```
 
@@ -440,9 +466,23 @@ Top-level interface aggregating all settings groups. Serialized to/from JSON by 
 - `background: BackgroundSettings` - the recording's background (mesh/solid/gradient) and its blur.
 - `audio_mic_volume` / `audio_sys_volume: number` - per-source playback gain (0..1) for the mixed preview/export audio, set by the editor's Audio panel.
 - `ai_model: string` - the user's chosen Ollama model override for the AI director (`""` = no explicit choice; the backend picks an installed model itself). Set by `AiPanel`'s Engine picker.
+- `layout_presets: LayoutPreset[]` - the user's saved layout looks, newest last. Serde-defaulted on the Rust side, so a config written before presets existed arrives as `[]`. The editor's Layouts panel is the only reader and writer; it read-modify-writes the whole `Settings` so every other field here survives a preset edit.
+
+**Note on `EditDoc.settings`.** `Settings` is also the shape of a recording's `edit.json` settings block, so `layout_presets` technically rides along in every project file (serialized as `[]` unless a doc was seeded from a config that had looks in it). Nothing reads it from there: the panel always asks `get_settings` for the library, precisely so a look is global and a project carries only the look it was GIVEN, not the library it came from.
 
 ### Used by
 
 - `src/hud/Hud.tsx` - top-level settings state
 - `src/lib/ipc.ts` - `getSettings` and `setSettings` IPC wrappers
 - `src/lib/edit.ts` - passed to the edit pipeline (`EditDoc.settings`)
+- `src/editor/panels/LayoutsPanel.tsx` - reads and writes the whole object for `layout_presets` and the global `appearance` default
+
+## CursorBackStyle
+
+```ts
+export type CursorBackStyle = "none" | "glass";
+```
+
+The glass shape drawn BEHIND the cursor, whatever pack it comes from - the wire mirror of Rust `settings::cursor::CursorBack`. `"none"` is the original look; `"glass"` adds a refracting disc that morphs by cursor kind (a horizontal pill over text, stretching into a selection bar while the left button is held there).
+
+Independent of the pack's own `material`: a plain pack can have a glass back, and a glass pack can have none. Carried on `CursorSettings.back`, edited by `CursorPanel.tsx` (a `Picker`) and `SettingsCursor.tsx` (a segment), and read by the preview through `DrawCursor.back`.

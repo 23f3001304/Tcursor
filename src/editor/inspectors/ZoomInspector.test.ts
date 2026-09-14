@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { CAM_ACTION_OPTIONS, isCamActionSelected, targetForMode, targetMode, zoomScopedSeekMs } from "./ZoomInspector";
+import { CAM_ACTION_OPTIONS, durationOptions, isCamActionSelected, targetForMode, targetMode, zoomScopedSeekMs } from "./ZoomInspector";
 import type { EditOp } from "../../lib/edit";
 
 describe("zoom target modes (T31 - Region targets)", () => {
@@ -82,5 +82,12 @@ describe("zoomScopedSeekMs (gate finding - zoom-scoped controls seek discoverabi
 
   it("rounds a non-integer midpoint to the nearest ms", () => {
     expect(zoomScopedSeekMs(0, 1000, 2001)).toBe(1501); // (1000+2001)/2 = 1500.5 -> 1501
+  });
+});
+
+describe("durationOptions (smart typing duration)", () => {
+  it("lights Fixed by default and Smart typing once the zoom is smart", () => {
+    expect(durationOptions(false).map((o) => [o.key, o.on])).toEqual([["fixed", true], ["smart", false]]);
+    expect(durationOptions(true).map((o) => [o.key, o.on])).toEqual([["fixed", false], ["smart", true]]);
   });
 });

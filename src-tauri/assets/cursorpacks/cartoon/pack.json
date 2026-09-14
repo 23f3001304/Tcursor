@@ -1,6 +1,7 @@
 {
   "id": "cartoon",
   "name": "Cartoon",
+  "category": "Playful",
   "version": 2,
   "builtin": true,
   "busy": {

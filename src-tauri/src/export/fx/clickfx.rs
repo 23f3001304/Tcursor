@@ -16,13 +16,31 @@ pub fn hits_at(events: &[MouseEvent], et: u32, life_ms: u32) -> Vec<Hit> {
         .collect()
 }
 
-/// Ripple ring radius (output px) at `progress`, growing to `r_max`.
-pub fn ripple_radius(progress: f32, r_max: f32) -> f32 { progress.clamp(0.0, 1.0) * r_max }
-
-/// Effect opacity at `progress` (fades out), scaled by the user intensity.
-pub fn fade_alpha(progress: f32, intensity: f32) -> f32 {
-    (1.0 - progress).clamp(0.0, 1.0) * intensity.clamp(0.0, 1.0)
+/// `smoothstep(e0, e1, x)`, the GPU builtin, for the CPU + timing helpers below.
+pub fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
+    let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
 }
+
+/// Shared radius easing for EVERY click style: ease-out cubic `1 - (1-p)^3`. Mirrored by
+/// `fx_clicks.wgsl::fx_ease` and `ripplePreview.ts::easeOut`. *Why not linear:* a linearly
+/// growing ring reads as a widget animating; an eased one leaves the click fast and settles,
+/// which is what an impact looks like.
+pub fn ease_out(progress: f32) -> f32 {
+    let q = 1.0 - progress.clamp(0.0, 1.0);
+    1.0 - q * q * q
+}
+
+/// Shared opacity for EVERY click style: full for the first 55% of the life, then a smoothstep
+/// release to 0. Mirrored by `fx_clicks.wgsl::fx_alpha` and `ripplePreview.ts::rippleAlpha`.
+/// *Why not the old linear `1 - p`:* the effect was already half gone at mid-life, so it read as
+/// a fade rather than a hit, and it still had visible alpha at the very last frame (a pop-off).
+pub fn fade_alpha(progress: f32, intensity: f32) -> f32 {
+    (1.0 - smoothstep(0.55, 1.0, progress.clamp(0.0, 1.0))) * intensity.clamp(0.0, 1.0)
+}
+
+/// Ripple ring radius (output px) at `progress`, easing out to `r_max`.
+pub fn ripple_radius(progress: f32, r_max: f32) -> f32 { ease_out(progress) * r_max }
 
 #[cfg(test)]
 mod tests {
@@ -49,11 +67,41 @@ mod tests {
         assert!(h.is_empty());
     }
 
+    /// The five points `ripplePreview.ts`'s own test pins, so a drift in either mirror is caught.
     #[test]
-    fn radius_grows_and_alpha_fades() {
+    fn ease_out_is_pinned_at_five_points() {
+        for (p, want) in [(0.0, 0.0), (0.25, 0.578125), (0.5, 0.875), (0.75, 0.984375), (1.0, 1.0)] {
+            assert!((ease_out(p) - want).abs() < 1e-6, "ease_out({p}) = {} want {want}", ease_out(p));
+        }
+    }
+
+    #[test]
+    fn ease_out_clamps_outside_the_life() {
+        assert_eq!(ease_out(-1.0), 0.0);
+        assert_eq!(ease_out(2.0), 1.0);
+    }
+
+    /// Same five points, mirrored by `ripplePreview.ts`. The tail starts at 0.55, so the first
+    /// three are exactly the intensity and the last is exactly 0.
+    #[test]
+    fn fade_alpha_is_pinned_at_five_points() {
+        for (p, want) in [(0.0, 1.0), (0.25, 1.0), (0.5, 1.0), (0.75, 0.582990_4), (1.0, 0.0)] {
+            let got = fade_alpha(p, 1.0);
+            assert!((got - want).abs() < 1e-5, "fade_alpha({p}) = {got} want {want}");
+        }
+    }
+
+    #[test]
+    fn fade_alpha_scales_by_intensity_and_clamps() {
+        assert!((fade_alpha(0.5, 0.5) - 0.5).abs() < 1e-6); // inside the hold -> intensity itself
+        assert_eq!(fade_alpha(-1.0, 2.0), 1.0);             // both inputs clamped
+        assert_eq!(fade_alpha(2.0, 1.0), 0.0);
+    }
+
+    #[test]
+    fn radius_eases_out_to_the_max() {
         assert!((ripple_radius(0.0, 100.0)).abs() < 1e-6);
         assert!((ripple_radius(1.0, 100.0) - 100.0).abs() < 1e-6);
-        assert!(fade_alpha(0.0, 1.0) > fade_alpha(0.9, 1.0));
-        assert!((fade_alpha(0.5, 0.5) - 0.25).abs() < 1e-6); // (1-0.5)*0.5
+        assert!((ripple_radius(0.5, 100.0) - 87.5).abs() < 1e-4); // eased, not the linear 50
     }
 }

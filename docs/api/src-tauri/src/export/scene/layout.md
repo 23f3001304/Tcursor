@@ -123,26 +123,27 @@ fn successor(&self, end_ms: u32) -> (Scene, bool)
 
 What a segment hands off to at its `end_ms` - the next segment if the two are gapless, else the base `screen` - plus whether that successor's OWN entry blend is still running at that instant. The `bool` is the overlap rule: `true` means the successor's entry wins and the exit must not run.
 
-## anchor_regions
+## anchor_frame
 
 ```rust
-pub fn anchor_regions(raw: Vec<ZoomRegion>, track: &LayoutTrack, sw: u32, sh: u32) -> Vec<ZoomRegion>
+pub fn anchor_frame(raw: &[ZoomRegion], scene: &Scene, out: &mut Vec<ZoomRegion>)
 ```
 
-Re-anchors each zoom region into the screen panel coordinate system that is active at the region's start time.
+Re-anchors every zoom region into THIS frame's screen panel, writing the result into `out` - a scratch buffer the caller keeps (`FrameRenderer::frame_regions`), so a 60 fps walk allocates nothing. Each region is re-anchored with `to_panel(anchor, scene.src, scene.screen.rect)`: the panel a region anchors into AND the crop rect it anchors through (a mid-take display switch's fitted sub-rect) both come from the frame's own resolved scene.
+
+**Why per frame, not per region (2026-09-14).** This used to be `anchor_regions`, run once per region at the region's `start_ms` on the assumption that layouts do not change mid-zoom. They do - a layout segment boundary, an arrangement, a display switch - and when the panel moved out from under a pinned aim the camera kept zooming into where the content HAD been, which the owner reported as the layout going haywire mid-zoom. Anchoring from the frame's scene carries the aim with the panel; `CameraSim`'s own follow damping turns the moving target into a smooth pan.
 
 ### Inputs
 
-- `raw: Vec<ZoomRegion>` - zoom regions with screen-local anchors (from `autozoom::generate` or `manual::from_actions`). *Why:* those modules produce anchors in full-screen coordinates; the renderer needs them relative to the screen panel rect, which varies by layout.*
-- `track: &LayoutTrack` - the layout track for the current export. *Why:* `track.scene_at(r.start_ms)` yields the screen panel rect at the moment each zoom begins. Both sides of that call are output time (a zoom's `start_ms` and the track's segments), so the panel looked up really is the one active when the zoom fires.*
-- `sw: u32`, `sh: u32` - source screen dimensions. *Why:* `to_panel` uses these to normalize the anchor into the panel rect.*
-
-### Returns
-
-`Vec<ZoomRegion>` - same regions with `anchor` remapped to panel-local coordinates; all other fields unchanged.
+- `raw: &[ZoomRegion]` - zoom regions with RAW canvas-space anchors (`fromedit::regions_from_doc`, ultimately `autozoom::generate` / `manual::from_actions` / the doc's `Fixed` targets). *Why:* those produce anchors in full-canvas coordinates; the camera needs them in output px relative to the screen panel, which varies by layout and by frame.*
+- `scene: &Scene` - the frame's resolved scene (`SpanTrack::frame_at` in `step_camera`), whose `screen.rect` and `src` place the anchor.
+- `out: &mut Vec<ZoomRegion>` - cleared and refilled, same length and order as `raw` (`CameraSim` keeps a driver INDEX across frames, so the order must not change).
 
 ### Implementation
 
-1. For each region `r`, get `panel = track.scene_at(r.start_ms).screen.rect`.
-2. Call `to_panel(r.anchor, sw, sh, panel)` -> new anchor.
-3. Return `ZoomRegion { anchor: panel_anchor, ..r }`. *Why at `start_ms`:* the zoom anchors at the layout active when it begins; layouts do not change mid-zoom.*
+1. `out.clear()`.
+2. For each region `r`, push `ZoomRegion { anchor: to_panel(r.anchor, scene.src, scene.screen.rect), ..*r }`.
+
+### Behaviors (`layout_tests.rs`)
+
+- `anchor_frame_follows_the_panel_frame_by_frame` - the same raw anchor lands at the panel's centre for a full-frame panel and at the centre of a half-size, offset panel when that is the frame's scene; the buffer is reused between calls.

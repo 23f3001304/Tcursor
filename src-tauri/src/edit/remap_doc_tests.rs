@@ -13,7 +13,7 @@ fn spot(id: &str, start_ms: u32, end_ms: u32) -> EffectRegion {
 fn regions_move_to_the_output_clock_and_keep_their_durations() {
     let mut d = EditDoc::default();
     d.zooms.push(Zoom { id: "z0".into(), start_ms: 2200, end_ms: 3200, target: ZoomTarget::Cursor, scale: 2.0, easing: "smooth".into(),
-        zoom_in_ms: 350, zoom_out_ms: 450, layer: 0, cam_action: None });
+        zoom_in_ms: 350, zoom_out_ms: 450, layer: 0, cam_action: None, smart_typing: false });
     let r = remap_doc(&d, &map());
     assert_eq!((r.zooms[0].start_ms, r.zooms[0].end_ms), (700, 1350));
     assert_eq!((r.zooms[0].zoom_in_ms, r.zooms[0].zoom_out_ms), (350, 450));
@@ -36,7 +36,7 @@ fn camera_moves_map_their_time_and_the_consumed_fields_are_cleared() {
     d.trim = Trim { in_ms: 500, out_ms: 9000 };
     d.cuts.push(Cut { id: "c0".into(), start_ms: 1000, end_ms: 2000 });
     d.speed.push(Speed { id: "s0".into(), start_ms: 2500, end_ms: 3500, factor: 2.0 });
-    d.camera_moves.push(CameraMove { id: "m0".into(), t_ms: 1500, x: 0.5, y: 0.5, size: 0.3, easing: "smooth".into() });
+    d.camera_moves.push(CameraMove { id: "m0".into(), t_ms: 1500, x: 0.5, y: 0.5, size: 0.3, easing: "smooth".into(), shape: "layout".into(), roundness: DEFAULT_CAM_ROUNDNESS });
     let r = remap_doc(&d, &map());
     assert_eq!(r.camera_moves[0].t_ms, 500);
     assert_eq!(r.trim, Trim::default());

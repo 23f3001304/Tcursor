@@ -38,7 +38,12 @@ pub fn apply_edit_op(folder: String, op: EditOp) -> Result<EditDoc, String> {
     let lock = crate::edit::lock::doc_lock(&p);
     let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
     let mut doc = crate::edit::seed_lock::load_or_seed_locked(&p, precomputed_default, shift, true_dur);
-    crate::edit::ops::api::apply(&mut doc, op);
+    crate::edit::ops::api::apply(&mut doc, op.clone());
+    // A smart-typing zoom refits its end after the op (see `ops::smart_zoom`): when it is switched
+    // on, and whenever its start moves. Every other op leaves every zoom exactly as it set it.
+    if let EditOp::UpdateZoom { id, start_ms, smart_typing, .. } = &op {
+        if start_ms.is_some() || *smart_typing == Some(true) { crate::edit::ops::smart_zoom::refit(&mut doc, id, &p); }
+    }
     doc.save(&p.edit()).map_err(|e| e.to_string())?;
     Ok(doc)
 }

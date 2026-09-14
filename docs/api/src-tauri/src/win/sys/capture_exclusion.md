@@ -17,15 +17,15 @@ Sets the Win32 `SetWindowDisplayAffinity` flag on a window: `WDA_EXCLUDEFROMCAPT
 
 ### Returns
 
-`bool` - `true` if `SetWindowDisplayAffinity` succeeded (`is_ok()` on the `WIN32_ERROR` result); `false` on any failure (insufficient privilege, invalid handle, OS too old) or on non-Windows.
+`bool` - `true` only if `SetWindowDisplayAffinity` succeeded AND `GetWindowDisplayAffinity` then reads back the requested affinity; `false` on any failure (insufficient privilege, invalid handle, OS too old), on a read-back that disagrees, or on non-Windows. Read back rather than trusted since 2026-09-14: the owner saw the take pill in a display capture although the flag had been set at startup, so the HUD now re-applies it after every window morph (`morph.ts` `keepHidden`) and this function reports the truth each time.
 
 ### Implementation
 
 1. (Windows only) Choose `WDA_EXCLUDEFROMCAPTURE` if `exclude` else `WDA_NONE`.
 2. Reconstruct `HWND` by casting `hwnd as *mut _` and call `SetWindowDisplayAffinity(HWND(...), affinity)`. *Why unsafe:* a raw Win32 API; Tauri's `hwnd()` is a valid `HWND` from the same process, so the cast is sound.
-3. Return `.is_ok()`. (non-Windows) Return `false` unconditionally.
+3. Read the affinity back with `GetWindowDisplayAffinity`; the result is `set_ok && read_ok && have == want`. A mismatch is logged to stderr as `capture exclusion: wanted ..., window has ...` so a dev console shows exactly when Windows dropped it. (non-Windows) Return `false` unconditionally.
 
 ### Used by
 
 - `src-tauri/src/lib.rs` (`run` setup) - excludes the HUD at startup via `set_capture_exclusion(hwnd, true)`, gated by the compile-time `CAPTURE_EXCLUDE` constant (default `true`).
-- `src-tauri/src/commands.rs` (`set_capturable`) - the runtime toggle the editor calls to opt the window back into capture.
+- `src-tauri/src/commands.rs` (`set_capturable`) - the runtime toggle the editor calls to opt the window back into capture, and the HUD calls after every window morph to opt back out (`morph.ts` `keepHidden`).

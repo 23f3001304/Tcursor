@@ -1,5 +1,4 @@
 import { IconArrowsMove } from "@tabler/icons-react";
-import { PanelHeader } from "../panels/PanelHeader";
 import type { EditDoc, EditOp, LayoutSeg } from "../../lib/edit";
 import type { LayoutPresetName, LayoutPresets } from "../../lib/ipc";
 import { NumberField, Switch } from "../controls/Controls";
@@ -7,7 +6,7 @@ import { resolvedPanelsFor } from "../timeline/layoutTrack";
 import { LayoutThumb } from "../timeline/LayoutThumb";
 import { poseOfRect, setArrangementOp, VISIBLE_ALPHA, type PanelKind } from "../stage/arrange/arrangeMath";
 import { CurveEditor } from "./CurveEditor";
-import { Hint, InspectorShell, RemoveButton, SegRow, Section, TimingRow, secOf, spanLede } from "./InspectorShape";
+import { Hint, InspectorHeader, InspectorShell, SegRow, Section, TimingRow, secOf, spanRange } from "./InspectorShape";
 
 // "screen" is the empty default (delete a pill / leave a gap to get screen) AND the one layout the
 // timeline hides as a pill, so starting from it would make the segment being edited vanish from
@@ -53,8 +52,9 @@ export function LayoutInspector({ seg, dur, presets, arrangeOn, onApply, onArran
 
   return (
     <InspectorShell kind="layout">
-      <PanelHeader title="Layout" lede={spanLede(seg.start_ms, seg.end_ms)} closeTitle="Deselect" onClose={onClose}
-        thumb={<LayoutThumb panels={panels} w={48} h={28} />} />
+      <InspectorHeader title="Layout" range={spanRange(seg.start_ms, seg.end_ms)}
+        deleteLabel="Delete layout" onClose={onClose} thumb={<LayoutThumb panels={panels} w={40} h={23} />}
+        onDelete={() => { void onApply({ op: "remove_layout_seg", id: seg.id }); onClose(); }} />
 
       <Section title="Timing">
         <TimingRow startMs={seg.start_ms} endMs={seg.end_ms} durMs={dur}
@@ -113,8 +113,6 @@ export function LayoutInspector({ seg, dur, presets, arrangeOn, onApply, onArran
           <CurveEditor value={seg.easing_out} label="Exit Curve" onChange={(easing_out) => upd({ easing_out })} />
         )}
       </Section>
-
-      <RemoveButton label="Delete layout" onClick={() => { void onApply({ op: "remove_layout_seg", id: seg.id }); onClose(); }} />
     </InspectorShell>
   );
 }

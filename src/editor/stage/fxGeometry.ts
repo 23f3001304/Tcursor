@@ -1,4 +1,5 @@
 import type { PreviewLayout } from "../../lib/ipc";
+import { FULL_SRC, toPanelFrac } from "./sourceSpans";
 import type { FxCamRect } from "./fxOverlay";
 
 /** The pure geometry the FX overlay needs, pulled out of `useCompositeLoop`'s rAF tick so it is
@@ -18,11 +19,16 @@ export interface FxFrameGeometry {
    *  (`scene.screen.h / oh`), which is what makes the spotlight track the screen panel in every
    *  layout instead of the whole frame. */
   screenScale: number;
-  /** Screen-content point (0..1 within the screen panel, the basis `ClickSample` and the cursor
-   *  track use) -> FX-render px. Never actually returns `null`; the nullable result matches what
-   *  `requestFxOverlay`/`drawMirroredRipples` already accept so a future clipped mapping can be
-   *  dropped in without touching either caller. */
+  /** PANEL point (0..1 within the screen panel, the basis the cursor track uses - Rust already
+   *  mapped it through the active source span) -> FX-render px. Never actually returns `null`; the
+   *  nullable result matches what `requestFxOverlay`/`drawMirroredRipples` already accept so a
+   *  future clipped mapping can be dropped in without touching either caller. */
   map: (fx: number, fy: number) => [number, number] | null;
+  /** CANVAS point (0..1 of the recorded frame, the basis `ClickSample` uses) -> FX-render px:
+   *  `map` composed with the active span's crop rect, the TS mirror of Rust's `to_panel`. Identical
+   *  to `map` outside a mid-take display switch; after one, a click recorded on the switched-to
+   *  display lands on the cropped picture instead of drifting with the black bars. */
+  mapCanvas: (cx: number, cy: number) => [number, number] | null;
 }
 
 /** Build the FX-render geometry for one frame. Mirrors `drawPreview`'s whole-frame zoom crop
@@ -46,13 +52,16 @@ export function fxFrameGeometry(
   const camPxX = dx + cam.cx * dw, camPxY = dy + cam.cy * dh;
   const cx0 = Math.min(Math.max(camPxX - cw / 2, 0), Math.max(0, fxW - cw));
   const cy0 = Math.min(Math.max(camPxY - ch / 2, 0), Math.max(0, fxH - ch));
+  const src = lay?.src ?? FULL_SRC;
+  const map = (fx: number, fy: number): [number, number] => {
+    const bx = dx + fx * dw, by = dy + fy * dh; // panel-local point, pre-zoom
+    return [(bx - cx0) * fxW / cw, (by - cy0) * fxH / ch];
+  };
   return {
     fxW, fxH,
     screenScale: fxH > 0 ? dh / fxH : 1,
-    map: (fx: number, fy: number) => {
-      const bx = dx + fx * dw, by = dy + fy * dh; // panel-local point, pre-zoom
-      return [(bx - cx0) * fxW / cw, (by - cy0) * fxH / ch];
-    },
+    map,
+    mapCanvas: (cx: number, cy: number) => { const [px, py] = toPanelFrac(cx, cy, src); return map(px, py); },
   };
 }
 

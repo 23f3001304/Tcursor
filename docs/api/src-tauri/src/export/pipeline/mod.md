@@ -86,7 +86,7 @@ Owns the screen decode thread's receiving end plus the last-delivered frame (`cu
 ## ScreenPipe::spawn
 
 ```rust
-pub fn spawn(video: &Path, screen_bytes: usize, target_dims: Option<(u32, u32)>, depth: usize, out_fps: u64) -> Result<ScreenPipe>
+pub fn spawn(video: &Path, screen_bytes: usize, crop: Option<(u32, u32)>, target_dims: Option<(u32, u32)>, depth: usize, out_fps: u64) -> Result<ScreenPipe>
 ```
 
 Spawns the screen `RawDecoder` at `out_fps` (no seek, `nv12` pixel format, optional `target_dims` scale) and its decode thread. The decoder is created here rather than inside the thread so spawn errors surface immediately to the caller. Passing `out_fps` (rather than a `0.0`/native rate, like `WebcamPipe::spawn` already did) rate-converts the decode to the export's output rate, so the composite loop's 1:1 pull stays correct even when `out_fps` differs from the capture rate.
@@ -95,6 +95,7 @@ Spawns the screen `RawDecoder` at `out_fps` (no seek, `nv12` pixel format, optio
 
 - `video: &Path` - the screen recording. *Why:* the primary decode input.*
 - `screen_bytes: usize` - bytes per screen frame (nv12: `sw*sh` Y + `sw*sh/2` UV). *Why:* sizes both the pooled decode buffers and the decoder's `read_frame` assertion.*
+- `crop: Option<(u32, u32)>` - `RenderMeta::screen_crop`: the exact even crop for an odd-sized capture, passed straight to the decoder (`RawDecoder::spawn`'s `crop`). *Why:* an odd nv12 frame does not measure `screen_bytes`, and every frame after it slides (`render::meta::even_screen`).*
 - `target_dims: Option<(u32, u32)>` - optional scale target passed to the decoder (`None` = native size). *Why:* lets a caller decode straight to a smaller working size.*
 - `depth: usize` - sizes both the bounded channel and the recycled buffer pool. *Why:* provides backpressure so the decode thread stays a bounded number of frames ahead.*
 - `out_fps: u64` - the export's resolved output frame rate, passed to the decoder as `-r out_fps`. *Why:* forces ffmpeg to rate-convert the decode to the export's output rate rather than the source capture rate, so `next`'s 1:1-with-output-frames pull stays correct at any export fps (matches `WebcamPipe::spawn`'s existing `out_fps` parameter).*

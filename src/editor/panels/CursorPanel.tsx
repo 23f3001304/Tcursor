@@ -1,7 +1,8 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { PanelHeader } from "./PanelHeader";
-import type { CursorSettings, CursorStyle } from "../../hud/settings/settings";
+import type { CursorBackStyle, CursorSettings, CursorStyle } from "../../hud/settings/settings";
 import { Switch, Slider, Segmented, Disclosure } from "../controls/Controls";
+import { Picker } from "../controls/Picker";
 import { CursorPackField } from "./CursorPackField";
 
 // design/premium-pass D6: the honesty hint below pops with a style choice - a cheap opacity/y-4
@@ -22,15 +23,24 @@ const STYLE_OPTS: { value: CursorStyle; label: string; title: string }[] = [
 // Mirrors the Rust `CursorSettings::default()` (settings/model.rs) byte-for-byte, including
 // `style: "system"` - a prior bug reset to `"enhanced"` here, silently diverging from the
 // backend default every time a user pressed Reset.
+// The glass shape behind the cursor. Its own setting, not the pack's: a plain pack can have one
+// and a glass pack can go without. See Rust `settings::cursor::CursorBack`.
+const BACK_OPTS: { value: CursorBackStyle; label: string; title: string }[] = [
+  { value: "none", label: "None", title: "Nothing behind the cursor" },
+  { value: "glass", label: "Glass", title: "A refracting disc - a pill over text, stretching along a selection" },
+];
+
 export const DEFAULT_CURSOR_SETTINGS: CursorSettings = {
   style: "system",
   size: 1.0,
   smoothness: 0.6,
   path_idealize: 0.0,
   motion_blur: 0.35,
+  tilt: 0.35,
   click_bounce: true,
   bounce_intensity: 0.5,
   pack: "default",
+  back: "none",
 };
 
 /** Panel flow (panel pass): what the cursor IS (style, then which pack), how big it is, how it
@@ -82,6 +92,13 @@ export function CursorPanel({
         <>
           <CursorPackField pack={settings.pack} onPick={(id) => set("pack", id)} />
 
+          {/* Directly under the pack, because it is the other half of "what the cursor IS": the
+              pack decides the shape, this decides what sits behind it. */}
+          <div className="e-grp">
+            <span className="e-sechead">Back</span>
+            <Picker value={settings.back} options={BACK_OPTS} onChange={(v) => set("back", v)} ariaLabel="Cursor back" />
+          </div>
+
           <div className="e-grp">
             <span className="e-sechead">Size</span>
             <div className="e-field">
@@ -108,6 +125,12 @@ export function CursorPanel({
               <div className="e-field">
                 <Slider min={0.0} max={1.0} step={0.05} value={settings.motion_blur} onChange={(v) => set("motion_blur", v)} ariaLabel="Motion Trail Blur"
                   label="Motion Trail Blur" formatValue={(v) => `${v.toFixed(2)}x`} />
+              </div>
+              {/* How far a thrown cursor tips into its own travel, and overshoots once coming back
+                  upright when it stops (`export/cursor/tilt.rs`). 0 switches the filter off. */}
+              <div className="e-field">
+                <Slider min={0.0} max={1.0} step={0.05} value={settings.tilt} onChange={(v) => set("tilt", v)} ariaLabel="Motion Tilt"
+                  label="Motion Tilt" formatValue={(v) => v.toFixed(2)} />
               </div>
             </div>
 

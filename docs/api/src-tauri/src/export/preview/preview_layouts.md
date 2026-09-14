@@ -44,6 +44,7 @@ pub struct LayoutPresets {
     pub screen: LayoutPresetDto, pub camera: LayoutPresetDto, pub presenter: LayoutPresetDto,
     pub screen_only: LayoutPresetDto, pub camera_only: LayoutPresetDto,
     pub segs: Vec<SegRectDto>,
+    pub spans: Vec<SourceSpanDto>,
     pub inset_w: f32,
 }
 ```
@@ -53,6 +54,21 @@ All five `LayoutId` presets in one payload, named to match the enum (`Screen`, `
 `segs: Vec<SegRectDto>` (T34 L2) - one entry per `EditDoc.layout` segment, IN DOC ORDER, not just posed ones: a lookup by id is then a single flat scan with no special-casing "this segment was never in the list" vs. "present but plain".
 
 `inset_w: f32` (fraction of `out_w`, from `FrameRenderer::inset_w_frac`, `render/accessors.md`) - the export's fixed reference width the synthetic cursor scales against (`cursorset::draw`'s `panel` factor). NOT one of the panel rects above: a baseline independent of the active preset/arrangement, so the editor preview can shrink the cursor exactly like the export does under a custom arrangement that narrows the screen panel (`src/editor/stage/cursorPanel.ts`'s `panelFactor`).
+
+## SourceSpanDto
+
+```rust
+#[derive(serde::Serialize)]
+pub struct SourceSpanDto { pub start_ms: u32, pub src: [f32; 4], pub transition_ms: u32, pub fit: [f32; 2] }
+```
+
+One SOURCE SPAN for the editor (`export::render::spans`): from `start_ms` on the output clock, the screen panel shows `src` of the recorded canvas. A mid-take display switch keeps ONE encoder canvas and fits every later frame into it, so the recording carries baked black bars from the switch on; the render shows only the active SOURCE SPAN's rect instead (`export::render::spans`).
+
+- `src: [f32; 4]` - `[x, y, w, h]` as FRACTIONS of the recorded canvas. *Why fractions:* the stage crops a PROXY `<video>` at a different resolution from the source, so a pixel rect would be wrong there; fractions are the same rect at any resolution.
+- `transition_ms: u32` - `spans::SWITCH_MS`, how long the switch takes to ease and cross-dissolve.
+- `fit: [f32; 2]` - how much smaller that span's screen panel is than the full-canvas one on each axis (`FrameRenderer::span_fit`). *Why a ratio rather than a rect:* the panel rect depends on the active layout preset or arrangement, which the TS side already resolves; a ratio composes with whatever it resolved, so the live preview gives a switched-to display its own aspect without re-deriving any of the export's panel math. The PAUSED stage shows the export's own frame either way (`useExactFrame`), so this only has to keep the moving picture honest.
+
+A take that never switched display has exactly one entry: `start_ms` 0, `src` `[0, 0, 1, 1]`, `fit` `[1, 1]` - the identity everywhere it is applied.
 
 ## panel_dto
 

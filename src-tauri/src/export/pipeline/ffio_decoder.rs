@@ -29,7 +29,7 @@ pub struct RawDecoder {
 /// `-r`/`-vf`/`-pix_fmt` selection is unit-testable without launching ffmpeg. Mirrors the
 /// exact arg order `spawn` used to build inline via `Command::args`.
 fn decode_args(
-    video: &Path, rate: f64, input_rate: bool, seek_ms: Option<u64>,
+    video: &Path, rate: f64, input_rate: bool, seek_ms: Option<u64>, crop: Option<(u32, u32)>,
     cover_scale: Option<(u32, u32)>, target_dims: Option<(u32, u32)>, pix_fmt: &str,
 ) -> Vec<String> {
     let r = format!("{rate:.4}");
@@ -40,8 +40,15 @@ fn decode_args(
     args.push(video.to_string_lossy().into_owned());
     if rate > 0.0 && !input_rate { args.push("-r".into()); args.push(r); }
     args.push("-sws_flags".into()); args.push("fast_bilinear".into());
+    let mut vf: Vec<String> = Vec::new();
+    // An EXACT crop, never a resample, and before any scale so the scale sees even input too. Its
+    // one use is trimming an odd-sized capture (a window whose client area is 1697x955) to even
+    // dims (`render::meta::even_screen`): nv12 has no odd sizes, ffmpeg pads the chroma plane,
+    // and the frame no longer measures `w*h*3/2` bytes - so every frame read off the pipe started
+    // a fraction of a row late and the whole export slid and sheared (2026-09-14).
+    if let Some((w, h)) = crop { vf.push(format!("crop={w}:{h}:0:0")); }
     if let Some((w, h)) = target_dims {
-        args.push("-vf".into()); args.push(format!("scale={w}:{h}:flags=fast_bilinear"));
+        vf.push(format!("scale={w}:{h}:flags=fast_bilinear"));
     } else if let Some((w, h)) = cover_scale {
         // Cover-crop to a centered `w`x`h`. For the webcam that box carries the SOURCE's own
         // aspect (`render::meta::webcam_box`), so this is effectively a scale-to-fit and the
@@ -51,9 +58,9 @@ fn decode_args(
         // newer ffmpeg reject the whole filtergraph ("Option not found"), which silently zeroed
         // the webcam decode and dropped the camera from every export. The global `-sws_flags
         // fast_bilinear` above already sets the scale flags, so `crop` needs none.
-        args.push("-vf".into());
-        args.push(format!("scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"));
+        vf.push(format!("scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"));
     }
+    if !vf.is_empty() { args.push("-vf".into()); args.push(vf.join(",")); }
     // `nv12` (Y + interleaved half-res UV, ~2.6x smaller than bgra) is nvdec's native output, so
     // the screen decode skips the expensive yuv->bgra swscale AND pushes far fewer bytes through
     // the pipe (the export bottleneck); the GPU/CPU compositor does the color convert. The webcam
@@ -97,9 +104,9 @@ impl RawDecoder {
     /// `target_dims` scales output dimensions directly in FFmpeg.
     pub fn spawn(
         video: &Path, rate: f64, input_rate: bool, seek_ms: Option<u64>,
-        cover_scale: Option<(u32, u32)>, target_dims: Option<(u32, u32)>, pix_fmt: &str, frame_bytes: usize
+        crop: Option<(u32, u32)>, cover_scale: Option<(u32, u32)>, target_dims: Option<(u32, u32)>, pix_fmt: &str, frame_bytes: usize
     ) -> Result<Self> {
-        Self::spawn_args(decode_args(video, rate, input_rate, seek_ms, cover_scale, target_dims, pix_fmt), frame_bytes)
+        Self::spawn_args(decode_args(video, rate, input_rate, seek_ms, crop, cover_scale, target_dims, pix_fmt), frame_bytes)
     }
 
     /// `spawn` for a caller that builds its OWN argument list - the background stream

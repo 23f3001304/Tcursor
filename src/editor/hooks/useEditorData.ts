@@ -5,6 +5,7 @@ import type { CamSample, ClickSample, CursorPackDto, CursorKindSample, CursorLay
 import { planProxySrc } from "./editorData";
 import { debounce } from "./debounce";
 import { bgAssetUrl, type StageBg } from "../stage/stageBg";
+import { FILMSTRIP_COUNT, FILMSTRIP_HEIGHT } from "../timeline/filmstripPlan";
 
 // Trailing debounce window for the previewBg refetch below - see editor.md "render hygiene".
 const PREVIEW_BG_DEBOUNCE_MS = 80;
@@ -127,17 +128,15 @@ export function useEditorData(folder: string, rev: number, quality: number) {
     return () => { live = false; };
   }, [folder, doc?.settings.cursor.pack]);
   // Timeline media: filmstrip thumbnails, the system/mic waveform images, and the mixed audio.
-  // `wavesReady` distinguishes "still fetching" (AudioTrack shows a shimmer) from "resolved, and
-  // this project genuinely has no system/mic audio" (AudioTrack renders nothing) - `waves.system`/
-  // `waves.mic` are both `""` in EITHER case, so that state alone can't tell them apart. Thumbs
-  // don't need the same treatment: a real recording always has at least one frame, so `!thumbs.
-  // length` unambiguously means "still loading" on its own.
+  // `wavesReady` separates "still fetching" (a shimmer) from "resolved, no audio" (nothing): both
+  // `waves.*` are `""` either way. Thumbs need no such flag - a recording always has a frame.
   const [wavesReady, setWavesReady] = useState(false);
   useEffect(() => {
     let live = true;
     setWavesReady(false);
-    ensureThumbs(folder, 16).then((p) => { if (live) setThumbs(p.map(fileSrc)); }).catch(() => {});
-    Promise.all([ensureWaveform(folder, "system"), ensureWaveform(folder, "mic")])
+    ensureThumbs(folder, FILMSTRIP_COUNT, FILMSTRIP_HEIGHT).then((p) => { if (live) setThumbs(p.map(fileSrc)); }).catch(() => {});
+    // Each waveform fails alone: one bad WAV must not hide the other lane (it did, 2026-09-14).
+    Promise.all([ensureWaveform(folder, "system").catch(() => ""), ensureWaveform(folder, "mic").catch(() => "")])
       .then(([s, m]) => { if (live) setWaves({ system: s ? fileSrc(s) : "", mic: m ? fileSrc(m) : "" }); })
       .catch(() => {})
       .finally(() => { if (live) setWavesReady(true); });

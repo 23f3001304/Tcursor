@@ -128,15 +128,29 @@ Complete renderer-agnostic description of all active FX at one output frame. Bui
 - `src-tauri/src/export/fx/fxdraw.rs` - `CpuFx::apply` handles the software path.
 - `src-tauri/src/export/fx/videodraw.rs` - reads `FxState.video`.
 
+### FxState::lens
+
+```rust
+pub lens: Option<crate::export::fx::fx_lens::Lenses>,
+```
+
+The **glass cursor material** for this frame - the refracting lens under a `material: "glass"` pack's sprite and/or the pack-independent cursor back. `None` for a plain pack with no back, which is every recording until someone picks one. See `docs/api/src-tauri/src/export/fx/fx_lens.md`.
+
+*Why it rides the FX pass at all.* It has to refract, which means re-sampling the composited frame - and this is the one pass that has the frame uploaded as a texture. It is not a click effect, though: `fx_state_at` never sets it (it returns `lens: None`), `render` attaches it afterwards, and a user who turned click FX off still gets their glass cursor.
+
+*Why it is placed before the pass rather than during it.* The sprite it belongs to is blitted AFTER this pass by `cursorset::draw`, so the box is computed one step earlier by `fx_lensbuild::lenses_at` and handed in. Both sides then read the same box (`cursormorph::sprite_box`), which is what stops the glass drifting off the cursor.
+
 ## fx_state_at
 
 ```rust
 pub fn fx_state_at(
     fx: &ClickFxSettings, events: &[MouseEvent], actions: &[ActionEvent], effects: &[EffectRegion],
     scene: &Scene, cam: Camera, cur: FramePoint, screen: &ScreenInfo, has_webcam: bool,
-    sw: u32, sh: u32, ow: u32, oh: u32, region_t: u32, ev_t: u32, spot_sim: &mut SpotlightSim,
+    ow: u32, oh: u32, region_t: u32, ev_t: u32, spot_sim: &mut SpotlightSim,
 ) -> Option<FxState>
 ```
+
+The capture dimensions are no longer parameters: a click hit is mapped with `to_panel(p, scene.src, scene.screen.rect)`, and `scene.src` already IS the sub-rect the screen panel shows - the whole canvas normally, one display switch's fitted rect after a mid-take switch. So a click recorded on the switched-to display ripples on the cropped picture instead of drifting with the black bars.
 
 Builds the FX state for one frame. Returns `None` when nothing is active so the renderer can skip the frame entirely.
 
@@ -217,7 +231,7 @@ Factory that returns the best available renderer for output dimensions `ow x oh`
 pub fn render(
     r: &dyn FxRenderer, out: &mut [u8], ow: u32, oh: u32, fx: &ClickFxSettings,
     events: &[MouseEvent], actions: &[ActionEvent], effects: &[EffectRegion], scene: &Scene, cam: Camera, cur: FramePoint, screen: &ScreenInfo, has_webcam: bool,
-    sw: u32, sh: u32, region_t: u32, ev_t: u32, keys: &HotkeySettings, spot_sim: &mut SpotlightSim,
+    region_t: u32, ev_t: u32, keys: &HotkeySettings, spot_sim: &mut SpotlightSim,
 )
 ```
 
@@ -228,7 +242,7 @@ Per-frame entry point called by the exporter after compositing the base frame. B
 - `r: &dyn FxRenderer` - the renderer selected by `select_fx`. *Why trait object:* decouples the exporter from GPU/CPU choice.*
 - `out: &mut [u8]` - composited BGRA frame; modified in-place. *Why:* FX are composited on top of the already-rendered frame without a separate allocation.*
 - `fx: &ClickFxSettings` - FX settings; `fx.enabled` is checked first as a fast exit. *Why early return:* when FX is fully disabled, no state is built and no renderer is invoked.*
-- `events`, `actions`, `effects`, `scene`, `cam`, `cur`, `screen`, `has_webcam`, `sw`, `sh`, `region_t`, `ev_t`, `spot_sim` - forwarded verbatim to `fx_state_at`. `FrameRenderer::composite_at` passes `&self.cursor.screen()` (the `Cursor`'s own `ScreenInfo`, already used for its own `to_frame` conversions in `clicks`/`compute_anchors`) rather than storing a second copy, and `self.has_webcam` (computed once via `paths.webcam().exists()` in `FrameRenderer::new`).
+- `events`, `actions`, `effects`, `scene`, `cam`, `cur`, `screen`, `has_webcam`, `sw`, `sh`, `region_t`, `ev_t`, `spot_sim` - forwarded verbatim to `fx_state_at`. `FrameRenderer::composite_at` passes `&self.cursor.screen()` (the `Cursor`'s own `ScreenInfo`, already used for its own `to_frame` conversions in `clicks`/`path::PathModel::new`) rather than storing a second copy, and `self.has_webcam` (computed once via `paths.webcam().exists()` in `FrameRenderer::new`).
 - `keys: &HotkeySettings` - hotkey bindings forwarded to `caption::overlay`. *Why:* captions label hotkey actions and need the binding strings to construct the text.*
 
 ### Implementation
@@ -236,3 +250,4 @@ Per-frame entry point called by the exporter after compositing the base frame. B
 1. Return immediately if `!fx.enabled`.
 2. Call `fx_state_at`; if `Some(state)`, call `r.apply(out, ow, oh, &state)`.
 3. Call `caption::overlay(out, ow, oh, actions, keys, ev_t, fx.captions)` unconditionally. *Why `ev_t`:* captions label hotkey presses read straight from the action log, which is an event-clock stream - not a doc region. *Why always:* captions are independent of click/spotlight FX and must appear even when FX rendering was skipped.*
+

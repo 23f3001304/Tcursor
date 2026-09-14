@@ -64,7 +64,7 @@ A `Scene`. For each panel: `Some(pose)` places it at `alpha = 1.0` (so a posed p
 
 ### Implementation
 
-The screen panel is `rect_from_center(pose, ow, oh, sw/sh)` with `corner_radius` re-evaluated for the new size and no ring (the screen panel never has one). The camera panel is `override_camera(base.camera, pose, ow, oh, width_px/size_px)` - literally the function a `camera_moves` keyframe uses - which re-centers the rect and scales the static radius and ring width by the height ratio, so a circle stays a circle and the ring keeps its proportion at any size. That ratio is exactly `1.0` when the pose reproduces the preset, which is why the parity above holds to a fraction of a pixel instead of approximately.
+The screen panel is `rect_from_center(pose, ow, oh, sw/sh)` with `corner_radius` re-evaluated for the new size and no ring (the screen panel never has one). The camera panel is `override_camera(base.camera, pose, ow, oh, width_px/size_px)` - literally the function a `camera_moves` keyframe uses - which re-centers the rect and scales the static radius and ring width by the height ratio, so a circle stays a circle and the ring keeps its proportion at any size. An arrangement pose carries no shape of its own (`cam_pose` builds the `CamPose` with `round: None`), so it takes that static-radius rule rather than a keyframe's own corner fraction. That ratio is exactly `1.0` when the pose reproduces the preset, which is why the parity above holds to a fraction of a pixel instead of approximately.
 
 ### Used by
 

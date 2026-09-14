@@ -3,6 +3,7 @@
 // play the recording natively and composite a smooth, export-faithful preview on a canvas -
 // kept out of preview.rs (frame compositing) so each file stays focused. All reuse the warm
 // renderer cache via `with_warm`.
+use std::io::BufRead;
 use std::path::PathBuf;
 use crate::export::preview::{with_warm, PreviewSession};
 use crate::export::render::{OUT_FPS, OUT_STEP_MS};
@@ -122,6 +123,14 @@ pub async fn ensure_proxy(folder: String, height: u32) -> Result<String, String>
 }
 
 pub(crate) fn ensure_proxy_blocking(folder: String, height: u32) -> Result<String, String> {
+    ensure_proxy_with_progress(folder, height, &|_| {})
+}
+
+/// `ensure_proxy_blocking` that reports the transcode's own progress - 0..99 from ffmpeg's
+/// `-progress` stream against the real recording duration (`proxy_pct`) - because the proxy IS
+/// the wait between Stop and the editor (`preprocess::essential`), and a pill that sat at 0% for
+/// a minute on a long take read as hung.
+pub(crate) fn ensure_proxy_with_progress(folder: String, height: u32, on_progress: &dyn Fn(u32)) -> Result<String, String> {
     let paths = ProjectPaths { folder: PathBuf::from(&folder) };
     let h = height.clamp(240, 2160) & !1; // even
     let proxy = paths.folder.join(format!("preview_{h}_rt.mp4"));
@@ -141,19 +150,37 @@ pub(crate) fn ensure_proxy_blocking(folder: String, height: u32) -> Result<Strin
         let k = real / enc;
         let vf = if (k - 1.0).abs() > 0.02 { format!("scale=-2:{h},setpts={k:.6}*PTS") } else { format!("scale=-2:{h}") };
         let tmp = crate::win::sys::proc::tmp_sibling(&proxy); // write then atomic-rename (no partial reads)
-        // No `-hwaccel auto`: it enables HW decode whose GPU frame format is often incompatible
-        // with the CPU `-vf scale/setpts` filters here, making the whole transcode fail - which
-        // silently aborted preprocessing (blank preview + a raw-4K thumbnail fallback). CPU decode
-        // of a short proxy is plenty fast and reliable.
-        let status = ffcmd_bg("ffmpeg")
-            .args(["-v", "error", "-y", "-i"]).arg(paths.video())
-            .args(["-vf", &vf, "-c:v", "libx264", "-preset", "veryfast",
+        // No `-hwaccel`: HW decode into the CPU `scale`/`setpts` filters measured 3x SLOWER than
+        // CPU decode on 1080p60 (the surface download), and `auto` once picked a frame format the
+        // filters rejected outright. CPU decode is the floor here; `ultrafast` (a third quicker
+        // than `veryfast` at this size, and a preview does not need the compression) keeps the
+        // encode under it. `-g 60` puts a keyframe every second so the editor's seeks land fast
+        // and the filmstrip can read keyframes only (`thumbs::ensure_thumbs_blocking`).
+        let mut child = ffcmd_bg("ffmpeg")
+            .args(["-v", "error", "-nostats", "-progress", "pipe:1", "-y", "-i"]).arg(paths.video())
+            .args(["-vf", &vf, "-c:v", "libx264", "-preset", "ultrafast", "-g", "60",
                 "-crf", "27", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an"])
             .arg(&tmp)
-            .status().map_err(|e| e.to_string())?;
+            .stdout(std::process::Stdio::piped())
+            .spawn().map_err(|e| e.to_string())?;
+        if let Some(out) = child.stdout.take() {
+            for line in std::io::BufReader::new(out).lines().map_while(Result::ok) {
+                if let Some(pct) = proxy_pct(&line, real) { on_progress(pct); }
+            }
+        }
+        let status = child.wait().map_err(|e| e.to_string())?;
         if !status.success() { let _ = std::fs::remove_file(&tmp); return Err("preview proxy transcode failed".into()); }
         std::fs::rename(&tmp, &proxy).map_err(|e| e.to_string())?;
         Ok(())
     })?;
     Ok(proxy.to_string_lossy().to_string())
+}
+
+/// One line of ffmpeg's `-progress` stream -> percent of the proxy written, for `out_time_us=`
+/// lines only (`None` for the rest of its key=value chatter). Output time is already stretched to
+/// the real duration by `setpts`, so it is measured against `real_secs`. Capped at 99: the last
+/// point is the caller's, once the file has been renamed into place.
+pub(crate) fn proxy_pct(line: &str, real_secs: f64) -> Option<u32> {
+    let us: f64 = line.strip_prefix("out_time_us=")?.trim().parse().ok()?;
+    Some(((us / 1e6 / real_secs.max(0.05)) * 100.0).clamp(0.0, 99.0) as u32)
 }

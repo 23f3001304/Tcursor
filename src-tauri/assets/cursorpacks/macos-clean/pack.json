@@ -1,6 +1,7 @@
 {
   "id": "macos-clean",
   "name": "Clean",
+  "category": "Classic",
   "version": 2,
   "builtin": true,
   "busy": {

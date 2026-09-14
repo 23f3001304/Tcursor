@@ -8,6 +8,7 @@ Small data-only types returned by `FrameRenderer`, split out of `mod.rs` (which 
 pub struct RenderMeta {
     pub tl: Timeline, pub video_start: u64, pub video_end: u64, pub out_w: u32, pub out_h: u32,
     pub sw: u32, pub sh: u32, pub screen_bytes: usize, pub audio_offset_ms: i32,
+    pub screen_crop: Option<(u32, u32)>,
     pub webcam_w: u32, pub webcam_h: u32,
     pub trim: crate::edit::model::Trim,
     pub mic_volume: f32, pub sys_volume: f32,
@@ -22,7 +23,8 @@ All information the export (or preview) loop needs to set up its raw decoders an
 - `video_start: u64` - timestamp (ms) of the first captured frame. *Why:* the loop's time variable `t = video_start + k * 1000 / OUT_FPS`.
 - `video_end: u64` - timestamp of the last captured frame (at least `video_start + 1`). *Why:* `total_out = (video_end - video_start) * OUT_FPS / 1000` drives the loop bound.
 - `out_w: u32`, `out_h: u32` - output canvas dimensions in pixels. *Why:* `FrameRenderer` owns the layout after `new()`, so the caller gets these from meta rather than re-reading the layout struct.
-- `sw: u32`, `sh: u32` - raw screen capture dimensions (probe result). *Why:* needed to allocate the `screen_bytes`-sized decode buffer.
+- `sw: u32`, `sh: u32` - the screen decode's dimensions: the probe result rounded down to even by `even_screen`. *Why:* needed to allocate the `screen_bytes`-sized decode buffer, and nv12 has no odd sizes.
+- `screen_crop: Option<(u32, u32)>` - `Some((sw, sh))` when the capture was odd-sized and the decoders must crop to it (`RawDecoder::spawn`'s `crop`), else `None`. *Why:* see `even_screen`.
 - `screen_bytes: usize` - `sw * sh * 3 / 2`: exact NV12 buffer size for the screen decoder (Y plane + half-res interleaved UV - cheaper to decode/pipe than BGRA; the compositor converts to BGRA internally). *Why:* pre-computed to avoid re-doing the multiply at every `RawDecoder::spawn` call.
 - `webcam_w: u32`, `webcam_h: u32` - the webcam decode box in pixels (`webcam_box` below): the SOURCE video's own aspect, big enough for the largest camera panel, height capped to 1440 and to the source's own height. *Why the source's aspect and not a panel's:* one decode box serves the whole export, but the layout track can put a `CamAspect::Wide` (16:9) bubble and a square big-cam in the SAME export, so no panel-shaped box is right for all of them - whichever panel lost was stretched (or squashed) 1.78x for its whole segment. The compositors now cover-crop this box to each panel's aspect per frame (`gpu::compositor::cover_rect` / `shader.wgsl`'s `cover_uv`), which only works if the box still holds the full source frame. `RawDecoder::spawn` takes the pair as its `cover_scale` argument; `exporter`/`preview` allocate `webcam_w * webcam_h * 4` to match.
 - `audio_offset_ms: i32` - the user's manual mic-sync nudge from settings. *Why:* carried here so `exporter.rs` does not need to reload the edit doc a second time after `new()`.
@@ -36,8 +38,11 @@ All information the export (or preview) loop needs to set up its raw decoders an
 ## FramePose
 
 ```rust
-pub struct FramePose { pub ev_t: u32, pub out_t: u32, pub scene: Scene, pub cur: FramePoint, pub cam: Camera }
+pub struct FramePose { pub ev_t: u32, pub out_t: u32, pub scene: Scene, pub cur: FramePoint, pub cam: Camera,
+    pub mix: Option<SpanMix>, pub hold: Option<usize> }
 ```
+
+`mix` and `hold` are the display-switch cross-dissolve's two halves and are `None` on every frame of a take that never switched. `mix` says this frame is inside a switch and carries the rect to blend FROM plus the eased 0..1 weight of the new picture; `hold` (a span index) says THIS frame's decoded screen buffer is the one to latch, because the next output frame is already past the switch. See `render::spans`.
 
 The resolved camera and scene for one output frame, returned by `step_camera` and passed unchanged to `composite_at`. Grouping these values as a struct avoids passing them as separate arguments and lets the preview engine inspect the pose (e.g. to know zoom scale) without compositing.
 
@@ -52,6 +57,14 @@ The resolved camera and scene for one output frame, returned by `step_camera` an
 ### Used by
 
 `composite_at` reads all four fields. The preview engine (Task 2) will inspect `cam` and `scene` to derive the zoom level for display.
+
+## even_screen
+
+```rust
+pub fn even_screen(w: u32, h: u32) -> (u32, u32, Option<(u32, u32)>)
+```
+
+The screen decode's dims and, when the capture is odd-sized, the exact crop that evens it: `(w & !1, h & !1)`, floored at 2, plus `Some` of that pair only when it differs from the probe. **Why (2026-09-14).** nv12 has no odd sizes: ffmpeg pads the chroma plane and a frame no longer measures `w*h*3/2` bytes, so an odd 1697x955 window capture was read off the pipe 1327 bytes (a fraction of a row) late on every frame and the whole export slid and sheared. Dropping one column or row of a screen capture is invisible; resampling it would not be, which is why the decoders CROP (`ffio_decoder`'s `crop`) rather than scale. Tests: `an_even_capture_is_untouched_and_needs_no_crop`, `an_odd_capture_loses_one_column_or_row_and_says_so`.
 
 ## webcam_box
 

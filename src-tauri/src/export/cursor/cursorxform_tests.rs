@@ -24,7 +24,7 @@ fn id(out: &[u8], x: u32, y: u32) -> u8 { out[((y * OW + x) * 4 + 2) as usize] }
 #[test]
 fn a_quarter_turn_clockwise_maps_every_texel_exactly() {
     let mut out = frame();
-    blit_transformed(&mut out, OW, OW, &ids_3x3(), ANCHOR, 1.0, 90.0, 1.0, CLIP);
+    blit_transformed(&mut out, OW, OW, &ids_3x3(), ANCHOR, 1.0, 90.0, 1.0, CLIP, 1.0);
     // Clockwise: the sprite's bottom-left corner ends up top-left, its top-left top-right.
     // Output (4 + i, 4 + j) must hold sprite texel (x = j, y = 2 - i).
     for i in 0..3u32 {
@@ -41,16 +41,16 @@ fn a_quarter_turn_clockwise_maps_every_texel_exactly() {
 #[test]
 fn a_full_turn_is_the_identity_and_a_half_turn_reverses_both_axes() {
     let mut full = frame();
-    blit_transformed(&mut full, OW, OW, &ids_3x3(), ANCHOR, 1.0, 360.0, 1.0, CLIP);
+    blit_transformed(&mut full, OW, OW, &ids_3x3(), ANCHOR, 1.0, 360.0, 1.0, CLIP, 1.0);
     let mut none = frame();
-    blit_transformed(&mut none, OW, OW, &ids_3x3(), ANCHOR, 1.0, 0.0, 1.0, CLIP);
+    blit_transformed(&mut none, OW, OW, &ids_3x3(), ANCHOR, 1.0, 0.0, 1.0, CLIP, 1.0);
     // Exact, thanks to `blend` rounding: `sin(360deg)` is not quite 0 in f32, so the bilinear
     // weights carry a ~1e-7 bleed from the neighbour - which rounds away instead of truncating a
     // step off every channel (the dimmed rim that fix is there for).
     assert_eq!(full, none, "360 degrees lands back on the untransformed placement");
 
     let mut half = frame();
-    blit_transformed(&mut half, OW, OW, &ids_3x3(), ANCHOR, 1.0, 180.0, 1.0, CLIP);
+    blit_transformed(&mut half, OW, OW, &ids_3x3(), ANCHOR, 1.0, 180.0, 1.0, CLIP, 1.0);
     for i in 0..3u32 {
         for j in 0..3u32 {
             assert_eq!(id(&half, 4 + i, 4 + j), id(&none, 6 - i, 6 - j), "180 flips both axes");
@@ -64,7 +64,7 @@ fn the_hotspot_stays_on_the_anchor_through_a_pulse() {
     // 50) still covers the anchor pixel at 1.0, 1.06 and a big 2.0.
     for extra in [1.0f32, 1.06, 2.0] {
         let mut out = frame();
-        blit_transformed(&mut out, OW, OW, &ids_3x3(), ANCHOR, 1.0, 0.0, extra, CLIP);
+        blit_transformed(&mut out, OW, OW, &ids_3x3(), ANCHOR, 1.0, 0.0, extra, CLIP, 1.0);
         assert_eq!(id(&out, 5, 5), 50, "anchor pixel at extra={extra}");
     }
 }
@@ -72,9 +72,9 @@ fn the_hotspot_stays_on_the_anchor_through_a_pulse() {
 #[test]
 fn scaling_up_widens_the_footprint_around_the_anchor() {
     let mut small = frame();
-    blit_transformed(&mut small, OW, OW, &ids_3x3(), ANCHOR, 1.0, 0.0, 1.0, CLIP);
+    blit_transformed(&mut small, OW, OW, &ids_3x3(), ANCHOR, 1.0, 0.0, 1.0, CLIP, 1.0);
     let mut big = frame();
-    blit_transformed(&mut big, OW, OW, &ids_3x3(), ANCHOR, 1.0, 0.0, 2.0, CLIP);
+    blit_transformed(&mut big, OW, OW, &ids_3x3(), ANCHOR, 1.0, 0.0, 2.0, CLIP, 1.0);
     let painted = |o: &[u8]| (0..OW * OW).filter(|i| o[(i * 4 + 3) as usize] > 0).count();
     assert_eq!(painted(&small), 9, "a 3x3 sprite at scale 1 covers exactly 9 pixels");
     assert!(painted(&big) > 30, "doubled it covers about 36, got {}", painted(&big));
@@ -84,7 +84,7 @@ fn scaling_up_widens_the_footprint_around_the_anchor() {
 fn the_clip_box_confines_the_transformed_blit() {
     let mut out = frame();
     // A clip that only admits the sprite's left column of output pixels.
-    blit_transformed(&mut out, OW, OW, &ids_3x3(), ANCHOR, 1.0, 90.0, 1.0, (0, 0, 5, OW as i32));
+    blit_transformed(&mut out, OW, OW, &ids_3x3(), ANCHOR, 1.0, 90.0, 1.0, (0, 0, 5, OW as i32), 1.0);
     assert_ne!(id(&out, 4, 4), 0, "inside the clip");
     assert_eq!(id(&out, 5, 4), 0, "past the clip edge");
     assert_eq!(id(&out, 6, 4), 0);
@@ -95,12 +95,12 @@ fn degenerate_inputs_are_a_safe_no_op() {
     let blank = frame();
     for (scale, extra, angle) in [(0.0f32, 1.0f32, 45.0f32), (1.0, 0.0, 45.0), (-1.0, 1.0, 0.0)] {
         let mut out = frame();
-        blit_transformed(&mut out, OW, OW, &ids_3x3(), ANCHOR, scale, angle, extra, CLIP);
+        blit_transformed(&mut out, OW, OW, &ids_3x3(), ANCHOR, scale, angle, extra, CLIP, 1.0);
         assert_eq!(out, blank, "scale={scale} extra={extra}");
     }
     // Entirely off-frame: must not panic or write.
     let mut out = frame();
-    blit_transformed(&mut out, OW, OW, &ids_3x3(), (900.0, 900.0), 1.0, 33.0, 1.0, CLIP);
+    blit_transformed(&mut out, OW, OW, &ids_3x3(), (900.0, 900.0), 1.0, 33.0, 1.0, CLIP, 1.0);
     assert_eq!(out, blank);
 }
 
@@ -115,7 +115,7 @@ fn a_rotated_edge_blends_without_a_halo_from_transparent_padding() {
     bgra[c..c + 4].copy_from_slice(&[255, 255, 255, 255]);
     let spr = CursorSprite { bgra, w: 3, h: 3, hot: (0.5, 0.5), canvas_h: 3 };
     let mut out = frame();
-    blit_transformed(&mut out, OW, OW, &spr, (5.9, 5.9), 1.0, 45.0, 1.0, CLIP);
+    blit_transformed(&mut out, OW, OW, &spr, (5.9, 5.9), 1.0, 45.0, 1.0, CLIP, 1.0);
     let mut touched = 0;
     for i in 0..OW * OW {
         let (o, a) = ((i * 4) as usize, out[(i * 4 + 3) as usize]);

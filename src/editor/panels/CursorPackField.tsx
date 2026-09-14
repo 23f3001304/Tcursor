@@ -7,9 +7,9 @@ import { listCursorPacks, importCursorPack } from "../../lib/ipc";
 import { Shimmer } from "../timeline/Shimmer";
 import { CursorPackGrid } from "./CursorPackGrid";
 
-// Loading-skeleton tile count: four tiles is what fits a 288px strip without scrolling, so the
-// skeleton is exactly as wide as the row it stands in for.
-const PACK_SKELETON_COUNT = 4;
+// Loading-skeleton tile count: one full row of the wrapping grid (three at the 320px panel width),
+// so the skeleton is exactly the shape of the first thing that replaces it.
+const PACK_SKELETON_COUNT = 3;
 const HINT_MOTION = { initial: { opacity: 0, y: -4 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -4 }, transition: { duration: 0.14 } };
 
 /** The Cursor panel's Pack group: the grid of installed packs and the import affordance under it,
@@ -49,7 +49,7 @@ export function CursorPackField({ pack, onPick }: { pack: string; onPick: (id: s
     <div className="e-grp">
       <span className="e-sechead">Cursor style pack</span>
       {packs === null ? (
-        <div className="e-tile-strip">
+        <div className="e-tile-grid">
           {Array.from({ length: PACK_SKELETON_COUNT }, (_, i) => <Shimmer key={i} className="e-tile e-tile-skel" />)}
         </div>
       ) : packs.length === 0 ? (

@@ -2,7 +2,39 @@
 
 Thumbnails for the editor's background picker. Every tile is rendered by the SAME code the export uses (`ffio::decode_image_cover` for the bundled wallpapers, `scene::background::render` for the gradients), so a tile is a true 96x54 miniature of the background it applies - not a CSS lookalike that drifts from the render as the two are edited apart.
 
-Built once per process into a `OnceLock`. Every bundled wallpaper costs an ffmpeg decode, so only the first call pays for them; every later call clones an in-memory `Vec`.
+Built once per process into a `OnceLock`, and since 2026-09-14 kept on disk between launches: every bundled wallpaper costs an ffmpeg decode, and the owner watched the Background panel sit on its Classic fallback for seconds after every start while 53 of them rendered. The first launch renders and writes `<cache dir>/TCursor/bg_thumbs.json`; every later launch reads it back in milliseconds, and `prewarm` (spawned by `lib.rs` at startup) does that before the editor can ask.
+
+## cache_key
+
+```rust
+pub(crate) fn cache_key() -> String
+```
+
+`v1:<w>x<h>:<every bundled wallpaper id, then every gradient id>` - what the disk copy was rendered from, so a new, renamed or removed wallpaper, or a resized tile, re-renders instead of serving a stale file.
+
+## load_disk
+
+```rust
+pub(crate) fn load_disk(path: &Path, key: &str) -> Option<Vec<BackgroundThumb>>
+```
+
+The disk copy, if the file exists, parses, carries exactly `key`, and is not empty. Any other case is `None` and the caller renders.
+
+## save_disk
+
+```rust
+pub(crate) fn save_disk(path: &Path, key: &str, thumbs: &[BackgroundThumb])
+```
+
+Best effort: creates the directory and writes `{ key, thumbs }` as JSON; a cache that cannot be written only means the next launch renders again. `cached` calls it only for a COMPLETE render (every wallpaper tile has a PNG) - with no ffmpeg every wallpaper tile is empty, and caching that would pin the panel's plain swatches until the file was deleted.
+
+## prewarm
+
+```rust
+pub fn prewarm()
+```
+
+Builds or loads the set off the main thread; `lib.rs` spawns it at startup next to the ffmpeg encoder prewarm, so the editor's first Background panel finds `cached` ready. Test: `the_disk_copy_round_trips_and_a_stale_key_is_ignored`.
 
 ## GradientStops
 

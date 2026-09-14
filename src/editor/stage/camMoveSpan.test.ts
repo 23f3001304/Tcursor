@@ -7,7 +7,7 @@ import { camKfRange, camMoveAt, KF_BLEND_MS } from "./cameraMoves";
 // the live layout-resolved pose at each edge. Outside it, `camMoveAt` is null and the layout
 // segments own the webcam panel.
 const kf = (t_ms: number, x: number, y: number, size: number, easing: string): CameraMove =>
-  ({ id: `k${t_ms}`, t_ms, x, y, size, easing });
+  ({ id: `k${t_ms}`, t_ms, x, y, size, easing, shape: "layout", roundness: 0.12 });
 
 const LIVE = { x: 0.85, y: 0.15, size: 0.18 };
 /** Two keyframes at 2000/4000 - the span is [1650, 4350]. */

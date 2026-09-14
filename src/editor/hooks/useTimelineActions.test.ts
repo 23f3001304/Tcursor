@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { pickAddedCameraMoveId } from "./useTimelineActions";
 import type { CameraMove } from "../../lib/edit";
 
-const kf = (id: string, t_ms: number): CameraMove => ({ id, t_ms, x: 0.5, y: 0.5, size: 0.25, easing: "smooth" });
+const kf = (id: string, t_ms: number): CameraMove => ({ id, t_ms, x: 0.5, y: 0.5, size: 0.25, easing: "smooth", shape: "layout", roundness: 0.12 });
 
 // M2: `AddCameraMove` sorts `camera_moves` by `t_ms` server-side, so the just-added keyframe's
 // INDEX in the returned doc is not reliably `length - 1` the moment it lands anywhere but the

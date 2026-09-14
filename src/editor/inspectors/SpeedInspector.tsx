@@ -1,8 +1,7 @@
-import { PanelHeader } from "../panels/PanelHeader";
 import type { EditDoc, EditOp, Speed } from "../../lib/edit";
 import { FACTOR_MAX, FACTOR_MIN } from "../../lib/remap";
 import { Slider } from "../controls/Controls";
-import { Hint, InspectorShell, RemoveButton, Section, TimingRow, secOf, spanLede } from "./InspectorShape";
+import { Hint, InspectorHeader, InspectorShell, Section, TimingRow, secOf, spanRange } from "./InspectorShape";
 
 /** The factors worth landing on exactly. A slider fine enough to reach 1.85 is also fine enough to
  *  MISS 2 - so a value inside `SNAP_WINDOW` of one of these becomes that one, and everything
@@ -28,7 +27,9 @@ export function SpeedInspector({ speed, dur, onApply, onClose }: {
 
   return (
     <InspectorShell kind="speed">
-      <PanelHeader title="Speed" lede={spanLede(speed.start_ms, speed.end_ms)} closeTitle="Deselect" onClose={onClose} />
+      <InspectorHeader title="Speed" range={spanRange(speed.start_ms, speed.end_ms)}
+        deleteLabel="Remove speed span" onClose={onClose}
+        onDelete={() => { void onApply({ op: "remove_speed", id: speed.id }); onClose(); }} />
 
       <Section title="Timing">
         <TimingRow startMs={speed.start_ms} endMs={speed.end_ms} durMs={dur}
@@ -44,8 +45,6 @@ export function SpeedInspector({ speed, dur, onApply, onClose }: {
         </label>
         <Hint>{secOf(speed.end_ms - speed.start_ms)} s of recording becomes {outSec} s of export.</Hint>
       </Section>
-
-      <RemoveButton label="Remove speed span" onClick={() => { void onApply({ op: "remove_speed", id: speed.id }); onClose(); }} />
     </InspectorShell>
   );
 }

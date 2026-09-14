@@ -1,6 +1,7 @@
 {
   "id": "fluent",
   "name": "Fluent",
+  "category": "Classic",
   "version": 2,
   "builtin": true,
   "busy": {

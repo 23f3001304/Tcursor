@@ -1,6 +1,10 @@
 # src-tauri/src/export/fx/fx_gpu.rs
 
-GPU-backed FX renderer that uploads a composited BGRA frame to wgpu, runs `fx.wgsl` (spotlight, click effects, video FX) in a full-screen triangle pass, and reads the result back into the caller's buffer. Selected automatically by `select_fx` when a wgpu adapter is available; falls through to `CpuFx` otherwise - and falls back to it per frame if a readback ever fails (see `GpuFx::apply`). Its tests live in the sibling `fx_gpu_tests.rs` to keep this file under the 200-line budget.
+GPU-backed FX renderer that uploads a composited BGRA frame to wgpu, runs the FX shader (spotlight, click effects, video FX) in a full-screen triangle pass, and reads the result back into the caller's buffer.
+
+**The shader is TWO files compiled as one module.** `build_pipeline` builds the WGSL source as `concat!(include_str!("fx.wgsl"), <newline>, include_str!("fx_clicks.wgsl"))`: `fx.wgsl` holds the uniform struct `FxU`, the bindings, the `FX_*`/`SP_*`/`VF_*` ids, the vertex stage, the noise/nebula helpers, the shockwave UV warp + chromatic dispersion (which must happen before the texture sample) and the spotlight/video-FX blending; `fx_clicks.wgsl` holds the shared click timing (`fx_ease`, `fx_alpha`), the small coverage helpers and one function, `clicks(base, px, oh, style, n) -> vec3<f32>`, which `fs_main` calls last. *Why split:* both halves are inside the repo's 200-line-per-file budget this way, and the click styles - the half that changes - are readable on their own. *Why this order is safe:* WGSL resolves module-scope declarations out of order, so `fs_main` calling `clicks()` (and the shockwave block calling `fx_ease`) from the half appended after it is legal; the GPU tests below compile the real module, so a violation fails the suite rather than shipping.
+
+Selected automatically by `select_fx` when a wgpu adapter is available; falls through to `CpuFx` otherwise - and falls back to it per frame if a readback ever fails (see `GpuFx::apply`). Its tests live in the sibling `fx_gpu_tests.rs` to keep this file under the 200-line budget.
 
 ## GpuFx
 
@@ -19,7 +23,7 @@ Holds all persistent wgpu objects for one export session. Constructed once in `G
 - `device` / `queue` - *the shared process-global logical device and its submission queue (`Arc`, see `gpu::shared_device`); all GPU work is submitted through these.*
 - `sampler` - *bilinear (linear mag + min) sampler bound at binding 1 so the composited frame is sampled smoothly by the full-screen triangle.*
 - `bind_layout` - *bind group layout declaring bindings 0 (texture), 1 (sampler), 2 (uniform); cached so per-frame bind groups can be created cheaply.*
-- `pipeline` - *render pipeline compiled from `fx.wgsl` (embedded via `include_str!`) once at construction; reused every frame.*
+- `pipeline` - *render pipeline compiled once at construction from the concatenated `fx.wgsl` + `fx_clicks.wgsl` source (both embedded via `include_str!`); reused every frame.*
 - `out_tex` / `out_view` - *fixed-size `RENDER_ATTACHMENT | COPY_SRC` output texture; the shader renders into it each frame, then its contents are copied to `readback`.*
 - `readback` - *`COPY_DST | MAP_READ` buffer sized `padded_bpr * oh`; mapped after each submit so the CPU can read back processed pixels.*
 - `padded_bpr` - *bytes per row rounded up to `wgpu::COPY_BYTES_PER_ROW_ALIGNMENT`; used to strip padding when copying from `readback` back into the caller's buffer.*
@@ -27,6 +31,23 @@ Holds all persistent wgpu objects for one export session. Constructed once in `G
 ### Used by
 
 - `src-tauri/src/export/fx/fx_state.rs` - `select_fx` constructs a `GpuFx` and boxes it as a `dyn FxRenderer`.
+
+### GpuFx::mask
+
+```rust
+mask: Mutex<Option<(u64, wgpu::TextureView)>>,
+blank: wgpu::TextureView,
+```
+
+The cursor lens mask (`fx_lens::LensMask`), uploaded once per (pack, kind) and kept until a different one is asked for, plus the 1x1 opaque texture bound when no lens is live (the bind group layout always needs a binding at 3).
+
+*Why one entry is enough:* a frame draws ONE cursor. A settled cursor re-uses the upload forever; a state change re-uploads about 16 KB per frame for the ten frames the morph lasts, because `morph_mask`'s key carries the step.
+
+*Why a `Mutex`:* `FxRenderer::apply` takes `&self`. A poisoned lock is recovered rather than propagated, for the same reason `readback_into` never panics - this runs on a Tauri command thread for the editor preview, where a panic takes out the overlay rather than one frame of it.
+
+### GpuFx::blank
+
+See `GpuFx::mask`.
 
 ## GpuFx::new
 
@@ -49,7 +70,7 @@ Initializes the full wgpu stack for a frame of size `ow x oh`. Returns `None` if
 
 1. Get the shared process-global device + queue via `gpu::shared_device` (blocking `pollster` init on the first call process-wide; `None` if the system has no usable GPU). This shares the compositor's device rather than creating a second one - removing half the device-creation cost behind an aspect change / frame resize.
 2. Create a bilinear `Sampler`. *Why bilinear:* the full-screen triangle samples the composited frame at exact pixel centers, so filtering is safe and prevents aliasing at spotlight feather edges.*
-3. Call `build_pipeline` to compile `fx.wgsl` and produce the bind layout and render pipeline.
+3. Call `build_pipeline` to compile the concatenated `fx.wgsl` + `fx_clicks.wgsl` source and produce the bind layout and render pipeline.
 4. Allocate `out_tex` as `RENDER_ATTACHMENT | COPY_SRC` at `ow x oh`. The shader renders into this texture; it is then copied to the readback buffer.
 5. Compute `padded_bpr = align_up(ow * 4, COPY_BYTES_PER_ROW_ALIGNMENT)` and allocate `readback` as `COPY_DST | MAP_READ` with total size `padded_bpr * oh`.
 
@@ -100,11 +121,12 @@ The map result travels back over an `mpsc::channel` from the `map_async` callbac
 
 ### Behaviors
 
-These tests skip silently on a machine with no wgpu adapter (`GpuFx::new` returns `None`); where one exists they are the CPU↔GPU parity harness, since `fx.wgsl` is the reference look for `fxdraw.rs`.
+These tests skip on a machine with no wgpu adapter (`GpuFx::new` returns `None`) - and say so on stderr, so `cargo test fx -- --nocapture` distinguishes "green because it passed" from "green because it never ran". Where an adapter exists they are the CPU-to-GPU parity harness, since the shader is the reference look for `fxdraw.rs`.
 
 - `spotlight_dims_corner_more_than_center` - the shader's own smoke test: a `Classic` spotlight leaves the centre brighter than the corner.
 - `cpu_spotlight_dim_matches_the_shader_at_probe_points` - `CpuFx` and `GpuFx` render the same `Classic` spotlight within ±3/255 at five probe points spanning the lit core, the feather band, and the fully dimmed corners. Pins the feather curve and the dim compositing formula against drift in either direction.
-- `cpu_click_ring_gains_match_the_shader` - for Neon, Shockwave, Ripple and Glow, the *total light added over the base frame* agrees between the two paths within 20%. *Why total added light rather than per-pixel equality:* ring geometry is identical but sub-pixel antialiasing is not, so a sum is tight enough to catch a wrong additive gain (it was the guard that caught Shockwave at `0.7` where the shader uses `0.5`) without being brittle about edge pixels.
+- `cpu_click_ring_gains_match_the_shader` - for Neon, Shockwave, Ripple, Glow and Pulse, at progress 0.05, 0.5 and 0.8, the *total light added over the base frame* agrees between the two paths within 20%. *Why total added light rather than per-pixel equality:* ring geometry is identical but sub-pixel antialiasing is not, so a sum is tight enough to catch a wrong additive gain (it was the guard that caught Shockwave at `0.7` where the shader uses `0.5`) without being brittle about edge pixels. *Why three progress points:* one point pins the gains, three pin the shared easing too - a `clickdraw.rs` that forgot `ease_out` would still match at a single sample but not across the curve. *Why Particles is excluded:* the GPU's `sin` approximation moves individual sparks (see `clickdraw.md`).
+- `the_impact_flash_is_brightest_at_the_click_and_gone_by_p_0_2` - the shared white impact flash, probed on the shader itself at the hit pixel with a black tint on Particles (a style that only ever ADDS the tint, so a black one contributes nothing and the flash is the only thing moving): blown out at p=0, already fading at p=0.10, and back to the untouched base frame by p=0.20.
 
 ### Implementation
 
@@ -120,3 +142,11 @@ These tests skip silently on a machine with no wgpu adapter (`GpuFx::new` return
 ### Behaviors worth knowing
 
 - `spotlight_dims_corner_more_than_center` - with a centered spotlight at `(32, 32)` on a 64x64 frame, the corner pixel is darker than the center pixel, confirming the GPU path is active and the readback is correctly unpadded. Test is skipped with `return` when no adapter is available.
+
+## r8_texture
+
+```rust
+fn r8_texture(device: &wgpu::Device, queue: &wgpu::Queue, w: u32, h: u32, a: &[u8]) -> wgpu::TextureView
+```
+
+Upload `a` as a single-channel `R8Unorm` texture and return its view. `queue.write_texture`, not a buffer copy, so an arbitrary sprite width needs no 256-byte row padding - the masks are content-cropped and almost never a multiple of 256.

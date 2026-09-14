@@ -1,4 +1,4 @@
-import { memo, useState } from "react";
+import { memo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   IconPlayerSkipBack,
@@ -13,17 +13,18 @@ import { Slider } from "../controls/Controls";
 import type { Aspect, EditDoc, EditOp } from "../../lib/edit";
 import type { ClickSample } from "../../lib/ipcPreview";
 import type { Range } from "../timeline/useRangeSelect";
+import { MAGNET_RADIUS, MAGNET_STRENGTH, useMagnetic } from "../effects/useMagnetic";
 import { PLAY_SPRING, PLAY_TAP, PRESS_TAP } from "./transportMotion";
 import { TransportTools } from "./TransportTools";
+import { ViewPicker } from "./ViewPicker";
 
-/** Cycle order + short chip labels for the aspect selector - mirrors the Rust `Aspect` enum.
- *  Exported: StageToolbar's aspect quick-toggle cycles the exact same sequence, so both controls
- *  agree on "next" and never drift apart into two aspect cycles. */
-export const ASPECT_ORDER: Aspect[] = ["source", "wide_16x9", "vertical_9x16", "square_1x1", "classic_4x3"];
-export const ASPECT_LABEL: Record<Aspect, string> = {
+/** Cycle order + short chip labels for the aspect selector - mirrors the Rust `Aspect` enum. The
+ *  chip below is the editor's ONE aspect control now: the floating stage toolbar that carried a
+ *  second copy of this cycle is gone, so these no longer need to be exported. */
+const ASPECT_ORDER: Aspect[] = ["source", "wide_16x9", "vertical_9x16", "square_1x1", "classic_4x3"];
+const ASPECT_LABEL: Record<Aspect, string> = {
   source: "Source", wide_16x9: "16:9", vertical_9x16: "9:16", square_1x1: "1:1", classic_4x3: "4:3",
 };
-/** The tap/hover spring the zoom/wand buttons use. */
 
 // `React.memo`'d (render hygiene pass) - `timeMs` still ticks every frame during playback (the
 // time readout genuinely needs it live), so this can't skip re-rendering ENTIRELY, but memo still
@@ -99,6 +100,11 @@ export const Transport = memo(function Transport({
   // what's rendering mid-export) or meaningless (nothing to play/trim/frame) in either state.
   const locked = exporting || dur <= 0;
 
+  // Play leans toward a near pointer (`effects/useMagnetic`), like the Trim pills beside it.
+  // `PLAY_TAP` is scale-only, so the translate channel is free; `locked` -> strength 0 -> no-op.
+  const playRef = useRef<HTMLButtonElement>(null);
+  const playMag = useMagnetic(playRef, MAGNET_RADIUS, locked ? 0 : MAGNET_STRENGTH);
+
   const cycleAspect = () => {
     const i = ASPECT_ORDER.indexOf(aspect);
     onAspect(ASPECT_ORDER[(i + 1) % ASPECT_ORDER.length]);
@@ -120,11 +126,12 @@ export const Transport = memo(function Transport({
           whileTap={PRESS_TAP} transition={PLAY_SPRING}>
           <IconPlayerSkipBack size={16} />
         </motion.button>
-        <motion.button className="e-play" disabled={locked} title={playing ? "Pause (Space)" : "Play (Space)"} onClick={onPlay}
+        <motion.button ref={playRef} style={{ x: playMag.x, y: playMag.y }}
+          className="e-play" disabled={locked} title={playing ? "Pause (Space)" : "Play (Space)"} onClick={onPlay}
           whileTap={locked ? undefined : PLAY_TAP} transition={PLAY_SPRING}>
           <motion.span key={playing ? "on" : "off"} className="e-play-glow" aria-hidden
             initial={{ opacity: 1 }} animate={{ opacity: 0 }} transition={{ duration: 0.15 }} />
-          {playing ? <IconPlayerPause size={17} fill="currentColor" /> : <IconPlayerPlay size={17} fill="currentColor" style={{ marginLeft: 2 }} />}
+          {playing ? <IconPlayerPause size={17} fill="currentColor" /> : <IconPlayerPlay size={17} fill="currentColor" />}
         </motion.button>
         <motion.button className="e-tg" title="Jump to the end" onClick={() => onSeek(dur)}
           whileTap={PRESS_TAP} transition={PLAY_SPRING}>
@@ -137,10 +144,11 @@ export const Transport = memo(function Transport({
       </div>
       <div className="e-tdiv" />
 
-      {/* Right: aspect + quality chips + volume */}
+      {/* Right: aspect + quality chips, how the frame sits in the stage, then volume. */}
       <div className="e-tgroup" style={{ gap: 10 }}>
         <button className="e-chip" disabled={locked} title="Cycle the preview aspect ratio" onClick={cycleAspect}>{ASPECT_LABEL[aspect]}</button>
         <button className="e-chip" title="Cycle the preview quality" onClick={onQuality}>{quality}p</button>
+        <ViewPicker />
 
         <div
           className="e-volwrap"
@@ -161,12 +169,14 @@ export const Transport = memo(function Transport({
             {showVolumeSlider && (
               <motion.div
                 className="e-volflyout"
-                initial={{ opacity: 0, x: -6 }}
+                // Slides out of the button leftward (the flyout opens inward now - see
+                // `.e-volflyout` in stage.css for why it cannot open past the bar's right edge).
+                initial={{ opacity: 0, x: 6 }}
                 animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -6 }}
+                exit={{ opacity: 0, x: 6 }}
                 transition={{ type: "tween", duration: 0.16, ease: [0.4, 0, 0.2, 1] }}
               >
-                <div style={{ width: 70, marginLeft: 4 }}>
+                <div style={{ width: 70, marginLeft: 6 }}>
                   <Slider
                     min={0}
                     max={100}

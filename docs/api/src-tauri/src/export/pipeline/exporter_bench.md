@@ -2,6 +2,22 @@
 
 The manual export benchmark, split out of `exporter.rs` when that file reached its 200-line budget. Test-only (`#[cfg(test)] #[path] mod bench;`), so it ships in no binary.
 
+## preview_frame_bench
+
+```rust
+#[test]
+#[ignore]
+fn preview_frame_bench()
+```
+
+One composited frame of a real recording to `%TEMP%/tcursor-preview-frame.png`, through the editor's own `render_preview` (the GPU compositor; no video encoder is involved). `TCURSOR_REC` names the folder, `TCURSOR_MS` the instant (default 1500):
+
+```
+TCURSOR_REC=C:\path\to\a\recording TCURSOR_MS=2500 cargo test preview_frame_bench -- --ignored --nocapture
+```
+
+Made for 2026-09-14's odd-sized capture, whose export slid and sheared: a look at one frame says whether a decode is sound without occupying the machine's hardware encoder for a full export (which, run while the owner was recording, had already cost one take its video).
+
 ## export_bench
 
 ```rust

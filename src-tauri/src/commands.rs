@@ -15,7 +15,11 @@ pub fn list_displays() -> Vec<DisplayInfo> {
             let name = m.name().unwrap_or_else(|_| format!("Display {}", i + 1));
             let w = m.width().unwrap_or(0);
             let h = m.height().unwrap_or(0);
-            let label = if i == 0 {
+            // The primary carries its size too (the HUD's display map draws each monitor to
+            // scale); `parseTarget` on the TS side reads both suffix shapes.
+            let label = if i == 0 && w > 0 && h > 0 {
+                format!("Display {}: {} ({}x{}, Primary)", i + 1, name, w, h)
+            } else if i == 0 {
                 format!("Display {}: {} (Primary)", i + 1, name)
             } else if w > 0 && h > 0 {
                 format!("Display {}: {} ({}x{})", i + 1, name, w, h)
@@ -109,13 +113,16 @@ pub fn save_webcam(folder: String, bytes: Vec<u8>) -> Result<(), String> {
     std::fs::write(path, bytes).map_err(|e| e.to_string())
 }
 
-/// Append one MediaRecorder chunk to webcam.webm during recording (streamed via 1s timeslices), so
-/// Stop has almost nothing left to write instead of one O(clip-length) blob. The recording folder
-/// is freshly created per recording, so the first append creates the file.
+/// Append one MediaRecorder chunk to this take's webcam file during recording (streamed via 1s
+/// timeslices), so Stop has almost nothing left to write instead of one O(clip-length) blob. The
+/// recording folder is freshly created per recording, so the first append creates the file.
+/// `segment` names that file (`webcam_segments::webcam_segment_name`): a mid-take camera switch
+/// needs a second `MediaRecorder`, which cannot share the first one's stream OR its file.
 #[tauri::command]
-pub fn append_webcam(folder: String, bytes: Vec<u8>) -> Result<(), String> {
+pub fn append_webcam(folder: String, bytes: Vec<u8>, segment: Option<u32>) -> Result<(), String> {
     use std::io::Write;
-    let path = std::path::Path::new(&folder).join("webcam.webm");
+    let name = crate::session::record::webcam_segments::webcam_segment_name(segment);
+    let path = std::path::Path::new(&folder).join(name);
     let mut f = std::fs::OpenOptions::new().create(true).append(true).open(path).map_err(|e| e.to_string())?;
     f.write_all(&bytes).map_err(|e| e.to_string())
 }

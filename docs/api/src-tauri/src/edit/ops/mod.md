@@ -18,6 +18,10 @@ Read-only summary statistics over an `EditDoc`, split out of `api.rs` (size budg
 
 Effect-region edit ops (`add/update/remove_effect`), split out of `api.rs` so each file stays under the size limit. Key item: `apply_effect` - `api::apply` delegates the three effect-op variants here; `AddEffect` generates an `e`-prefixed id, `UpdateEffect` patches start/end, `RemoveEffect` drops by id.
 
+## smart_zoom
+
+Smart typing duration for a manual zoom (owner, 2026-09-14). Key items: `smart_end` (pure: where a zoom starting at `start_ms` ends, given keystroke times on the same clock - a chain of keys each within `hold_ms` of the previous, the end one hold after the last), `typing_on_doc_clock` (`typing.json` shifted like the seed shifts every region, then through the doc's cuts and speed spans via `TimeMap::out_of`), `refit` (rewrites a smart zoom's `end_ms`; called by `edit::commands::apply_edit_op` after an `UpdateZoom` that switched the flag on or moved the start).
+
 ## timeops
 
 The cut and speed-span ops with their normalisation (`apply_time_op`, `normalize_cuts`, `normalize_speed`), kept apart from `api.rs`; `api::apply` tries them first.

@@ -1,0 +1,13 @@
+{
+  "id": "crystal",
+  "name": "Crystal",
+  "category": "Glass and glow",
+  "version": 2,
+  "material": "glass",
+  "builtin": true,
+  "busy": {
+    "anim": "spin",
+    "fps": 24
+  },
+  "generated": "gpt-image-2.5-sunburst via the OpenAI Images API, 2026-09-14, from TCursor's own prompts (the blob-and-pill glass cursor: no arrow, no hand, no I-beam); sprites 128px, hotspots at the centre of every state."
+}

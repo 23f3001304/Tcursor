@@ -12,8 +12,8 @@ pub const FH: u32 = 1080;
 pub const DUR_MS: u32 = 12_000;
 /// The fast sweep's window - where "does the camera track?" and the filter's lag are measured.
 pub const SWEEP: (u32, u32) = (3000, 3400);
-/// `CursorSettings::follow_alpha` at the default `smoothness` 0.6.
-pub const ALPHA_DEFAULT: f32 = 0.36;
+/// The default `CursorSettings::smoothness` - the glide strength `Cursor` draws with.
+pub const SMOOTH_DEFAULT: f32 = 0.6;
 
 /// (t_ms, x, y) waypoints of the hand-made path, linearly interpolated between: a slow drift
 /// with two clicks, a move to the left edge, a 400ms 1400px sweep, then a long near-still pause.
@@ -151,9 +151,9 @@ pub fn band(ts: &[u32], v: &[f32], a: u32, b: u32) -> f32 {
 }
 
 /// Drive `Cursor::at` + `CameraSim::step` over the whole clip on `grid`, recording every sample.
-/// `alpha` is the cursor low-pass alpha (`CursorSettings::follow_alpha`).
-pub fn run(grid: Grid, cfg: &ZoomConfig, alpha: f32) -> Run {
-    let (rs, mut cur) = (regions(), Cursor::new(events(), screen(), alpha));
+/// `smoothness` is the cursor glide strength (`CursorSettings::smoothness`).
+pub fn run(grid: Grid, cfg: &ZoomConfig, smoothness: f32) -> Run {
+    let (rs, mut cur) = (regions(), Cursor::new(events(), screen(), smoothness));
     let mut sim = CameraSim::new(FW, FH);
     let mut r = Run { grid, t: vec![], scale: vec![], cx: vec![], cy: vec![], curx: vec![], cury: vec![],
         clamped: vec![], driver: vec![] };

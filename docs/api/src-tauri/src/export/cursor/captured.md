@@ -53,6 +53,8 @@ Output pixels per SOURCE pixel for this frame's screen panel - the scale that ke
 
 *Degenerate `sw`:* clamped to 1, so a zero can never divide.
 
+`sw` is the source width the panel actually SHOWS - `Scene.src.w`, which is the whole canvas unless a mid-take display switch cropped it. Feeding the canvas width there after a switch would size the cursor against pixels the panel is not drawing, shrinking it against its own content.
+
 ## CapturedCursors
 
 ```rust
@@ -98,7 +100,7 @@ Per-frame draw, taking the same arguments as `cursorset::draw` (plus the source 
 ### Inputs
 
 - `out`, `ow`, `oh` - the composited frame, BGRA.
-- `cur: FramePoint` - the cursor in base/output coordinates. In this mode it is the RAW recorded path: `CursorSettings::plain_os` is true for System-without-a-baked-cursor, so `follow_alpha_at` is 1.0 (no glide) and `idealize_at` is 0.0 (no straightening) - `Cursor::at` returns the interpolated sample verbatim.
+- `cur: FramePoint` - the cursor in base/output coordinates. In this mode it is the RAW recorded path: `CursorSettings::plain_os` is true for System-without-a-baked-cursor, so `smoothness_at` is 0.0 (no glide) and `idealize_at` is 0.0 (no straightening) - `Cursor::at` returns the interpolated sample verbatim.
 - `cam`, `screen`, `inset_w` - projected through `cursorset::frame_placement`, the helper both cursor paths share, so the panel scale and the clip box can never drift apart.
 - `sw: u32` - the source video's width, for `content_scale`. The synthetic path does not need it (its sprites are authored against the output canvas); the captured bitmaps are in source pixels, so they do.
 - `ev_t: u32` - event time, for `sprite_at`.

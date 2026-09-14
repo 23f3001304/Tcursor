@@ -117,7 +117,7 @@ An `Err` here is the ordinary case for a deleted or unreadable asset, and is wha
 ## StagedInput
 
 ```rust
-struct StagedInput(std::path::PathBuf); // private to ffio.rs
+pub(crate) struct StagedInput(std::path::PathBuf); // private to ffio.rs
 ```
 
 An input image written to disk for ffmpeg to read, at `$TEMP/cursorzoom_img_<pid>_<n>` (`n` from a process-wide `AtomicU64`), removed by `Drop`.
@@ -127,6 +127,8 @@ An input image written to disk for ffmpeg to read, at `$TEMP/cursorzoom_img_<pid
 `decode_image` used to stage every image at one fixed `$TEMP/cursorzoom_bg_src`, and it has two unrelated callers that run on different threads: `background::build` (the mesh wallpaper, on a cold `FrameRenderer::new` for a preview *or* an export) and `decode_cursor` (every cursor-pack sprite, via the `cursor_sprites` command and `cursorset::prep`). The editor fires both within milliseconds of opening a project, so a sprite decode could overwrite the wallpaper's staged bytes in the window between the write and ffmpeg's read - the background then decoded from `resize_ns.png`, scaled to the full frame. That is what `preview_bg` returned to the editor stage, and what `composite_at` drew under every panel. A per-call path (unique within the process by the counter, across processes by the pid) makes the collision impossible rather than unlikely.
 
 Dropping the guard also deletes the file on the error path, which the old inline `remove_file` (placed after a `?`) skipped.
+
+Crate-visible since 2026-09-14: `export::preview::jpeg_encode` stages a composited BGRA frame through it the same way `decode_with` stages an image.
 
 ## png_dims
 

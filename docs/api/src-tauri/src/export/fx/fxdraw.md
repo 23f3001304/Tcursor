@@ -41,6 +41,8 @@ Implements `FxRenderer::apply`. Applies all active effects from `state` onto `ou
 ### Behaviors
 
 - `ripple_paints_a_colored_ring` - a `Ripple` hit at (50, 50) in a 100x100 frame paints at least one pixel with R > 40 (red ring in BGRA at idx 2).
+- `pulse_paints_a_disc_with_a_white_core` - a `Pulse` hit at `progress = 0.2` puts a white core at the click point (both the tint's own channel and the channels the tint has none of are lit) while a pixel out on the disc's rim is the tint alone. Pins that the core and the rim are separate passes.
+- `every_style_flashes_white_at_the_instant_of_the_click` - at `progress = 0` with a BLACK tint - which contributes nothing on a purely additive style - Glow, Shockwave, Particles and Neon all still light the click point, because the impact flash is style-independent. *Why Ripple and Pulse are not probed this way:* they composite their tint OVER the flash (`blend`, not `add_blend`), so a black one would paint it back out at the exact centre; their own tests cover them, and `fx_gpu_tests.rs` pins the shared curve on the shader.
 - `spotlight_dims_corner_more_than_center` - with a `Classic` spotlight at centre, the corner pixel is darker than the centre pixel.
 - `glow_brightens_near_click` - a `Glow` hit at centre with white colour increases the byte value at the centre pixel above its initial value.
 - `neon_paints_a_bright_ring` - a `Neon` hit produces at least one pixel with B > 60 (blue component of the `[0, 128, 255]` colour).

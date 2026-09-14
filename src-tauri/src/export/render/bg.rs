@@ -25,7 +25,7 @@ impl FrameRenderer {
     /// settings changed (the decode shells out to ffmpeg - every OTHER edit must stay cheap).
     pub fn reload_edit(&mut self, paths: &ProjectPaths) {
         let es = EditState::load(paths, &self.actions, &self.layout, self.sw, self.sh,
-            self.events_ms as i64 - self.video_start as i64, self.full_dur_ms);
+            self.events_ms as i64 - self.video_start as i64, self.video_start, self.full_dur_ms);
         if es.settings.background != self.settings.background {
             self.bg = build_bg(paths, &es.settings.background, self.layout.out_w, self.layout.out_h);
             // A background that MOVES has to re-upload every frame; one that does not must keep
@@ -34,8 +34,9 @@ impl FrameRenderer {
         }
         // Live-apply Smoothness/idealize; the `_at` variants also flip the path to RAW the moment
         // the style is switched to System on a recording with no baked OS cursor.
-        self.cursor.set_a(es.settings.cursor.follow_alpha_at(self.os_cursor_in_video));
+        self.cursor.set_smoothness(es.settings.cursor.smoothness_at(self.os_cursor_in_video));
         self.cursor.set_idealize(es.settings.cursor.idealize_at(self.os_cursor_in_video));
+        self.cursor.set_tilt(es.settings.cursor.tilt_at(self.os_cursor_in_video));
         self.settings = es.settings; self.cfg = es.cfg; self.track = es.track;
         self.regions = es.regions; self.effects = es.effects; self.cam_moves = es.cam_moves; self.map = es.map;
     }

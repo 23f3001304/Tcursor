@@ -1,8 +1,7 @@
-import { PanelHeader } from "../panels/PanelHeader";
 import type { EditDoc, EditOp, EffectRegion } from "../../lib/edit";
 import type { Settings } from "../../hud/settings/settings";
 import { Switch, Picker, NumberField, Slider } from "../controls/Controls";
-import { Hint, InspectorShell, RemoveButton, Section, TimingRow, secOf, spanLede } from "./InspectorShape";
+import { Hint, InspectorHeader, InspectorShell, Section, TimingRow, secOf, spanRange } from "./InspectorShape";
 
 const MODE_OPTIONS = [
   { value: "global", label: "Use Global Default" },
@@ -53,7 +52,9 @@ export function EffectInspector({ effect, dur, settings, onApply, onDimCamera, o
 
   return (
     <InspectorShell kind="fx">
-      <PanelHeader title="Spotlight" lede={spanLede(effect.start_ms, effect.end_ms)} closeTitle="Deselect" onClose={onClose} />
+      <InspectorHeader title="Spotlight" range={spanRange(effect.start_ms, effect.end_ms)}
+        deleteLabel="Delete spotlight" onClose={onClose}
+        onDelete={() => { void onApply({ op: "remove_effect", id: effect.id }); onClose(); }} />
 
       <Section title="Timing">
         <TimingRow startMs={effect.start_ms} endMs={effect.end_ms} durMs={dur}
@@ -89,8 +90,6 @@ export function EffectInspector({ effect, dur, settings, onApply, onDimCamera, o
               onChange={(v) => upd({ fade_out_ms: Math.round(v * 1000) })} /></label>
         </div>
       </Section>
-
-      <RemoveButton label="Delete spotlight" onClick={() => { void onApply({ op: "remove_effect", id: effect.id }); onClose(); }} />
     </InspectorShell>
   );
 }

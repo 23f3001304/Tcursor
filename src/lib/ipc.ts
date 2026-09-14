@@ -17,8 +17,19 @@ export const stopRecording = () =>
   invoke<{ folder: string; frames: number }>("stop_recording");
 export const saveWebcam = (folder: string, bytes: Uint8Array) =>
   invoke<void>("save_webcam", { folder, bytes });
-export const appendWebcam = (folder: string, bytes: Uint8Array) =>
-  invoke<void>("append_webcam", { folder, bytes });
+/** `segment` picks the file this chunk appends to: 1 (the default) is `webcam.webm`, a later index
+ *  is `webcam_<n>.webm`, written by the second `MediaRecorder` a mid-take camera switch needs. */
+export const appendWebcam = (folder: string, bytes: Uint8Array, segment = 1) =>
+  invoke<void>("append_webcam", { folder, bytes, segment });
+/** Stamp where webcam segment `n` (2, 3...) starts on the recording clock, so `preprocess` can
+ *  merge the segments back into one `webcam.webm`. Rejects when no take is running. */
+export const markWebcamSegment = (segment: number) => invoke<void>("mark_webcam_segment", { segment });
+/** Change the take's microphone without stopping it (`null` = mic off from here on); the recorder
+ *  finalizes the current WAV and starts `mic_<n>.wav`. Rejects when no take is running. */
+export const switchMic = (deviceId: string | null) => invoke<void>("switch_mic", { deviceId });
+/** Change what the take is capturing without stopping it: the capture restarts on `targetId` and
+ *  is fitted into the same encoder canvas. Rejects when no take is running. */
+export const switchDisplay = (targetId: string) => invoke<void>("switch_display", { targetId });
 /** Output frame SIZE (mirrors Rust `export::settings::Resolution`), independent of the doc's
  *  `Aspect` (the RATIO). Fixed presets name the SHORT edge in px - `"p1080"` on a landscape
  *  aspect is height=1080 (1920x1080); on a portrait aspect the short edge is the WIDTH
@@ -66,6 +77,8 @@ export interface BusySpecDto { anim: "spin" | "flip" | "pulse"; fps: number; fra
  *  `busyPose` the export does. */
 export interface CursorPackDto {
   sprites: CursorSpriteDto[]; busy_frames: CursorSpriteDto[]; busy: BusySpecDto | null;
+  /** `"glass"` when the sprites are lenses the export refracts through (the preview mirrors alpha and cross-fade); else null. */
+  material: string | null;
 }
 export const cursorSprites = (folder: string) => invoke<CursorPackDto>("cursor_sprites", { folder });
 /** One cursor-shape change at output time `t` (ms); `kind` is the lowercase cursor-type name. */
@@ -83,8 +96,12 @@ export interface CursorLayerDto {
 }
 export const cursorLayer = (folder: string) => invoke<CursorLayerDto | null>("cursor_layer", { folder });
 /** One selectable cursor pack: `id` persists into `CursorSettings.pack`, `name` is shown in the
- *  picker, `builtin` marks a pack the user cannot delete (the embedded set, always first, or one
- *  bundled with the app). `dir` is the pack's folder, so the grid loads each tile's sprite through
+ *  picker, `category` is the style section the picker groups it under ("Classic", "Glass and
+ *  glow", "Playful", "Drawn", "Retro", or "Imported" for a pack that names none - see
+ *  `packCategories.ts`), and `builtin` marks a pack the user cannot delete (the embedded set,
+ *  always first, or one bundled with the app). A pack's category is a claim about its ARTWORK, so
+ *  it comes from the pack's own `pack.json`; `builtin` is a claim about provenance, so it comes
+ *  from the folder Rust found it in. `dir` is the pack's folder, so the grid loads each sprite through
  *  the asset protocol rather than the backend base64ing every pack's nine PNGs into one reply.
  *  `files` maps each kind wire name to its filename inside `dir`, already alias-resolved (the
  *  embedded pack spells its arrow `pointer.png`) and already carrying the busy-is-arrow
@@ -92,8 +109,10 @@ export const cursorLayer = (folder: string) => invoke<CursorLayerDto | null>("cu
  *  absent. `busy` is the pack's busy animation, so a hovered tile previews it with the same
  *  `busyPose` the export runs. */
 export interface CursorPackInfo {
-  id: string; name: string; builtin: boolean; dir: string;
+  id: string; name: string; category: string; builtin: boolean; dir: string;
   files: Record<string, string>; busy: BusySpecDto | null;
+  /** `"glass"` when the pack declares `material: "glass"` (how the renderer treats the sprites); null = plain blit. */
+  material: string | null;
 }
 /** Built-in pack first, then every imported pack under the app's cursors folder. */
 export const listCursorPacks = () => invoke<CursorPackInfo[]>("list_cursor_packs");
@@ -122,8 +141,11 @@ export const detectSilences = (folder: string) => invoke<[number, number][]>("de
  *  `background.asset` in its own save, which is the only writer of the doc. */
 export const removeBackgroundAsset = (projectDir: string, relPath: string) =>
   invoke<void>("remove_background_asset", { projectDir, relPath });
-/** Filmstrip thumbnail file paths (wrap each with `fileSrc`); one cached ffmpeg pass. */
-export const ensureThumbs = (folder: string, count: number) => invoke<string[]>("ensure_thumbs", { folder, count });
+/** Filmstrip thumbnail file paths (wrap each with `fileSrc`); one cached ffmpeg pass, cached per
+ *  `count`+`height` pair. Pass the height the lane actually draws at (`FILMSTRIP_HEIGHT`,
+ *  `editor/timeline/filmstripPlan.ts`) so a tile is never an upscaled smaller JPEG. */
+export const ensureThumbs = (folder: string, count: number, height: number) =>
+  invoke<string[]>("ensure_thumbs", { folder, count, height });
 /** A cached waveform PNG path for the system or mic track ("" if that source wasn't recorded). */
 export const ensureWaveform = (folder: string, which: "system" | "mic") => invoke<string>("ensure_waveform", { folder, which });
 /** A cached mixed (mic+system) preview-audio file path so the editor can play sound. */

@@ -2,6 +2,8 @@
 
 The editor preview's Canvas2D compositor: given the screen `<video>`, the webcam `<video>`, the interpolated camera pose, and the export framing/background, it draws one full preview frame that matches the export's compositing order exactly - background + screen panel are composited onto an offscreen buffer *unzoomed*, then that whole buffer is cropped/resized per the camera (mirroring the export's `coordmap::crop`), so the background pans/zooms in lockstep with the screen instead of a plain crop of the raw recording sitting in a static panel. The webcam PiP and cursor are drawn on top of the zoomed result afterward, at their normal unzoomed size - also matching the export, which composites/projects them after its own crop. Native `drawImage` keeps it at 60fps.
 
+**The colours here are frame pixels, not chrome, so they do NOT follow the editor's theme.** The panel drop shadow, the black backing each panel is drawn on before its video, and the 2px white edge on the webcam PiP are all part of the picture the export produces; a preview that lightened them under the light theme would stop matching what gets written to the file. They are the one place in the editor a literal colour is correct, and the reason `themeTokens.test.ts`'s "no raw hex" scan covers stylesheets rather than this file.
+
 ## DrawCam
 
 **Time remap.** `drawPreview` gained an optional last argument `bgTimeMs`: a video background runs on the OUTPUT clock (the exporter feeds it one frame per output frame), so the composite loop passes `tOut` for it while `now` stays clip time for the cursor, the clicks and the trail. Omitted, `now` is used for both, as before.
@@ -20,9 +22,14 @@ export function drawPreview(
   screen: HTMLVideoElement, webcam: HTMLVideoElement | null, cam: DrawCam,
   layout: PreviewLayout | null, bg: StageBgState | null, clicks: ClickSample[], now: number,
   cursor: DrawCursor | null, offscreen: HTMLCanvasElement, layer: HTMLCanvasElement,
-  insetW: number = 1
+  insetW: number = 1,
+  bgTimeMs?: number
 ): void
 ```
+
+The screen video is drawn through the active source span's crop rect (`PreviewLayout.src`, fractions of the recorded canvas applied to the proxy's own dimensions), so the black bars a mid-take display switch baked into the recording are cropped away here exactly as the export's compositor crops them (`Scene.src`). The captured cursor's content scale uses the same rect's width, matching Rust passing `Scene.src.w` into `captured::content_scale`.
+
+`paintPanel`, `coverDraw` and `roundRect` live in `previewDraw.ts`.
 
 Composites one preview frame onto `ctx` (a `w`x`h` canvas).
 

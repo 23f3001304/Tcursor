@@ -39,7 +39,7 @@ png = "0.17"
 
 [dependencies.windows]
 version = "0.58"
-features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Registry"]
+features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Registry"]
 
 # The SAME `windows` package as above, at the version windows-capture builds against, under a
 # second name. NOT a second dependency: cargo unifies both entries onto the one 0.61.3 crate

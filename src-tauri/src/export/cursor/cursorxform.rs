@@ -13,9 +13,12 @@ use crate::export::cursor::cursordraw::CursorSprite;
 ///
 /// `scale` is the sprite's own output scale (sprite px -> output px, as `draw_cursor` computes
 /// it); `extra` is the animation's scale ON TOP of that. `clip` is the screen-panel box, applied
-/// exactly as in `blit`.
+/// exactly as in `blit`. `alpha` scales the sprite's opacity the same way `blit`'s `alpha_mul`
+/// does, so a glass pack's animated busy cursor is as see-through as its still ones.
+#[allow(clippy::too_many_arguments)]
 pub fn blit_transformed(out: &mut [u8], ow: u32, oh: u32, spr: &CursorSprite, anchor: (f32, f32),
-                        scale: f32, angle_deg: f32, extra: f32, clip: (i32, i32, i32, i32)) {
+                        scale: f32, angle_deg: f32, extra: f32, clip: (i32, i32, i32, i32),
+                        alpha: f32) {
     let (sw, sh) = (spr.w as f32, spr.h as f32);
     if sw < 1.0 || sh < 1.0 || scale <= 0.0 || extra <= 0.0 { return; }
     let total = scale * extra;
@@ -32,7 +35,9 @@ pub fn blit_transformed(out: &mut [u8], ow: u32, oh: u32, spr: &CursorSprite, an
             let (ux, uy) = (dx * cos + dy * sin, -dx * sin + dy * cos);
             let (sx, sy) = (hot.0 + ux / total, hot.1 + uy / total);
             let Some(px) = sample(spr, sx - 0.5, sy - 0.5) else { continue };
-            blend(out, ow, ox, oy, px);
+            // Premultiplied, so one multiply scales colour and coverage together.
+            let a = alpha.clamp(0.0, 1.0);
+            blend(out, ow, ox, oy, [px[0] * a, px[1] * a, px[2] * a, px[3] * a]);
         }
     }
 }

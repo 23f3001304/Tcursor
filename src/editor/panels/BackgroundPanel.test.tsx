@@ -5,8 +5,8 @@ import type { BackgroundThumb } from "../../lib/ipc";
 import type { EditDoc } from "../../lib/edit";
 
 // The panel fetches its thumbnails over IPC and its asset card opens a Tauri file dialog; neither
-// exists in jsdom, so both seams are stubbed. Everything else - the rows, the keyboard, the
-// settings patch - is the real component.
+// exists in jsdom, so both seams are stubbed. Everything else - the sections, their default open
+// state, the settings patch - is the real component.
 const THUMBS: BackgroundThumb[] = [
   { id: "amber", name: "Amber", kind: "mesh", group: "Ribbons", png_base64: "AAA" },
   { id: "paper", name: "Paper", kind: "mesh", group: "Ribbons", png_base64: "" },
@@ -33,12 +33,17 @@ const DOC = {
   },
 } as unknown as EditDoc;
 
+const docWith = (mesh: string): EditDoc =>
+  ({ ...DOC, settings: { ...DOC.settings, background: { ...DOC.settings.background, mesh } } }) as EditDoc;
+
 let root: Root, container: HTMLDivElement;
 let saved: EditDoc["settings"][] = [];
-let scrolled: string[] = [];
 
-const rows = () => Array.from(container.querySelectorAll<HTMLElement>('[role="listbox"]'));
-const tilesOfRow = (i: number) => Array.from(rows()[i].querySelectorAll<HTMLButtonElement>('[role="option"]'));
+const sections = () => Array.from(container.querySelectorAll<HTMLElement>(".e-cat"));
+const headOf = (i: number) => sections()[i].querySelector<HTMLButtonElement>(".e-cat-btn")!;
+const labels = () => sections().map((s) => s.querySelector(".e-cat-label")?.textContent);
+const openFlags = () => sections().map((s) => s.querySelector(".e-cat-btn")!.getAttribute("aria-expanded"));
+const tilesOf = (i: number) => Array.from(sections()[i].querySelectorAll<HTMLButtonElement>(".e-tile"));
 
 const show = async (doc: EditDoc = DOC) => {
   await act(async () => {
@@ -49,60 +54,65 @@ const show = async (doc: EditDoc = DOC) => {
 
 beforeEach(() => {
   (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  saved = []; scrolled = [];
-  // jsdom ships no scrollIntoView at all, so the row's own call needs a stand-in to observe.
-  Element.prototype.scrollIntoView = function (this: Element) {
-    scrolled.push(this.getAttribute("title") ?? "");
-  } as Element["scrollIntoView"];
+  saved = [];
+  localStorage.clear();
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
 });
 afterEach(() => { act(() => { root.unmount(); }); container.remove(); localStorage.clear(); });
 
-describe("BackgroundPanel wallpaper rows", () => {
-  it("renders one listbox row per group, named by the group, with Classic leading the first", async () => {
+describe("BackgroundPanel wallpaper sections", () => {
+  it("renders one collapsible section per group, named and counted, with Your file last", async () => {
     await show();
-    expect(rows().map((r) => r.getAttribute("aria-label"))).toEqual(["Ribbons", "Folds", "Scenic"]);
-    expect(tilesOfRow(0).map((b) => b.title)).toEqual(["Classic", "Amber", "Paper"]);
-    expect(tilesOfRow(2).map((b) => b.title)).toEqual(["Dunes"]);
-    // The group name is the ROW's own label now, not a section heading above a grid.
-    expect(container.querySelector(".e-tilerow-label")?.textContent).toBe("Ribbons");
+    expect(labels()).toEqual(["Ribbons", "Folds", "Scenic", "Your file"]);
+    expect(sections().map((s) => s.querySelector(".e-cat-count")?.textContent)).toEqual(["3", "1", "1", "0"]);
   });
 
-  it("scrolls the selected tile into view once the thumbnails resolve", async () => {
+  it("opens only the section holding the current wallpaper", async () => {
     await show();
-    expect(scrolled).toContain("Paper");
-    expect(tilesOfRow(0)[2].getAttribute("aria-selected")).toBe("true");
-    // Exactly one tile is ever selected, across every row.
-    expect(container.querySelectorAll('[aria-selected="true"]')).toHaveLength(1);
+    expect(openFlags()).toEqual(["true", "false", "false", "false"]);
+    // Classic leads Ribbons, and its tiles caption their own names under the picture.
+    expect(tilesOf(0).map((b) => b.textContent)).toEqual(["Classic", "Amber", "Paper"]);
+    expect(tilesOf(1)).toHaveLength(0); // closed sections keep their tiles out of the tab order
   });
 
-  it("moves the selection with the arrow keys, clamped at the ends of the row", async () => {
-    await show();
-    act(() => { tilesOfRow(0)[2].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true })); });
-    expect(saved).toHaveLength(1);
-    expect(saved[0].background.mesh).toBe("amber");
-    // "Paper" is the last tile of Ribbons, so ArrowRight has nowhere to go and re-picks it.
-    act(() => { tilesOfRow(0)[2].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })); });
-    expect(saved[1].background.mesh).toBe("paper");
+  it("follows the selection into a later section", async () => {
+    await show(docWith("scenic-dunes"));
+    expect(openFlags()).toEqual(["false", "false", "true", "false"]);
+    expect(tilesOf(2).map((b) => b.getAttribute("aria-pressed"))).toEqual(["true"]);
   });
 
-  it("keeps only the selected tile in the tab order, so a row is one tab stop", async () => {
+  it("names the chosen wallpaper in a CLOSED section's header, so nothing has to be opened to see it", async () => {
+    await show(docWith("folds-citrus"));
+    act(() => { headOf(1).click(); }); // close the section the selection opened
+    expect(sections()[1].querySelector(".e-cat-sel")?.textContent).toBe("Citrus");
+    expect(sections()[0].querySelector(".e-cat-sel")).toBeNull();
+  });
+
+  it("marks exactly one tile selected, across every section", async () => {
     await show();
-    expect(tilesOfRow(0).map((b) => b.tabIndex)).toEqual([-1, -1, 0]);
-    // A row holding no selection still offers its first tile, or the row would be unreachable.
-    expect(tilesOfRow(1).map((b) => b.tabIndex)).toEqual([0]);
+    act(() => { headOf(1).click(); });
+    act(() => { headOf(2).click(); });
+    expect(container.querySelectorAll('.e-tile[aria-pressed="true"]')).toHaveLength(1);
   });
 
   it("writes the same settings patch a tile click always did", async () => {
     await show();
-    act(() => { tilesOfRow(1)[0].click(); });
+    act(() => { headOf(1).click(); });
+    act(() => { tilesOf(1)[0].click(); });
     expect(saved).toHaveLength(1);
     expect(saved[0]).toEqual({
       ...DOC.settings,
       background: { ...DOC.settings.background, kind: "mesh", mesh: "folds-citrus" },
     });
+  });
+
+  it("never lays a picker out as a sideways scroller", async () => {
+    // The whole point of the arrangements pass: no horizontal movement anywhere in the panel.
+    await show();
+    expect(container.querySelectorAll(".e-tilerow, .e-tile-strip")).toHaveLength(0);
+    expect(container.querySelectorAll(".e-tile-grid").length).toBeGreaterThan(0);
   });
 
   it("puts the tuning sections under one More row, closed until asked", async () => {

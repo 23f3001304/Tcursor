@@ -25,7 +25,13 @@ export function panelFactor(screenW: number, insetW: number): number {
  *  `insetPx` is the reference inset width in CANVAS px (`LayoutPresets.inset_w * canvasW` - the
  *  fraction scaled up, since `srcW` is in real pixels and the ratio has to share a unit).
  *  A non-positive `srcW` means the backend could not probe the video: falls back to `panel`
- *  alone, i.e. the pre-content-scale behavior, rather than collapsing the cursor to nothing. */
+ *  alone, i.e. the pre-content-scale behavior, rather than collapsing the cursor to nothing.
+ *
+ *  `srcW` is the source width the panel actually SHOWS - the whole recorded frame normally, but
+ *  only the active source span's slice of it after a mid-take display switch (the caller scales it
+ *  by `PreviewLayout.src`'s width). Rust does the same, passing `Scene.src.w` where it used to pass
+ *  the canvas width; the full width after a switch would size the cursor against pixels the panel
+ *  is not drawing. */
 export function contentScale(panel: number, insetPx: number, srcW: number): number {
   return srcW > 0 ? panel * insetPx / srcW : panel;
 }

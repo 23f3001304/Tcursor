@@ -135,7 +135,7 @@ All tuneable parameters for click-zoom behavior. Populated from user settings; k
 - `follow_damping: f32` - per-frame exponential step size for `CameraSim` (0=instant, higher=slower follow). Default: 0.10.
 - `dead_zone_px: u32` - cursor must exceed this distance from center before the camera follows (hold phase). Default: 60. *Note: unread. `CameraSim::step` has no dead band any more (a `follow_cursor` region aims at the cursor every step, an anchored one at its anchor); the field is kept for the settings file's shape.*
 - `easing: Easing` - curve for zoom transitions. Default: `Easing::Smooth`.
-- `smoothing_ms: u32` - settle time, in ms, of the opt-in critically damped post-pass `CameraSim::step` applies to its own output (`camera/smoothing.md`). **Default: 0 = off, and off is bit-identical to the camera before the filter existed** (`jank_filter_tests::smoothing_off_is_bit_identical` pins a fingerprint of all 721 samples of the probe scene). Set from the user-facing settings field `ZoomSettings::camera_smoothing_ms` via `to_zoom_config` (see `settings/model.md`) - a field distinct from `smoothness`, which already means the CURSOR low-pass (`CursorSettings::follow_alpha`), and from `follow_damping`, the hold-phase chase rate. Useful values measured on the probe scene: 120ms cuts the worst spike by 72% for ~33ms of lag, 250ms by 86% for ~83ms.
+- `smoothing_ms: u32` - settle time, in ms, of the opt-in critically damped post-pass `CameraSim::step` applies to its own output (`camera/smoothing.md`). **Default: 0 = off, and off is bit-identical to the camera before the filter existed** (`jank_filter_tests::smoothing_off_is_bit_identical` pins a fingerprint of all 721 samples of the probe scene). Set from the user-facing settings field `ZoomSettings::camera_smoothing_ms` via `to_zoom_config` (see `settings/model.md`) - a field distinct from `smoothness`, which already means the CURSOR glide (`CursorSettings::smoothness`), and from `follow_damping`, the hold-phase chase rate. Useful values measured on the probe scene: 120ms cuts the worst spike by 72% for ~33ms of lag, 250ms by 86% for ~83ms.
 
 ### Used by
 
@@ -174,7 +174,7 @@ A single resolved zoom event, baked from either auto-generated click detection o
 
 - `src-tauri/src/export/camera/mod.rs` - `CameraSim::step` iterates `&[ZoomRegion]` to find the active region.
 - `src-tauri/src/export/camera/autozoom.rs` - `generate` produces `Vec<ZoomRegion>`.
-- `src-tauri/src/export/scene/layout.rs` - `anchor_regions` re-maps region anchors into the active panel.
+- `src-tauri/src/export/scene/layout.rs` - `anchor_frame` re-maps region anchors into each frame's panel.
 
 ## Background
 

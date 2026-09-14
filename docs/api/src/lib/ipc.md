@@ -118,13 +118,14 @@ Not currently called from any `.tsx` file - superseded by `appendWebcam`, which 
 ## appendWebcam
 
 ```ts
-export const appendWebcam = (folder: string, bytes: Uint8Array) => invoke<void>("append_webcam", { folder, bytes })
+export const appendWebcam = (folder: string, bytes: Uint8Array, segment = 1) => invoke<void>("append_webcam", { folder, bytes, segment })
 ```
 
 ### Inputs
 
 - `folder` (`string`) - absolute path to the project directory.
-- `bytes` (`Uint8Array`) - one `MediaRecorder` chunk (a 1s timeslice) to append to `webcam.webm`.
+- `bytes` (`Uint8Array`) - one `MediaRecorder` chunk (a 1s timeslice) to append.
+- `segment` (`number`, default `1`) - which webcam file the chunk belongs to. `1` is `webcam.webm`, the take's first (and usually only) camera; `2`, `3`... are `webcam_<n>.webm`, written by the SECOND (third...) `MediaRecorder` a mid-take camera switch needs, because a `MediaRecorder` cannot change its stream. `preprocess` merges them back into one `webcam.webm` before the editor opens (`export::preview::segments_webcam`), so nothing downstream ever sees more than one file.
 
 ### Returns
 
@@ -132,7 +133,61 @@ export const appendWebcam = (folder: string, bytes: Uint8Array) => invoke<void>(
 
 ### Used by
 
-`useWebcamRecorder` (`src/hud/hooks/useWebcamRecorder.ts`) - called from the recorder's `ondataavailable` handler for every chunk, chained so appends land in order; `stop()` awaits the chain so `webcam.webm` is complete before the editor opens.
+`useWebcamRecorder` (`src/hud/hooks/useWebcamRecorder.ts`) - called from the recorder's `ondataavailable` handler for every chunk, chained so appends land in order, with the segment index `start()` was given; `stop()` awaits the chain so the file is complete before the next segment opens (or before the editor does).
+
+## markWebcamSegment
+
+```ts
+export const markWebcamSegment = (segment: number) => invoke<void>("mark_webcam_segment", { segment })
+```
+
+### Inputs
+
+- `segment` (`number`) - the index of the segment that is about to start recording (2, 3...). `1` is rejected: the first segment is `webcam.webm`, which `sync.json` never lists.
+
+### Returns
+
+`Promise<void>`. Rejects with `"not recording"` when no take is running, and with `"the first webcam segment is webcam.webm and is never marked"` for an index below 2.
+
+### Used by
+
+`useSourceSwitch` (`src/hud/hooks/useSourceSwitch.ts`) - `switchCamera`, called the moment the new camera's stream is live and immediately before `webcam.start(stream, folder, segment)`, so the stamp in `sync.json` is the instant the new recorder begins rather than the instant the picker was tapped.
+
+## switchMic
+
+```ts
+export const switchMic = (deviceId: string | null) => invoke<void>("switch_mic", { deviceId })
+```
+
+### Inputs
+
+- `deviceId` (`string | null`) - the cpal device id to record from here on; `null` means the mic goes off for the rest of the take (still a segment boundary, so the merge pads silence over it).
+
+### Returns
+
+`Promise<void>`. Rejects when no take is running.
+
+### Used by
+
+`useSourceSwitch` (`src/hud/hooks/useSourceSwitch.ts`) - `switchMic`. Rust finalizes the running WAV and spawns a thread writing `mic_<n>.wav`; the HUD's level meter follows the new thread on the same `audio-level` event, so nothing in the pill changes.
+
+## switchDisplay
+
+```ts
+export const switchDisplay = (targetId: string) => invoke<void>("switch_display", { targetId })
+```
+
+### Inputs
+
+- `targetId` (`string`) - a `list_displays` target id (a display or a window), the same string `startRecording` takes.
+
+### Returns
+
+`Promise<void>`. Rejects when no take is running, and on the legacy/compatibility capture path, which cannot restart its capture into a running encoder.
+
+### Used by
+
+`useSourceSwitch` (`src/hud/hooks/useSourceSwitch.ts`) - `switchDisplay`. Rust restarts the capture on the new target into the SAME encoder canvas and remaps mouse coordinates at capture time, so the take keeps one size and `events.json` keeps one `ScreenInfo`.
 
 ## ExportResolution
 
@@ -425,6 +480,14 @@ export interface CursorPackDto {
 
 The recording's selected cursor pack, ready to draw: one sprite per kind, the pack's explicit busy frames (empty unless it ships them), and its declared busy animation (`null` for the embedded set and any v1 pack). `busy` + `busy_frames` are what let the preview run the same `busyPose` the export does.
 
+### CursorPackDto::material
+
+```ts
+material: string | null;
+```
+
+`"glass"` when the selected pack's sprites are LENSES the export refracts the frame through, else `null`. The canvas preview draws a glass pack's sprite at the same reduced alpha the export blits it at (`cursorGlass.ts`), so the live look approximates the paused exact frame.
+
 ## cursorSprites
 
 ```ts
@@ -497,16 +560,26 @@ export const cursorLayer = (folder: string) => invoke<CursorLayerDto | null>("cu
 
 ```ts
 export interface CursorPackInfo {
-  id: string; name: string; builtin: boolean; dir: string;
+  id: string; name: string; category: string; builtin: boolean; dir: string;
   files: Record<string, string>; busy: BusySpecDto | null;
 }
 ```
 
 One selectable cursor pack. `id` persists into `CursorSettings.pack`; `builtin` marks a pack the user cannot delete (the embedded set, always first, or one bundled with the app).
 
+`category` is the style section the picker groups the pack under - `Classic`, `Glass and glow`, `Playful`, `Drawn`, `Retro`, or `Imported` for a pack that names none (`packCategories.md` has the ordering rule, `packlist.md` the Rust side). It is never empty. A pack's category is a claim about its ARTWORK, so it comes from the pack's own `pack.json`; `builtin` is a claim about provenance, so it comes from the folder Rust found it in. That split is what lets a new pack join a section by shipping a folder, with no list of pack ids anywhere in the frontend.
+
 `dir` is the pack's folder, so the grid loads each tile's sprite through the asset protocol rather than the backend base64ing every pack's nine PNGs into one reply. The embedded set has one too now (`assets/cursors`, shipped as a resource) - which is what lets its tile show a sprite - even though the EXPORT still reads the copies compiled into the binary.
 
 `files` maps each kind wire name to its filename inside `dir`, already alias-resolved (the embedded pack spells its arrow `pointer.png`) and already carrying the busy-is-arrow substitution, so the grid has to know neither rule; a kind the pack does not ship is absent. `busy` is the pack's busy animation, so a hovered tile previews it with the same `busyPose` the export runs - `null` for the embedded set, whose busy state renders as the arrow.
+
+### CursorPackInfo::material
+
+```ts
+material: string | null;
+```
+
+The same value for a pack in the PICKER's listing rather than the selected one: how the renderer TREATS the sprites (as lenses the frame bends through), not what they depict. `null` for a plain alpha blit, which is every other pack.
 
 ## listCursorPacks
 
@@ -589,13 +662,15 @@ Deletes the imported file and its thumbnail. Idempotent. It does NOT touch `edit
 ## ensureThumbs
 
 ```ts
-export const ensureThumbs = (folder: string, count: number) => invoke<string[]>("ensure_thumbs", { folder, count })
+export const ensureThumbs = (folder: string, count: number, height: number) =>
+  invoke<string[]>("ensure_thumbs", { folder, count, height })
 ```
 
 ### Inputs
 
 - `folder` (`string`) - project directory.
 - `count` (`number`) - number of filmstrip thumbnails (the backend clamps 8..120).
+- `height` (`number`) - pixel height to generate them at (the backend clamps 16..240 and rounds down to even). Pass the height the lane actually draws at - `FILMSTRIP_HEIGHT` (`editor/timeline/filmstripPlan.ts`) - so a tile is never an upscaled smaller JPEG. The pair is the cache key: `folder/thumbs_<count>_<height>/`.
 
 ### Returns
 
@@ -731,3 +806,4 @@ export const detectSilences = (folder: string) => Promise<[number, number][]>
 ```
 
 Remove silences (`src-tauri/src/export/pipeline/silence.rs`): the recording's quiet stretches, silent on mic AND system when both exist, as clip-time spans already padded by 150 ms a side, at least 700 ms long and clamped into the trim. The editor applies them as one `add_cuts` so the batch is one undo step, skipping spans already inside a cut.
+

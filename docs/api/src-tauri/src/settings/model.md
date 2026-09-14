@@ -296,6 +296,8 @@ pub struct InterfaceSettings {
     pub theme: ThemeMode,
     pub accent: [u8; 3],
     pub animated_brand: bool,
+    #[serde(default = "default_true")]
+    pub interface_effects: bool,
 }
 ```
 
@@ -307,12 +309,44 @@ Fields:
 - `accent: [u8; 3]` - RGB accent color used for interactive elements throughout the UI. Default `[239, 68, 68]` (red). *Why red:* vivid, on-brand default that reads well against both light and dark backgrounds.
 - `animated_brand: bool` (Task 39) - the "living brand" feel knob: whether `TcursorMark` (`src/lib/TcursorMark.tsx`) flows/pulses for its recording/exporting/directing states at all, in the HUD titlebar and the editor's `TopBar`. Default `true`. *Why a settings field rather than always-on:* the fake-polish rule is every feel knob is a setting a user can turn off; `prefers-reduced-motion` disables the animation independently of this flag (accessibility isn't optional), but a user without that OS preference can still opt out here. Doesn't affect the dynamic Windows icon/taskbar progress (`win::sys::brand_icon`) - that's OS chrome, not an in-page animation, and stays purely state-driven.
 
+- `interface_effects: bool` (micro-interaction pass, 2026-09-14) - the second feel knob, for the editor's **own** interface: the click ripple that blooms under every pointerdown in the chrome, and the magnetic pull the transport's Play button and Trim pills exert on a nearby pointer. Default `true`. Off unmounts the ripple overlay entirely (zero listeners, not a listener that early-returns) and turns the magnetic hook into a no-op - see `src/editor/effects/`. Like `animated_brand`, `prefers-reduced-motion` softens these regardless of the flag (the ripple stops growing, the pull stops entirely) and this flag is the opt-out for a user with no OS-level preference. It never touches the **export**: these are TCursor's own chrome, not the recording's click effects, which are `ClickFxSettings`.
+
+  *Why the explicit `#[serde(default = "default_true")]`* when the container already carries `#[serde(default)]`: belt-and-suspenders, the same pattern `Settings::audio_mic_volume` uses. It is what makes a `config.json` written before this field existed load `true` rather than `bool::default()` - which would silently ship the feature turned off to every existing install. `model_tests.rs::interface_effects_defaults_on_and_round_trips` pins all three halves (the default is on, field-less JSON loads on, an explicit `false` survives a full `Settings` round-trip).
+
 ### Used by
 
 - `src-tauri/src/settings/model.rs` (`Settings.ui`) - persisted in `config.json`
 - `src-tauri/src/export/pipeline/exporter.rs` - reads `ui.theme` to resolve dark mode for cursor sprite inversion
 - `src/editor/Editor.tsx` - reads `doc.settings.ui.animated_brand` (the per-recording snapshot) to gate `TopBar`'s `brandState`
 - `src/hud/Hud.tsx` - reads the global `ui.animated_brand` (via `getSettings`/`Preferences`) to gate the titlebar mark's `state`
+- `src/editor/effects/InterfaceEffects.tsx` - reads the global `ui.interface_effects` (via `getSettings`, on mount and on every window focus) and publishes it to the rest of the effects folder
+
+## LayoutPreset
+
+```rust
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct LayoutPreset {
+    pub id: String,
+    pub name: String,
+    pub appearance: AppearanceSettings,
+}
+```
+
+One saved "look" (2026-09-14): a name plus a snapshot of **all five** layouts' appearance, for the editor's Layouts panel.
+
+- `id: String` - opaque and stable; the frontend mints `lp1`, `lp2`, ... A rename changes `name` only, so a row keeps its identity.
+- `name: String` - what the user typed, already trimmed and validated frontend-side (non-empty, unique case-insensitively including against the built-in "Default" row, at most 40 characters). Rust does not re-validate: the list is whatever the frontend last wrote, exactly like the rest of `Settings`.
+- `appearance: AppearanceSettings` - all five layouts at once. A look is deliberately not per-layout: a coherent look is the relationship between the layouts a recording cuts among, so applying one is a single write of a project's `settings.appearance`.
+
+**No `#[serde(default)]` on the struct itself**, and no `Default` impl: a preset is never partially present. It either exists in the list or it does not, and the list's own `#[serde(default)]` (on `Settings::layout_presets`) is what handles a config written before presets existed.
+
+The backend only stores and returns these - nothing in the render path reads them. The export resolves a project's own `settings.appearance` through `AppearanceSettings::for_id` / `layout_for` / `overlay_for` (`settings::appearance`), which is unchanged, so presets needed no renderer work at all.
+
+### Used by
+
+- `src-tauri/src/settings/model.rs` (`Settings::layout_presets`) - persisted in `config.json`
+- `src/hud/settings/settings.ts` (`LayoutPreset`) - the TypeScript mirror
+- `src/editor/panels/LayoutsPanel.tsx` / `layoutPresets.ts` - the only reader and writer
 
 ## Settings
 
@@ -331,6 +365,7 @@ pub struct Settings {
     pub audio_mic_volume: f32,
     pub audio_sys_volume: f32,
     pub ai_model: String,
+    #[serde(default)] pub layout_presets: Vec<LayoutPreset>,
 }
 ```
 
@@ -348,6 +383,7 @@ Fields:
 - `background: BackgroundSettings` - background style (mesh/solid/gradient + blur). Default `BackgroundSettings::default()` (`Mesh`, today's bundled image, byte-identical to before this field existed). See `settings::background`.
 - `audio_mic_volume: f32`, `audio_sys_volume: f32` - linear gain multipliers applied to each track at mux (0 = muted, 1 = unchanged, up to 1.5). Default `1.0` for both. *Why an explicit field-level `#[serde(default = "default_volume")]` in addition to the manual `impl Default` above:* belt-and-suspenders matching `spotlight_dim_camera`'s pattern, so a config saved without this key loads full volume under either code path.
 - `ai_model: String` - Ollama model name for the AI director. Default `""` (empty = let the backend pick its own default, `"llama3.2"`), so configs saved before this field existed behave identically.
+- `layout_presets: Vec<LayoutPreset>` - the user's saved layout looks, newest last. Default empty. *Why an explicit field-level `#[serde(default)]` on top of the container's:* same belt-and-suspenders as the two volumes - a `config.json` written before this field existed must load with an empty list under either code path rather than failing the whole `Settings` parse and silently resetting every other setting. `layout_presets_round_trip_and_default_empty` (`model_tests.rs`) pins both halves: `{}` loads empty, and a saved look survives a write/read cycle with all five layouts intact.
 
 ### Used by
 

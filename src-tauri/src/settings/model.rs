@@ -116,9 +116,35 @@ pub struct InterfaceSettings {
     /// a system-level reduced-motion preference. Doesn't affect the dynamic Windows icon/taskbar
     /// progress (Task 39B) - those are OS chrome, not an in-page animation.
     pub animated_brand: bool,
+    /// The second feel knob, for the editor's own interface micro-interactions (2026-09-14): the
+    /// click ripple that blooms under every pointerdown in the editor chrome, and the magnetic pull
+    /// the transport's Play button and Trim pills exert on a pointer that comes close. Off unmounts
+    /// the ripple overlay entirely (no listeners at all) and turns the magnetic hook into a no-op -
+    /// see `src/editor/effects/`. Like `animated_brand`, `prefers-reduced-motion` softens these
+    /// regardless of this flag (ripples stop growing, the pull stops); this flag is the opt-out for
+    /// a user with no system-level preference. Never touches the EXPORT - these are TCursor's own
+    /// chrome, not the recording's click effects (`ClickFxSettings`).
+    ///
+    /// The explicit field default (belt-and-suspenders alongside the container `#[serde(default)]`
+    /// and the manual `impl Default` below, matching `Settings::audio_mic_volume`) is what makes a
+    /// config.json written before this field existed load `true` rather than `bool::default()`,
+    /// which would silently ship the feature turned off to every existing install.
+    #[serde(default = "default_true")]
+    pub interface_effects: bool,
 }
 impl Default for InterfaceSettings {
-    fn default() -> Self { Self { theme: ThemeMode::Light, accent: [239, 68, 68], animated_brand: true } }
+    fn default() -> Self { Self { theme: ThemeMode::Light, accent: [239, 68, 68], animated_brand: true, interface_effects: true } }
+}
+
+/// One saved "look": a name plus a snapshot of ALL FIVE layouts' appearance. Lives in the app
+/// config rather than in a recording's `edit.json`, which is what lets the editor's Layouts panel
+/// apply the same look to a project recorded months later. `id` is opaque and stable (rename
+/// changes `name` only), so a row keeps its identity across a rename.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct LayoutPreset {
+    pub id: String,
+    pub name: String,
+    pub appearance: AppearanceSettings,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -144,6 +170,12 @@ pub struct Settings {
     /// Ollama model name for the AI director. Empty = let the backend pick its own default
     /// (`"llama3.2"`), so configs saved before this field existed behave identically.
     pub ai_model: String,
+    /// The user's saved layout looks, newest last - the editor's Layouts panel reads and writes
+    /// this whole list through `get_settings`/`set_settings`. `#[serde(default)]` (belt and
+    /// braces alongside the container's own `#[serde(default)]`) so a config written before
+    /// presets existed loads with an empty list instead of failing.
+    #[serde(default)]
+    pub layout_presets: Vec<LayoutPreset>,
 }
 fn default_volume() -> f32 { 1.0 }
 impl Default for Settings {
@@ -153,7 +185,8 @@ impl Default for Settings {
         Self { zoom: ZoomSettings::default(), clickfx: ClickFxSettings::default(), hotkeys: HotkeySettings::default(),
             appearance: AppearanceSettings::default(), cursor: CursorSettings::default(), ui: InterfaceSettings::default(),
             audio_offset_ms: 0, background: BackgroundSettings::default(),
-            audio_mic_volume: 1.0, audio_sys_volume: 1.0, ai_model: String::new() }
+            audio_mic_volume: 1.0, audio_sys_volume: 1.0, ai_model: String::new(),
+            layout_presets: Vec::new() }
     }
 }
 

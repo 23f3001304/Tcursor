@@ -5,6 +5,11 @@ const fulfilled = <T,>(value: T): PromiseFulfilledResult<T> => ({ status: "fulfi
 const rejected = (reason: unknown): PromiseRejectedResult => ({ status: "rejected", reason });
 
 describe("settleStop", () => {
+  it("a take whose screen stop returned zero frames is an error, never a folder to open", () => {
+    const out = settleStop(fulfilled({ folder: "C:/rec-0", frames: 0 }), fulfilled(undefined));
+    expect("err" in out && /No video was captured/.test(out.err)).toBe(true);
+  });
+
   it("returns the folder with no camWarn when both the screen and webcam stops settle fine", () => {
     const out = settleStop(fulfilled({ folder: "C:/rec-1", frames: 100 }), fulfilled(undefined));
     expect(out).toEqual({ folder: "C:/rec-1", camWarn: undefined });

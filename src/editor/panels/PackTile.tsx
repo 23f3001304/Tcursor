@@ -2,9 +2,9 @@ import { useEffect, useState, type CSSProperties, type ReactNode, type RefObject
 import { motion, useReducedMotion } from "motion/react";
 import { alphaBounds, fitBox, type Box } from "./glyphFit";
 
-// The panel's ONE card level, and since the usability pass the cursor packs' alone: the wallpaper
-// and gradient tiles moved to `controls/TileRow.tsx`'s 64x36 strip tile, whose look this one is
-// the parent of (raised plane, one lightness step on hover, a 2px inset accent ring when chosen).
+// The panel's ONE card level, and since the arrangements pass every picture tile in the editor
+// again: a cursor pack, a wallpaper and a gradient preset are all this tile (raised plane, one
+// lightness step on hover, a 2px inset accent ring when chosen, the name captioned underneath).
 // `.e-tile` lives in panels.css.
 const PRESS = { type: "spring" as const, stiffness: 500, damping: 30 };
 // The glyph plate, and the area a sprite's own drawing is fitted into inside it.
@@ -64,7 +64,8 @@ export function PackTile({ selected, title, label, onPick, onHoverStart, onHover
   selected: boolean;
   /** Tooltip and accessible name - every tile is a picture, so it always needs one. */
   title: string;
-  /** Caption UNDER the face (the pack strip's pack names). */
+  /** Caption UNDER the face. Every picker passes it: a name a user has to hover to read is the
+   *  thing the arrangements pass removed, and a tooltip here was being clipped by its own row. */
   label?: string;
   onPick: () => void;
   onHoverStart?: () => void;

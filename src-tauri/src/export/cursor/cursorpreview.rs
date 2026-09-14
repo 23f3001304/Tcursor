@@ -23,6 +23,10 @@ pub struct CursorPackDto {
     pub sprites: Vec<CursorSpriteDto>,
     pub busy_frames: Vec<CursorSpriteDto>,
     pub busy: Option<crate::export::cursor::busy::BusySpec>,
+    /// The pack's `material` (`"glass"`, else `None`): the canvas preview draws a glass pack's
+    /// sprite at the same reduced alpha the export blits it at, so the live look approximates the
+    /// paused exact frame. See `cursorPreview.ts`.
+    pub material: Option<String>,
 }
 
 /// The recording's selected cursor pack (embedded, bundled, or imported - see
@@ -44,7 +48,8 @@ pub fn cursor_sprites(folder: String) -> Result<CursorPackDto, String> {
     // Explicit frames get the busy sprite's own centered hotspot, matching `cursorset::prep`.
     let busy_frames = pack::busy_frames(pack_id).iter()
         .filter_map(|png| sprite_dto(CursorType::Busy, png, (0.5, 0.5), dark)).collect();
-    Ok(CursorPackDto { sprites, busy_frames, busy: pack::busy_spec(pack_id) })
+    Ok(CursorPackDto { sprites, busy_frames, busy: pack::busy_spec(pack_id),
+        material: pack::material(pack_id) })
 }
 
 /// Decode one pack PNG the way the export does, then re-encode it as a data URL for the canvas.
@@ -170,7 +175,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("tcursor-curoff-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let paths = ProjectPaths { folder: dir };
-        SyncLog { frames: vec![1000, 1016], events_ms: 900, mic_ms: None, system_ms: None }
+        SyncLog { frames: vec![1000, 1016], events_ms: 900, mic_ms: None, system_ms: None, ..Default::default() }
             .save(&paths.sync()).unwrap();
         assert_eq!(output_offset(&paths), -100);
         // No sync.json at all (a synthesized timeline): no shift rather than a guess.

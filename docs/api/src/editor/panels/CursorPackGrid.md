@@ -1,6 +1,6 @@
 # src/editor/panels/CursorPackGrid.tsx
 
-The Cursor panel's pack picker, split out of `CursorPanel.tsx` to keep that file under its line budget. Built-in packs first under a dim group label, then the imported ones, one horizontally scrolling STRIP each. Each tile rests on the pack's ARROW sprite and, while hovered, walks its nine states so the user sees what they are choosing before choosing it - including the busy state animating exactly as the export will render it.
+The Cursor panel's pack picker, split out of `CursorPanel.tsx` to keep that file under its line budget. One collapsible section per pack STYLE, each holding a wrapping grid of tiles three to a row. Each tile rests on the pack's ARROW sprite and, while hovered, walks its nine states so the user sees what they are choosing before choosing it - including the busy state animating exactly as the export will render it.
 
 **Where the sprites come from.** `CursorPackInfo.dir` is the pack's folder on disk and `CursorPackInfo.files` names the file for each kind, so a tile loads `<dir>/<files[kind]>` through the asset protocol (`fileSrc`). The backend never base64s them: 15 packs x 9 PNGs is about a megabyte per reply, and each would have to go through `decode_sprite`, which shells out to ffmpeg - opening this panel would launch 135 subprocesses. This way the browser fetches only the files a tile actually shows.
 
@@ -8,7 +8,11 @@ The Cursor panel's pack picker, split out of `CursorPanel.tsx` to keep that file
 
 **Styling (panel pass, 2026-09-13).** The tiles are the shared idiom: `PackTile` (`PackTile.md`), in `panels/panels.css`. The old `.e-pack-grid`/`.e-pack-card` rules are gone, and with them a fixed five-column grid that left dead space on the right.
 
-**Layout (usability pass, 2026-09-13): a strip per group, not a wrapping grid.** Fifteen built-in packs four-up is four rows at 65px, about 290px, which is most of the Cursor panel's 620px budget spent before Size and Motion get a look in. The same fifteen scroll sideways in one 84px row. `.e-tile-strip` (`panels.css`) is the flex scroller; its reserved, hover-only scrollbar lane is shared with `TileRow`'s rule in `controls.css`, so the two strips in this editor scroll identically. Each tile is a fixed 66px column, which is what it measured at four-up anyway, so nothing about a tile's proportions changed.
+**Layout (arrangements pass, 2026-09-14): a collapsible section per style, holding a wrapping grid.** The usability pass had made this a sideways strip per group, which bought the height back but hid most of every group behind a flick and left the pack's NAME in a tooltip that the strip then clipped. The owner rejected all of that: no horizontal movement in a panel, a section per category, and the name under the picture.
+
+What it costs now: six closed section headers are 28px each, and the one section that opens (the style the current pack is in, `defaultOpenIndex`) is one or two rows of 78px tiles. That is less than the 84px strip plus its group label, and nothing is hidden behind a gesture.
+
+**Why the sections are STYLES and not "built in vs imported".** The owner's read: provenance says nothing about what a pack looks like, which is the only thing anyone is choosing between here. The grouping key is `CursorPackInfo.category`, which each pack states in its own `pack.json` - so this file holds no list of pack ids and a new pack joins a section by shipping a folder. `packCategories.md` has the ordering rule; `src-tauri/assets/cursorpacks/README.md` documents the field. "Imported" is one section among the styles, which is also why the `(built in)` tooltip suffix is gone: the heading above a tile already says it.
 
 **What the owner's read of this grid changed.** Every pack's PNG is 128x128 with the drawing padded differently inside it (content widths run 70 to 105px) and with the pack's own colours (Cartoon orange, Cat cream, Ink black). Tiles therefore looked mismatched in both size and value. The fix is entirely in `PackTile`: one constant plane per tile, a constant mid-grey plate behind each glyph so a dark pack is legible without being recoloured, and each sprite scaled by its own alpha content box so every arrow is the same visual size. The glyph itself is never tinted, filtered or shadowed - what a tile shows is what the pack draws.
 
@@ -67,6 +71,8 @@ function CursorPack({ pack, selected, onPick }: {
 
 One tile: a shared `PackTile` holding a `GlyphPlate`, plus the hover cycle wired to the plate's `<img>`. Renamed from `PackTile` in the panel pass, when the tile shell itself became the shared component of that name.
 
+`title` is the pack's plain name. It carried a `(built in)` suffix until the arrangements pass; the section heading now carries that, and the name itself is captioned under the tile rather than living only in a tooltip.
+
 The cycle writes only `src` and `transform`; the element's size and offset are the plate's fitted ones, so every state of every pack stays the same visual size. Hover is a CSS lightness step on the tile (no lift - a grid where every tile jumps reads as jelly), and the press spring is `PackTile`'s. There are no CSS keyframes anywhere in this file.
 
 ## CursorPackGrid
@@ -77,9 +83,11 @@ export function CursorPackGrid({ packs, selected, onPick }: {
 }): JSX.Element
 ```
 
-The strips themselves: `packs` partitioned into "Built in" and "Imported", each group a `.e-tile-strip` under a dim label, empty groups omitted (a user with no imports sees one strip, not an empty heading).
+The sections themselves: `packCategories(packs)` (`packCategories.md`) splits the list by `category` into the curated order, and each entry becomes a `CategorySection` (`CategorySection.md`) wrapping one `.e-tile-grid`, all inside one `.e-secstack` so the headers sit at 2px rather than the 10px of the `.e-grp` this renders into. Empty categories never appear, so a user with no imports sees no "Imported" heading.
 
-Every tile stays a plain button in the tab order rather than a listbox option (`PackTile.md` says why), so Tab reaches each pack in visual order and the browser scrolls the focused one into view on its own.
+`defaultOpenIndex` opens exactly the section holding `selected`, and that section's header also carries the chosen pack's name while closed - so the picker's whole state is readable without opening anything. Nothing is written to storage until the user toggles a section themselves.
+
+Every tile stays a plain button in the tab order rather than a listbox option (`PackTile.md` says why); a closed section's tiles are unmounted, so Tab crosses the picker in a handful of stops.
 
 `selected` is `CursorSettings.pack`; `onPick` writes it. The backend guarantees one row per id (`pack::list_packs` dedupes), which is also what makes `p.id` a safe React key.
 

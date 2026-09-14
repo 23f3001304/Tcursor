@@ -49,6 +49,8 @@ export function layoutAt(segs: LayoutSeg[], presets: LayoutPresets | null, t: nu
   canvas: [number, number]): PreviewLayout | null
 ```
 
+The take's SOURCE SPAN is resolved once here (`sourceSpans.ts`'s `spanAt`) and applied to whichever panel pair the layout track lands on: the screen rect is squeezed to the aspect of the display actually on screen (`fitPanel` - the identity outside a mid-take display switch) and the span's crop rect rides out as `PreviewLayout.src`. Spans and layout segments are orthogonal - WHICH display is on screen versus WHAT shape its panels take - so they compose here rather than in the segment blend.
+
 The active layout at output time `t`, mirroring `LayoutTrack::scene_at` exactly. Returns `null` when the presets have not loaded yet (the caller falls back to the static `PreviewLayout` from the backend).
 
 ### Rules

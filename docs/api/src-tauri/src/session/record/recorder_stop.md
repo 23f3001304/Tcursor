@@ -29,7 +29,7 @@ Clears `Recorder::stopping` when `stop_blocking` leaves scope, however it leaves
 pub async fn stop_recording(app: tauri::AppHandle) -> Result<RecordingResult, String>
 ```
 
-Signals all threads to stop, joins them in dependency order, persists input data, `sync.json`, and `project.tcursor`, and returns the `RecordingResult`. A thin `async` wrapper: the work is `stop_blocking`, below.
+Signals all threads to stop (the take-wide `stop` and the current mic thread's own `mic_stop`, see `switch_mic`), joins them in dependency order, takes the `SegmentLog` for `sync.json`, persists input data, `sync.json`, and `project.tcursor`, and returns the `RecordingResult`. A thin `async` wrapper: the work is `stop_blocking`, below.
 
 **Off the main thread (sweep-2 Task 1).** `async fn` + `spawn_blocking`, the same conversion `ai::commands`, `thumbs.rs` and `preview_track.rs` already had. As a sync `#[tauri::command] fn` this ran on the whole app's main thread while it joined the mic and system-audio threads (each a 50 ms poll loop plus a WAV-header finalize), gzip-compressed and wrote the entire mouse-event log, and then joined the video pipeline - which waits for the encoder to close its pipe and write the `moov` atom of a potentially multi-GB MP4. On a long 4K recording that froze the HUD outright: no repaint, no "Saving..." spinner motion, no input, for the whole finalize.
 

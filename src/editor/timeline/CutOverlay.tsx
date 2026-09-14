@@ -4,7 +4,7 @@ import type { Cut } from "../../lib/edit";
 
 /** The stretches a cut removes, hatched across the whole track stack - the trim overlay's idiom one
  *  plane down, and for the same reason: what is gone is gone from every lane at once, not from the
- *  Time lane alone. The hatch itself is a pattern fill (`.e-cut`, editor.css), no border; the 1px
+ *  Time lane alone. The hatch itself is a pattern fill (`.e-cut`, timeline.css), no border; the 1px
  *  accent edges only appear on hover, so a resting timeline stays quiet.
  *
  *  Click selects the cut (the id goes into the editor's one selection), which opens `CutInspector`

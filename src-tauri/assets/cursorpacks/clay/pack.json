@@ -1,6 +1,7 @@
 {
   "id": "clay",
   "name": "Clay",
+  "category": "Playful",
   "version": 2,
   "builtin": true,
   "busy": {

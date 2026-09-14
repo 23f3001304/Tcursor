@@ -18,7 +18,7 @@ Peak-to-peak height of a wave at silence, px. A flat-but-visible line, never a b
 export const AMP_MAX: number   // 24
 ```
 
-Peak-to-peak height at 0 dBFS, px. Halved for `AMP_CEIL_PX`, the same way.
+Peak-to-peak height at full level (`CEIL_DB` and above), px, for the 30px slot the wave was designed in. Halved for `AMP_CEIL_PX`, the same way; a taller slot passes `heightFromRms` its own `max` (see `voiceWave.ts`'s `ceilFor`).
 
 ## IDLE_DB
 
@@ -26,7 +26,23 @@ Peak-to-peak height at 0 dBFS, px. Halved for `AMP_CEIL_PX`, the same way.
 export const IDLE_DB: number   // -50
 ```
 
-Below this the take counts as silent: the log mapping bottoms out here, and `voiceFrame` starts its idle timer.
+Below this the take counts as silent: `voiceFrame` starts its idle timer here. The level mapping has its own floor (`FLOOR_DB`, just above this).
+
+## FLOOR_DB
+
+```ts
+export const FLOOR_DB: number   // -46
+```
+
+The bottom of the dB window the wave spends its height on: flat at or under it.
+
+## CEIL_DB
+
+```ts
+export const CEIL_DB: number   // -16
+```
+
+The top of that window: full height at or over it. **Why a speech window, not full scale.** The map used to run `IDLE_DB`..0 dBFS. A mic at ordinary gain puts speech between roughly -35 and -18 dBFS RMS, and 0 dBFS is a clipped take, so normal speech sat at half height and the top half of the meter was reserved for a signal nobody records on purpose - the owner's "the wave doesn't react much to voice" (2026-09-14). Thirty dB centred on -31: quiet speech is already well off the line, ordinary speech fills most of the slot, and anything hotter than -16 is simply full. System audio (music at -6) pins at full, which is the honest reading of "loud".
 
 ## dbFromRms
 
@@ -45,17 +61,25 @@ dBFS for a 0..1 RMS.
 - Full scale is 0 dBFS; each halving of RMS is -6 dB.
 - Zero and negative inputs both give the same finite floor, well under `IDLE_DB`.
 
-## heightFromRms
+## levelFromRms
 
 ```ts
-export function heightFromRms(rms: number): number
+export function levelFromRms(rms: number): number
 ```
 
-Peak-to-peak wave height in px for a 0..1 RMS.
+The wave's level as a 0..1 fraction of its height for a 0..1 RMS.
 
 ### Returns
 
-`AMP_MIN` at or under `IDLE_DB`, `AMP_MAX` at 0 dBFS, linear in **dB** between the two - so a halving of loudness is a constant drop in px, which is what makes the meter readable rather than spiky. Clamped at both ends.
+`0` at or under `FLOOR_DB`, `1` at or over `CEIL_DB`, linear in **dB** between the two - so a halving of loudness is a constant drop, which is what makes the meter readable rather than spiky. Clamped at both ends. `voiceFrame` scales this by its slot's own ceiling.
+
+## heightFromRms
+
+```ts
+export function heightFromRms(rms: number, max?: number): number
+```
+
+Peak-to-peak wave height in px for a 0..1 RMS: `AMP_MIN` at the floor, `max` (`AMP_MAX` by default; a taller slot passes its own) at the ceiling, `levelFromRms` between.
 
 ## Damped
 

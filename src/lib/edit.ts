@@ -19,6 +19,9 @@ export interface Zoom {
   layer: number;
   /** Per-zoom webcam override; absent = inherit the global default. */
   cam_action?: CamZoomAction | null;
+  /** Smart typing duration: the end follows the typing after the start (refit by the backend on
+   *  every start move or when switched on); absent on docs written before it, meaning fixed. */
+  smart_typing?: boolean;
 }
 
 /** A removed stretch of clip time; `id` is `c{n}`. Rendered by the time remap (`lib/remap.ts`). */
@@ -61,7 +64,11 @@ export function resolveTrim(trim: Trim, durMs: number): { inMs: number; outMs: n
 
 export type EffectKind = "spotlight";
 export interface EffectRegion { id: string; kind: EffectKind; start_ms: number; end_ms: number; fade_in_ms: number; fade_out_ms: number; mode?: string; dim?: number; radius?: number; feather?: number; layer: number }
-export interface CameraMove { id: string; t_ms: number; x: number; y: number; size: number; easing: string }
+/** A keyframe's shape: `"layout"` inherits the layout's webcam shape (every keyframe written
+ *  before shapes existed), the other three are its own; `roundness` is the `"rounded"` corner
+ *  radius as a fraction of the panel's short side (0..0.5). Mirrors Rust `edit::model::CameraMove`. */
+export type CamMoveShape = "layout" | "circle" | "rounded" | "rect";
+export interface CameraMove { id: string; t_ms: number; x: number; y: number; size: number; easing: string; shape: CamMoveShape; roundness: number }
 
 export interface EditDoc {
   version: number;
@@ -79,7 +86,7 @@ export interface EditDoc {
 export type EditOp =
   | { op: "add_zoom"; at_ms: number; dur_ms: number }
   | { op: "add_zoom_full"; at_ms: number; dur_ms: number; scale: number }
-  | { op: "update_zoom"; id: string; start_ms?: number; end_ms?: number; scale?: number; target?: ZoomTarget; easing?: string; zoom_in_ms?: number; zoom_out_ms?: number; layer?: number }
+  | { op: "update_zoom"; id: string; start_ms?: number; end_ms?: number; scale?: number; target?: ZoomTarget; easing?: string; zoom_in_ms?: number; zoom_out_ms?: number; layer?: number; smart_typing?: boolean }
   | { op: "remove_zoom"; id: string }
   | { op: "clear_zooms" }
   | { op: "set_zoom_cam_action"; id: string; action: CamZoomAction | null }
@@ -106,6 +113,6 @@ export type EditOp =
   | { op: "add_effect"; kind: EffectKind; start_ms: number; end_ms: number }
   | { op: "update_effect"; id: string; start_ms?: number; end_ms?: number; fade_in_ms?: number; fade_out_ms?: number; mode?: string; dim?: number; radius?: number; feather?: number; layer?: number }
   | { op: "remove_effect"; id: string }
-  | { op: "add_camera_move"; t_ms: number; x: number; y: number; size: number }
-  | { op: "update_camera_move"; id: string; t_ms?: number; x?: number; y?: number; size?: number; easing?: string }
+  | { op: "add_camera_move"; t_ms: number; x: number; y: number; size: number; shape?: CamMoveShape; roundness?: number }
+  | { op: "update_camera_move"; id: string; t_ms?: number; x?: number; y?: number; size?: number; easing?: string; shape?: CamMoveShape; roundness?: number }
   | { op: "remove_camera_move"; id: string };

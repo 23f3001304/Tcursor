@@ -58,6 +58,13 @@ export function SettingsInterface({ value, onChange }: {
         <Switch on={value.animated_brand} onChange={(animated_brand) => onChange({ ...value, animated_brand })} />
       </Field>
 
+      {/* The editor's micro-interactions (src/editor/effects/). Off unmounts the ripple overlay
+          and no-ops the magnetic pull; the overlay re-reads this on window focus, so flipping it
+          here lands on an editor that is already open without a reload. */}
+      <Field label="Interface effects" hint="Click ripples + magnetic controls">
+        <Switch on={value.interface_effects} onChange={(interface_effects) => onChange({ ...value, interface_effects })} />
+      </Field>
+
       {/* Plain label+value row, not a control - a disabled full-width button read as a broken
           placeholder rather than "there's nothing to pick yet". Reverts to a real Field (matching
           App theme/Accent above) once a second language exists. */}

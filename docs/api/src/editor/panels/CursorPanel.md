@@ -2,7 +2,7 @@
 
 Editor panel for the "Cursor" rail tab. Picks the cursor style (System / Enhanced / Hidden); for Enhanced it also selects the sprite pack, and holds the size, motion and click-bounce controls. Every Enhanced-only control is hidden for the System and Hidden styles.
 
-**Flow (panel pass, 2026-09-13).** Five groups, in this order: **Style**, **Pack**, **Size**, **Motion** (Cursor Smoothness, Path Idealization, Motion Trail Blur), **Click** (the Click bounce switch and, directly under it, Click Bounce Intensity). Every setting and every setting NAME is the one that was there before; what changed is where they sit. Previously the bounce switch lived above the pack grid while the intensity it scales sat alone at the very bottom of the panel, four groups away - the owner's read of this panel was "the flow is incorrect", and this is that fix: what it is, how it looks, how it moves, then what a click does, with each switch directly above what it enables.
+**Flow (panel pass, 2026-09-13).** Five groups, in this order: **Style**, **Pack**, **Size**, **Motion** (Cursor Smoothness, Path Idealization, Motion Trail Blur, Motion Tilt), **Click** (the Click bounce switch and, directly under it, Click Bounce Intensity). Every setting and every setting NAME is the one that was there before; what changed is where they sit. Previously the bounce switch lived above the pack grid while the intensity it scales sat alone at the very bottom of the panel, four groups away - the owner's read of this panel was "the flow is incorrect", and this is that fix: what it is, how it looks, how it moves, then what a click does, with each switch directly above what it enables.
 
 **Height (usability pass, 2026-09-13).** With all five groups open the panel was about 957px against a 620px slot, the pack grid alone accounting for 369 of it. Two changes, in this order:
 
@@ -39,7 +39,7 @@ Exposing `system` at all is what lets a clip recorded in System return to its or
 
 **Reset.** Restores every field to `DEFAULT_CURSOR_SETTINGS` (below), including `pack: "default"` - does *not* touch `CursorPackField`'s fetched list (an imported pack stays visible in the grid after a reset; only the *selection* reverts to Default).
 
-**Sliders.** Cursor Size (`0.4`-`3.0`), Cursor Smoothness (`0.0`-`1.0`), Path Idealization (`0.0`-`1.0`), Motion Trail Blur (`0`-`1`), Click Bounce Intensity (`0.1`-`1`) - each a direct `set(field, v)` on `Slider`'s `onChange`. *Cursor Smoothness* (`settings.smoothness`, default `0.6`) drives the Rust-side follow low-pass alpha (`CursorSettings::follow_alpha`, `0.75 - 0.65 * smoothness`): `0` is snappy/raw cursor tracking, `1` is a glassy, heavily-damped glide. *Path Idealization* (`settings.path_idealize`, default `0.0`) straightens wandering mouse movement into clean strokes between clicks on the export side (`Cursor::set_idealize`); `0` leaves the recorded path untouched.
+**Sliders.** Cursor Size (`0.4`-`3.0`), Cursor Smoothness (`0.0`-`1.0`), Path Idealization (`0.0`-`1.0`), Motion Trail Blur (`0`-`1`), Motion Tilt (`0`-`1`), Click Bounce Intensity (`0.1`-`1`) - each a direct `set(field, v)` on `Slider`'s `onChange`. *Cursor Smoothness* (`settings.smoothness`, default `0.6`) is the glide of each move between the recording's rests on the export side (`CursorSettings::smoothness_at` -> `Cursor::set_smoothness`, `export/cursor/path.rs`): `0` replays the recording's own timing and jitter, `1` is one clean eased stroke per move - and at any value the cursor is exactly where the hand rested and clicked. *Path Idealization* (`settings.path_idealize`, default `0.0`) straightens each of those moves toward the straight line between its two rests (`Cursor::set_idealize`); `0` leaves the recorded route untouched, and neither slider ever moves a rest or a click. *Motion Tilt* (`settings.tilt`, default `0.35`, step `0.05`, shown as `x.xx`) is how far a thrown cursor tips into its own travel and overshoots once coming back upright when it stops (`export/cursor/tilt.rs`); it scales the 6-degree cap, and `0` switches the filter off. It sits last in the Motion group, after Motion Trail Blur, because the two are the same question asked twice - where the cursor has been, and how hard it is being thrown.
 
 ### Notes
 
@@ -53,10 +53,12 @@ Exposing `system` at all is what lets a clip recorded in System return to its or
 export const DEFAULT_CURSOR_SETTINGS: CursorSettings
 ```
 
-Mirrors the Rust `CursorSettings::default()` (`settings/model.rs`) field-for-field, including
-`style: "system"`. A Task 26 audit found this panel's Reset button wrote `style: "enhanced"`
-here instead, silently diverging from the backend default on every reset; extracted to a named,
-independently-testable constant so the two can't drift apart unnoticed again.
+Mirrors the Rust `CursorSettings::default()` (`settings/cursor.rs`) field-for-field, including
+`style: "system"` and `tilt: 0.35`. A Task 26 audit found this panel's Reset button wrote
+`style: "enhanced"` here instead, silently diverging from the backend default on every reset;
+extracted to a named, independently-testable constant (`CursorPanel.test.ts` asserts the whole
+object, so a field added on one side and not the other fails immediately) so the two can't drift
+apart unnoticed again.
 
 ### Used by
 

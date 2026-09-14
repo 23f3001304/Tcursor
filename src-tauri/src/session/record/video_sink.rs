@@ -9,10 +9,17 @@ use crate::capture::frame_source::FrameSource;
 use crate::capture::windows_capture::WgcFrameSource;
 use crate::domain::time::Clock;
 use crate::encode::vfr_segments::VfrSegments;
+use crate::session::record::gpu_frames::{FrameTimes, SizeHook};
 use crate::session::record::gpu_record::{GpuRecorder, GpuStart};
 use crate::session::record::pause_totals::PauseTotals;
 use crate::session::record::recording_session::RecordingSession;
+use crate::session::record::target_bounds::get_target_bounds;
 use crate::session::record::{Notify, CAPTURE_CLOSED, DISPLAY_CHANGED};
+
+/// What `VideoSink::switch` refuses with when the take is on the legacy pipeline. Its rawvideo
+/// pipe is sized once at start and its `RecordingSession` ends the take on the first mismatched
+/// frame, so there is nothing to restart into.
+const NO_GPU: &str = "switching needs the GPU encoder; turn the compatibility encoder off";
 
 /// A live recording video pipeline.
 pub enum VideoSink {
@@ -24,6 +31,11 @@ pub enum VideoSink {
         halt: Arc<AtomicBool>,
         stopper: Option<Box<dyn FnOnce() + Send>>,
     },
+    /// A display switch stopped the capture and the replacement never started. Nothing is
+    /// recording and `video.mp4` is finalized, but the frame timestamps of what WAS recorded are
+    /// still here (the same `Arc` the dead capture pushed into), so the stop path can write a
+    /// truthful `sync.json` instead of losing the take.
+    Dead(FrameTimes),
 }
 
 /// What a stopped video pipeline leaves behind. `error` is reported separately from the
@@ -50,64 +62,6 @@ pub struct VideoStart {
     pub ended: Notify,
     pub fps: u32,
     pub with_cursor: bool,
-}
-
-pub fn get_target_bounds(target_id: Option<&str>) -> (u32, u32, i32, i32) {
-    #[cfg(windows)]
-    {
-        use windows::Win32::Foundation::{HWND, RECT};
-        use windows::Win32::Graphics::Gdi::{EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFOEXW};
-        use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
-
-        if let Some(tid) = target_id {
-            if let Some(hex) = tid.strip_prefix("window:0x") {
-                if let Ok(hwnd_val) = usize::from_str_radix(hex, 16) {
-                    let hwnd = HWND(hwnd_val as *mut _);
-                    let mut r = RECT::default();
-                    if unsafe { GetWindowRect(hwnd, &mut r) }.is_ok() {
-                        let w = (r.right - r.left).max(100) as u32;
-                        let h = (r.bottom - r.top).max(100) as u32;
-                        return (w, h, r.left, r.top);
-                    }
-                }
-            } else if let Some(idx_str) = tid.strip_prefix("display:") {
-                // Resolve the origin for the monitor windows_capture ACTUALLY captures
-                // (Monitor::from_index, the same order list_displays + GpuRecorder use),
-                // correlating to its Win32 rect by GDI device name. Indexing EnumDisplayMonitors
-                // directly used a DIFFERENT order, so display:N could take another monitor's origin
-                // and shift every cursor point by the delta - the "cursor drawn in the wrong place"
-                // regression. Matching device names keeps the video and the origin on one screen.
-                if let Some(dev) = idx_str.parse::<usize>().ok()
-                    .and_then(|i| windows_capture::monitor::Monitor::from_index(i).ok())
-                    .and_then(|m| m.device_name().ok())
-                {
-                    struct MonCtx { want: Vec<u16>, bounds: Option<(u32, u32, i32, i32)> }
-                    unsafe extern "system" fn enum_mon_cb(hmon: HMONITOR, _: HDC, _: *mut RECT, lparam: windows::Win32::Foundation::LPARAM) -> windows::Win32::Foundation::BOOL {
-                        let ctx = &mut *(lparam.0 as *mut MonCtx);
-                        let mut info = MONITORINFOEXW::default();
-                        info.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
-                        if GetMonitorInfoW(hmon, &mut info.monitorInfo).as_bool() {
-                            let n = info.szDevice.iter().position(|&c| c == 0).unwrap_or(info.szDevice.len());
-                            if info.szDevice[..n] == ctx.want[..] {
-                                let r = info.monitorInfo.rcMonitor;
-                                ctx.bounds = Some(((r.right - r.left) as u32, (r.bottom - r.top) as u32, r.left, r.top));
-                            }
-                        }
-                        windows::Win32::Foundation::BOOL(1)
-                    }
-                    let mut ctx = MonCtx { want: dev.encode_utf16().collect(), bounds: None };
-                    unsafe { let _ = EnumDisplayMonitors(HDC::default(), None, Some(enum_mon_cb), windows::Win32::Foundation::LPARAM(&mut ctx as *mut _ as isize)); }
-                    if let Some(b) = ctx.bounds { return b; }
-                }
-            }
-        }
-    }
-    if let Ok(mon) = windows_capture::monitor::Monitor::primary() {
-        let w = mon.width().unwrap_or(1920);
-        let h = mon.height().unwrap_or(1080);
-        return (w, h, 0, 0);
-    }
-    (1920, 1080, 0, 0)
 }
 
 /// Start the video pipeline writing `video_path`. GPU-native unless `cfg.legacy` is set; on a
@@ -158,12 +112,39 @@ fn start_ffmpeg(cfg: VideoStart, target_id: Option<&str>, video_path: &str, ox: 
 }
 
 impl VideoSink {
+    /// Move a running capture to another display or window mid-take, keeping the encoder - so
+    /// `video.mp4` stays one stream at one size and the editor never learns a second screen
+    /// existed. `on_size` is told the replacement capture's first frame size (`switch_display`
+    /// writes it into the switch record); the target's rectangle is `get_target_bounds`' business.
+    pub fn switch(&mut self, cfg: VideoStart, target_id: &str, on_size: SizeHook) -> Result<(), String> {
+        let VideoSink::Gpu(live) = self else { return Err(NO_GPU.into()) };
+        // `restart` consumes the recorder, so something has to stand in its place: `Dead` holds
+        // the shared timestamps, which keep filling until the old capture's thread exits.
+        let dead = VideoSink::Dead(live.frame_times());
+        let gpu = GpuStart {
+            clock: cfg.clock, paused: cfg.paused, totals: cfg.totals,
+            ended: cfg.ended, fps: cfg.fps, with_cursor: cfg.with_cursor,
+        };
+        let VideoSink::Gpu(rec) = std::mem::replace(self, dead) else { return Err(NO_GPU.into()) };
+        match rec.restart(gpu, Some(target_id), on_size) {
+            Ok((r, _, _)) => { *self = VideoSink::Gpu(r); Ok(()) }
+            Err(e) => Err(format!("display switch: {e}")),
+        }
+    }
+
     /// Stop the pipeline and finalize `video.mp4`. A finalize failure comes back inside
     /// `VideoStopped::error` rather than replacing the result, so the caller can still write
     /// `sync.json` for the frames that did make it.
     pub fn stop_and_collect(self) -> VideoStopped {
         match self {
             VideoSink::Gpu(r) => r.stop(),
+            VideoSink::Dead(ts) => {
+                let frame_ts = ts.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                VideoStopped {
+                    frames: frame_ts.len() as u64, frame_ts,
+                    error: Some("a display switch stopped the capture and the replacement did not start".into()),
+                }
+            }
             VideoSink::Ffmpeg { thread, halt, stopper } => {
                 halt.store(true, Ordering::SeqCst);
                 if let Some(s) = stopper { s(); } // WM_QUIT -> WGC thread exits -> channel closes -> run() ends

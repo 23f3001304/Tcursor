@@ -27,14 +27,14 @@ A wallpaper tile (no `gradient` field at all) never matches.
 ```tsx
 export function GradientTab({ bg, thumbs, setBg }: {
   bg: BackgroundSettings;
-  thumbs: BackgroundThumb[];
+  thumbs: BackgroundThumb[] | null;
   setBg: (patch: Partial<BackgroundSettings>) => void;
 }): JSX.Element
 ```
 
 ### Behavior
 
-**Presets** - the twelve gradient tiles from `background_thumbs`, through the shared `WallpaperRow` (`WallpaperGrid.md`): one strip labelled Presets, in the same `.e-rowstack` idiom the Wallpapers tab uses, which is 55px where the wrapping grid was 287. The row's label IS the heading, so there is no `.e-sechead` above it saying the same word. Selecting a tile applies its stops AND its angle in a single patch, including `gradient_mid: null` for a two-stop preset (so switching from a three-stop preset actually drops the middle stop instead of leaving it behind). The selection ring is computed with `isPreset`, and is `null` whenever `bg.kind` is not `"gradient"`.
+**Presets** - the twelve gradient tiles from `background_thumbs`, cut into sections by `thumbGroups(thumbs, "gradient")` and rendered through the shared `CategorySection` + `TileGrid` pair (`WallpaperGrid.md`, `CategorySection.md`), in the same `.e-grp.e-secstack` idiom the Wallpapers tab uses. The backend puts all twelve in one group, `"Presets"` - deliberately NOT `"Gradients"`, which is one of the wallpaper groups - so today this is one section; a second group of gradients would appear here with no change in this file. The section header IS the heading, so there is no `.e-sechead` above it saying the same word, and it opens by itself when a preset is the current background (`defaultOpenIndex`). Selecting a tile applies its stops AND its angle in a single patch, including `gradient_mid: null` for a two-stop preset (so switching from a three-stop preset actually drops the middle stop instead of leaving it behind). The selection ring is computed with `isPreset`, and is `null` whenever `bg.kind` is not `"gradient"`.
 
 **Custom** - a `.e-colorrow` of `ColorInput` swatches: From, Middle (only when a middle stop exists), To. Under them, one `.e-ghostbtn` toggles the middle stop. Adding one starts it at the AVERAGE of the two ends, so switching it on changes nothing visible until the user moves it - the control announces itself without silently restyling the background.
 
@@ -45,3 +45,5 @@ Every edit also asserts `kind: "gradient"`, so tweaking a colour while another k
 ### Used by
 
 - `src/editor/panels/BackgroundPanel.tsx` - rendered for `tab === "gradient"`.
+
+While `thumbs` is `null` (still loading) the tab renders one open "Presets" section holding `TileGridSkeleton` (see `WallpaperGrid.md`) instead of the preset grid.

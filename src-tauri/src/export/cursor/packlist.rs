@@ -10,11 +10,24 @@ use crate::export::cursor::cursorset::SPRITES;
 use crate::export::cursor::pack::{count_busy_frames, kind_filename, kind_name, read_meta, DEFAULT_PACK_ID};
 use crate::export::cursor::packdirs::{bundled_pack_dirs, default_pack_dir, imported_pack_dirs};
 
+/// The category a pack that names none of its own is listed under. A bundled pack always states
+/// one (`bundled_packs_all_declare_a_known_category` pins that), so in practice this is the user's
+/// own imports, whose `pack.json` is written by `pack_import` and has no category at all.
+pub const IMPORTED_CATEGORY: &str = "Imported";
+
+/// The category the embedded set is listed under: it is the plain system arrow, which is what
+/// "Classic" means in the picker.
+pub const DEFAULT_PACK_CATEGORY: &str = "Classic";
+
 /// One selectable cursor pack, as the panel's grid sees it.
 #[derive(serde::Serialize, Clone, Debug, PartialEq)]
 pub struct CursorPackInfo {
     pub id: String,
     pub name: String,
+    /// The STYLE section the picker lists this pack under ("Classic", "Glass and glow", "Playful",
+    /// "Drawn", "Retro", "Imported"). It comes from the pack's own `pack.json`, so a new pack ships
+    /// by dropping a folder in and the frontend never holds a list of pack ids. Never empty.
+    pub category: String,
     pub builtin: bool,
     /// Absolute path to the pack's folder, so the grid loads each tile's sprite through the asset
     /// protocol instead of the backend base64ing 135 PNGs into one reply. Empty only when the
@@ -27,6 +40,10 @@ pub struct CursorPackInfo {
     /// The pack's busy animation, so a hovered tile previews it with the same `busyPose` the
     /// export runs. `None` when the busy state is a still.
     pub busy: Option<BusySpec>,
+    /// The pack's `material` (`"glass"`, or `None` for a plain alpha blit) - how the renderer
+    /// TREATS the sprites, not what they depict. On the wire so the picker can say a pack refracts
+    /// the frame rather than leaving the user to discover it in the export.
+    pub material: Option<String>,
 }
 
 /// The embedded pack's grid row. Its sprites ARE on disk (`assets/cursors`, shipped as a resource)
@@ -42,10 +59,12 @@ fn embedded() -> CursorPackInfo {
     CursorPackInfo {
         id: DEFAULT_PACK_ID.to_string(),
         name: "Default".to_string(),
+        category: DEFAULT_PACK_CATEGORY.to_string(),
         builtin: true,
         dir: dir.map(|d| d.to_string_lossy().into_owned()).unwrap_or_default(),
         files: dir.map(|d| pack_files(d, true, false)).unwrap_or_default(),
         busy: None,
+        material: None,
     }
 }
 
@@ -83,17 +102,30 @@ fn pack_files(dir: &Path, is_default: bool, animates: bool) -> HashMap<String, S
 
 /// One pack folder's listing entry. `builtin` comes from the CALLER (the folder it was found in),
 /// which is what makes it unspoofable by a `"builtin": true` key in an imported pack's own JSON.
+/// A missing or blank `category` lists as `IMPORTED_CATEGORY`, which is what a v1 pack.json - the
+/// only kind `pack_import` writes - always gets.
 fn read_pack_meta(dir: &Path, builtin: bool) -> Option<CursorPackInfo> {
     let m = read_meta(dir)?;
     let busy = m.busy.map(|mut b| { b.frames = count_busy_frames(dir); b });
     Some(CursorPackInfo {
         id: m.id,
         name: m.name,
+        category: category_or_imported(m.category),
         builtin,
         dir: dir.to_string_lossy().into_owned(),
         files: pack_files(dir, false, busy.is_some()),
         busy,
+        material: m.material,
     })
+}
+
+/// A `pack.json` category, or `IMPORTED_CATEGORY` when it is absent or only whitespace - the
+/// picker must never be handed a nameless section, and a blank string is exactly as useless as no
+/// key at all. Surrounding whitespace is trimmed, so `"Playful "` is the Playful section.
+fn category_or_imported(raw: Option<String>) -> String {
+    raw.map(|c| c.trim().to_string())
+        .filter(|c| !c.is_empty())
+        .unwrap_or_else(|| IMPORTED_CATEGORY.to_string())
 }
 
 /// The embedded set, then every BUNDLED pack, then every IMPORTED one.
@@ -115,12 +147,14 @@ pub fn list_packs(resource_dir: Option<&Path>) -> Vec<CursorPackInfo> {
 }
 
 /// A freshly imported pack's row, built from what `pack_import` just wrote (no `pack.json` read).
+/// Its category is `IMPORTED_CATEGORY`, which is also what re-listing it from disk will produce.
 pub fn imported_info(id: String, name: String, dir: &Path) -> CursorPackInfo {
     CursorPackInfo {
-        id, name, builtin: false,
+        id, name, category: IMPORTED_CATEGORY.to_string(), builtin: false,
         dir: dir.to_string_lossy().into_owned(),
         files: pack_files(dir, false, false),
         busy: None,
+        material: None,
     }
 }
 

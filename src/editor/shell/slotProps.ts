@@ -26,10 +26,13 @@ export interface SlotProps {
   setSel: Dispatch<SetStateAction<string | null>>;
   /** The timeline's own selection handler (`useArrangeMode`), not a bare `setSel`. */
   onSel: (id: string | null) => void;
-  tab: Tab;
-  setTab: Dispatch<SetStateAction<Tab>>;
-  /** Opens a panel tab in the nearest `panel` area, making one if the workspace has none - built
-   *  by `ClassicShell`, used by the stage toolbar's quick-open buttons. */
+  /** Which panel the rail is showing, or `null` for "the column is collapsed" - a real resting
+   *  state since the panel slot became collapsible (the rail stays either way). */
+  tab: Tab | null;
+  setTab: Dispatch<SetStateAction<Tab | null>>;
+  /** What a rail click means: the clicked tab, or `null` when it was already the open one (see
+   *  `nextTab` in `panelState.ts`). Built by `ClassicShell`, so the rail and the panels cannot
+   *  disagree about whether a second press on the active tab closes. */
   onTab: (t: Tab) => void;
   dur: number;
   timeMs: number;

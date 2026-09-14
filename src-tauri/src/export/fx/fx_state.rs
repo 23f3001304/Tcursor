@@ -47,6 +47,10 @@ pub struct FxState {
     pub hits: Vec<FxHit>,
     pub spot: Option<Spot>,
     pub video: Option<VideoFx>,
+    /// The glass cursor material for this frame (`fx_lens`), placed by `fx_lensbuild::lenses_at`
+    /// BEFORE the pass runs because the cursor sprite is blitted after it. `None` for a plain pack
+    /// with no cursor back - which is every recording until someone picks one.
+    pub lens: Option<crate::export::fx::fx_lens::Lenses>,
 }
 
 /// Build the FX state for one frame. TWO clocks: `region_t` is output time (0 = first video
@@ -65,7 +69,7 @@ pub struct FxState {
 pub fn fx_state_at(
     fx: &ClickFxSettings, events: &[MouseEvent], actions: &[ActionEvent], effects: &[EffectRegion],
     scene: &Scene, cam: Camera, cur: FramePoint, screen: &ScreenInfo, has_webcam: bool,
-    sw: u32, sh: u32, ow: u32, oh: u32, region_t: u32, ev_t: u32, spot_sim: &mut SpotlightSim,
+    ow: u32, oh: u32, region_t: u32, ev_t: u32, spot_sim: &mut SpotlightSim,
 ) -> Option<FxState> {
     let s_alpha = spot_sim.resolve(effects, region_t, fx.spotlight);
     let spot = if s_alpha > 0.0 {
@@ -99,7 +103,9 @@ pub fn fx_state_at(
     if !matches!(fx.style, ClickFxStyle::None) {
         for h in hits_at(events, ev_t, LIFE_MS) {
             let p = to_frame(screen, h.sx, h.sy);
-            let b = to_panel(p, sw, sh, scene.screen.rect);
+            // Through the scene's OWN source rect (the canvas, or one display switch's fitted
+            // rect), so a click on the switched-to display ripples on the cropped picture.
+            let b = to_panel(p, scene.src, scene.screen.rect);
             let (x, y) = project(b.x as f32, b.y as f32, cam, ow, oh);
             hits.push(FxHit { x, y, progress: h.progress });
         }
@@ -112,7 +118,7 @@ pub fn fx_state_at(
     let video = if va > 0.0 { Some(VideoFx { mode: fx.video_fx_mode, alpha: va, t: ev_t as f32 / 1000.0 }) } else { None };
 
     if spot.is_none() && hits.is_empty() && video.is_none() { return None; }
-    Some(FxState { style: fx.style, color: fx.color, intensity: fx.intensity, hits, spot, video })
+    Some(FxState { style: fx.style, color: fx.color, intensity: fx.intensity, hits, spot, video, lens: None })
 }
 
 /// Draws an `FxState` onto a composited BGRA frame.
@@ -133,16 +139,28 @@ pub fn select_fx(ow: u32, oh: u32) -> Box<dyn FxRenderer> {
 /// click ripples, hold-driven video FX and the hotkey captions. `screen`/`has_webcam` are threaded
 /// straight to `fx_state_at` (see its doc) for the click-hit origin conversion and the spotlight
 /// camera-exclusion hole gate, respectively.
+///
+/// `lens` is the glass cursor material `fx_lensbuild::lenses_at` placed for this frame. It rides
+/// the SAME pass because the cursor sprite is blitted right after it, but it is NOT a click effect:
+/// a user who turned click FX off still gets their glass cursor, so a lens alone builds a state of
+/// its own rather than being dropped with the rest. Captions stay gated on `fx.enabled` as before.
 #[allow(clippy::too_many_arguments)]
 pub fn render(
     r: &dyn FxRenderer, out: &mut [u8], ow: u32, oh: u32, fx: &ClickFxSettings,
     events: &[MouseEvent], actions: &[ActionEvent], effects: &[EffectRegion], scene: &Scene, cam: Camera, cur: FramePoint, screen: &ScreenInfo, has_webcam: bool,
-    sw: u32, sh: u32, region_t: u32, ev_t: u32, keys: &HotkeySettings, spot_sim: &mut SpotlightSim,
+    region_t: u32, ev_t: u32, keys: &HotkeySettings, spot_sim: &mut SpotlightSim,
+    lens: Option<crate::export::fx::fx_lens::Lenses>,
 ) {
+    let built = fx.enabled.then(|| fx_state_at(fx, events, actions, effects, scene, cam, cur, screen,
+        has_webcam, ow, oh, region_t, ev_t, spot_sim)).flatten();
+    let state = match (built, lens) {
+        (Some(mut s), l) => { s.lens = l; Some(s) }
+        (None, Some(l)) => Some(FxState { style: ClickFxStyle::None, color: fx.color,
+            intensity: fx.intensity, hits: Vec::new(), spot: None, video: None, lens: Some(l) }),
+        (None, None) => None,
+    };
+    if let Some(state) = state { r.apply(out, ow, oh, &state); }
     if !fx.enabled { return; }
-    if let Some(state) = fx_state_at(fx, events, actions, effects, scene, cam, cur, screen, has_webcam, sw, sh, ow, oh, region_t, ev_t, spot_sim) {
-        r.apply(out, ow, oh, &state);
-    }
     crate::export::fx::caption::overlay(out, ow, oh, actions, keys, ev_t, fx.captions);
 }
 

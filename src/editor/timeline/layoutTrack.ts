@@ -2,6 +2,7 @@ import type { LayoutSeg } from "../../lib/edit";
 import type { LayoutPresets, LayoutPresetName, LayoutPresetDto, PanelRectDto, PreviewLayout } from "../../lib/ipc";
 import { evalCubic, parseCubic } from "../../lib/cubicBezier";
 import { spring, springOf } from "../../lib/spring";
+import { fitPanel, spanAt, type SpanState } from "../stage/sourceSpans";
 
 /** One resolved panel pair - screen + cam - either a segment's own per-segment override (a posed
  *  T34 arrangement, resolved once in Rust through the exact path the export uses) or its preset's
@@ -68,10 +69,15 @@ const lerpRect = (a: PanelRectDto, b: PanelRectDto, t: number): PanelRectDto => 
 
 /** Collapse a resolved (screen, cam) PanelRect pair to the PreviewLayout the canvas draws.
  *  `canvas` is passed through unchanged from the caller's own `PreviewLayout` (this cross-fade
- *  never changes the backing-store size, only the panel rects within it). */
-function toPreviewLayout(screen: PanelRectDto, cam: PanelRectDto, canvas: [number, number]): PreviewLayout {
+ *  never changes the backing-store size, only the panel rects within it).
+ *
+ *  `span` applies the take's SOURCE SPAN on top: the screen panel is squeezed to the aspect of the
+ *  display actually on screen (`fitPanel` - the identity outside a mid-take display switch) and the
+ *  span's crop rect rides along as `src`, so every consumer of this layout (the canvas draw, the FX
+ *  geometry, the cursor) maps canvas points through the same rect the export does. */
+function toPreviewLayout(screen: PanelRectDto, cam: PanelRectDto, canvas: [number, number], span: SpanState): PreviewLayout {
   return {
-    screen: screen.rect, radius: screen.radius, screenAlpha: screen.alpha,
+    screen: fitPanel(screen.rect, span.fit), radius: screen.radius, screenAlpha: screen.alpha, src: span.src,
     cam: cam.alpha > 0.004
       ? [cam.rect[0], cam.rect[1], cam.rect[2], cam.rect[3], cam.radius,
          cam.ring_px, cam.ring_color[0], cam.ring_color[1], cam.ring_color[2]]
@@ -117,14 +123,17 @@ export function resolvedPanelsFor(seg: LayoutSeg | null, presets: LayoutPresets)
  *  at a time). Returns null when presets haven't loaded (caller falls back). */
 export function layoutAt(segs: LayoutSeg[], presets: LayoutPresets | null, t: number, canvas: [number, number]): PreviewLayout | null {
   if (!presets) return null;
+  // The source span is orthogonal to the layout track - WHICH display is on screen and what shape
+  // its panel takes - so it resolves once here and every branch below hands it on.
+  const span = spanAt(presets.spans ?? [], t, ease);
   const ordered = [...segs].sort((a, b) => a.start_ms - b.start_ms);
   const idx = activeIdx(ordered, t);
-  if (idx < 0) { const b = resolvedPanelsFor(null, presets); return toPreviewLayout(b.screen, b.cam, canvas); } // gap/outside -> screen
+  if (idx < 0) { const b = resolvedPanelsFor(null, presets); return toPreviewLayout(b.screen, b.cam, canvas, span); } // gap/outside -> screen
 
   const s = ordered[idx];
   const cur = resolvedPanelsFor(s, presets);
   const blend = (from: ResolvedPanels, to: ResolvedPanels, f: number) =>
-    toPreviewLayout(lerpRect(from.screen, to.screen, f), lerpRect(from.cam, to.cam, f), canvas);
+    toPreviewLayout(lerpRect(from.screen, to.screen, f), lerpRect(from.cam, to.cam, f), canvas, span);
 
   const [tin, tout] = fittedOf(s);
   const elapsed = t - s.start_ms;
@@ -142,5 +151,5 @@ export function layoutAt(segs: LayoutSeg[], presets: LayoutPresets | null, t: nu
       return blend(cur, to, ease(s.easing_out, (t - exitFrom) / tout));
     }
   }
-  return toPreviewLayout(cur.screen, cur.cam, canvas);
+  return toPreviewLayout(cur.screen, cur.cam, canvas, span);
 }

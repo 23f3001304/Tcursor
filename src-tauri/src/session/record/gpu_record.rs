@@ -2,7 +2,8 @@
 //! Media Foundation `VideoEncoder` (no GPU->CPU readback), curing game-recording lag. The
 //! recorded `video.mp4` is the raw full-res intermediate the export re-composites; per-frame
 //! capture timestamps still go to `sync.json` (collected here, written by `recorder_stop.rs`).
-//! The frame callback itself lives in `gpu_frames.rs`.
+//! The frame callback itself lives in `gpu_frames.rs`; restarting a live capture on another
+//! display without disturbing the encoder lives in `gpu_restart.rs`.
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use windows_capture::capture::{CaptureControl, GraphicsCaptureApiHandler};
@@ -13,10 +14,10 @@ use windows_capture::encoder::{
 use windows_capture::monitor::Monitor;
 use windows_capture::settings::{
     ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings,
-    MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings,
+    MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings, TryIntoCaptureItemWithType,
 };
 use crate::domain::time::Clock;
-use super::gpu_frames::{Cap, CapFlags, FrameTimes};
+use super::gpu_frames::{Cap, CapFlags, EncoderSpec, FrameTimes};
 use super::pause_totals::PauseTotals;
 use super::video_sink::VideoStopped;
 use super::Notify;
@@ -50,12 +51,12 @@ pub(super) fn encoder(w: u32, h: u32, fps: u32, video_path: &str) -> anyhow::Res
 /// A live GPU-native recording. The capture+encode runs on the crate's own thread; `stop` ends
 /// it, finalizes the MP4, and returns the per-frame capture timestamps (ms) for `sync.json`.
 pub struct GpuRecorder {
-    control: CaptureControl<Cap, anyhow::Error>,
-    frame_ts: FrameTimes,
+    pub(super) control: CaptureControl<Cap, anyhow::Error>,
+    pub(super) frame_ts: FrameTimes,
 }
 
-/// Everything `start` needs that isn't the capture target itself, so the three target branches
-/// below stay one line each.
+/// Everything `start` and `restart` need that isn't the capture target itself, so `start_capture`
+/// takes one argument for all of it.
 pub struct GpuStart {
     pub clock: Arc<dyn Clock>,
     pub paused: Arc<AtomicBool>,
@@ -65,82 +66,80 @@ pub struct GpuStart {
     pub with_cursor: bool,
 }
 
+/// Start one WGC capture of `item` with `flags`, on the crate's own thread. The single place a
+/// `Settings` is built, so monitors, windows and the primary-display fallback differ only in the
+/// item they hand in - and a seeded restart goes through exactly the same call as a cold start.
+fn launch<T: TryIntoCaptureItemWithType + Send + 'static>(
+    item: T, cfg: &GpuStart, flags: CapFlags,
+) -> anyhow::Result<CaptureControl<Cap, anyhow::Error>> {
+    let cursor = if cfg.with_cursor { CursorCaptureSettings::WithCursor } else { CursorCaptureSettings::WithoutCursor };
+    let interval = MinimumUpdateIntervalSettings::Custom(
+        std::time::Duration::from_micros(1_000_000 / cfg.fps.max(1) as u64));
+    Ok(Cap::start_free_threaded(Settings::new(
+        item, cursor, DrawBorderSettings::WithoutBorder, SecondaryWindowSettings::Default,
+        interval, DirtyRegionSettings::Default, ColorFormat::Bgra8, flags,
+    ))?)
+}
+
+/// Resolve `target_id` (`window:0x…`, `display:N`, or `None`/unparseable for the primary
+/// display) and start capturing it with `flags`. Returns the control handle and the target's
+/// nominal `(w, h)` - only an estimate of what WGC will deliver, which is why `Cap` sizes the
+/// encoder from the first real frame instead.
+pub(super) fn start_capture(
+    cfg: &GpuStart, target_id: Option<&str>, flags: CapFlags,
+) -> anyhow::Result<(CaptureControl<Cap, anyhow::Error>, u32, u32)> {
+    use windows_capture::window::Window;
+
+    if let Some(tid) = target_id {
+        if let Some(hex) = tid.strip_prefix("window:0x") {
+            if let Ok(hwnd_val) = usize::from_str_radix(hex, 16) {
+                let hwnd = windows::Win32::Foundation::HWND(hwnd_val as *mut _);
+                let win = Window::from_raw_hwnd(hwnd.0 as *mut _);
+                let mut r = windows::Win32::Foundation::RECT::default();
+                let (w, h) = if unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd, &mut r) }.is_ok() {
+                    ((r.right - r.left).max(100) as u32, (r.bottom - r.top).max(100) as u32)
+                } else {
+                    (1920, 1080)
+                };
+                return Ok((launch(win, cfg, flags)?, w, h));
+            }
+        } else if let Some(idx_str) = tid.strip_prefix("display:") {
+            if let Ok(idx) = idx_str.parse::<usize>() {
+                if let Ok(mon) = Monitor::from_index(idx) {
+                    let (w, h) = (mon.width().unwrap_or(1920), mon.height().unwrap_or(1080));
+                    return Ok((launch(mon, cfg, flags)?, w, h));
+                }
+            }
+        }
+    }
+
+    let monitor = Monitor::primary()?;
+    let (w, h) = (monitor.width()?, monitor.height()?);
+    Ok((launch(monitor, cfg, flags)?, w, h))
+}
+
 impl GpuRecorder {
     /// Start GPU-native capture+encode of the specified monitor or application window to
     /// `video_path` (H.264 MP4). Returns the recorder plus the captured `(w, h)`.
     pub fn start(cfg: GpuStart, target_id: Option<&str>, video_path: &str) -> anyhow::Result<(Self, u32, u32)> {
-        use windows_capture::window::Window;
-
-        let cursor_setting = if cfg.with_cursor { CursorCaptureSettings::WithCursor } else { CursorCaptureSettings::WithoutCursor };
-        let interval_setting = MinimumUpdateIntervalSettings::Custom(std::time::Duration::from_micros(1_000_000 / cfg.fps.max(1) as u64));
         let frame_ts: FrameTimes = Arc::new(std::sync::Mutex::new(Vec::new()));
         // The encoder is NOT built here: `GetWindowRect`/monitor dims are only an estimate of
         // what WGC will actually deliver, and a wrong guess corrupts every frame. `Cap` builds it
         // from the first real frame instead; this just carries the settings it needs.
-        let flags = || CapFlags {
-            enc: super::gpu_frames::EncoderSpec { fps: cfg.fps, path: video_path.to_string() },
+        let flags = CapFlags {
+            enc: EncoderSpec { fps: cfg.fps, path: video_path.to_string() },
             clock: cfg.clock.clone(), frame_ts: frame_ts.clone(),
             paused: cfg.paused.clone(), totals: cfg.totals.clone(), ended: cfg.ended.clone(),
+            seed: None, on_size: None,
         };
-
-        if let Some(tid) = target_id {
-            if let Some(hex) = tid.strip_prefix("window:0x") {
-                if let Ok(hwnd_val) = usize::from_str_radix(hex, 16) {
-                    let hwnd = windows::Win32::Foundation::HWND(hwnd_val as *mut _);
-                    let win = Window::from_raw_hwnd(hwnd.0 as *mut _);
-                    let mut r = windows::Win32::Foundation::RECT::default();
-                    let (w, h) = if unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd, &mut r) }.is_ok() {
-                        ((r.right - r.left).max(100) as u32, (r.bottom - r.top).max(100) as u32)
-                    } else {
-                        (1920, 1080)
-                    };
-                    let settings = Settings::new(
-                        win,
-                        cursor_setting,
-                        DrawBorderSettings::WithoutBorder,
-                        SecondaryWindowSettings::Default,
-                        interval_setting,
-                        DirtyRegionSettings::Default,
-                        ColorFormat::Bgra8,
-                        flags(),
-                    );
-                    return Ok((Self { control: Cap::start_free_threaded(settings)?, frame_ts }, w, h));
-                }
-            } else if let Some(idx_str) = tid.strip_prefix("display:") {
-                if let Ok(idx) = idx_str.parse::<usize>() {
-                    if let Ok(mon) = Monitor::from_index(idx) {
-                        let w = mon.width().unwrap_or(1920);
-                        let h = mon.height().unwrap_or(1080);
-                        let settings = Settings::new(
-                            mon,
-                            cursor_setting,
-                            DrawBorderSettings::WithoutBorder,
-                            SecondaryWindowSettings::Default,
-                            interval_setting,
-                            DirtyRegionSettings::Default,
-                            ColorFormat::Bgra8,
-                            flags(),
-                        );
-                        return Ok((Self { control: Cap::start_free_threaded(settings)?, frame_ts }, w, h));
-                    }
-                }
-            }
-        }
-
-        let monitor = Monitor::primary()?;
-        let (w, h) = (monitor.width()?, monitor.height()?);
-        let settings = Settings::new(
-            monitor,
-            cursor_setting,
-            DrawBorderSettings::WithoutBorder,
-            SecondaryWindowSettings::Default,
-            interval_setting,
-            DirtyRegionSettings::Default,
-            ColorFormat::Bgra8,
-            flags(),
-        );
-        Ok((Self { control: Cap::start_free_threaded(settings)?, frame_ts }, w, h))
+        let (control, w, h) = start_capture(&cfg, target_id, flags)?;
+        Ok((Self { control, frame_ts }, w, h))
     }
+
+    /// The frame timestamps collected so far, as the shared `Arc` rather than a snapshot, so a
+    /// caller that has to give the recorder up (`VideoSink::switch`) still ends up with every
+    /// timestamp the old capture pushes on its way out.
+    pub fn frame_times(&self) -> FrameTimes { self.frame_ts.clone() }
 
     /// Stop capture and finalize the MP4. `CaptureControl::stop` posts WM_QUIT and joins the
     /// capture thread; the crate runs `on_closed` only on an OS-initiated close, NOT on a

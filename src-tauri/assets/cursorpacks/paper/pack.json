@@ -1,6 +1,7 @@
 {
   "id": "paper",
   "name": "Paper",
+  "category": "Drawn",
   "version": 2,
   "builtin": true,
   "busy": {

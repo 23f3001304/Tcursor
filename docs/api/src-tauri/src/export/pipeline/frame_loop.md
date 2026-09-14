@@ -6,8 +6,11 @@ The exporter's per-frame loop, moved out of `exporter.rs` (at the size cap) when
 
 ```rust
 pub(super) struct Pipes { pub spipe: ScreenPipe, pub wpipe: Option<WebcamPipe>, pub bgpipe: Option<BgPipe>,
-    pub last_webcam: Option<(Vec<u8>, u32, u32)>, pub wc_fail: Option<String>, pub wc_frames: u64 }
+    pub last_webcam: Option<(Vec<u8>, u32, u32)>, pub wc_fail: Option<String>, pub wc_frames: u64,
+    pub held: Option<(usize, Vec<u8>)> }
 ```
+
+`held` is the last screen frame of the span before a mid-take display switch, with that span's index: what the switch's cross-dissolve blends FROM (`render::spans`). The loop latches it on the one output frame `FramePose::hold` names - copied while the decode buffer is still borrowed, stored after the composite releases it - and only uses it while `FramePose::mix` names that same span, so a cut that skipped the latch frame drops the dissolve instead of blending a stale picture. `None` all take long for a recording that never switched display, which costs that (overwhelmingly common) case nothing.
 
 The three decoders plus the held webcam frame and the webcam failure bookkeeping that `webcam_warning` reads after the loop. `advance` decodes ONE recording frame on the screen pipe (which then holds it) and the webcam pipe (holding its latest frame; a shorter webcam stream freezes on its last). `feed_bg` pulls one background-video frame per OUTPUT frame: the background runs on the output clock, so its frame index is the output frame index.
 

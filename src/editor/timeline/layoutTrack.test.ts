@@ -18,6 +18,9 @@ const PRESETS: LayoutPresets = {
   screen: preset(0.1, 0.1), camera: preset(0.5, 0.5), presenter: preset(0.9, 0.9),
   screen_only: preset(0.3, 0.3), camera_only: preset(0.7, 0.7),
   segs: [], // no per-segment overrides by default - every fixture segment resolves from its preset
+  // A take that never switched display: one full-canvas span, no panel squeeze - so every
+  // assertion below is about the layout track alone, exactly as before spans existed.
+  spans: [{ start_ms: 0, src: [0, 0, 1, 1], transition_ms: 350, fit: [1, 1] }],
   inset_w: 0.8, // unused by layoutAt (cursorPanel.ts's concern) - matches the fixture screens' own width
 };
 

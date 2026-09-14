@@ -33,18 +33,23 @@ export function useWebcamRecorder() {
   const rec = useRef<MediaRecorder | null>(null);
   const chain = useRef<Promise<void>>(Promise.resolve());
   const folder = useRef<string>("");
+  // Which webcam file this recorder's chunks belong to. A `MediaRecorder` cannot change its
+  // stream, so a mid-take camera switch is a SECOND recorder writing `webcam_2.webm` (then _3...)
+  // beside the first; `preprocess` merges them back into one `webcam.webm` before the editor opens.
+  const segment = useRef(1);
 
-  function start(stream: MediaStream | null, dest: string) {
+  function start(stream: MediaStream | null, dest: string, seg = 1) {
     if (!stream) return;
     folder.current = dest;
+    segment.current = seg;
     chain.current = Promise.resolve();
     const mr = new MediaRecorder(stream, { mimeType: "video/webm" });
     mr.ondataavailable = (e) => {
       if (!e.data.size) return;
-      const f = folder.current;
+      const f = folder.current, s = segment.current;
       chain.current = chain.current
         .then(() => e.data.arrayBuffer())
-        .then((buf) => appendWebcam(f, new Uint8Array(buf)))
+        .then((buf) => appendWebcam(f, new Uint8Array(buf), s))
         .catch(() => {});
     };
     mr.start(1000); // 1s timeslice -> a chunk streamed to disk each second
@@ -80,5 +85,5 @@ export function useWebcamRecorder() {
     await chain.current; // all chunks flushed to disk
   }
 
-  return { start, stop };
+  return { start, stop, folder: () => folder.current, segment: () => segment.current };
 }

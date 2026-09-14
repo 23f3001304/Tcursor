@@ -14,7 +14,7 @@ Each lens is a closed mirrored sine (`lensPath`) filled from one blue-to-violet 
 
 ### Inputs
 
-- `w`, `h` - the drawing area in px. `RecMeter.tsx` owns the numbers the HUD uses (`METER_W` 104 / `METER_H` 30), which `useHudWindowSize.ts` reads to size the recording window. `voiceWave.ts`'s amplitude ceiling is half of `AMP_MAX`, so a full-scale wave reaches 12px either side of the midline and stays inside a 30px box.
+- `w`, `h` - the drawing area in px. `RecMeter.tsx` owns the numbers the HUD uses (`METER_W` 150 / `METER_H` 40), which `useHudWindowSize.ts` reads to size the take window. The amplitude ceiling follows `h` (`voiceWave.ts`'s `ceilFor`: `h / 2 - 3`, so 17px either side of the midline at 40, and the 30px design's 12 there), so the wave fills whatever slot it is given with 3px of air.
 - `read` - called once per frame for the newest RMS pair. A getter, not props: at 20 reports a second per source, level props would re-render the whole recording bar forty times a second to move a wave this component's own rAF loop is already redrawing. Must be referentially stable (`useAudioLevels` returns a `useCallback`'d one) or the loop re-subscribes.
 - `live` - the honesty gate. `false` (a source is enabled but no level has arrived: permission pending, no device, a driver reset mid-take) adds the `stale` class, draining the colour out of the layers rather than letting a resting blue-to-violet wave imply capture that is not happening.
 
@@ -33,4 +33,4 @@ Each lens is a closed mirrored sine (`lensPath`) filled from one blue-to-violet 
 
 ### Used by
 
-- `src/hud/components/RecMeter.tsx` - the recording bar's mic indicator.
+- `src/hud/components/RecMeter.tsx` - the take pill's level slot.

@@ -138,3 +138,22 @@ fn a_gapless_successors_entry_wins_the_overlap() {
 // Arrangement (pose-driven) segment tests, likewise in their own file for the size budget.
 #[path = "layout_arrangement_tests.rs"]
 mod arrangement_tests;
+
+/// A pinned zoom aim is re-anchored from each frame's OWN scene, so it rides with the panel when a
+/// layout transition moves it mid-zoom; the scratch buffer is reused between calls.
+#[test]
+fn anchor_frame_follows_the_panel_frame_by_frame() {
+    use crate::export::scene::Panel;
+    use crate::export::types::{FramePoint, RectF};
+    let panel = |x: f32, y: f32, w: f32, h: f32| Panel { rect: RectF { x, y, w, h }, radius: 0.0, alpha: 1.0, ring_px: 0.0, ring_color: [0, 0, 0] };
+    let scene = |r: RectF| Scene { screen: panel(r.x, r.y, r.w, r.h), camera: panel(0.0, 0.0, 1.0, 1.0), src: RectF { x: 0.0, y: 0.0, w: 1920.0, h: 1080.0 } };
+    let raw = vec![ZoomRegion { start_ms: 0, end_ms: 5000, zoom_in_ms: 350, zoom_out_ms: 450, target_scale: 2.0,
+        anchor: FramePoint { x: 960, y: 540 }, easing: Easing::Smooth, layer: 0, cam_action: None, follow_cursor: false }];
+    let mut out = Vec::new();
+    anchor_frame(&raw, &scene(RectF { x: 0.0, y: 0.0, w: 1920.0, h: 1080.0 }), &mut out);
+    assert_eq!(out[0].anchor, FramePoint { x: 960, y: 540 }, "a full-frame panel is the identity");
+    anchor_frame(&raw, &scene(RectF { x: 100.0, y: 50.0, w: 960.0, h: 540.0 }), &mut out);
+    assert_eq!(out.len(), 1, "the buffer is refilled, not appended to");
+    assert_eq!(out[0].anchor, FramePoint { x: 580, y: 320 }, "the same aim, at the centre of the half-size panel");
+    assert_eq!(raw[0].anchor, FramePoint { x: 960, y: 540 }, "the raw anchor is never touched");
+}

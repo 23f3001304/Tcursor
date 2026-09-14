@@ -2,17 +2,18 @@
 
 Builds the backend FX-overlay request (spotlight + video-fx, and click ripples for an unmirrored style) from the current preview state and calls the `preview_fx_overlay` Tauri command, which renders it with the same renderer the export would use for that frame (`with_fx` → `select_fx`). Returning `null` early - FX disabled, or nothing active - skips the IPC round-trip entirely.
 
-**Click ripples are conditional on the active style (sweep-2).** They used to ALWAYS be part of this request, mapped through `mapFn` and sent as `hits`, refreshed only at this call's `FX_BUCKET_MS` cadence with single-flight gating - the highest-frequency element on screen getting the coarsest, laggiest update rate. `ripplePreview.ts`'s `stylesMirrored` styles (Ripple - the default - and Shockwave) now draw straight on the preview canvas every `useCompositeLoop` tick instead, and are EXCLUDED from this request (`overlayNeedsClicks` returns `false` for them). The other four click-fx styles (Pulse/Glow/Neon/Particles) are NOT mirrored yet, so `overlayNeedsClicks` returns `true` for them and this request keeps building their `hits` exactly as before this pass - laggy at `FX_BUCKET_MS` cadence, but still visible in the live preview, not a silent regression to nothing.
+**Click ripples are conditional on the active style (sweep-2).** They used to ALWAYS be part of this request, mapped through `mapFn` and sent as `hits`, refreshed only at this call's `FX_BUCKET_MS` cadence with single-flight gating - the highest-frequency element on screen getting the coarsest, laggiest update rate. `ripplePreview.ts`'s `stylesMirrored` styles (Ripple - the default - plus Shockwave and Pulse) now draw straight on the preview canvas every `useCompositeLoop` tick instead, and are EXCLUDED from this request (`overlayNeedsClicks` returns `false` for them). The other three click-fx styles (Glow/Neon/Particles) are NOT mirrored, so `overlayNeedsClicks` returns `true` for them and this request keeps building their `hits` exactly as before this pass - laggy at `FX_BUCKET_MS` cadence, but still visible in the live preview, not a silent regression to nothing.
 
 This file holds no effect *logic* otherwise: everything it does is resolve which spotlight/video-fx/click values to send.
 
 ### Behaviors
 
-- `includes click hits for an UNMIRRORED style (pulse) - falls back to the overlay exactly as before` / `drops an unmirrored-style click once it passes 600ms` - the export's 600ms lifetime (`ripplePreview.ts`'s `RIPPLE_LIFE_MS`, via `activeRippleHits`), not the old 500ms bug.
+- `includes click hits for an UNMIRRORED style (glow) - falls back to the overlay exactly as before` / `drops an unmirrored-style click once it passes 600ms` - the export's 600ms lifetime (`ripplePreview.ts`'s `RIPPLE_LIFE_MS`, via `activeRippleHits`), not the old 500ms bug.
 - `excludes click hits for a MIRRORED style (ripple)` / `... (shockwave)` - `ripplePreview.ts` draws those client-side instead.
 - `excludes click hits when the style is none` / `still draws the spotlight regardless of the click style setting`.
 - `triggers a backend call from an unmirrored-style click ALONE, spotlight off` - an unmirrored style still pays the pre-sweep-2 request cost when the user clicks.
-- `returns null with no backend call for a mirrored-style click ALONE, spotlight off` - the actual win: a Ripple/Shockwave click no longer triggers this "hottest command" (`useCompositeLoop.md`) at all.
+- `returns null with no backend call for a mirrored-style click ALONE, spotlight off` - the actual win: a Ripple/Shockwave/Pulse click no longer triggers this "hottest command" (`useCompositeLoop.md`) at all.
+- `excludes click hits for Pulse, mirrored client-side since the click-fx look pass` - Pulse joined `stylesMirrored` when the click styles were reworked, so it must not be drawn twice (once here, once on the canvas).
 - `returns null with no backend call when nothing is active at all` / `renders nothing at all when fx are disabled, spotlight included`.
 
 ## FxCamRect

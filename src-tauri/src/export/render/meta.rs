@@ -9,14 +9,31 @@ use crate::export::types::{Camera, FramePoint};
 pub struct RenderMeta {
     pub tl: Timeline, pub video_start: u64, pub video_end: u64, pub out_w: u32, pub out_h: u32,
     pub sw: u32, pub sh: u32, pub screen_bytes: usize, pub audio_offset_ms: i32,
+    pub screen_crop: Option<(u32, u32)>, // an odd-sized capture's exact even crop (`even_screen`), else None
     pub webcam_w: u32, pub webcam_h: u32, // webcam decode box: the SOURCE's aspect (see `webcam_box`)
     pub trim: crate::edit::model::Trim, // unresolved (`Trim::resolve`); avoids a 2nd doc load in `exporter::export`
     pub mic_volume: f32, pub sys_volume: f32, // 0..1.5 gain per track at mux (`audio_mux::mux`)
 }
 
+/// The screen decode's dims and, when the capture is odd-sized, the exact crop that evens it.
+/// nv12 has no odd sizes: ffmpeg pads the chroma plane and a frame no longer measures `w*h*3/2`
+/// bytes, so an odd 1697x955 window capture was read off the pipe a fraction of a row late on
+/// every frame and the whole export slid and sheared (2026-09-14). Dropping one column or row of
+/// a screen capture is invisible; resampling it would not be. `(2, 2)` floors a degenerate probe.
+pub fn even_screen(w: u32, h: u32) -> (u32, u32, Option<(u32, u32)>) {
+    let (ew, eh) = ((w & !1).max(2), (h & !1).max(2));
+    (ew, eh, ((ew, eh) != (w, h)).then_some((ew, eh)))
+}
+
 /// Camera + scene for one output frame, carrying BOTH clocks: `ev_t` indexes the raw event streams
 /// (cursor/mouse/actions), `out_t` is the timeline every `EditDoc` region list lives on.
-pub struct FramePose { pub ev_t: u32, pub out_t: u32, pub scene: Scene, pub cur: FramePoint, pub cam: Camera }
+///
+/// `mix` and `hold` are the display-switch cross-dissolve's two halves, and are `None` on every
+/// frame of a take that never switched. `mix` says this frame is inside a switch and wants the
+/// held pre-switch screen frame blended in; `hold` (the span index) says THIS frame's screen
+/// buffer is the one to latch, because the next output frame is already past the switch.
+pub struct FramePose { pub ev_t: u32, pub out_t: u32, pub scene: Scene, pub cur: FramePoint, pub cam: Camera,
+    pub mix: Option<crate::export::render::spans::SpanMix>, pub hold: Option<usize> }
 
 /// The ONE webcam decode box for a whole export, at the SOURCE's own aspect (`src`, from
 /// `probe_dims`) - NOT any panel's. The layout track can put a Wide bubble and a square big-cam
@@ -98,5 +115,22 @@ mod tests {
         assert_eq!(w, h);
         assert!(w % 2 == 0 && w >= 2);
         assert_eq!(webcam_box(&[], None, 1440), (420, 420));
+    }
+}
+
+#[cfg(test)]
+mod even_tests {
+    use super::even_screen;
+
+    #[test]
+    fn an_even_capture_is_untouched_and_needs_no_crop() {
+        assert_eq!(even_screen(1920, 1080), (1920, 1080, None));
+    }
+
+    #[test]
+    fn an_odd_capture_loses_one_column_or_row_and_says_so() {
+        assert_eq!(even_screen(1697, 955), (1696, 954, Some((1696, 954))));
+        assert_eq!(even_screen(1698, 955), (1698, 954, Some((1698, 954))));
+        assert_eq!(even_screen(1, 1), (2, 2, Some((2, 2))));
     }
 }

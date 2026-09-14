@@ -9,6 +9,8 @@ import { SettingsAppearance } from "../settings/SettingsAppearance";
 type Tab = "interface" | "layout";
 const TABS: { id: Tab; label: string }[] = [{ id: "interface", label: "Interface" }, { id: "layout", label: "Layout" }];
 
+/** Preferences as a sheet inside the idle card (`IdleCard`'s body, the display picker's own box):
+ *  the same two-tab box Settings uses, scrolling inside the card's height. */
 export function Preferences({ onClose, onUiChange }: {
   onClose: () => void;
   /** Fires on every Interface-tab change (theme, accent, and Task 39's `animated_brand`) with the

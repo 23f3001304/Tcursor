@@ -1,6 +1,7 @@
 {
   "id": "mono-dark",
   "name": "Mono Dark",
+  "category": "Classic",
   "version": 2,
   "builtin": true,
   "busy": {

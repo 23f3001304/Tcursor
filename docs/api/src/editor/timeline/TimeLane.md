@@ -37,7 +37,7 @@ A single `<RegionRows rows={1} ... rowClass="e-timerow" blkClass="e-spdblk">`, d
 
 **Drag.** The shared pill mechanics: the body moves the span, the two `.e-zh` edge handles retime it, a local draft follows the pointer and exactly one `update_speed` is applied on release (and none at all for a bare click under the 3px threshold, which selects only). `useRegionDrag` clamps a drag against same-row neighbours, which here means the neighbouring speed spans - so a drag can never produce the overlap `normalize_speed` would then have to resolve behind the user's back.
 
-**Look.** `.e-spdblk` sets `--pill-accent: var(--e-speed)`, the one lane accent the palette was missing; everything else about the pill (the raised plane, the 3px accent bar, the hairline, the hover/selected treatment, the `@container` label hiding on a narrow pill) comes from the shared rules in `editor.css`, so the lane reads as the same instrument as the others.
+**Look.** `.e-spdblk` sets `--pill-accent: var(--e-speed)`, the one lane accent the palette was missing; everything else about the pill (the raised plane, the 3px accent bar, the hairline, the hover/selected treatment, the `@container` label hiding on a narrow pill) comes from the shared rules in `timeline.css`, so the lane reads as the same instrument as the others.
 
 ### Notes
 

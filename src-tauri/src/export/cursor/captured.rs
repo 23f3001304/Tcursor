@@ -28,6 +28,10 @@ pub fn draws_captured(style: CursorStyle, has_layer: bool) -> bool {
 /// source->output ratio, which is the same number (`panel * inset_w == screen.rect.w`) with the
 /// panel shrink applied exactly ONCE.
 ///
+/// `sw` is the width the panel actually SHOWS - `Scene.src.w`, which is the whole canvas unless a
+/// mid-take display switch cropped it. Feeding the canvas width there after a switch would size
+/// the cursor against pixels the panel is not drawing, shrinking it against its own content.
+///
 /// Without this a 4K take exported at 1080p drew the cursor at its captured 4K pixel size, about
 /// twice its on-screen proportion. Same-resolution takes are unaffected (`inset_w == sw` gives 1).
 pub fn content_scale(panel: f32, inset_w: f32, sw: u32) -> f32 {

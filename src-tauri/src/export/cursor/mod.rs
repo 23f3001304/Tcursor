@@ -1,6 +1,7 @@
 pub mod busy;
 pub mod captured;
 pub mod cursordraw;
+pub mod cursormorph;
 pub mod cursorset;
 pub mod cursorxform;
 pub mod cursorpreview;
@@ -8,40 +9,54 @@ pub mod pack;
 pub mod packdirs;
 pub mod packlist;
 pub mod pack_import;
+pub mod path;
+pub mod tilt;
 
 use crate::events::model::{EventKind, MouseEvent, ScreenInfo};
 use crate::export::coordmap::to_frame;
 use crate::export::types::FramePoint;
 
-/// Cursor lookup that interpolates between throttled samples and then low-pass
-/// smooths the result so small jittery mouse movements don't jerk the follow.
-/// Owns its event log so it can live inside the `FrameRenderer`. `at` must be
-/// called with non-decreasing `t_ms` - the sample index only advances.
+/// Cursor lookup: the raw recorded path, or the polished one `path::PathModel` draws between the
+/// points the recording actually rested and clicked at. Owns its event log so it can live inside
+/// the `FrameRenderer`. `at` must be called with non-decreasing `t_ms` - the raw sample index only
+/// advances (`reset` rewinds it).
 pub struct Cursor {
     events: Vec<MouseEvent>,
     screen: ScreenInfo,
     idx: usize,
-    sx: f32,
-    sy: f32,
-    a: f32, // follow low-pass alpha PER 60fps FRAME (settings-driven; lower = smoother glide)
-    idealize: f32, // 0 = raw path, 1 = clean eased strokes between the click/endpoint anchors
-    anchors: Vec<(u32, f32, f32)>, // (t, x, y) frame-local anchors for path idealization
-    primed: bool,
+    path: path::PathModel, // the offline rest/move model the polished path is drawn from
+    smooth: f32,           // `CursorSettings::smoothness`, 0..1 (0 = the raw recording's timing)
+    ideal: f32,            // `CursorSettings::path_idealize`, 0..1 (0 = the raw route)
+    tilt: tilt::Tilt,      // the motion-lean filter, fed the path this struct returns
+    tilt_max: f32,         // its cap in degrees (`tilt::max_deg` of the setting); 0 = filter off
 }
 
 impl Cursor {
-    pub fn new(events: Vec<MouseEvent>, screen: ScreenInfo, a: f32) -> Self {
-        let anchors = compute_anchors(&events, &screen);
-        Self { events, screen, idx: 0, sx: 0.0, sy: 0.0, a, idealize: 0.0, anchors, primed: false }
+    pub fn new(events: Vec<MouseEvent>, screen: ScreenInfo, smoothness: f32) -> Self {
+        let path = path::PathModel::new(&events, &screen);
+        Self { events, screen, idx: 0, path, smooth: smoothness.clamp(0.0, 1.0), ideal: 0.0,
+               tilt: tilt::Tilt::new(), tilt_max: 0.0 }
     }
 
-    /// Update the follow-smoothing alpha in place so a `smoothness` settings change reflects via
+    /// Update the glide strength in place so a `smoothness` settings change reflects via
     /// `FrameRenderer::reload_edit` without rebuilding the whole cursor.
-    pub fn set_a(&mut self, a: f32) { self.a = a; }
+    pub fn set_smoothness(&mut self, s: f32) { self.smooth = s.clamp(0.0, 1.0); }
 
-    /// Update the path-idealization strength (0 = raw path, 1 = clean eased strokes between the
-    /// click/endpoint anchors). Settings-driven, live-applied like `set_a`.
-    pub fn set_idealize(&mut self, s: f32) { self.idealize = s.clamp(0.0, 1.0); }
+    /// Update the path-idealization strength (0 = the raw route, 1 = straight eased strokes between
+    /// the rests). Settings-driven, live-applied like `set_smoothness`.
+    pub fn set_idealize(&mut self, s: f32) { self.ideal = s.clamp(0.0, 1.0); }
+
+    /// Update the motion-tilt strength (`CursorSettings::tilt`, 0..1). Settings-driven and
+    /// live-applied like `set_smoothness`. Turning it off also unwinds the filter, so the cursor
+    /// cannot be left frozen mid-lean by a slider drag through 0.
+    pub fn set_tilt(&mut self, t: f32) {
+        self.tilt_max = tilt::max_deg(t);
+        if self.tilt_max <= 0.0 { self.tilt.reset(); }
+    }
+
+    /// This frame's motion lean in degrees, clockwise-positive - what `cursorset::draw` rotates the
+    /// sprite by. Valid after `at`, which is what advances it.
+    pub fn tilt_deg(&self) -> f32 { self.tilt.angle_deg() }
 
     /// The mouse events this cursor owns. Shared with FX rendering so the renderer
     /// has a single owner of the event log rather than a second copy.
@@ -50,11 +65,11 @@ impl Cursor {
     /// The recording's `ScreenInfo` (virtual-desktop origin). `Copy`, so this is a cheap read, not
     /// a second owner - shared with FX rendering (`fx_state::render`) so a click hit's raw
     /// `WH_MOUSE_LL` coordinates go through the same origin subtraction (`coordmap::to_frame`)
-    /// this cursor already applies to itself (see `clicks`, `compute_anchors`).
+    /// this cursor already applies to itself (see `clicks`, `path::PathModel::new`).
     pub fn screen(&self) -> ScreenInfo { self.screen }
 
     /// Click (mouse-down) positions as 0..1 fractions of the screen content, in the same
-    /// coordinate basis as the smoothed cursor (`to_frame` then divide by the screen size),
+    /// coordinate basis as the drawn cursor (`to_frame` then divide by the screen size),
     /// paired with each click's event time. The editor preview uses these for click ripples.
     pub fn clicks(&self) -> Vec<(u32, f32, f32)> {
         let (w, h) = (self.screen.w.max(1) as f32, self.screen.h.max(1) as f32);
@@ -64,50 +79,37 @@ impl Cursor {
         }).collect()
     }
 
-    /// Rewind the forward-only sample index + smoothing so the owning renderer can be
-    /// reused to re-scan from t=0 (preview fast-forward to an arbitrary T).
-    pub fn reset(&mut self) { self.idx = 0; self.sx = 0.0; self.sy = 0.0; self.primed = false; }
+    /// Rewind the forward-only sample index + the lean so the owning renderer can be reused to
+    /// re-scan from t=0 (preview fast-forward to an arbitrary T). The path model is stateless.
+    pub fn reset(&mut self) {
+        self.idx = 0;
+        self.tilt.reset(); // no arriving at the far side of a cut still leaning from the gesture before it
+    }
 
-    /// Smoothed cursor position at `t_ms` (interpolate, then exponential low-pass) after one frame
-    /// of `dt_ms`. `dt_ms` is the caller's EXACT frame period (`render::OUT_STEP_MS`), never a
-    /// difference of `t_ms` values: `a` is a per-60fps-frame fraction and `follow::damping` turns
-    /// it into the equivalent fraction for this step, so `smoothness` means the same time constant
-    /// at every output rate - and whole-ms timestamps would read 16/17/17/16 and ripple it.
+    /// The drawn cursor position at `t_ms` (frame-local px). With no polish asked for (plain-OS
+    /// mode, or both sliders at 0) this is the raw interpolated recording, verbatim; otherwise the
+    /// path model's polished route, which still passes through every rest and click exactly.
+    /// `dt_ms` is the caller's EXACT frame period (`render::OUT_STEP_MS`), which only the motion
+    /// lean consumes: the path itself is a function of time, so it never lags and never depends on
+    /// the output rate.
     pub fn at(&mut self, t_ms: u32, dt_ms: f32) -> FramePoint {
         while self.idx + 1 < self.events.len() && self.events[self.idx + 1].t <= t_ms {
             self.idx += 1;
         }
         let raw = self.raw_at(t_ms);
-        if !self.primed {
-            self.sx = raw.x as f32;
-            self.sy = raw.y as f32;
-            self.primed = true;
+        let before_first = self.events.first().map_or(true, |e| e.t > t_ms);
+        let (fx, fy) = if before_first || (self.smooth <= 0.0 && self.ideal <= 0.0) {
+            (raw.x as f32, raw.y as f32)
         } else {
-            let a = crate::export::camera::follow::damping(self.a, dt_ms);
-            self.sx += (raw.x as f32 - self.sx) * a;
-            self.sy += (raw.y as f32 - self.sy) * a;
+            self.path.at(t_ms, self.smooth, self.ideal).unwrap_or((raw.x as f32, raw.y as f32))
+        };
+        // The lean reads the path the cursor is actually DRAWN on, so an idealized stroke leans into
+        // its own clean route, not the wander the viewer never sees. Skipped when the setting is 0.
+        if self.tilt_max > 0.0 {
+            let k = tilt::ref_scale(self.screen.w);
+            self.tilt.step(fx * k, fy * k, dt_ms, self.tilt_max);
         }
-        // Path idealization: blend the smoothed position toward the eased anchor path so wandering
-        // routes become clean, deliberate strokes between the points that matter (clicks).
-        if self.idealize > 0.001 && self.anchors.len() >= 2 {
-            let (ix, iy) = self.anchored_at(t_ms);
-            let s = self.idealize;
-            return FramePoint { x: (self.sx + (ix - self.sx) * s).round() as i32,
-                                y: (self.sy + (iy - self.sy) * s).round() as i32 };
-        }
-        FramePoint { x: self.sx.round() as i32, y: self.sy.round() as i32 }
-    }
-
-    /// The eased position along the click/endpoint anchor path at `t_ms` (the "ideal" route).
-    fn anchored_at(&self, t_ms: u32) -> (f32, f32) {
-        let a = &self.anchors;
-        let i = a.partition_point(|p| p.0 <= t_ms); // first anchor with t > t_ms
-        if i == 0 { return (a[0].1, a[0].2); }
-        if i >= a.len() { let l = a[a.len() - 1]; return (l.1, l.2); }
-        let (t0, x0, y0) = a[i - 1];
-        let (t1, x1, y1) = a[i];
-        let f = smoothstep(((t_ms - t0) as f32 / (t1 - t0).max(1) as f32).clamp(0.0, 1.0));
-        (x0 + (x1 - x0) * f, y0 + (y1 - y0) * f)
+        FramePoint { x: fx.round() as i32, y: fy.round() as i32 }
     }
 
     /// Interpolated (un-smoothed) cursor; frame center before the first event.
@@ -127,58 +129,6 @@ impl Cursor {
     }
 }
 
-/// smoothstep 0..1 -> 0..1 (ease-in-out) so idealized strokes accelerate then settle, not move linearly.
-fn smoothstep(f: f32) -> f32 { f * f * (3.0 - 2.0 * f) }
-
-/// Path-idealization anchors: the first sample, every click, and the last sample - frame-local, in
-/// ascending time (same-time duplicates collapsed). Between consecutive anchors the idealized cursor
-/// eases straight, turning a meandering real path into deliberate strokes to the points that matter.
-fn compute_anchors(events: &[MouseEvent], screen: &ScreenInfo) -> Vec<(u32, f32, f32)> {
-    let fp = |t: u32, x: i32, y: i32| { let p = to_frame(screen, x, y); (t, p.x as f32, p.y as f32) };
-    let mut out: Vec<(u32, f32, f32)> = Vec::new();
-    if let Some(e) = events.first() { out.push(fp(e.t, e.x, e.y)); }
-    for e in events.iter().filter(|e| e.kind == EventKind::Down) { out.push(fp(e.t, e.x, e.y)); }
-    if let Some(e) = events.last() { out.push(fp(e.t, e.x, e.y)); }
-    out.sort_by_key(|p| p.0);
-    out.dedup_by_key(|p| p.0);
-    out
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::events::model::{EventKind, MouseEvent, ScreenInfo};
-    fn mv(t: u32, x: i32, y: i32) -> MouseEvent { MouseEvent { t, kind: EventKind::Move, x, y, button: None } }
-
-    #[test]
-    fn center_before_first_event() {
-        let s = ScreenInfo { w: 1920, h: 1080, origin_x: 0, origin_y: 0 };
-        let ev = vec![mv(1000, 100, 100)];
-        let mut c = Cursor::new(ev, s, 0.35);
-        assert_eq!(c.at(0, 16.0), FramePoint { x: 960, y: 540 }); // before the first sample -> center
-    }
-
-    #[test]
-    fn smooths_toward_a_jump_target() {
-        let s = ScreenInfo { w: 1920, h: 1080, origin_x: 0, origin_y: 0 };
-        let ev = vec![mv(0, 0, 0), mv(100, 800, 400)];
-        let mut c = Cursor::new(ev, s, 0.35);
-        let mut p = FramePoint { x: 0, y: 0 };
-        for t in (0..2000).step_by(16) { p = c.at(t, 16.0); }
-        assert!((p.x - 800).abs() <= 2 && (p.y - 400).abs() <= 2); // converged to the held target
-    }
-
-    #[test]
-    fn idealize_pulls_a_detour_toward_the_click_anchor_line() {
-        let s = ScreenInfo { w: 1920, h: 1080, origin_x: 0, origin_y: 0 };
-        let click = |t: u32, x: i32, y: i32| MouseEvent { t, kind: EventKind::Down, x, y, button: None };
-        // Two clicks on the x-axis with a big detour up in y between them.
-        let ev = vec![click(0, 0, 0), mv(500, 0, 800), click(1000, 1000, 0)];
-        let mut raw = Cursor::new(ev.clone(), s, 1.0); // a=1 -> follows the raw detour
-        let mut ideal = Cursor::new(ev, s, 1.0);
-        ideal.set_idealize(1.0);
-        for t in (0..=500).step_by(16) { raw.at(t, 16.0); ideal.at(t, 16.0); }
-        let (r, i) = (raw.at(500, 16.0), ideal.at(500, 16.0));
-        assert!(i.y.abs() < r.y.abs(), "idealized y {} should hug the anchor line, not the detour {}", i.y, r.y);
-    }
-}
+#[path = "mod_tests.rs"]
+mod tests;

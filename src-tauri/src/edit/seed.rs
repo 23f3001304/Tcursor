@@ -27,17 +27,19 @@ fn easing_str(e: Easing) -> String {
     }
 }
 
-/// PURE: one `Zoom` per region, ids `z0, z1, ...`. The region `anchor` (the click /
-/// press point, screen-local) is the load-bearing zoom-in target in `CameraSim`, so
-/// it is preserved as `ZoomTarget::Fixed{x,y}` (NOT dropped to `Cursor`) to keep a
-/// re-render byte-identical. Output length always equals input length.
+/// PURE: one `Zoom` per region, ids `z0, z1, ...`. Every seeded zoom FOLLOWS the cursor
+/// (`ZoomTarget::Cursor`): an auto zoom fires on a click, and at that instant the cursor
+/// IS the region's click anchor, so the zoom-in lands where the old `Fixed` anchor did and
+/// then tracks the hand instead of staying pinned there (owner ruling 2026-09-14 - a fresh
+/// recording's zooms showed as "Region" in the inspector). The anchor is dropped; a user
+/// who wants a pinned aim switches that zoom to Region. Output length equals input length.
 pub fn zooms_from_regions(regions: &[ZoomRegion]) -> Vec<Zoom> {
     regions.iter().enumerate().map(|(i, r)| Zoom {
         id: format!("z{}", i), start_ms: r.start_ms, end_ms: r.end_ms,
-        target: ZoomTarget::Fixed { x: r.anchor.x as f32, y: r.anchor.y as f32 },
+        target: ZoomTarget::Cursor,
         scale: r.target_scale, easing: easing_str(r.easing),
         zoom_in_ms: r.zoom_in_ms, zoom_out_ms: r.zoom_out_ms, layer: r.layer,
-        cam_action: r.cam_action,
+        cam_action: r.cam_action, smart_typing: false,
     }).collect()
 }
 

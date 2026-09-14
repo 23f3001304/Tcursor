@@ -38,11 +38,20 @@ pub fn to_base(p: FramePoint, sw: u32, sh: u32, layout: &Layout) -> FramePoint {
     FramePoint { x: bx.round() as i32, y: by.round() as i32 }
 }
 
-/// Map a screen-local point into a panel rect (output pixels). Generalizes
-/// `to_base` to any panel placement (the active layout's screen panel).
-pub fn to_panel(p: FramePoint, sw: u32, sh: u32, rect: RectF) -> FramePoint {
-    let bx = rect.x + (p.x as f32 / sw.max(1) as f32) * rect.w;
-    let by = rect.y + (p.y as f32 / sh.max(1) as f32) * rect.h;
+/// The whole recorded canvas as a source rect - the `Scene.src` of a take that never switched
+/// display, and what `resolve` stamps on every scene it builds.
+pub fn full_src(sw: u32, sh: u32) -> RectF {
+    RectF { x: 0.0, y: 0.0, w: sw.max(1) as f32, h: sh.max(1) as f32 }
+}
+
+/// Map a canvas point into a panel rect (output pixels) THROUGH the source sub-rect the panel is
+/// showing. Generalizes `to_base` to any panel placement (the active layout's screen panel) and to
+/// any crop: `src` is `full_src(sw, sh)` for an ordinary take - where this is exactly the old
+/// `x / sw * rect.w` formula - and one display switch's fitted rect after a mid-take switch, so
+/// the cursor, the click effects and the zoom anchors all land on the cropped picture.
+pub fn to_panel(p: FramePoint, src: RectF, rect: RectF) -> FramePoint {
+    let bx = rect.x + ((p.x as f32 - src.x) / src.w.max(1.0)) * rect.w;
+    let by = rect.y + ((p.y as f32 - src.y) / src.h.max(1.0)) * rect.h;
     FramePoint { x: bx.round() as i32, y: by.round() as i32 }
 }
 
@@ -92,10 +101,39 @@ mod tests {
     fn to_panel_maps_into_rect() {
         use crate::export::types::RectF;
         let r = RectF { x: 100.0, y: 50.0, w: 800.0, h: 600.0 };
-        let c = to_panel(FramePoint { x: 960, y: 540 }, 1920, 1080, r); // center -> rect center
+        let c = to_panel(FramePoint { x: 960, y: 540 }, full_src(1920, 1080), r); // center -> rect center
         assert!((c.x - 500).abs() <= 1 && (c.y - 350).abs() <= 1);
-        let tl = to_panel(FramePoint { x: 0, y: 0 }, 1920, 1080, r); // origin -> rect origin
+        let tl = to_panel(FramePoint { x: 0, y: 0 }, full_src(1920, 1080), r); // origin -> rect origin
         assert_eq!((tl.x, tl.y), (100, 50));
+    }
+
+    /// The no-switch pin: with the full-canvas `src`, `to_panel` IS the old `x / sw * rect.w`
+    /// formula at every point - so a take that never switched display maps identically.
+    #[test]
+    fn a_full_canvas_src_reproduces_the_old_formula() {
+        use crate::export::types::RectF;
+        let r = RectF { x: 17.0, y: 42.0, w: 813.0, h: 611.0 };
+        let (sw, sh) = (1920u32, 1080u32);
+        for (x, y) in [(0, 0), (1, 1), (960, 540), (1919, 1079), (123, 977)] {
+            let got = to_panel(FramePoint { x, y }, full_src(sw, sh), r);
+            let old_x = r.x + (x as f32 / sw as f32) * r.w;
+            let old_y = r.y + (y as f32 / sh as f32) * r.h;
+            assert_eq!((got.x, got.y), (old_x.round() as i32, old_y.round() as i32), "at {x},{y}");
+        }
+    }
+
+    /// A switched-to 16:10 display fitted into a 16:9 canvas lands at x 96..1824. A canvas point
+    /// on that fitted picture's left edge is the panel's left edge, its centre the panel's centre -
+    /// the crop's whole point, and what keeps the cursor on the pixel it was recorded over.
+    #[test]
+    fn a_span_src_maps_the_fitted_rect_onto_the_whole_panel() {
+        use crate::export::types::RectF;
+        let src = RectF { x: 96.0, y: 0.0, w: 1728.0, h: 1080.0 };
+        let r = RectF { x: 200.0, y: 100.0, w: 1000.0, h: 625.0 };
+        assert_eq!((to_panel(FramePoint { x: 96, y: 0 }, src, r).x, to_panel(FramePoint { x: 96, y: 0 }, src, r).y), (200, 100));
+        let c = to_panel(FramePoint { x: 960, y: 540 }, src, r);
+        assert!((c.x - 700).abs() <= 1 && (c.y - 412).abs() <= 1, "centre -> panel centre, got {c:?}");
+        assert_eq!(to_panel(FramePoint { x: 1824, y: 1080 }, src, r).x, 1200); // right edge
     }
 
     #[test]

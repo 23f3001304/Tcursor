@@ -7,6 +7,23 @@ const layout = (over: Partial<PreviewLayout> = {}): PreviewLayout => ({
 });
 const noZoom = { cx: 0.5, cy: 0.5, scale: 1 };
 
+describe("fxFrameGeometry mapCanvas", () => {
+  /// After a display switch the panel shows only part of the canvas, so a CANVAS point (what a
+  /// `ClickSample` carries) must go through the crop rect first - the mirror of Rust's `to_panel`.
+  it("maps a canvas point through the active span's crop rect", () => {
+    const g = fxFrameGeometry(400, 400, layout({ src: [0.05, 0, 0.9, 1] }), noZoom, 1);
+    const near = (a: [number, number] | null, b: [number, number] | null) => {
+      expect(a![0]).toBeCloseTo(b![0], 9);
+      expect(a![1]).toBeCloseTo(b![1], 9);
+    };
+    near(g.mapCanvas(0.05, 0), g.map(0, 0));       // crop's left edge -> panel's left edge
+    near(g.mapCanvas(0.95, 1), g.map(1, 1));       // crop's right edge -> panel's right edge
+    near(g.mapCanvas(0.5, 0.5), g.map(0.5, 0.5));
+    // A point on the bar the crop removed lands OUTSIDE the panel, not clamped onto its edge.
+    expect(g.mapCanvas(0.01, 0.5)![0]).toBeLessThan(g.map(0, 0)![0]);
+  });
+});
+
 describe("fxFrameGeometry", () => {
   it("renders at fxScale and reports the screen panel's height fraction", () => {
     const g = fxFrameGeometry(800, 400, layout(), noZoom, 0.5);
@@ -24,6 +41,8 @@ describe("fxFrameGeometry", () => {
     expect(g.map(0, 0)).toEqual([40, 40]);       // panel origin: 0.1 * 400
     expect(g.map(1, 1)).toEqual([360, 360]);     // panel far corner: (0.1 + 0.8) * 400
     expect(g.map(0.5, 0.5)).toEqual([200, 200]);
+    // With no display switch the canvas IS the panel's source, so the two mappings coincide.
+    expect(g.mapCanvas(0.25, 0.75)).toEqual(g.map(0.25, 0.75));
   });
 
   it("projects through the zoom crop, magnifying around the camera centre", () => {

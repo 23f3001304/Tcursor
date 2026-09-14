@@ -39,19 +39,19 @@ fn h2_handoff_restarts_from_zero_velocity() {
 #[test]
 fn h4_cursor_low_pass_is_per_step_not_per_ms() {
     let tau = |a: f32, dt: f32| -dt / (1.0f32 - a).ln();
-    println!("\n--- H4  the cursor low-pass alpha, per STEP (was) vs per millisecond (now) ---");
+    println!("\n--- H4  the camera follow alpha, per STEP (was) vs per millisecond (now) ---");
     println!("  {:>7} {:>13} {:>13} {:>9}  {:>13} {:>13} {:>9}", "alpha",
         "raw tau@16.667", "raw tau@16", "gap", "tau@16.667", "tau@30fps", "gap");
-    for a in [0.10f32, js::ALPHA_DEFAULT, 0.75] {
+    for a in [0.10f32, 0.36, 0.75] {
         let (t0, t1) = (tau(a, 16.667), tau(a, 16.0));
-        // What `Cursor::at` does now: convert the per-60fps-frame alpha to THIS step first.
+        // What `CameraSim::step` does now: convert the per-60fps-frame alpha to THIS step first.
         let fixed = |dt: f32| tau(damping(a, dt), dt);
         println!("  {a:>7.2} {t0:>11.1}ms {t1:>11.1}ms {:>8.1}%  {:>11.1}ms {:>11.1}ms {:>8.1}%",
             (t1 / t0 - 1.0) * 100.0, fixed(16.667), fixed(1000.0 / 30.0),
             (fixed(1000.0 / 30.0) / fixed(16.667) - 1.0) * 100.0);
     }
-    println!("  alpha 1.00: no low-pass at all (plain-OS cursor mode) - raw samples reach the camera");
-    for a in [0.10f32, js::ALPHA_DEFAULT, 1.0] {
+    println!("  smoothness 0.00: no glide at all (plain-OS cursor mode) - raw samples reach the camera");
+    for a in [1.0f32, js::SMOOTH_DEFAULT, 0.0] {
         let mut c = Cursor::new(js::events(), js::screen(), a);
         let mut xs = vec![];
         for i in 0.. {
@@ -60,7 +60,7 @@ fn h4_cursor_low_pass_is_per_step_not_per_ms() {
             let p = c.at(t, js::STEP_MS);
             if t >= 3700 { xs.push(p.x as f32); }
         }
-        println!("  alpha {a:.2}: cursor accel rms over the near-still pause = {:.3} px/f2",
+        println!("  smoothness {a:.2}: cursor accel rms over the near-still pause = {:.3} px/f2",
             jm::rms(&js::vel(&js::vel(&xs))));
     }
     println!("  VERDICT: a fixed per-step alpha smoothed ~4.0% harder on a 16ms grid than on the\n\
@@ -70,7 +70,7 @@ fn h4_cursor_low_pass_is_per_step_not_per_ms() {
               \x20 time constant is identical at every rate - the right-hand gap column is 0.0%.\n\
               \x20 At alpha 1.0 raw +-2px sample jitter still reaches the follow directly: that is\n\
               \x20 plain-OS mode asking for no low-pass, not a defect.");
-    for a in [0.10f32, js::ALPHA_DEFAULT, 0.75] {
+    for a in [0.10f32, 0.36, 0.75] {
         for dt in [8.0f32, 16.0, 16.667, 1000.0 / 30.0, 50.0] {
             assert!((tau(damping(a, dt), dt) / tau(a, 16.66667) - 1.0).abs() < 2e-3,
                 "alpha {a} at dt {dt}ms no longer means the same time constant");

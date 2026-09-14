@@ -67,12 +67,14 @@ Races `onDone` against a `timeoutMs` timer. Split out of `stop()` purely so the 
 
 ```ts
 export function useWebcamRecorder(): {
-  start: (stream: MediaStream | null, dest: string) => void;
+  start: (stream: MediaStream | null, dest: string, seg?: number) => void;
   stop: () => Promise<void>;
+  folder: () => string;
+  segment: () => number;
 }
 ```
 
-Returns a `{ start, stop }` pair for controlling a `video/webm` `MediaRecorder` session that streams to `dest` (a project folder) as it records.
+Returns a `{ start, stop, folder, segment }` set for controlling a `video/webm` `MediaRecorder` session that streams to `dest` (a project folder) as it records.
 
 ### Returns
 
@@ -81,15 +83,16 @@ The hook itself returns synchronously and has no state or effects. It exposes tw
 #### start
 
 ```ts
-start(stream: MediaStream | null, dest: string): void
+start(stream: MediaStream | null, dest: string, seg = 1): void
 ```
 
 Begins recording from `stream`, streaming to `dest`.
 
 - `stream: MediaStream | null` - the active webcam stream from `useWebcamPreview`. *Why nullable:* the caller passes `cam.stream()` from the preview hook, which returns `null` when no preview is active; `start` no-ops on `null` rather than forcing the caller to guard.
 - `dest: string` - the project folder `append_webcam` writes chunks into (the folder `start_recording` just returned).
+- `seg: number` (default `1`) - which webcam file this recorder's chunks belong to. A take normally only ever calls `start` with `1` (`webcam.webm`); a mid-take camera switch (`useSourceSwitch.switchCamera`) stops the running recorder and calls `start` again with `2`, `3`... so the new camera writes `webcam_<n>.webm` instead of appending a second stream's bytes onto the first one's file. *Why a second recorder at all:* a `MediaRecorder` cannot change its stream. `preprocess` merges the segments back into one `webcam.webm` before the editor opens.
 - Resets `chain.current` to `Promise.resolve()` so any prior recording's flush chain can't bleed into this one.
-- Creates a `MediaRecorder` with `{ mimeType: "video/webm" }`; `ondataavailable` chains each non-empty chunk through `chain.current` (`.arrayBuffer()` -> `appendWebcam(dest, bytes)`, swallowing any single chunk's failure so one bad append can't break the chain for the rest of the take).
+- Creates a `MediaRecorder` with `{ mimeType: "video/webm" }`; `ondataavailable` chains each non-empty chunk through `chain.current` (`.arrayBuffer()` -> `appendWebcam(dest, bytes, seg)`, swallowing any single chunk's failure so one bad append can't break the chain for the rest of the take). Both `dest` and `seg` are read from refs at fire time, so a chunk is always written under the values its own recorder was started with.
 - Calls `mr.start(1000)` (1s timeslices, so a chunk streams to disk roughly every second instead of one large in-memory blob written at Stop) and stores the recorder in `rec.current`.
 
 #### stop
@@ -104,11 +107,29 @@ Stops recording and waits for every queued chunk to finish writing.
 - Calls `webcamStopAction(mr?.state ?? null)`. `"skip"` (no recorder, or already `"inactive"`) goes straight to awaiting `chain.current` and returns; no `mr.stop()` call is made in this case, because one would throw `InvalidStateError` on an already-inactive recorder (task-6 (b) / finding H1).
 - Otherwise (`"stop"`): registers `mr.onstop`, calls `mr.stop()` inside a `try`/`catch` (guards a race where the tracks end between the state check above and this call - the `catch` falls through to awaiting `chain.current` and returns, since `onstop` will never fire for a throwing call), then awaits `raceStopOrTimeout(stopped, 4000)` so a browser quirk that never fires `onstop` can't hang the caller's whole Stop/Close flow forever, then awaits `chain.current` so every chunk (including the final one queued by the stop itself) has actually reached disk.
 
+#### folder
+
+```ts
+folder(): string
+```
+
+The `dest` the last `start` was given, `""` before the first one (a take that began with the camera off never calls `start`). Read by `useSourceSwitch.switchCamera`, which needs the running take's project folder to open the next segment in it and has no other handle on it.
+
+#### segment
+
+```ts
+segment(): number
+```
+
+The segment index the currently-running (or last) recorder was started with. `switchCamera` adds one to it for the next segment, so the numbering is the recorder's own truth rather than a second counter that could drift from it.
+
 Internal refs (not exposed):
 - `rec` (`useRef<MediaRecorder | null>`) - the active recorder instance.
 - `chain` (`useRef<Promise<void>>`) - the ordered chain of in-flight `appendWebcam` calls.
-- `folder` (`useRef<string>`) - the current `dest`, read by `ondataavailable` (which fires after `start` returns, so it cannot close over a stale local).
+- `folder` (`useRef<string>`) - the current `dest`, read by `ondataavailable` (which fires after `start` returns, so it cannot close over a stale local) and exposed through the getter above.
+- `segment` (`useRef<number>`) - the current `seg`, read by `ondataavailable` for the same reason, and exposed through the getter above.
 
 ### Used by
 
 - `src/hud/hooks/useRecordingFlow.ts` - `toggle()` calls `start` on Record; `stopCore()` calls `stop()` in parallel with `stopRecording()` via `Promise.allSettled`, so a webcam-side failure here can never prevent the screen/mic/system-audio take from being saved.
+- `src/hud/hooks/useSourceSwitch.ts` - `switchCamera` calls `stop()`, then `start(newStream, folder(), segment() + 1)` once the new device is live.

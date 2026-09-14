@@ -1,6 +1,6 @@
 # src/hud/preferences/Preferences.tsx
 
-Preferences overlay panel with "Interface" and "Layout" tabs for theme/accent and recording-layout appearance settings. Loads the full settings object from Tauri on mount, holds it as a local draft, and writes every change back via IPC immediately with no debounce. Opened from the Hud titlebar via `openPanel("preferences")`.
+Preferences panel with "Interface" and "Layout" tabs for theme/accent and recording-layout appearance settings. Loads the full settings object from Tauri on mount, holds it as a local draft, and writes every change back via IPC immediately with no debounce. Opened from the idle card's header via `openPanel("preferences")`, and rendered as a sheet inside that card's body (`IdleCard`'s `panelBody`) - the same flip, and the same 430px `--sheet-h` box, the display picker gets, so the window never resizes for it. A theme or accent change applies to the card around it immediately (`onUiChange` -> `applyTheme`), which is now visible while the panel is still open.
 
 ## Preferences
 
@@ -15,7 +15,7 @@ A two-tab settings panel. Returns `null` until the initial `getSettings()` resol
 
 ### Props
 
-- `onClose` (`() => void`) - called when the back-arrow button in the panel header is clicked. *Why a callback rather than internal navigation:* `Hud` owns the panel state and the window morph; it needs to drive the transition back to the bar.
+- `onClose` (`() => void`) - called when the back-arrow button in the panel header is clicked. *Why a callback rather than internal navigation:* `Hud` owns the panel state; `setPanel(null)` re-keys the card's flip, which frosts this panel out and the sources back in. `Hud`'s Escape listener calls the same thing.
 - `onUiChange` (`(ui: InterfaceSettings) => void`) - called with the FULL new `InterfaceSettings` whenever the Interface tab changes anything (theme, accent, or Task 39's `animated_brand`). *Why propagated up:* `Hud` holds `themeRef` and must call `applyTheme` immediately so CSS variables update in the current session without waiting for the next settings reload, and (Task 39) sets its own `animatedBrand` state so the titlebar mark reacts immediately too. *Why the whole object rather than positional args (renamed from `onThemeChange`, Task 39):* a growing list of individual changed-field parameters doesn't scale past two: passing the full `InterfaceSettings` once covers every current AND future field this tab writes, with one call site to update instead of one per field.
 
 ### Behavior
@@ -39,5 +39,5 @@ Tab panels are wrapped in `AnimatePresence mode="wait"`. Each `motion.div` (keye
 
 ### Notes
 
-- The panel header uses `data-tauri-drag-region` on the header div so the user can still drag the window while the bar is hidden.
+- The panel header (a 30px row matching the display picker's `.sheet-head`) keeps `data-tauri-drag-region`, so a drag on it still moves the window, the same as the card header above it.
 - Tab definitions are a module-level constant `TABS: { id: Tab; label: string }[]` with `"interface"` and `"layout"` entries; they drive both the tab button row and the conditional rendering block.

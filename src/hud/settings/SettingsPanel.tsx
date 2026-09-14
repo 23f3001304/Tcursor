@@ -15,7 +15,8 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "zoom", label: "Zoom" }, { id: "cursor", label: "Cursor" }, { id: "keys", label: "Keys" }, { id: "fx", label: "FX" },
 ];
 
-/** Small settings box: a back arrow, segmented tabs, and one section at a time.
+/** Settings as a sheet inside the idle card (`IdleCard`'s body, the display picker's own box): a
+ *  back arrow, segmented tabs, and one section at a time, scrolling inside the card's height.
  *  Loads the persisted settings into a draft and writes every change back. */
 export function Settings({ onClose }: { onClose: () => void }) {
   const [draft, setDraft] = useState<S | null>(null);

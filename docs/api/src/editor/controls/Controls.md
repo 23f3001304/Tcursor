@@ -12,9 +12,8 @@ export { Slider } from "./Slider";
 export { Swatches } from "./Swatches";
 export type { SwatchItem, SwatchVariant } from "./Swatches";
 export { ColorInput, toHex, fromHex } from "./ColorInput";
-export { TileRow, rowNextIndex } from "./TileRow";
-export type { RowTile } from "./TileRow";
 export { Disclosure, readDisclosure, writeDisclosure } from "./Disclosure";
+export { CategorySection, defaultOpenIndex, readCategory, writeCategory } from "./CategorySection";
 ```
 
 `Spin`, `ResizeEdges` and `ConfirmDialog` are deliberately not re-exported here - they are not settings controls, and their two or three call sites import them directly.
@@ -30,4 +29,6 @@ The shared controls' stylesheet. Four rules, the first three matching `panels.cs
 3. **One motion language**, with nothing in this file animating a layout property in CSS.
 4. **24px is the floor for anything you can click, drag or type into** (usability pass, 2026-09-13). The readout button and its edit field (19px), the slider's own hit strip (20px, and the 4px rail is only paint) and the switch track (23px) were all under it; all four are 24 now. Nothing in this sheet is smaller.
 
-Rules moved here from `editor.css` (and deleted there): `.e-slider-*`, `.e-picker-*`, `.sw`, `.e-numfield`/`.e-numstep`, `.e-preset-*`/`.e-accent-*`/`.e-swatch-*`, `.e-colorpick`. Added by the panel pass: `.e-segmented`/`.e-segment*` (`Segmented.md`) and `.e-val`/`.e-val-edit`/`.e-fl-name` (`SliderValue.md`). Added by the usability pass: `.e-tilerow*`/`.e-rowtile*` (`TileRow.md`) and `.e-more*` (`Disclosure.md`). The tile-row scroller rules are shared with `panels.css`'s `.e-tile-strip`, so the reserved hover-only scrollbar lane is defined once.
+Rules moved here from `editor.css` (and deleted there): `.e-slider-*`, `.e-picker-*`, `.sw`, `.e-numfield`/`.e-numstep`, `.e-preset-*`/`.e-accent-*`/`.e-swatch-*`, `.e-colorpick`. Added by the panel pass: `.e-segmented`/`.e-segment*` (`Segmented.md`) and `.e-val`/`.e-val-edit`/`.e-fl-name` (`SliderValue.md`). Added by the usability pass: `.e-more*` (`Disclosure.md`).
+
+The arrangements pass (2026-09-14) DELETED the `.e-tilerow*`/`.e-rowtile*` block with `TileRow.tsx` itself: nothing in a panel scrolls sideways any more, so the reserved hover-only scrollbar lane it existed for has nothing left to reserve. Its replacement, `CategorySection`, keeps its rules in `panels/panels.css` (`CategorySection.md` says why) - so this sheet has no horizontal scroller in it at all.

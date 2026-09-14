@@ -54,10 +54,37 @@ states with one-word labels use `Segmented` instead (`Segmented.md`), which has 
 `value`/`options`/`onChange` shape - the benchmark's section (b) point 2, "segmented controls for
 exclusive states, never dropdowns".
 
+### Where the menu opens (width/clipping audit, 2026-09-14)
+
+The menu is **portalled** out of the picker (`portalHost`, `popoverPlace.md`) and positioned in
+viewport coordinates by `placeStacked`: below the button, flipping **upward** when the window has no
+room below, and clamped `EDGE_MARGIN` off every edge. Its width is the button's own `offsetWidth`,
+so it still lines up with the control exactly as `left: 0; right: 0` used to.
+
+*The bug this fixes:* `position: absolute; top: 100%` put the menu inside whatever scroll box the
+picker was sitting in. Opened near the foot of an `.e-panel` it only extended that panel's scroll
+height (so it was off screen until you scrolled), and inside `.e-panel-slot`, the `.e-props-side`
+inspector column or a settings dialog it was simply cut off - the "Spotlight Mode" picker in
+`EffectInspector` and the Theme and "Clicks to zoom" pickers in the settings dialog all could.
+
+Three consequences worth knowing about:
+
+- **Outside-click detection checks both boxes.** A mousedown on an option is outside the picker's
+  own container now; closing on it would unmount the menu before the option's own `click` could
+  fire, so the handler ignores anything inside the menu as well.
+- **Scroll and resize close the menu.** A `position: fixed` layer is pinned to where the button
+  *was*. The scroll listener is registered in the capture phase, because the scroll that matters is
+  a panel's own and does not bubble to the window - and it exempts scrolls originating inside the
+  menu, which is a scroll box itself (a long model list) and would otherwise close as it was read.
+- **It is measured before it is shown,** the same way `Tooltip` is: one hidden pass, a
+  `useLayoutEffect` that measures `scrollHeight` (capped at the menu's own `MENU_MAX_H`) and places
+  it, then the real render. The enter/exit `y` flips with `Placement.flipped`.
+
 ### Look
 
 The closed button and the menu are both raised planes with no stroke (34px button, `--e-raised`, one
 lightness step on hover). The selected option is a **3px accent tick** at the row's left edge rather
 than a filled or outlined chip, so a long menu stays quiet while it is being scanned. The menu's
-paint moved out of `Picker.tsx`'s inline style and into `.e-picker-menu` (`controls/controls.css`);
+paint moved out of `Picker.tsx`'s inline style and into `.e-picker-menu` (`controls/controls.css`) -
+including the `z-index`, which has to clear the modals (100) now that three dialogs hold pickers;
 only its placement and scroll box are still inline.

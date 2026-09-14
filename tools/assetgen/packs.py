@@ -61,6 +61,29 @@ THEMES = {
   "clay": ("Soft 3D clay cursor style: matte pastel clay shapes (lavender body with a mint accent), rounded puffy edges, soft studio lighting, gentle shadow, toy-like and friendly.", {
       "busy": "a BUSY indicator drawn as a puffy clay ring with a gap",
   }),
+  # Crystal (2026-09-14): the owner's Liquid Glass cursor - NOT glyphs rendered in glass (Aero
+  # Glass and Gradient Glass already are that) and NOT a clear 3D bubble (rejected on sight). It is
+  # Apple's iOS 26 / macOS Tahoe Liquid Glass MATERIAL in the iPadOS pointer's shapes: a frosted,
+  # flat-lensed disc for the pointer, the standard thin translucent text pill, oriented capsules
+  # for the resizes, a dotted disc for move, a ring for busy. No arrow, no hand, no I-beam serifs.
+  # Hotspots are the CENTRE of every sprite (mkpack's tip rule is overridden for this pack). The
+  # renderer refracts the frame through the sprite at run time (pack.json `material: "glass"`).
+  "crystal": ("Apple iOS 26 Liquid Glass material, seen straight on: a smooth, FLAT slab of frosted translucent glass with a "
+      "soft milky-white fill at roughly 40 percent opacity, a thin crisp bright specular highlight tracing the upper-left "
+      "rim and a fainter one along the lower-right rim, a subtle soft inner shadow just inside the edge that gives it "
+      "depth, gentle lens-like brightening at the edges, a faint cool neutral tint; calm, minimal, premium, exactly like "
+      "the pointer and text cursor of iPadOS; NOT a 3D marble, NOT a soap bubble, NOT chrome; NO drop shadow, NO "
+      "background, NO arrow, NO hand.", {
+      "arrow": "the pointer as a perfectly round frosted-glass disc, the iPadOS pointer circle, with no arrow shape at all",
+      "ibeam": "the text cursor as a HORIZONTAL rounded pill of frosted glass, about three times wider than tall, like a highlight capsule lying over a line of text, no serifs",
+      "hand": "the link cursor as a slightly larger round frosted-glass disc with a faint brighter ring just inside its edge",
+      "resize_ns": "a VERTICAL rounded capsule of frosted glass, long and slim, meaning up-and-down resizing",
+      "resize_ew": "a HORIZONTAL rounded capsule of frosted glass, long and slim, meaning left-and-right resizing",
+      "resize_nwse": "a slim rounded capsule of frosted glass lying along the upper-left to lower-right diagonal",
+      "resize_nesw": "a slim rounded capsule of frosted glass lying along the upper-right to lower-left diagonal",
+      "move": "a round frosted-glass disc with four tiny frosted-glass dots floating just outside it at top, bottom, left and right",
+      "busy": "a BUSY indicator drawn as a frosted-glass ring with one brighter segment",
+  }),
 }
 which = sys.argv[1:] or list(THEMES)
 for theme in which:

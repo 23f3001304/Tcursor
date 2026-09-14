@@ -37,6 +37,12 @@ pub(crate) fn clamp_order(start: &mut u32, end: &mut u32, start_was_set: bool) {
     }
 }
 
+/// Known camera-move keyframe shapes (`CameraMove::shape`); anything else falls back to "layout"
+/// (inherit the layout's webcam shape), the meaning of every keyframe written before shapes existed.
+pub(crate) fn valid_cam_shape(s: &str) -> String {
+    match s { "layout" | "circle" | "rounded" | "rect" => s.to_string(), _ => "layout".into() }
+}
+
 /// Known layout preset wire-names; anything else falls back to "screen".
 pub(crate) fn valid_layout(s: &str) -> String {
     match s { "screen" | "camera" | "presenter" | "screen_only" | "camera_only" => s.to_string(), _ => "screen".into() }

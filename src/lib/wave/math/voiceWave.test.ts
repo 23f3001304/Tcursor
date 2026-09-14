@@ -1,21 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { AMP_MAX, AMP_MIN, IDLE_DB, heightFromRms } from "./level";
-import {
-  AMP_CEIL_PX, AMP_FLOOR_PX, AMP_RELEASE_S, IDLE_AFTER_S, IDLE_SWELL_PX, LAYERS, MAX_DT_S,
-  idleAmp, initialVoiceState, layerPath, layerSpec, lensPath, taperWindow, voiceFrame,
-  type VoiceState,
-} from "./voiceWave";
+import { AMP_MAX, AMP_MIN, CEIL_DB, IDLE_DB, heightFromRms } from "./level";
+import { AMP_CEIL_PX, AMP_FLOOR_PX, AMP_RELEASE_S, IDLE_AFTER_S, IDLE_SWELL_PX, LAYERS, MAX_DT_S, ceilFor,
+  idleAmp, initialVoiceState, layerPath, layerSpec, lensPath, taperWindow, voiceFrame, type VoiceState } from "./voiceWave";
 
-const DT = 1 / 60;
-const SILENT = Math.pow(10, (IDLE_DB - 10) / 20);   // 10 dB under the idle floor
-const LOUD = 0.5;                                    // ~-6 dBFS
-const W = 104;
-const H = 30;
+const DT = 1 / 60, W = 104, H = 30;
+const SILENT = Math.pow(10, (IDLE_DB - 10) / 20), LOUD = 0.5;   // 10 dB under the idle floor; ~-6 dBFS
 
 /** Run `seconds` worth of frames at `dt`, feeding the same levels every frame. */
-function run(s: VoiceState, mic: number, sys: number, seconds: number, dt = DT): VoiceState {
+function run(s: VoiceState, mic: number, sys: number, seconds: number, dt = DT, ceil?: number): VoiceState {
   const n = Math.round(seconds / dt);
-  for (let i = 0; i < n; i++) s = voiceFrame(s, mic, sys, dt);
+  for (let i = 0; i < n; i++) s = voiceFrame(s, mic, sys, dt, ceil);
   return s;
 }
 
@@ -73,16 +67,22 @@ describe("LAYERS", () => {
 describe("voiceFrame level mapping", () => {
   const at = (mic: number, sys = 0) => run(initialVoiceState(false), mic, sys, 0.5).amp;
 
-  it("is a flat line at silence and full height at 0 dBFS, half of level.ts's peak-to-peak", () => {
+  it("is a flat line at silence and full height from the ceiling up, half of level.ts's peak-to-peak", () => {
     expect(at(0)).toBeCloseTo(AMP_FLOOR_PX, 1);
+    expect(at(Math.pow(10, CEIL_DB / 20))).toBeCloseTo(AMP_CEIL_PX, 1);
     expect(at(1)).toBeCloseTo(AMP_CEIL_PX, 1);
     expect([AMP_FLOOR_PX, AMP_CEIL_PX]).toEqual([AMP_MIN / 2, AMP_MAX / 2]);
   });
 
-  it("is log-mapped: each halving of loudness costs the same number of px", () => {
-    const dropA = at(0.5) - at(0.25);
-    expect(dropA).toBeGreaterThan(0);
-    expect(at(0.25) - at(0.125)).toBeCloseTo(dropA, 1);
+  it("is log-mapped inside the speech window: each halving of loudness costs the same number of px", () => {
+    const dropA = at(0.1) - at(0.05);   // -20 -> -26 dBFS
+    expect(dropA).toBeGreaterThan(1);
+    expect(at(0.05) - at(0.025)).toBeCloseTo(dropA, 1);
+  });
+
+  it("raises its ceiling with the slot: a 40px slot reaches 17px, the 30px design stays at 12", () => {
+    expect([ceilFor(30), ceilFor(40)]).toEqual([AMP_CEIL_PX, 17]);
+    expect(run(initialVoiceState(false), 1, 0, 0.5, DT, ceilFor(40)).amp).toBeCloseTo(17, 1);
   });
 
   it("follows whichever source is louder, so system audio drives the wave too", () => {

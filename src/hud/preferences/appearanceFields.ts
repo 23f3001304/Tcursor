@@ -52,25 +52,6 @@ export const DEFAULT_APPEARANCE: import("../settings/settings").AppearanceSettin
   screen: bubble, screen_only: bubble, camera: big, camera_only: big, presenter: big,
 };
 
-// The webcam knobs CameraPanel actually shows/owns for the "screen" mode - NOT pad/screen_size/
-// screen_radius (BackgroundPanel owns those) and NOT the other four appearance modes (out of
-// scope until Task 35). A prior bug reset ALL FIVE modes via `onChange(DEFAULT_APPEARANCE)`.
-export function resetCameraAppearance(
-  settings: import("../settings/settings").AppearanceSettings
-): import("../settings/settings").AppearanceSettings {
-  const def = DEFAULT_APPEARANCE.screen;
-  return {
-    ...settings,
-    screen: {
-      ...settings.screen,
-      cam_size: def.cam_size,
-      cam_margin_x: def.cam_margin_x,
-      cam_margin_y: def.cam_margin_y,
-      cam_shape: def.cam_shape,
-      cam_radius: def.cam_radius,
-      cam_aspect: def.cam_aspect,
-      cam_corner: def.cam_corner,
-      cam_ring: def.cam_ring,
-    },
-  };
-}
+// `resetCameraAppearance` (a one-mode, eight-field reset for the old Camera panel) is gone: the
+// Layouts panel resets a WHOLE layout instead, through `resetLayout` in
+// `src/editor/panels/layoutPresets.ts`, which is the same idea generalized to all five.

@@ -20,4 +20,5 @@ One `.e-grp`: the switch row with the width slider and colour row directly under
 
 ### Used by
 
-- `src/editor/panels/CameraPanel.tsx` - first under the panel's **More** disclosure since the usability pass (it was the third group, between size/position and movement). The ring is trim on a webcam whose shape, corner and size are already set above; `CameraPanel.md` carries the height arithmetic. Nothing about this component changed.
+- `src/editor/panels/LayoutKnobs.tsx` - the last thing in the Camera group, for whichever layout is being edited (2026-09-14). Nothing about this component changed in the move: it takes a `CamRing | null` and hands one back, and which layout's ring that is has always been the caller's business.
+- ~~`src/editor/panels/CameraPanel.tsx`~~ - the original caller, for the `screen` layout only. The webcam's appearance left that panel when the Layouts panel arrived (`CameraPanel.md`), and the ring went with it. Until then, four of the five layouts had a ring in the data model that nothing in the editor could switch on.

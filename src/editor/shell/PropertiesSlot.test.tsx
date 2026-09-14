@@ -4,13 +4,15 @@ import { createRoot, type Root } from "react-dom/client";
 import type { EditDoc } from "../../lib/edit";
 import { shellProps } from "./shellFixture";
 import type { SlotProps } from "./slotProps";
-import { PropertiesSlot } from "./PropertiesSlot";
+import { PropertiesSlot, selectedClip } from "./PropertiesSlot";
 
 // Routing only: which inspector one selection opens. The inspectors' own controls are covered where
 // they live; what can silently rot here is the `sel`-to-inspector chain, since every new region kind
-// has to be added to the same ladder.
+// has to be added to the same ladder - and `selectedClip` is now also what decides whether the
+// sidebar exists at all, so a wrong answer collapses a column that should be open.
 const DOC = {
-  zooms: [], effects: [], layout: [], camera_moves: [],
+  zooms: [{ id: "z0", start_ms: 0, end_ms: 1000, target: "cursor", scale: 2, easing: "smooth", zoom_in_ms: 350, zoom_out_ms: 450, layer: 0 }],
+  effects: [], layout: [], camera_moves: [],
   cuts: [{ id: "c0", start_ms: 1000, end_ms: 2500 }],
   speed: [{ id: "s0", start_ms: 3000, end_ms: 5000, factor: 2 }],
   aspect: "source", trim: { in_ms: 0, out_ms: 0 },
@@ -34,23 +36,43 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => { root.unmount(); }); container.remove(); });
 
+// The pure half of "the sidebar collapses when nothing is selected": `ClassicShell` mounts the
+// aside exactly while this is non-null, so these cases ARE the collapsed/arrived states.
+describe("selectedClip (what the sidebar exists for)", () => {
+  it("is null with no selection at all, which is the collapsed sidebar", () => {
+    expect(selectedClip(DOC, null)).toBeNull();
+    expect(selectedClip(DOC, "")).toBeNull();
+  });
+
+  it("is null for a stale id that matches nothing, so a deleted clip collapses it too", () => {
+    expect(selectedClip(DOC, "z-gone")).toBeNull();
+  });
+
+  it("names the kind and hands back the clip itself for each lane", () => {
+    expect(selectedClip(DOC, "z0")).toEqual({ kind: "zoom", zoom: DOC.zooms[0] });
+    expect(selectedClip(DOC, "c0")).toEqual({ kind: "cut", cut: DOC.cuts[0] });
+    expect(selectedClip(DOC, "s0")).toEqual({ kind: "speed", speed: DOC.speed[0] });
+  });
+});
+
 describe("PropertiesSlot routing", () => {
   it("a selected cut opens CutInspector, naming how much time it removes", () => {
     show("c0");
-    expect(q(".e-phead h2")?.textContent).toBe("Cut");
-    expect(q(".e-lede")?.textContent).toContain("1.5 s");
-    expect(q(".e-del")?.textContent).toContain("Remove cut");
+    expect(q(".e-ihead h2")?.textContent).toBe("Cut");
+    expect(q(".e-isec-val")?.textContent).toContain("1.5 s");
+    expect(q(".e-ihicon.del")?.getAttribute("aria-label")).toBe("Remove cut");
   });
 
   it("a selected speed span opens SpeedInspector, on its own factor", () => {
     show("s0");
-    expect(q(".e-phead h2")?.textContent).toBe("Speed");
+    expect(q(".e-ihead h2")?.textContent).toBe("Speed");
     expect(labels().find((t) => t.startsWith("Factor"))).toBe("Factor 2x");
     expect(q('[role="slider"]')?.getAttribute("aria-valuenow")).toBe("2");
   });
 
-  it("nothing selected stays the one typographic sentence", () => {
+  it("renders nothing at all with nothing selected - there is no empty panel to fill", () => {
     show(null);
-    expect(q(".e-insp-empty")?.textContent).toContain("cut or speed span");
+    expect(q(".e-insp")).toBeNull();
+    expect(container.textContent).toBe("");
   });
 });

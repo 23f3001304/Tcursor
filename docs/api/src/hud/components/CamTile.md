@@ -5,7 +5,7 @@ The recording bar's live camera-preview tile. Split out of `Hud.tsx` (200-line c
 ## CamTile
 
 ```ts
-export function CamTile({ camRef, camOn, camLive }: { camRef: RefCallback<HTMLVideoElement>; camOn: boolean; camLive: boolean }): JSX.Element
+export function CamTile({ camRef, camOn, camLive, shape }: { camRef: RefCallback<HTMLVideoElement>; camOn: boolean; camLive: boolean; shape?: "wide" | "round" }): JSX.Element
 ```
 
 ### Props
@@ -13,6 +13,7 @@ export function CamTile({ camRef, camOn, camLive }: { camRef: RefCallback<HTMLVi
 - `camRef: RefCallback<HTMLVideoElement>` - `Hud`'s `cam.ref` (from `useWebcamPreview`), bound straight to the `<video>` element.
 - `camOn: boolean` - `Hud`'s camera toggle state.
 - `camLive: boolean` - `Hud`'s `cam.on` (from `useWebcamPreview`) - `true` only once a real stream is actually attached.
+- `shape?: "wide" | "round"` - `"wide"` is the idle card's preview across its width (`.camtoggle.wide`, 160px tall), `"round"` the take pill's 44px circle (`.camtoggle.round`); unset is the original 52px square. Same `<video>`, same off-glyph, larger in the wide one.
 
 ### Behavior
 
@@ -20,8 +21,9 @@ Renders a `<video>` bound to `camRef`, plus a camera-off glyph overlay whenever 
 
 ### Notes
 
-This component does NOT decide whether the camera stream itself is live - that is `useWebcamPreview`'s `enabled` argument, which `Hud.tsx` passes as `camOn && !saving` (item 4). This component only decides whether to render a TILE at all: `Hud.tsx` renders `<CamTile>` itself inside `{!saving && ...}`, hiding it completely while saving rather than showing a dead/off-state tile - the camera LED going off is a separate, already-covered effect of the stream actually being released.
+This component does NOT decide whether the camera stream itself is live - that is `useWebcamPreview`'s `enabled` argument, which `Hud.tsx` passes as `camOn && !saving` (item 4). Whether a tile renders at all is the caller's call: the idle card and the recording pill both show one, the saving pill shows none rather than a dead/off-state tile - the camera LED going off is a separate, already-covered effect of the stream actually being released. Swapping between the idle tile and the pill's round one remounts the `<video>`; `useWebcamPreview`'s callback ref re-attaches the stream to the new element, which is why it is a callback ref in the first place.
 
 ### Used by
 
-- `src/hud/Hud.tsx` - `{!saving && <CamTile camRef={cam.ref} camOn={camOn} camLive={cam.on} />}` in the recording row, unchanged across the idle and recording states.
+- `src/hud/components/IdleCard.tsx` - `shape="wide"`, the preview across the card under its header.
+- `src/hud/components/TakeBar.tsx` - `shape="round"`, at the recording pill's left end.

@@ -11,7 +11,7 @@ const { requestFxOverlay } = await import("./fxOverlay");
 const { resolveSpotlight, newSpotlightSimState } = await import("./spotlightPreview");
 
 const clickfx = {
-  enabled: true, style: "pulse", color: [255, 0, 0], intensity: 1,
+  enabled: true, style: "glow", color: [255, 0, 0], intensity: 1,
   spotlight: false, spotlight_dim: 0.6, spotlight_radius: 0.13, spotlight_feather: 0.1,
   spotlight_mode: "classic", spotlight_tint: [130, 90, 255], spotlight_dim_camera: true,
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -31,7 +31,7 @@ const call = (fx: unknown, clicks: { t: number; x: number; y: number }[], now: n
 describe("requestFxOverlay (sweep-2: clicks fall back to the overlay for an unmirrored style)", () => {
   beforeEach(() => { sent.length = 0; nextResult = () => Promise.resolve("data:image/png;base64,x"); });
 
-  it("includes click hits for an UNMIRRORED style (pulse) - falls back to the overlay exactly as before", async () => {
+  it("includes click hits for an UNMIRRORED style (glow) - falls back to the overlay exactly as before", async () => {
     await call(clickfx, [{ t: 0, x: 0.5, y: 0.5 }], 550);
     expect(sent[0].hits.length).toBe(1);
     expect(sent[0].hits[0][2]).toBeCloseTo(550 / 600, 5); // export's 600ms lifetime, not 500ms
@@ -49,6 +49,11 @@ describe("requestFxOverlay (sweep-2: clicks fall back to the overlay for an unmi
 
   it("excludes click hits for a MIRRORED style (shockwave) too", async () => {
     await call({ ...clickfx, style: "shockwave" }, [{ t: 0, x: 0.5, y: 0.5 }], 100);
+    expect(sent[0].hits).toEqual([]);
+  });
+
+  it("excludes click hits for Pulse, mirrored client-side since the click-fx look pass", async () => {
+    await call({ ...clickfx, style: "pulse" }, [{ t: 0, x: 0.5, y: 0.5 }], 100);
     expect(sent[0].hits).toEqual([]);
   });
 

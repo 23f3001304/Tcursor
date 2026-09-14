@@ -60,8 +60,9 @@ Applies one `EditOp` to the project's `EditDoc`, persists the result, and return
 3. `edit::seed_lock::derive_seed_inputs(&p, &unlocked)` - precompute any ffprobe-backed inputs `load_or_seed_locked` might need, still unlocked (see `seed_lock.md`).
 4. Acquire `edit::lock::doc_lock` for the folder, held for the rest of this function - so nothing else can land between this call's load and save.
 5. `edit::seed_lock::load_or_seed_locked(&p, precomputed_default, shift, true_dur)` - re-reads `edit.json` FRESH under the lock (authoritative - not the step-2 snapshot) and applies any still-needed seed/migrate/lift write.
-6. Apply `op` via `edit::api::apply`.
-7. Save the mutated doc to `paths.edit()`.
+6. Apply `op` via `edit::api::apply` (a clone; the op is inspected once more in the next step).
+7. For an `UpdateZoom` whose `start_ms` is `Some` or whose `smart_typing` is `Some(true)`, `ops::smart_zoom::refit` rewrites that zoom's `end_ms` from the recording's typing (see `smart_zoom.md`); every other op leaves every zoom exactly as it set it.
+8. Save the mutated doc to `paths.edit()`.
 8. Return the mutated doc.
 
 ### Behaviors

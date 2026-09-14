@@ -1,6 +1,6 @@
 # src/hud/settings/SettingsCursor.tsx
 
-Settings panel for cursor rendering style and enhanced-mode parameters. Shows the style selector at all times and conditionally reveals size, motion-blur, and bounce controls only when "Enhanced" is active.
+Settings panel for cursor rendering style and enhanced-mode parameters. Shows the style selector at all times and conditionally reveals the back, size, motion-blur, motion-tilt and bounce controls only when "Enhanced" is active.
 
 ## SettingsCursor
 
@@ -31,6 +31,7 @@ Renders `<section className="sec">` with heading "Cursor". Controls in source or
 
    - **Size** (Range 0.5-2.5, step 0.05) - scales the enhanced cursor sprite relative to the system cursor size. Writes `value.size`, displayed as a percentage. *Why 0.5-2.5:* sub-0.5 is too small to see; above 2.5 the cursor overlaps nearby content distractingly.
    - **Motion blur** (Range 0-1, step 0.05) - amount of directional blur applied to the cursor during fast movement. Writes `value.motion_blur`, displayed as a percentage. *Why 0 minimum:* completely disabling motion blur is a valid preference for presenters who want a crisp pointer.
+   - **Motion tilt** (Range 0-1, step 0.05) - how far a thrown cursor tips into its own travel, and overshoots once coming back upright when it stops (`export/cursor/tilt.rs`). Writes `value.tilt`, displayed as a percentage. Sits directly under Motion blur, the other motion knob: the trail says where the cursor has been, the lean says how hard it is being thrown. *Why 0 minimum:* it scales the lean's cap, so `0` is a real "off" - the filter is skipped entirely rather than run at a tiny angle.
    - **Click bounce** (Switch) - when on, the cursor briefly scales down and back on each click. Writes `value.click_bounce`. *Why a toggle:* bounce is a visual flourish; some presenters find it distracting.
    - **Bounce intensity** (Range 0-1, step 0.05) - depth of the bounce scale-down. Visible only when `value.click_bounce` is true. Writes `value.bounce_intensity`, displayed as a percentage. *Why conditional:* the slider is meaningless when click_bounce is off, so hiding it reduces clutter.
 

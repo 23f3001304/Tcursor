@@ -11,7 +11,7 @@ pub(super) struct Running {
     pub paused_totals: Arc<PauseTotals>,
     pub clock: Arc<dyn Clock>,
     pub video: VideoSink,
-    pub mic_thread: Option<JoinHandle<()>>,
+    pub mic_thread: Option<JoinHandle<()>>, pub mic_stop: Arc<AtomicBool>,
     pub system_thread: Option<JoinHandle<()>>,
     pub mouse: Option<MouseTracker>,
     pub keyboard: Option<KeyboardTracker>,
@@ -25,7 +25,7 @@ pub(super) struct Running {
     pub events_ms: u64,
     pub mic_start: Arc<AtomicU64>,
     pub system_start: Arc<AtomicU64>,
-    pub folder: String,
+    pub folder: String, pub segments: SharedSegments,
 }
 ```
 
@@ -37,6 +37,7 @@ Holds every live resource for one recording. Consumed in full by `recorder_stop:
 - `clock: Arc<dyn Clock>` - the same `Clock` used to derive `events_ms` and start the video/audio threads. *Why stored:* `pause_recording` / `resume_recording` need it to stamp `paused_totals` at the exact instant `paused` flips.
 - `video: VideoSink` - the live recording video pipeline: GPU-native Media Foundation by default (no readback), else the legacy ffmpeg fallback (see `video_sink.rs`). *Why an enum:* the stop path finalizes it uniformly via `stop_and_collect`, which returns a `VideoStopped` regardless of which path ran.
 - `mic_thread / system_thread: Option<JoinHandle<()>>` - `None` when mic/system-audio is off. *Why Option:* join is skipped cheaply for the disabled case.
+- `mic_stop: Arc<AtomicBool>` - the CURRENT mic thread's own stop flag, distinct from the take-wide `stop`: `switch_mic` (mid-take source switching, 2026-09-14) stops just that thread, joins it so its WAV finalizes, and spawns the next with a fresh flag. `stop_blocking` sets both.
 - `mouse / keyboard / cursor: Option<...>` - active input trackers; `None` when not started. `cursor` is now `Some` on EVERY take, whatever the style: capture excludes the OS cursor for all of them, so the shape track AND the captured cursor layer both have to be sampled live for any style to be selectable in the editor afterwards. *Why still Option:* the `save_inputs` helper skips each absent tracker individually, and a spawn failure or a minimal build can legitimately have none.
 - `events_path / actions_path / typing_path / cursor_path: PathBuf` - destination paths passed to `save_inputs`. *Why stored here not in paths:* `Running` outlives the local `ProjectPaths` variable in `start_recording`.
 - `screen: ScreenInfo` - capture dimensions and origin, needed by `EventLog`. *Why captured at start:* display resolution could change after recording begins; the log must reflect the resolution actually used.
@@ -44,6 +45,7 @@ Holds every live resource for one recording. Consumed in full by `recorder_stop:
 - `events_ms: u64` - clock value (ms) at the moment `MouseTracker` was started. *Why:* mouse event `t` values are relative to this origin; `sync.json` records it so the exporter can realign events.
 - `mic_start / system_start: Arc<AtomicU64>` - stamped by each audio thread at their first real sample. *Why AtomicU64:* read back in the stop path without a lock; SeqCst load ensures the written value is visible.
 - `folder: String` - project folder path, returned in `RecordingResult` and used to write `sync.json`.
+- `segments: SharedSegments` - the ledger of mid-take source switches (`segments.rs`), taken at Stop and written into `sync.json`'s `mic_segments` / `webcam_segments` / `display_switches`.
 
 ### Used by
 

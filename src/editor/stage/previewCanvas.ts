@@ -1,6 +1,8 @@
 import type { PreviewLayout, ClickSample } from "../../lib/ipc";
 import { drawCursorSprite, type DrawCursor } from "./cursorPreview";
 import { panelFactor, panelClipRect, contentScale } from "./cursorPanel";
+import { paintPanel, coverDraw, roundRect } from "./previewDraw";
+import { FULL_SRC } from "./sourceSpans";
 import { drawBackground, type StageBgState } from "./stageBg";
 
 export interface DrawCam { scale: number; cx: number; cy: number; curx: number; cury: number }
@@ -50,6 +52,11 @@ export function drawPreview(
   // screenAlpha so a camera_only layout (or a mid-transition frame) hides/fades this panel.
   const vw = screen.videoWidth, vh = screen.videoHeight;
   const screenAlpha = layout?.screenAlpha ?? 1;
+  // The SOURCE SPAN's crop rect (fractions of the recorded canvas): the whole frame normally, one
+  // display switch's fitted rect after a mid-take switch - so the black bars the capture baked in
+  // are cropped away here exactly as the export's compositor crops them (`Scene.src`). Applied to
+  // the PROXY's own dimensions, since the fractions are resolution-independent.
+  const src = layout?.src ?? FULL_SRC;
   if (vw > 0 && vh > 0 && screenAlpha >= 0.004) {
     paintPanel(octx, screenAlpha, layer, w, h, (c) => {
       c.save();
@@ -58,7 +65,7 @@ export function drawPreview(
       c.restore();
       c.save();
       roundRect(c, dx, dy, dw, dh, r); c.clip();
-      c.drawImage(screen, 0, 0, vw, vh, dx, dy, dw, dh);
+      c.drawImage(screen, src[0] * vw, src[1] * vh, src[2] * vw, src[3] * vh, dx, dy, dw, dh);
       c.restore();
     });
   }
@@ -88,8 +95,10 @@ export function drawPreview(
     const cpos: [number, number] = [(curPxX - cx0) * w / cw, (curPxY - cy0) * h / ch];
     const panel = panelFactor(dw / w, insetW);
     const clip = panelClipRect({ x: dx, y: dy, w: dw, h: dh }, { cx0, cy0, cw, ch }, w, h);
+    // `srcW * src[2]` is the source width the panel actually shows - Rust passes `Scene.src.w`
+    // into `captured::content_scale` for the same reason (see `cursorPanel.ts`).
     drawCursorSprite(ctx, cpos, now, cursor, clicks, h, panel, clip,
-      contentScale(panel, insetW * w, cursor.captured?.srcW ?? 0));
+      contentScale(panel, insetW * w, (cursor.captured?.srcW ?? 0) * src[2]));
   }
 
   // Webcam PiP: exact rect from the layout (rounded-rect, cover-fit), else a bottom-right circle.
@@ -148,49 +157,4 @@ export function drawPreview(
       }
     });
   }
-}
-
-/** Composite one panel ONCE at `alpha`, the way the export's shader does - a single
- *  `mix(color, panel, cov * panel_a)` per panel (gpu/shader.wgsl). Setting `globalAlpha` and then
- *  drawing the panel's own layers straight onto `target` composites EACH of them separately: the
- *  shadow backing and the video both land at `alpha`, so a panel at alpha 0.5 came out as
- *  `0.5*video + 0.25*bg + 0.25*black` - visibly DARK through every layout cross-fade, and worst at
- *  the middle of it, which the export never does. Painting them into a scratch layer and blitting
- *  that once is the same picture the shader produces (plus the preview's decorative shadow, which
- *  now fades WITH its panel instead of as a layer of its own).
- *
- *  Opaque is the overwhelmingly common case and takes the direct path, so the extra full-canvas
- *  buffer is only ever touched on the frames a transition is actually running. */
-function paintPanel(target: CanvasRenderingContext2D, alpha: number, scratch: HTMLCanvasElement,
-  w: number, h: number, draw: (c: CanvasRenderingContext2D) => void) {
-  if (alpha >= 0.999) { draw(target); return; }
-  if (scratch.width !== w) scratch.width = w;
-  if (scratch.height !== h) scratch.height = h;
-  const sc = scratch.getContext("2d");
-  if (!sc) { draw(target); return; } // no context: an undimmed panel beats no panel
-  sc.clearRect(0, 0, w, h);
-  draw(sc);
-  target.save();
-  target.globalAlpha = alpha;
-  target.drawImage(scratch, 0, 0);
-  target.restore();
-}
-
-/** Draw `img` to cover the dest rect (centre-crop the source to the dest aspect). */
-function coverDraw(ctx: CanvasRenderingContext2D, img: CanvasImageSource, sw: number, sh: number,
-  dx: number, dy: number, dw: number, dh: number) {
-  const scale = Math.max(dw / sw, dh / sh);
-  const cw = dw / scale, ch = dh / scale;
-  ctx.drawImage(img, (sw - cw) / 2, (sh - ch) / 2, cw, ch, dx, dy, dw, dh);
-}
-
-function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
-  const rr = Math.min(r, w / 2, h / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + rr, y);
-  ctx.arcTo(x + w, y, x + w, y + h, rr);
-  ctx.arcTo(x + w, y + h, x, y + h, rr);
-  ctx.arcTo(x, y + h, x, y, rr);
-  ctx.arcTo(x, y, x + w, y, rr);
-  ctx.closePath();
 }

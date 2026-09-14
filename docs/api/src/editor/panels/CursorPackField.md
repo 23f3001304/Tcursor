@@ -1,16 +1,16 @@
 # src/editor/panels/CursorPackField.tsx
 
-The Cursor panel's Pack group: the strips of installed packs, and the import affordance under them. Split out of `CursorPanel.tsx` by the panel pass so that file reads as the panel's flow (style, pack, size, motion, click) rather than as a list of async handlers.
+The Cursor panel's Pack group: the collapsible style sections of installed packs, and the import affordance under them. Split out of `CursorPanel.tsx` by the panel pass so that file reads as the panel's flow (style, pack, size, motion, click) rather than as a list of async handlers.
 
 Everything about the pack list lives here: the `listCursorPacks()` fetch, the `importCursorPack()` call, and the import error. `CursorPanel` passes only the selected pack id and a setter.
 
 ## PACK_SKELETON_COUNT
 
 ```ts
-const PACK_SKELETON_COUNT = 4
+const PACK_SKELETON_COUNT = 3
 ```
 
-How many skeleton tiles fill the strip while the list is in flight. Four 66px tiles plus their gaps is exactly what fits the 288px content column without scrolling, so the skeleton is as wide as the row it stands in for and nothing resizes when the real list lands (`.e-tile-skel` fixes the tile's width and height for the same reason). It was five while the packs were a wrapping grid.
+How many skeleton tiles stand in while the list is in flight: one full row of `.e-tile-grid`, which is three at the 320px panel width. The skeleton is therefore exactly the shape of the first thing that replaces it, and nothing resizes when the real list lands (`.e-tile-skel` fixes the tile's height for the same reason). It was four while the packs were a sideways strip, and five before that.
 
 ## CursorPackField
 
@@ -29,9 +29,9 @@ export function CursorPackField({ pack, onPick }: {
 
 **Pack list.** `packs: CursorPackInfo[] | null` - `null` means the fetch is in flight; it resolves to the real list (built-in "Default" first, then imports) or, on rejection, `[]`. Three renders keyed on that:
 
-- `null` -> `PACK_SKELETON_COUNT` `Shimmer` tiles carrying `.e-tile .e-tile-skel`, in a `.e-tile-strip`.
+- `null` -> `PACK_SKELETON_COUNT` `Shimmer` tiles carrying `.e-tile .e-tile-skel`, in a `.e-tile-grid`.
 - `[]` (resolved empty, or rejected) -> one quiet `.e-hintline`: "No cursor packs yet. Import a pack folder." - pointing at the button below rather than offering a second retry affordance.
-- non-empty -> `CursorPackGrid`, one strip per group.
+- non-empty -> `CursorPackGrid`, one collapsible section per pack category.
 
 **Import.** The button (`.e-upload`, `IconFolderPlus`) opens the Tauri dialog plugin's folder picker (`{ directory: true, multiple: false }`), then calls `importCursorPack(dir)`. On success the returned `CursorPackInfo` is appended to local `packs` (so the grid updates with no re-fetch; `prev ?? []` covers an import finishing while the list was still loading) and selected. On failure the rejection message - or a generic fallback when it is not a string - shows as an `.e-errline` under the button, inside `AnimatePresence` (0.14s opacity/y-4, dropped under `useReducedMotion`). While in flight the button is disabled and its label reads "Importing...".
 

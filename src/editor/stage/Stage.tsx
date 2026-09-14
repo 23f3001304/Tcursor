@@ -1,8 +1,7 @@
 import { memo, useRef, useState, type RefObject } from "react";
 import type { CamSample, ClickSample, CursorPackDto, CursorKindSample, CursorLayerDto, PreviewLayout, LayoutPresets } from "../../lib/ipc";
 import type { CursorSettings, ClickFxSettings, ZoomSettings } from "../../hud/settings/settings";
-import type { Aspect, CameraMove, EditDoc, EditOp, EffectRegion, LayoutSeg, Zoom } from "../../lib/edit";
-import type { Tab } from "../shell/panelTabs";
+import type { CameraMove, EditDoc, EditOp, EffectRegion, LayoutSeg, Zoom } from "../../lib/edit";
 import { camAt } from "./camera";
 import { type CamPose } from "./cameraMoves";
 import { newSpotlightSimState, type SpotlightSimState } from "./spotlightPreview";
@@ -12,6 +11,7 @@ import type { StageBg, StageBgState } from "./stageBg";
 import { useArrangeDrag } from "./arrange/useArrangeDrag";
 import { ArrangeOverlay } from "./arrange/ArrangeOverlay";
 import { useCompositeLoop } from "../hooks/useCompositeLoop";
+import { useExactFrame } from "../hooks/useExactFrame";
 import { useCursorSprites } from "../hooks/useCursorSprites";
 import { useMediaPlayback } from "../hooks/useMediaPlayback";
 import { useSyncRefs } from "../hooks/useSyncRefs";
@@ -20,24 +20,24 @@ import { stageCursor } from "./stageCursor";
 import { mapCanvasClickToZoomTarget, mapZoomTargetToCanvasPoint } from "./zoomTargetMapper";
 import { CamDragHandle } from "./CamDragHandle";
 import { ZoomReticle } from "./ZoomReticle";
-import { StageToolbar } from "./StageToolbar";
 import { StageMedia } from "./StageMedia";
 import { StageEmpty } from "./StageEmpty";
+import { stageFrameStyle, useFrameSize, useViewMode } from "./viewMode";
+import "./stage.css";
 
 const MEDIA_ERR = ["", "aborted", "network", "decode", "src not supported (asset protocol blocked?)"];
-// Fallback backing-store size before `layout.canvas` loads (matches the old hardcoded default,
-// so the very first paint is unchanged); once loaded, `layout.canvas` (from `PreviewLayout`,
-// resolved server-side via `Layout::resolve` from `EditDoc.aspect`) drives the real size.
+// Fallback backing-store size before `layout.canvas` (the server-resolved `EditDoc.aspect`) loads.
 const DEFAULT_CANVAS: [number, number] = [1280, 720];
 
 /** Smooth, full-composite preview: the screen (a low-res proxy) and webcam play in hidden
  *  native <video>s, and each animation frame is composited onto a 2D canvas (background +
  *  rounded zoomed screen + webcam PiP) via drawPreview. The zoom comes from the exact
- *  camera_track curve. Native decode + Canvas2D drawImage = 60fps. `React.memo`'d (render
- *  hygiene pass) - still re-renders every tick while playing (`timeMs` genuinely drives the
- *  reticle/dirty-tracking), but skips re-rendering for unrelated `Editor` state as long as the
- *  caller passes stable callback props. */
-export const Stage = memo(function Stage({ src, webcamSrc, track, layout, layoutPresets, layoutSegs, cameraMoves, zooms, zoomSettings, clicks, bg, map, cursorSprites, cursorKinds, cursorLayer, osCursorInVideo, cursor, effects, clickfx, audioSrc, muted, volume, timeMs, playing, moveMode, aimPoint, aimMode, arrangeSeg, camDraftRef, tab, onTab, aspect, onAspect, aspectLocked, onTime, onDuration, onZoomAt, onAimAt, onApply, onRetryMedia }: {
+ *  camera_track curve. Native decode + Canvas2D drawImage = 60fps. `React.memo`'d - still
+ *  re-renders every tick while playing (`timeMs` drives the reticle/dirty-tracking), but skips
+ *  re-renders from unrelated `Editor` state as long as the caller's callback props are stable. */
+export const Stage = memo(function Stage({ folder, src, webcamSrc, track, layout, layoutPresets, layoutSegs, cameraMoves, zooms, zoomSettings, clicks, bg, map, cursorSprites, cursorKinds, cursorLayer, osCursorInVideo, cursor, effects, clickfx, audioSrc, muted, volume, timeMs, playing, moveMode, aimPoint, aimMode, arrangeSeg, camDraftRef, onTime, onDuration, onZoomAt, onAimAt, onApply, onRetryMedia }: {
+  /** The project folder, for the exact export frame drawn while paused (`useExactFrame`). */
+  folder: string;
   src: string; webcamSrc: string; track: CamSample[]; layout: PreviewLayout | null;
   layoutPresets: LayoutPresets | null; layoutSegs: LayoutSeg[]; cameraMoves: CameraMove[];
   zooms: Zoom[]; zoomSettings: ZoomSettings;
@@ -46,12 +46,7 @@ export const Stage = memo(function Stage({ src, webcamSrc, track, layout, layout
   effects: EffectRegion[]; clickfx: ClickFxSettings;
   audioSrc: string; muted: boolean; volume: number; timeMs: number;
   playing: boolean; moveMode: boolean;
-  // StageToolbar's real targets (Task 11 - see StageToolbar.tsx's own doc comment): the active
-  // Rail tab (Cursor/Captions/Camera quick-open) and the doc's aspect ratio (quick-cycle, mirrors
-  // Transport's chip). Threaded straight through rather than lifting StageToolbar out of Stage -
-  // Toast already set the "sibling, not owned by Stage" precedent for NEW state; this is instead
-  // just wiring an already-owned child up to state Editor.tsx already lifts.
-  tab: Tab; onTab: (t: Tab) => void; aspect: Aspect; onAspect: (a: Aspect) => void; aspectLocked: boolean;
+  // Accepted and ignored since the floating stage toolbar was retired (nothing may float over the
   /** The selected zoom's stored Region aim point (0..1 screen-content), or null when it follows
    *  the cursor / nothing is selected - drives the on-stage reticle. */
   aimPoint: [number, number] | null;
@@ -71,6 +66,7 @@ export const Stage = memo(function Stage({ src, webcamSrc, track, layout, layout
   const webcam = useRef<HTMLVideoElement>(null);
   const audio = useRef<HTMLAudioElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
+  const wrap = useRef<HTMLDivElement>(null); // the stage area, measured for the Fill/100% boxes
   const [err, setErr] = useState<string | null>(null);
   const bgImg = useRef<StageBgState | null>(null); // the still PNG + any moving asset, owned by useStageInvalidation
   const dirtyRef = useRef(true); // paused: recomposite once per change, not 60fps over a static frame
@@ -99,12 +95,9 @@ export const Stage = memo(function Stage({ src, webcamSrc, track, layout, layout
   const arrange = useArrangeDrag({ seg: arrangeSeg, presets: layoutPresets, canvasRef: canvas, canvasW, canvasH, dirtyRef, onApply });
   const arranging = arrangeSeg !== null;
   // Mode exclusivity has a half beyond the pointer: `frameCamLayout` gives `camDraftRef` precedence
-  // over the base layout rect (`drag ?? camMoveAt(...)`), which is exactly where the arrange draft
-  // lives - a leftover UNSAVED Move drag would pin the composited webcam while the arrange frame
-  // moved freely. The loop therefore reads the draft through `activeCamDraft`, which SUPPRESSES it
-  // while this is true instead of clearing it: `camDraftRef` is never written here, so the Move
-  // draft survives arrange mode and reasserts on exit, still discarded only by its own two
-  // documented triggers (CameraPanel's Add/Update, or moving the playhead).
+  // over the base layout rect, which is where the arrange draft lives, so the loop reads the draft
+  // through `activeCamDraft` - SUPPRESSED while arranging, never cleared (`camDraftRef` is not
+  // written here, so an unsaved Move drag survives and reasserts on exit). See Stage.md.
   const arrangingRef = useRef(arranging); arrangingRef.current = arranging;
   // Mirrored into refs directly (not via useSyncRefs) so the rAF loop always reads the live
   // presets/segments without re-subscribing; same plain "useRef + assign each render" pattern.
@@ -115,9 +108,7 @@ export const Stage = memo(function Stage({ src, webcamSrc, track, layout, layout
   const zoomsRef = useRef(zooms); zoomsRef.current = zooms;
   const zoomSettingsRef = useRef(zoomSettings); zoomSettingsRef.current = zoomSettings;
   // camDraftRef (lifted to Editor, shared with CameraPanel's save button) holds the UNSAVED Move-
-  // mode pose: the loop draws the PiP here when non-null. CamDragHandle updates it live but does
-  // NOT commit a keyframe - only the panel's Update/Add button saves it, and moving the playhead
-  // discards it (the effect below).
+  // mode pose the loop draws the PiP from; only that panel's Update/Add button commits a keyframe.
   const trailRef = useRef<[number, number][]>([]);
   const onSpriteLoaded = () => { dirtyRef.current = true; };
   const spritesRef = useCursorSprites(cursorSprites, captured, onSpriteLoaded);
@@ -131,12 +122,16 @@ export const Stage = memo(function Stage({ src, webcamSrc, track, layout, layout
     drawDeps: [timeMs, playing, track, layout, arrange.presets, layoutSegs, cameraMoves, zooms, zoomSettings, clicks, effects, cursor, clickfx, cursorKinds, captured, arranging] });
 
   useMediaPlayback({ screenRef: screen, webcamRef: webcam, audioRef: audio, playing, src, muted, volume, audioSrc, timeMs, playRef });
+  // The export's own frame over the live composite whenever the playhead rests (see the hook);
+  // its deps are the draw deps minus the playhead, so an edit retires the held frame.
+  const exact = useExactFrame({ folder, playing, timeMs, draft: moveMode || arranging, dirtyRef,
+    deps: [track, layout, arrange.presets, layoutSegs, cameraMoves, zooms, zoomSettings, clicks, effects, cursor, clickfx, cursorKinds, captured, arranging, moveMode, bg] });
 
   useCompositeLoop({
     screenRef: screen, webcamRef: webcam, audioRef: audio, canvasRef: canvas,
     playRef, timeRef, onTimeRef,
     trackRef, layoutRef, layoutPresetsRef, layoutSegsRef, cameraMovesRef, zoomsRef, zoomSettingsRef, dragPoseRef: camDraftRef, arrangingRef, clicksRef, effectsRef, clickfxRef, kindsRef, cursorRef,
-    spritesRef, trailRef, dirtyRef, bgRef: bgImg, spotSimRef, mapRef,
+    spritesRef, trailRef, dirtyRef, bgRef: bgImg, spotSimRef, mapRef, exactRef: exact.exactRef, editGenRef: exact.editGenRef,
   });
 
   // Inverse-map a pointer position through the current zoom crop + screen rect to a 0..1
@@ -167,10 +162,16 @@ export const Stage = memo(function Stage({ src, webcamSrc, track, layout, layout
     ? mapZoomTargetToCanvasPoint({ tx: shownAim[0], ty: shownAim[1], canvasW, canvasH, layout, cam: camAt(track, tOut) })
     : null;
 
+  // Fit (the default) is the plain aspect-ratio sizer; Fill and 100% need the stage area's own
+  // measured box. Either way the stage box stays exactly the canvas' displayed box, which is what
+  // every on-stage overlay and the click mapping are positioned against - Fill simply lets that
+  // box grow past the area and be cropped by `.e-stagewrap`'s overflow.
+  const view = useViewMode();
+  const [frameW, frameH] = useFrameSize(wrap);
+
   return (
-    <div className="e-stagewrap">
-      <StageToolbar tab={tab} onTab={onTab} aspect={aspect} onAspect={onAspect} aspectLocked={aspectLocked} />
-      <div className="e-stage" style={{ aspectRatio: `${canvasW} / ${canvasH}` }}>
+    <div ref={wrap} className={`e-stagewrap${view === "fill" ? " fill" : ""}`}>
+      <div className="e-stage" data-ui-fx="off" style={stageFrameStyle(view, canvasW, canvasH, frameW, frameH)}>
         {!src && !err && <StageEmpty />}
         <canvas ref={canvas} className="e-canvas" width={canvasW} height={canvasH} onClick={onCanvasClick}
           title={arranging ? "Drag the panel frames to arrange this layout" : aimMode ? "Click to aim this zoom" : "Click to add a zoom here"}

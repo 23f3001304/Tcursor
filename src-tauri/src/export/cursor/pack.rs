@@ -46,14 +46,24 @@ fn read_hotspots(path: &Path) -> HashMap<String, (f32, f32)> {
 }
 
 /// `pack.json` as written by `pack_import` (v1: `{id, name}`) or shipped with a bundled pack
-/// (v2: `+ version`, `busy`). Unknown keys - `builtin`, `generated` - are ignored: where a pack
-/// came from is decided by WHICH FOLDER it was found in, never by what its own JSON claims.
+/// (v2: `+ version`, `busy`, `category`). Unknown keys - `builtin`, `generated` - are ignored:
+/// where a pack came from is decided by WHICH FOLDER it was found in, never by what its own JSON
+/// claims. `category` is the STYLE the picker groups by ("Classic", "Playful", ...), which is a
+/// claim about the artwork rather than about provenance, so a pack is trusted with its own.
 #[derive(serde::Deserialize)]
 pub(crate) struct Meta {
     pub(crate) id: String,
     pub(crate) name: String,
     #[serde(default)]
+    pub(crate) category: Option<String>,
+    #[serde(default)]
     pub(crate) busy: Option<BusySpec>,
+    /// How the renderer TREATS the sprites, as opposed to what they look like. Absent (the only
+    /// state until 2026-09-14) is a plain alpha blit. `"glass"` makes each sprite a LENS: the FX
+    /// pass refracts the frame through its alpha mask and the sprite itself lands on top at
+    /// `fx_lens::SPRITE_ALPHA`. See `assets/cursorpacks/README.md`.
+    #[serde(default)]
+    pub(crate) material: Option<String>,
 }
 
 pub(crate) fn read_meta(dir: &Path) -> Option<Meta> {
@@ -76,6 +86,19 @@ pub(crate) fn count_busy_frames(dir: &Path) -> u32 {
 pub fn list_cursor_packs(app: tauri::AppHandle) -> Vec<crate::export::cursor::packlist::CursorPackInfo> {
     use tauri::Manager;
     crate::export::cursor::packlist::list_packs(app.path().resource_dir().ok().as_deref())
+}
+
+/// The `material` `pack_id` declares, or `None` for the embedded set and any pack that names none
+/// (a plain alpha blit). Read from disk, so callers that need it per frame cache the answer -
+/// `cursorset::prep` resolves it once into `CursorPrep::glass`.
+pub fn material(pack_id: &str) -> Option<String> {
+    if pack_id.is_empty() || pack_id == DEFAULT_PACK_ID { return None; }
+    read_meta(&resolve_pack_dir(pack_id))?.material
+}
+
+/// Whether `pack_id`'s sprites are lenses rather than pictures (`material: "glass"`).
+pub fn is_glass(pack_id: &str) -> bool {
+    material(pack_id).as_deref() == Some(crate::export::fx::fx_lens::GLASS)
 }
 
 /// The busy animation `pack_id` declares, or `None` for the embedded set and any v1 pack (whose
@@ -158,3 +181,6 @@ fn sprite_sources_from_dir(dir: &Path) -> Vec<(CursorType, Vec<u8>, (f32, f32))>
 #[cfg(test)]
 #[path = "pack_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "pack_default_tests.rs"]
+mod default_tests;

@@ -5,9 +5,8 @@ import type { BackgroundSettings } from "../../hud/settings/settings";
 import { backgroundThumbs, type BackgroundThumb } from "../../lib/ipc";
 import { ColorInput, Disclosure, Segmented, Slider, Swatches, type SwatchItem } from "../controls/Controls";
 import { COLOR_PRESETS, ACCENTS, DEFAULT_BG } from "./backgroundPresets";
-import { WallpaperRow, wallpaperGroups } from "./WallpaperGrid";
+import { WallpaperTab } from "./WallpaperGrid";
 import { GradientTab } from "./GradientTab";
-import { BackgroundAssetCard } from "./BackgroundAssetCard";
 
 type BgTab = "wallpapers" | "color" | "gradient";
 // Three exclusive kinds, so a segmented row rather than a dropdown (panel-design benchmark (b)2).
@@ -44,10 +43,15 @@ export function BackgroundPanel({
   // Rendered once per process in Rust, so this refetch on every mount is a cheap clone. An error
   // (no ffmpeg, command missing) leaves the list empty: the grids still render their tiles, just
   // without artwork, so nothing becomes unselectable.
-  const [thumbs, setThumbs] = useState<BackgroundThumb[]>([]);
+  // `null` = still loading (the tabs show skeleton tiles); `[]` = resolved with nothing (no ffmpeg,
+  // an older backend), which the tabs render as the plain-swatch fallback. Since 2026-09-14 the
+  // backend keeps the rendered set on disk and warms it at startup, so this normally resolves at
+  // once; on the very first launch it still takes seconds, and the owner saw the panel sit on a
+  // lone Classic tile under "Wallpapers 1" for all of them.
+  const [thumbs, setThumbs] = useState<BackgroundThumb[] | null>(null);
   useEffect(() => {
     let live = true;
-    backgroundThumbs().then((t) => { if (live) setThumbs(t); }).catch(() => {});
+    backgroundThumbs().then((t) => { if (live) setThumbs(t); }).catch(() => { if (live) setThumbs([]); });
     return () => { live = false; };
   }, []);
 
@@ -89,26 +93,11 @@ export function BackgroundPanel({
         <Segmented value={tab} options={TABS} onChange={setTab} ariaLabel="Background Type" />
       </div>
 
-      {/* One ROW per wallpaper group (Ribbons / Folds / Gradients / Metal / Scenic), in the order
-          the backend lists them; Classic (the legacy bundled mesh, id "") leads the first one,
-          since it is what every pre-library project already renders. The five groups plus Custom
-          are one block at 8px, not six sections at 16 - they are one library, read top to bottom.
-          The user's own file is the last row rather than a section of its own: it is one more way
-          to choose a background. Picking a wallpaper leaves `asset` alone, so coming back to that
-          row restores it without a re-import. */}
-      {tab === "wallpapers" && (
-        <div className="e-grp e-rowstack">
-          {wallpaperGroups(thumbs).map((g) => (
-            <WallpaperRow key={g.name} label={g.name} tiles={g.tiles}
-              selectedId={bg.kind === "mesh" ? bg.mesh : null}
-              onSelect={(id) => setBg({ kind: "mesh", mesh: id })} />
-          ))}
-          <BackgroundAssetCard folder={folder} asset={bg.asset} kind={bg.kind}
-            onPick={(k) => setBg({ kind: k })}
-            onImported={(i) => setBg({ kind: i.kind, asset: i.rel_path })}
-            onRemoved={() => setBg({ kind: "mesh", asset: null })} />
-        </div>
-      )}
+      {/* One collapsible SECTION per wallpaper group (Ribbons / Folds / Gradients / Metal /
+          Scenic), in the order the backend lists them, then the user's own file last. The stack
+          lives in `WallpaperTab` (`WallpaperGrid.tsx`) so this file stays a flat read of the
+          panel's flow. */}
+      {tab === "wallpapers" && <WallpaperTab folder={folder} bg={bg} thumbs={thumbs} setBg={setBg} />}
 
       {tab === "color" && (
         <div className="e-grp">
@@ -126,10 +115,10 @@ export function BackgroundPanel({
       {tab === "gradient" && <GradientTab bg={bg} thumbs={thumbs} setBg={setBg} />}
 
       {/* Everything below is TUNING - it adjusts a background you have already chosen - so it
-          lives under the panel's one disclosure. That is not a preference: with five wallpaper
-          rows plus Custom the panel's visible stack is 576px of a 620px slot, and Look, Frame and
-          Accent together are another 215. Choosing stays in sight; tuning is one click away and
-          remembered, so a user who tunes often never sees it closed again.
+          lives under the panel's one disclosure. That is not a preference: Look, Frame and Accent
+          together are 215px, and the choosing stack above (six section headers plus the one open
+          section) already fills most of a 620px slot. Choosing stays in sight; tuning is one click
+          away and remembered, so a user who tunes often never sees it closed again.
           Blur is a one-off pass over the STATIC background buffer, so on a video background it
           would only ever reach the first frame - a control that visibly does nothing reads as
           broken, so it is replaced by the reason it is absent. Dim is a black overlay over

@@ -15,7 +15,7 @@ import "../../lib/wave.css";
  *    glows, still reads as grabbed, it just does not pulse.
  *
  *  Extracted from `Timeline.tsx` (at its line cap) so Timeline renders one element for all of it.
- *  `.e-ph`/`.e-ph-glow` keep their timeline layout rules in `editor.css`; the head and the ripple
+ *  `.e-ph`/`.e-ph-glow` keep their timeline layout rules in `timeline.css`; the head and the ripple
  *  are wave-motif pieces and live in `wave.css` with the rest of the motif. */
 export function Playhead({ pct, playing, dragging }: { pct: number; playing: boolean; dragging: boolean }) {
   const reduced = useReducedMotion();

@@ -8,6 +8,13 @@ export const AMP_MIN = 2;
 export const AMP_MAX = 24;
 /** Below this dBFS the take counts as silent. */
 export const IDLE_DB = -50;
+/** The dB window the wave spends its height on: flat at or under `FLOOR_DB`, full at or over
+ *  `CEIL_DB`, linear in dB between. A mic at ordinary gain puts speech between roughly -35 and
+ *  -18 dBFS RMS, and 0 dBFS is a clipped take, so the old full-scale window (-50..0) left normal
+ *  speech at half height and gave the top half of the meter to a signal nobody records on purpose
+ *  (owner, 2026-09-14: "the wave doesn't react much to voice"). Thirty dB centred on -31. */
+export const FLOOR_DB = -46;
+export const CEIL_DB = -16;
 
 /** dBFS for a 0..1 RMS. Digital silence has no dB, so it floors at a value well under `IDLE_DB`
  *  rather than returning -Infinity (which would poison every arithmetic downstream). */
@@ -16,12 +23,17 @@ export function dbFromRms(rms: number): number {
   return 20 * Math.log10(Math.min(1, rms));
 }
 
-/** Peak-to-peak wave height in px for a 0..1 RMS: log-mapped, `AMP_MIN` at or under `IDLE_DB`,
- *  `AMP_MAX` at 0 dBFS, linear in dB between the two (so a halving of loudness is a constant
- *  drop in px, which is what makes the meter readable rather than spiky). */
-export function heightFromRms(rms: number): number {
-  const t = Math.max(0, Math.min(1, (dbFromRms(rms) - IDLE_DB) / -IDLE_DB));
-  return AMP_MIN + t * (AMP_MAX - AMP_MIN);
+/** The wave's level as a 0..1 fraction of its height for a 0..1 RMS: 0 at or under `FLOOR_DB`,
+ *  1 at or over `CEIL_DB`, linear in dB between (so a halving of loudness is a constant drop,
+ *  which is what makes the meter readable rather than spiky). */
+export function levelFromRms(rms: number): number {
+  return Math.max(0, Math.min(1, (dbFromRms(rms) - FLOOR_DB) / (CEIL_DB - FLOOR_DB)));
+}
+
+/** Peak-to-peak wave height in px for a 0..1 RMS: `AMP_MIN` at the floor, `max` (`AMP_MAX` by
+ *  default; a taller slot passes its own) at the ceiling, `levelFromRms` between. */
+export function heightFromRms(rms: number, max: number = AMP_MAX): number {
+  return AMP_MIN + levelFromRms(rms) * (max - AMP_MIN);
 }
 
 export interface Damped { value: number; vel: number }

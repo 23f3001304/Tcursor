@@ -34,4 +34,4 @@ The ripple alone is dropped. The playhead still moves, still glows, still reads 
 
 ### Styling
 
-`.e-ph` and `.e-ph-glow` keep their timeline layout rules in `editor.css`. The head (`.w-ph-head`, a dot) and the ripple (`.w-ph-ripple`) are wave-motif pieces and live in `src/lib/wave.css` with the rest of the motif. The head is still the one interactive part of an otherwise `pointer-events: none` playhead, and its `pointerdown` still bubbles to `.e-tlbody`'s existing scrub handler with no extra wiring.
+`.e-ph` and `.e-ph-glow` keep their timeline layout rules in `timeline.css`. The head (`.w-ph-head`, a dot) and the ripple (`.w-ph-ripple`) are wave-motif pieces and live in `src/lib/wave.css` with the rest of the motif. The head is still the one interactive part of an otherwise `pointer-events: none` playhead, and its `pointerdown` still bubbles to `.e-tlbody`'s existing scrub handler with no extra wiring.

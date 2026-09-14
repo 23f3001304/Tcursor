@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { cursorAt, idAt } from "./cursorPreview";
+import { backBox, cursorMorphAt, lerpBox, morphEase, spriteBox, BACK_SCALE, GLASS_ALPHA,
+  MORPH_MS, PILL_W } from "./cursorGlass";
 
 describe("idAt", () => {
   // The TS mirror of Rust `CursorLayer::id_at` - same "last sample with t <= ms" rule, same
@@ -43,5 +45,74 @@ describe("cursorAt", () => {
     const kinds = [{ t: 0, kind: "arrow" }, { t: 100, kind: "ibeam" }];
     expect(cursorAt(kinds, 100)).toBe("ibeam");
     expect(cursorAt(kinds, 99)).toBe("arrow");
+  });
+});
+
+describe("the glass cursor material's preview mirror", () => {
+  // These three numbers are the export's (Rust `fx_lens::SPRITE_ALPHA`/`BACK_SCALE`/`PILL_W`).
+  // The live canvas cannot refract, but it must not place or size anything differently, or a
+  // pause - which swaps in the backend's exact frame - would visibly MOVE the cursor.
+  it("pins the constants the export owns", () => {
+    expect(GLASS_ALPHA).toBe(0.65);
+    expect(BACK_SCALE).toBe(2.2);
+    expect(PILL_W).toBe(0.35);
+  });
+  it("is a disc for every shape but the I-beam, which is a horizontal pill", () => {
+    const disc = backBox("arrow", 40);
+    expect(disc.ry).toBeCloseTo(44, 6);        // 2.2x the sprite height, halved
+    expect(disc.rx).toBeCloseTo(disc.ry, 6);   // a circle
+    for (const k of ["hand", "move", "busy", "resize_ns"]) {
+      expect(backBox(k, 40).ry).toBeCloseTo(disc.ry, 6);
+    }
+    // Over text it lies ALONG the line: as wide as the disc, 0.35x as tall.
+    const pill = backBox("ibeam", 40);
+    expect(pill.rx).toBeCloseTo(disc.rx, 6);
+    expect(pill.ry).toBeCloseTo(disc.rx * 0.35, 6);
+  });
+});
+
+describe("cursorMorphAt", () => {
+  // The TS mirror of Rust `fx_lens::kind_morph` - the one that decides how far a glass pack's
+  // state change has dissolved, so the live canvas and the export's paused frame agree.
+  const kinds = [{ t: 0, kind: "arrow" }, { t: 1000, kind: "ibeam" }];
+  it("is a settled arrow before the first sample and on an empty track", () => {
+    expect(cursorMorphAt([], 500)).toEqual({ kind: "arrow", prev: "arrow", m: 1 });
+    expect(cursorMorphAt(kinds, 500)).toEqual({ kind: "arrow", prev: "arrow", m: 1 });
+  });
+  it("starts a change at the previous shape and settles after MORPH_MS", () => {
+    const at0 = cursorMorphAt(kinds, 1000);
+    expect([at0.kind, at0.prev]).toEqual(["ibeam", "arrow"]);
+    expect(at0.m).toBeCloseTo(0, 6);
+    expect(cursorMorphAt(kinds, 1000 + MORPH_MS).m).toBeCloseTo(1, 6);
+    expect(cursorMorphAt(kinds, 9999).m).toBeCloseTo(1, 6);
+  });
+  it("eases out like the click effects", () => {
+    // The five points clickfx.rs and ripplePreview.ts both pin.
+    for (const [p, want] of [[0, 0], [0.25, 0.578125], [0.5, 0.875], [0.75, 0.984375], [1, 1]]) {
+      expect(morphEase(p)).toBeCloseTo(want, 6);
+    }
+    expect(morphEase(-1)).toBe(0);
+    expect(morphEase(2)).toBe(1);
+  });
+});
+
+describe("the glass state cross-fade's box", () => {
+  const img = { naturalWidth: 20, naturalHeight: 10 } as HTMLImageElement;
+  it("puts the hotspot on the cursor point", () => {
+    expect(spriteBox(img, [0.5, 0.5], 10, [100, 100], 10)).toEqual([90, 95, 20, 10]);
+  });
+  it("interpolates between the two states without drifting off the cursor", () => {
+    const a = spriteBox(img, [0.5, 0.5], 10, [100, 100], 10);
+    const b = spriteBox({ naturalWidth: 30, naturalHeight: 10 } as HTMLImageElement,
+      [0.5, 0.5], 10, [100, 100], 20);
+    for (const m of [0, 0.25, 0.5, 0.75, 1]) {
+      const box = lerpBox(a, b, m);
+      expect(box[0] + box[2] / 2).toBeCloseTo(100, 6);
+      expect(box[1] + box[3] / 2).toBeCloseTo(100, 6);
+    }
+    expect(lerpBox(a, b, 0)).toEqual(a);
+    expect(lerpBox(a, b, 1)).toEqual(b);
+    expect(lerpBox(a, b, -1)).toEqual(a);
+    expect(lerpBox(a, b, 2)).toEqual(b);
   });
 });

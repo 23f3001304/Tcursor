@@ -32,7 +32,7 @@ fn a_stale_trail_point_draws_a_ghost_until_recent_is_cleared() {
     let mut recent = std::collections::VecDeque::from(vec![(4.0f32, 4.0f32)]);
     let ghost_alpha = |r: &mut std::collections::VecDeque<(f32, f32)>| {
         let mut out = vec![0u8; 40 * 40 * 4];
-        apply_enhanced(&mut out, 40, 40, &spr(), (30.0, 30.0), r, 6, &[], 0, 1.0, 0.9, false, 0.5, 1.0, (0, 0, 40, 40), BusyPose::still());
+        apply_enhanced(&mut out, 40, 40, &spr(), (30.0, 30.0), r, 6, &[], 0, 1.0, 0.9, false, 0.5, 1.0, (0, 0, 40, 40), BusyPose::still(), 1.0);
         out[(4 * 40 + 4) * 4 + 3]
     };
     assert!(ghost_alpha(&mut recent) > 0, "a stale trail point paints a ghost cursor at (4,4)");
@@ -61,7 +61,7 @@ fn checker() -> CursorSprite {
 fn a_still_pose_keeps_the_nearest_neighbour_blit_and_never_interpolates() {
     let mut out = vec![0u8; 40 * 40 * 4];
     draw_cursor_posed(&mut out, 40, 40, &checker(), (10.0, 10.0), &[], 3.4, 0.0, 1.0,
-        (0, 0, 40, 40), BusyPose::still());
+        (0, 0, 40, 40), BusyPose::still(), 1.0);
     let painted: Vec<u8> = out.chunks_exact(4).filter(|p| p[3] > 0).map(|p| p[0]).collect();
     assert!(!painted.is_empty(), "the still cursor drew something");
     assert!(painted.iter().all(|&v| v == 0 || v == 255),
@@ -78,7 +78,7 @@ fn a_rotated_pose_reaches_the_transformed_blit() {
     let render = |pose: BusyPose| {
         let mut out = vec![0u8; 40 * 40 * 4];
         draw_cursor_posed(&mut out, 40, 40, &checker(), (10.0, 10.0), &[], 8.0, 0.0, 1.0,
-            (0, 0, 40, 40), pose);
+            (0, 0, 40, 40), pose, 1.0);
         out
     };
     assert_ne!(render(BusyPose { frame: 0, angle_deg: 90.0, scale: 1.0 }), render(BusyPose::still()));

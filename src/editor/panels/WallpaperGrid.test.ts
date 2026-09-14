@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { BackgroundThumb } from "../../lib/ipc";
 import type { BackgroundSettings } from "../../hud/settings/settings";
-import { CLASSIC, tilesOf, wallpaperGroups } from "./WallpaperGrid";
+import { CLASSIC, thumbGroups, tilesOf, wallpaperGroups } from "./WallpaperGrid";
 import { isPreset } from "./GradientTab";
 
 const thumbs: BackgroundThumb[] = [
@@ -36,6 +36,25 @@ describe("tilesOf", () => {
   it("gives the legacy mesh the empty id BackgroundSettings.mesh actually stores for it", () => {
     expect(CLASSIC.id).toBe("");
     expect(CLASSIC.name).toBe("Classic");
+  });
+});
+
+describe("thumbGroups", () => {
+  it("cuts one kind into the backend's own sections, in its order", () => {
+    expect(thumbGroups(thumbs, "mesh").map((g) => g.name)).toEqual(["Ribbons", "Folds"]);
+    expect(thumbGroups(thumbs, "mesh")[0].tiles.map((t) => t.id)).toEqual(["brand", "paper"]);
+  });
+
+  it("gives the gradient presets their own section, never a wallpaper one", () => {
+    // The backend deliberately groups the procedural gradients as "Gradients" here in the test
+    // fixture; whatever it says, the two kinds never share a section.
+    const grads = thumbGroups(thumbs, "gradient");
+    expect(grads.map((g) => g.name)).toEqual(["Gradients"]);
+    expect(grads[0].tiles.map((t) => t.id)).toEqual(["dusk"]);
+  });
+
+  it("has no sections at all when nothing of that kind came back", () => {
+    expect(thumbGroups([], "mesh")).toEqual([]);
   });
 });
 

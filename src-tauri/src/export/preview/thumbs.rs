@@ -6,34 +6,58 @@ use std::path::PathBuf;
 use crate::session::paths::ProjectPaths;
 use crate::win::sys::proc::ffcmd_bg;
 
-/// N evenly-spaced JPEG thumbnails (height 64) from the proxy (or raw video), cached in
-/// `folder/thumbs_<count>_64/`. Returns the per-file paths (the frontend wraps each with
+/// The filmstrip the editor actually draws: `FILMSTRIP_COUNT` tiles at `FILMSTRIP_HEIGHT` px.
+/// Mirrors `src/editor/timeline/filmstripPlan.ts`, which DERIVES the pair from the lane's own drawn
+/// height and the editor window's usual width - keep the two in step so this background pass fills
+/// the very cache dir the editor then asks for instead of leaving it a second ffmpeg pass to run.
+pub(crate) const FILMSTRIP_COUNT: u32 = 9;
+pub(crate) const FILMSTRIP_HEIGHT: u32 = 80;
+
+/// Clamped count, clamped EVEN height, and the cache dir name the pair owns. Even because
+/// `scale=-2:h` only guarantees an even WIDTH; an odd height would leave the JPEG's 4:2:0 chroma
+/// plane half a line short. The height is part of the dir name so a taller lane re-renders its
+/// thumbnails at the new size instead of silently upscaling the cached 64px ones.
+pub(crate) fn thumbs_spec(count: u32, height: u32) -> (u32, u32, String) {
+    let n = count.clamp(8, 120);
+    let h = height.clamp(16, 240) / 2 * 2;
+    (n, h, format!("thumbs_{n}_{h}"))
+}
+
+/// N evenly-spaced JPEG thumbnails at `height` px from the proxy (or raw video), cached in
+/// `folder/thumbs_<count>_<height>/`. Returns the per-file paths (the frontend wraps each with
 /// `convertFileSrc`). One ffmpeg pass: `fps=count/duration`. `async` + `spawn_blocking` - same
 /// freeze mechanism as `ai::commands` (Task 40): a sync `#[tauri::command] fn` runs the blocking
 /// ffmpeg `.status()` call inline on the main thread, freezing the window for the pass's
 /// duration. The blocking body is `ensure_thumbs_blocking`, called directly (no runtime hop
 /// needed) by `preprocess::run`, which already runs off the main thread on its own `std::thread`.
 #[tauri::command]
-pub async fn ensure_thumbs(folder: String, count: u32) -> Result<Vec<String>, String> {
-    tauri::async_runtime::spawn_blocking(move || ensure_thumbs_blocking(folder, count))
+pub async fn ensure_thumbs(folder: String, count: u32, height: u32) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || ensure_thumbs_blocking(folder, count, height))
         .await
         .map_err(|e| e.to_string())?
 }
 
-pub(crate) fn ensure_thumbs_blocking(folder: String, count: u32) -> Result<Vec<String>, String> {
+pub(crate) fn ensure_thumbs_blocking(folder: String, count: u32, height: u32) -> Result<Vec<String>, String> {
     let paths = ProjectPaths { folder: PathBuf::from(&folder) };
-    let n = count.clamp(8, 120);
-    let dir = paths.folder.join(format!("thumbs_{n}_64"));
+    let (n, h, dir_name) = thumbs_spec(count, height);
+    let dir = paths.folder.join(dir_name);
     crate::win::sys::proc::generate_once(&dir.join("thumb_0001.jpg"), || {
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         // TRUE full duration, not `trim.out_ms` (a sub-range once a user actually trims) - the
         // filmstrip spans the whole scrubbable timeline, trimmed or not.
         let dur = (crate::edit::seed::true_duration_ms(&paths) as f64 / 1000.0).max(0.1);
         let proxy = paths.folder.join("preview_720_rt.mp4");
-        let src = if proxy.exists() { proxy } else { paths.video() };
-        let status = ffcmd_bg("ffmpeg")
-            .args(["-v", "error", "-y", "-i"]).arg(&src)
-            .args(["-vf", &format!("fps={n}/{dur:.3},scale=-2:64"), "-q:v", "4"])
+        let from_proxy = proxy.exists();
+        let src = if from_proxy { proxy } else { paths.video() };
+        let mut cmd = ffcmd_bg("ffmpeg");
+        cmd.args(["-v", "error", "-y"]);
+        // The proxy carries a keyframe every second (`preview_track`'s `-g 60`), so decoding only
+        // keyframes gives the `fps` filter a sample per second to pick from at ~half the cost of
+        // decoding every frame (measured 5.0s -> 2.9s on a 5-minute 1080p60 take). The raw
+        // capture's keyframes are seconds apart, so it is still decoded whole.
+        if from_proxy { cmd.args(["-skip_frame", "nokey"]); }
+        let status = cmd.arg("-i").arg(&src)
+            .args(["-vf", &format!("fps={n}/{dur:.3},scale=-2:{h}"), "-q:v", "4"])
             .arg(dir.join("thumb_%04d.jpg"))
             .status().map_err(|e| e.to_string())?;
         if !status.success() { return Err("thumbnail extraction failed".into()); }
@@ -58,6 +82,11 @@ pub async fn ensure_waveform(folder: String, which: String) -> Result<String, St
         .map_err(|e| e.to_string())?
 }
 
+/// True for a WAV that holds no samples: nothing past the 44-byte RIFF/fmt/data header.
+pub(crate) fn wav_is_empty(wav: &std::path::Path) -> bool {
+    std::fs::metadata(wav).map(|m| m.len() <= 44).unwrap_or(true)
+}
+
 pub(crate) fn ensure_waveform_blocking(folder: String, which: String) -> Result<String, String> {
     let paths = ProjectPaths { folder: PathBuf::from(&folder) };
     let wav = match which.as_str() {
@@ -65,7 +94,10 @@ pub(crate) fn ensure_waveform_blocking(folder: String, which: String) -> Result<
         "system" => paths.system(),
         _ => return Err("which must be system|mic".into()),
     };
-    if !wav.exists() { return Ok(String::new()); }
+    // A header-only WAV (44 bytes: a source that was on but never delivered a sample, e.g. a
+    // silent loopback) is "no audio", not a render job: `showwavespic` fails on it, and until
+    // 2026-09-14 that failure took the OTHER lane's waveform down with it in the editor.
+    if !wav.exists() || wav_is_empty(&wav) { return Ok(String::new()); }
     let out = paths.folder.join(format!("wf_{which}.png"));
     crate::win::sys::proc::generate_once(&out, || {
         let tmp = crate::win::sys::proc::tmp_sibling(&out); // write then atomic-rename
@@ -136,4 +168,26 @@ fn preview_audio_shifts(paths: &ProjectPaths) -> (i64, i64) {
     // playback clamp, so only the export has a (frame-floored) trim-in to subtract here.
     let shift = |t| crate::export::pipeline::audio_shift_ms(t, vs, 0);
     (shift(tl.mic_ms) + offset, shift(tl.system_ms))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{thumbs_spec, FILMSTRIP_COUNT, FILMSTRIP_HEIGHT};
+
+    #[test]
+    fn a_thumb_spec_clamps_its_count_and_rounds_its_height_down_to_even() {
+        assert_eq!(thumbs_spec(9, 80), (9, 80, "thumbs_9_80".to_string()));
+        assert_eq!(thumbs_spec(2, 80).0, 8);
+        assert_eq!(thumbs_spec(999, 80).0, 120);
+        assert_eq!(thumbs_spec(9, 81).1, 80); // odd -> even, or the JPEG's chroma plane is short
+        assert_eq!(thumbs_spec(9, 4).1, 16);
+        assert_eq!(thumbs_spec(9, 9999).1, 240);
+    }
+
+    #[test]
+    fn the_preview_filmstrip_constants_name_the_dir_the_editor_asks_for() {
+        // The editor requests `filmstrip.ts`'s FILMSTRIP_COUNT/FILMSTRIP_HEIGHT; if this pair ever
+        // drifts from that one, `preprocess::rest` fills a cache nobody reads.
+        assert_eq!(thumbs_spec(FILMSTRIP_COUNT, FILMSTRIP_HEIGHT).2, "thumbs_9_80");
+    }
 }

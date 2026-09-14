@@ -147,7 +147,7 @@ fn shrink_is_identity_at_no_zoom_and_min_at_full() {
 fn empty_track_leaves_static_scene_camera_rect_unchanged() {
     let before = mode(LayoutId::Screen, 1920, 1080);
     let track = crate::export::camera::moves::CameraMoveTrack::from_doc(&[]);
-    assert_eq!(track.sample(0, Some(CamPose { x: 0.5, y: 0.5, size: 0.2 })), None);
+    assert_eq!(track.sample(0, Some(CamPose { x: 0.5, y: 0.5, size: 0.2, round: None })), None);
     let after = mode(LayoutId::Screen, 1920, 1080);
     assert_eq!(after.camera.rect, before.camera.rect, "static overlay_for rect must be untouched");
 }

@@ -46,7 +46,7 @@ Stops each active input tracker and writes its data to disk. Called synchronousl
 
 ```rust
 pub fn save_session_files(folder: &str, frames: Vec<u64>, events_ms: u64,
-    mic_ms: Option<u64>, system_ms: Option<u64>, screen: ScreenInfo)
+    mic_ms: Option<u64>, system_ms: Option<u64>, screen: ScreenInfo, segments: SegmentLog)
 ```
 
 Persists the three post-capture session files: `sync.json` (the real capture timeline the export rebuilds every clock from), the `.tcursor` project manifest, and the recents entry. Split out of `stop_recording` so `recorder.rs` stays under the line cap, alongside `save_inputs`.
@@ -67,6 +67,8 @@ Nothing. All three writes are **best-effort**: `sync.json` and the manifest log 
 
 The manifest is written with `preprocessed: false` regardless. The frontend calls `export::preview::preprocess::preprocess_project` right after `stop_recording` resolves (shown as the HUD's "Saving..." progress via `useRecordingFlow`) and that flips it once its pass finishes. This is NOT done as a detached background thread from the stop path anymore - that used to race the editor's mount (the proxy/thumbs/waveform transcode could still be running when the editor opened), which was exactly the "preview still takes a while to load" lag; awaiting it with progress in the caller fixes that.
 
+`segments` (`record/segments.rs`) becomes `sync.json`'s `mic_segments`, `webcam_segments` and `display_switches` - empty for a take with no mid-take source switch.
+
 ## spawn_mic_thread
 
 ```rust
@@ -86,12 +88,12 @@ Spawns a dedicated thread that owns and drives a `CpalMic` handle. Returns `None
 
 ### Inputs
 
-- `mic_id: Option<String>` - cpal input device name. *Why Option:* `None` short-circuits the function before any thread is created; the caller stores the result directly as `mic_thread`.
-- `mic_path: String` - destination for `mic.wav`. *Why String:* moved into the thread closure, where it is passed to `CpalMic::open` as a `&str`.
-- `stop: Arc<AtomicBool>` - shared shutdown flag. *Why Arc:* the thread loop polls it at 50ms intervals; storing the clone inside the thread ensures the borrow never escapes.
+- `mic_id: Option<String>` - cpal input device name. *Why Option:* `None` short-circuits the function before any thread is created; the caller stores the result directly as `mic_thread`. Mid-take source switching (2026-09-14) reuses exactly that: `switch_mic(None)` is "mic off from here on", and needs no separate path because a `None` here already means no thread, no stream and no file.
+- `mic_path: String` - destination for the WAV. `mic.wav` for the take's first segment; `mic_2.wav`, `mic_3.wav`... for each one a `switch_mic` opens after it (`segments::next_name`). *Why String:* moved into the thread closure, where it is passed to `CpalMic::open` as a `&str`.
+- `stop: Arc<AtomicBool>` - the shutdown flag for THIS segment's thread, not the take's. *Why its own flag:* the caller passes `Running.mic_stop`, which `switch_mic` sets and then replaces with a fresh one for the next thread, so a mic switch ends the mic thread alone and leaves the take's `stop` (system audio, the video pipeline) untouched. `recorder_stop` sets both. *Why Arc:* the thread loop polls it at 50ms intervals; storing the clone inside the thread ensures the borrow never escapes.
 - `paused: Arc<AtomicBool>` - pause flag passed to `CpalMic::open` so the mic stream can gate sample capture. *Why passed at open time:* cpal callbacks run on an OS audio thread; the `Arc` is the only safe channel to communicate pause state into the callback.
 - `clock: Arc<dyn Clock>` - used inside `CpalMic::open` to stamp `started` with the first sample's capture time, cancelling device input latency. *Why Arc<dyn Clock>:* injectable for tests; `SystemClock` is the production instance.
-- `started: Arc<AtomicU64>` - written by `CpalMic` at the first captured sample. *Why AtomicU64:* read back in the stop path without a lock; SeqCst is used on both sides.
+- `started: Arc<AtomicU64>` - written by `CpalMic` at the first captured sample. *Why AtomicU64:* read back in the stop path without a lock; SeqCst is used on both sides. The stamp is PER SEGMENT: `switch_mic` hands a later thread a fresh counter and drops it, keeping `Running.mic_start` (and therefore `sync.json`'s `mic_ms`) the first segment's, since that is the instant `segments_audio::parts_of` measures every later segment's delay from.
 - `warn: Notify` - called with `audio_warning("microphone", e)` if the device will not open.
 - `level: Option<Level>` - called with this source's peak RMS on every poll wake, feeding the HUD's wave meter. Dropped to `None` when the device did not open, so the meter reads the absence of reports as "not capturing" and can never be told otherwise.
 

@@ -2,7 +2,7 @@
 
 The background picker's tile rows, shared by `BackgroundPanel`'s Wallpapers tab and `GradientTab`'s preset row. Every tile is a 96x54 PNG rendered in Rust by the export's OWN background code (`background_thumbs`), so what the row shows is what the render produces - not a CSS lookalike that drifts from it as the two are edited apart. That is also why the old `GRADIENT_PRESETS` CSS strings in `backgroundPresets.ts` were removed rather than reused here.
 
-**The file is still called `WallpaperGrid.tsx` and its component is `WallpaperRow`.** The usability pass turned each group from a wrapping grid into one horizontally scrolling strip (`TileRow.md` carries the arithmetic); the file name stayed because the data helpers below - which are what most callers actually import - did not change at all.
+**The file is called `WallpaperGrid.tsx` and it is a grid again.** The usability pass had turned each group into a horizontally scrolling strip; the arrangements pass (2026-09-14) put the wrapping grid back, inside a collapsible `CategorySection` per group, on the owner's ruling that nothing in a panel may move sideways and that a tile's name belongs under the tile rather than in a tooltip the strip then clips. The data helpers below - which are what most callers actually import - did not change with either pass.
 
 ## Tile
 
@@ -13,7 +13,7 @@ export interface Tile { id: string; name: string; png: string; css: string }
 One tile's display data.
 
 - `id` - what the caller gets back from `onSelect` (and, for wallpapers, exactly what `BackgroundSettings.mesh` stores).
-- `name` - the tile's `title`, and the caption that rides in over the artwork on hover or keyboard focus. *Why a caption at all:* a strip tile is 64x36, and several wallpapers are deliberately dark and calm - without a name they are hard to tell apart at that size.
+- `name` - the tile's `title` AND the caption printed under its artwork, always visible. *Why a caption at all:* several wallpapers are deliberately dark and calm, and are hard to tell apart from the picture alone. It used to ride in over the artwork on hover; a name you have to hover to read is what the arrangements pass removed.
 - `png` - a `data:image/png;base64,...` URL, or empty.
 - `css` - what to paint when `png` is empty.
 
@@ -41,43 +41,83 @@ Thumbnails of one `kind` as tiles, in the order Rust returned them (which is the
 - `leaves \`png\` empty when the backend could not render one, so the tile falls back to css`.
 - `gives the legacy mesh the empty id BackgroundSettings.mesh actually stores for it`.
 
+## thumbGroups
+
+```ts
+export function thumbGroups(thumbs: BackgroundThumb[], kind: "mesh" | "gradient"):
+  { name: string; tiles: Tile[] }[]
+```
+
+Tiles of one `kind` cut into sections wherever the backend's `group` field changes, so the ORDER is whatever Rust emitted (`Ribbons`, `Folds`, `Gradients`, `Metal`, `Scenic`, each alphabetical) - a new group ships by dropping files into `assets/`, with no change here or in either tab.
+
+Split out of `wallpaperGroups` by the arrangements pass so the Gradient tab can build sections the same way. The two kinds can never share a section, because the filter runs before the cut.
+
+### Behaviors
+
+- `cuts one kind into the backend's own sections, in its order`.
+- `gives the gradient presets their own section, never a wallpaper one`.
+- `has no sections at all when nothing of that kind came back`.
+
 ## wallpaperGroups
 
 ```ts
 export function wallpaperGroups(thumbs: BackgroundThumb[]): { name: string; tiles: Tile[] }[]
 ```
 
-The wallpaper tiles split into the picker's groups - one ROW each since the usability pass. Groups are cut where the backend's `group` field changes, so the ORDER is whatever Rust emitted (`Ribbons`, `Folds`, `Gradients`, `Metal`, `Scenic`, each alphabetical) - a new group ships by dropping files into `assets/`, with no change here or in the panel.
-
-`CLASSIC` is unshifted onto the FIRST group, so the legacy background stays one click away without needing a row of its own. With no thumbnails at all - no ffmpeg, or the fetch rejected - the function returns a single `Wallpapers` group holding just Classic, because Classic renders through a path that never needed the thumbnail list and the tab must not come up empty.
+`thumbGroups(thumbs, "mesh")` with the legacy tile in front: `CLASSIC` is unshifted onto the FIRST group, so the legacy background stays one click away without needing a section of its own. With no thumbnails at all - no ffmpeg, or the fetch rejected - the function returns a single `Wallpapers` group holding just Classic, because Classic renders through a path that never needed the thumbnail list and the tab must not come up empty.
 
 ### Behaviors
 
 - `splits the wallpapers into the backend's own sections, in its order`.
 - `puts Classic first in the first section, never in a later one`.
 - `still offers Classic when no thumbnails came back at all`.
-- `renders one listbox row per group, named by the group, with Classic leading the first` (`BackgroundPanel.test.tsx`).
+- `renders one collapsible section per group, named and counted, with Your file last` (`BackgroundPanel.test.tsx`).
 
-## WallpaperRow
+## TileGrid
 
 ```tsx
-export function WallpaperRow({ label, tiles, selectedId, onSelect }: {
-  label: string;
+export function TileGrid({ tiles, selectedId, onSelect }: {
   tiles: Tile[];
   selectedId: string | null;
   onSelect: (id: string) => void;
 }): JSX.Element
 ```
 
-One group as one `TileRow` (`TileRow.md`): a horizontally scrolling strip of 64x36 tiles, with the group's name as the row's own 11px label rather than a section heading above a grid.
+One section's tiles as a WRAPPING grid - `.e-tile-grid`, three to a row at the 320px panel width, with no `overflow-x` anywhere in it.
 
-**What changed, and why.** The panel pass had already made the tile BE the artwork - no padding, no border, a 2px inset accent ring for selection, the name as a caption over the bottom on hover. The usability pass kept all of that and changed only the layout: `repeat(auto-fill, minmax(88px, 1fr))` three-up meant the 52-tile library cost about 1000px of a 620px panel, and the owner's verdict on it was that the Background panel "needs a lot of scrolling". Five strips cost 295px. Keyboard, scroll-into-view and the listbox semantics all come from `TileRow` and are documented there.
+Each tile is the shared `PackTile` (`PackTile.md`): the same press spring, the same 2px inset accent ring, the same name captioned under the picture that a cursor pack gets. The face is a `.e-tile-img` span painted with the thumbnail, or with `Tile.css` when the backend could not render one. So a wallpaper and a cursor pack are chosen by the same control, in the same idiom, in two different panels.
 
-- `label` - the group name, which doubles as the row's `aria-label`.
-- `selectedId` - `null` means nothing in THIS row is active, which is the normal state for every wallpaper row while the background is a gradient or a solid, and for the gradient row once the user has edited a preset's stops. Compared against `Tile.id`, so the Classic tile is selected exactly when `mesh` is empty.
+**The arithmetic it replaced.** Three-up in a 288px content column was already the panel pass's layout, and the 52-tile library cost about 1000px of a 620px panel - which is what the sideways strips were for. Sections solve the same problem without moving anything: five closed headers at 28px plus the one open group is well under the budget, and the group the user is actually in is the one on screen.
+
+- `selectedId` - `null` means nothing in THIS section is active, which is the normal state for every wallpaper section while the background is a gradient or a solid, and for the gradient section once the user has edited a preset's stops. Compared against `Tile.id`, so the Classic tile is selected exactly when `mesh` is empty.
 - `onSelect` - handed the tile's id; the caller decides what that means (a `mesh` id, or a preset to expand into gradient stops).
+
+## TileGridSkeleton
+
+```ts
+export function TileGridSkeleton(): JSX.Element
+```
+
+Six `Shimmer` tiles in the library's own `.e-tile-grid`, shown by `WallpaperTab` and `GradientTab` inside a single open `CategorySection` while `backgroundThumbs()` is still resolving (`thumbs === null`): the shape of what is coming, instead of a lone Classic tile under a "Wallpapers 1" heading, which read as the library being missing (owner, 2026-09-14). The backend now caches the set on disk and warms it at startup, so this is normally gone before it is seen.
+
+## WallpaperTab
+
+```tsx
+export function WallpaperTab({ folder, bg, thumbs, setBg }: {
+  folder: string;
+  bg: BackgroundSettings;
+  thumbs: BackgroundThumb[] | null;
+  setBg: (patch: Partial<BackgroundSettings>) => void;
+}): JSX.Element
+```
+
+`BackgroundPanel`'s whole Wallpapers tab: one `CategorySection` per `wallpaperGroups` entry, then "Your file" (a `BackgroundAssetCard`) as the last one. It lives here rather than in `BackgroundPanel.tsx` so that file stays a flat read of the panel's flow.
+
+**Which section opens.** `defaultOpenIndex` over `[...each group holds the mesh id, the background IS an imported asset]`, so opening the panel lands on the group the current wallpaper is in - or on "Your file" when the background is the user's own image or video, or on the first group when the background is a solid or a gradient. A closed section that holds the selection names it in its header: the wallpaper's name, or the imported file's name through `assetFileName`.
+
+**Why "Your file" is a section like any other.** Importing is one more way to choose a background, not a separate mode. Picking a wallpaper leaves `asset` alone, so coming back to that section restores the imported file without a re-import. Its count is 1 when a file is imported and 0 when none is, which is what a closed header has to say about it.
 
 ### Used by
 
-- `src/editor/panels/BackgroundPanel.tsx` - one row per wallpaper group (`CLASSIC` prepended to the first).
-- `src/editor/panels/GradientTab.tsx` - the twelve gradient presets, as one row labelled Presets.
+- `src/editor/panels/BackgroundPanel.tsx` - rendered for `tab === "wallpapers"`.
+- `src/editor/panels/GradientTab.tsx` uses `TileGrid` and `thumbGroups` for its own preset sections.

@@ -1,10 +1,11 @@
-// The Background panel's Custom row: "your own" as the tile that LEADS the row (it is what an
-// empty row is for), and whatever is already imported sitting beside it.
+// The Background panel's "Your file" section: the import button that LEADS the row (it is what an
+// empty section is for), and whatever is already imported sitting beside it.
 //
-// Since the usability pass this is one more strip in the same stack as Ribbons, Folds and the
-// rest, at the same 36px height - because importing IS one more way to choose a background, not a
-// separate kind of object. Selecting the card re-asserts the asset's own kind, which is how
-// switching to a wallpaper and back needs no re-import: the file never left.
+// It is the LAST section of the Wallpapers tab, in the same stack as Ribbons, Folds and the rest -
+// because importing IS one more way to choose a background, not a separate kind of object. The
+// section's own header carries the name; this file renders only the row. Selecting the card
+// re-asserts the asset's own kind, which is how switching to a wallpaper and back needs no
+// re-import: the file never left.
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -70,12 +71,11 @@ export function BackgroundAssetCard({ folder, asset, kind, onPick, onImported, o
   const motionProps = still ? {} : ENTER;
 
   return (
-    <div className="e-tilerow-wrap">
-      <span className="e-tilerow-label">Custom</span>
-      <div className="e-tilerow">
-        {/* Not a listbox option: this one opens a file dialog rather than choosing anything, so
-            it is a plain button at the row's own tile size, with the row's own plane. */}
-        <button type="button" className="e-rowtile e-rowtile-add" onClick={handleImport} disabled={busy}
+    <div className="e-bgassetwrap">
+      <div className="e-bgassetrow">
+        {/* The import affordance leads the row at the imported card's own height, because
+            importing IS one more way to choose a background rather than a separate mode. */}
+        <button type="button" className="e-bgadd" onClick={handleImport} disabled={busy}
           aria-label="Import image or video"
           title={busy ? "Importing..." : "Choose an image or video from this computer"}>
           <IconPhotoPlus size={16} />

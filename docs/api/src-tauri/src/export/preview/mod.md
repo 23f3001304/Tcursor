@@ -47,11 +47,11 @@ Step the camera along the renderer's frame plan up to the output frame that show
 pub async fn preview_frame(folder: String, time_ms: u32, app: tauri::AppHandle) -> Result<String, String>
 ```
 
-Tauri IPC command: renders one preview frame (via the warm cache) and returns a PNG data URL.
+Tauri IPC command: renders one preview frame (via the warm cache) and returns a JPEG data URL - the export's own frame at that instant. **Why it exists (owner ruling 2026-09-14: the export is the reference):** the stage shows this frame whenever playback pauses or a scrub settles, so what the owner looks at while editing IS a frame of the export, whatever the live canvas approximated a moment earlier.
 
 **Off the main thread (Task 41 sweep correction).** `async fn` + `spawn_blocking`, same freeze mechanism as `ai::commands` (Task 40) and `thumbs.rs`/`preview_track.rs` (Task 41): `render_frame` calls `RawDecoder::spawn` (screen, and webcam when present) which shells out to `ffmpeg` and blocks on its stdout pipe until the seeked frame decodes - a real blocking subprocess call, not in-process math. An earlier T41 sweep incorrectly grouped this command with `camera_track`/`preview_layout`/`click_track` (`preview_track.rs`) as "pure math/cache reads" and left it sync - those three genuinely are pure math (no decode, see their own docs); this one is not. (Sweep-2 Task 1 has since converted those three too - not because their own bodies decode, but because the `with_warm` cold path underneath every one of them does.) Because `session: tauri::State<'_, PreviewSession>` can't be moved into `spawn_blocking` (its lifetime isn't `'static`), the command instead takes `app: tauri::AppHandle` (`'static`, `Clone`, `Send`) and re-derives the same managed-state handle inside the blocking closure via `app.state::<PreviewSession>()` (`tauri::Manager`).
 
-**Verified uncalled by the frontend today** (Task 41 sweep correction - grepped `src/` for `preview_frame`/`previewFrame`, no hits) - the editor's M3 preview plays the recording natively via `<video>` (see `Editor.md`) rather than fetching per-frame PNGs, so nothing currently invokes this command. Converted anyway per "dead-or-not, it must not be a landmine" - a future caller (or a re-enabled `render_preview`-style flow) would otherwise silently reintroduce a main-thread freeze.
+**Called by `useExactFrame`** (`src/editor/hooks/useExactFrame.ts`, via `ipcPreview.ts`'s `previewFrame`) whenever the stage's playhead rests; it was uncalled from the Task 41 sweep until 2026-09-14 - the editor's M3 preview plays the recording natively via `<video>` (see `Editor.md`) rather than fetching per-frame PNGs, so nothing currently invokes this command. Converted anyway per "dead-or-not, it must not be a landmine" - a future caller (or a re-enabled `render_preview`-style flow) would otherwise silently reintroduce a main-thread freeze.
 
 ### Inputs (what, and why it is needed)
 
@@ -61,16 +61,24 @@ Tauri IPC command: renders one preview frame (via the warm cache) and returns a 
 
 ### Returns
 
-`Result<String, String>` - on success, a `data:image/png;base64,...` data URL ready for use in an `<img>` `src` attribute. On error, a human-readable error string that the frontend can display. A `spawn_blocking` join failure also maps to `Err(String)`, same shape as every other failure this command can return.
+`Result<String, String>` - on success, a `data:image/jpeg;base64,...` data URL ready for use in an `<img>` `src` attribute. On error, a human-readable error string that the frontend can display. A `spawn_blocking` join failure also maps to `Err(String)`, same shape as every other failure this command can return.
 
 ### Implementation
 
 The whole body runs inside `tauri::async_runtime::spawn_blocking(move || { ... })`, `.await`ed then `?`-unwrapped:
 
 1. `app.state::<PreviewSession>()` re-derives the managed-state handle.
-2. Via `with_warm`, call `render_frame` at `time_ms` and the cached size.
-3. Base64-encode the PNG bytes with the local `base64_encode` helper (RFC 4648 alphabet, no line breaks).
-4. Prefix with `"data:image/png;base64,"` and return.
+2. Via `with_warm`, call `composite_frame` at `time_ms` and the cached size, then `jpeg_encode`.
+3. Base64-encode the JPEG bytes with the local `base64_encode` helper (RFC 4648 alphabet, no line breaks).
+4. Prefix with `"data:image/jpeg;base64,"` and return.
+
+## decode_screen
+
+```rust
+fn decode_screen(paths: &ProjectPaths, meta: &RenderMeta, time_ms: u32, buf: &mut [u8]) -> Result<()>
+```
+
+Seek-decodes one screen frame at `time_ms` (clip time) into `buf` as nv12 at the renderer's own crop. Factored out because `composite_frame` now decodes up to TWO frames: the one at `time_ms`, and - only when `FramePose::mix` says this instant is inside a mid-take display switch - the frame at `SpanMix::hold_ms`, the last output frame before the switch. That second one is the picture the EXPORT latches and dissolves from, so the ghost image in a mid-transition preview frame is the export's own. A failure on the second decode drops the dissolve rather than failing the scrub; only the export treats a screen decode as a deliverable.
 
 ## preview_bg
 

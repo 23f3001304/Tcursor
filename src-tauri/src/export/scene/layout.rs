@@ -157,16 +157,16 @@ impl LayoutTrack {
     }
 }
 
-/// Re-anchor each zoom region into the screen panel active at the region's start
-/// (anchors arrive in screen-local coords; the screen panel placement is layout-
-/// and time-dependent). Identity-ish when the layout never changes.
-pub fn anchor_regions(raw: Vec<ZoomRegion>, track: &LayoutTrack, sw: u32, sh: u32) -> Vec<ZoomRegion> {
-    raw.into_iter()
-        .map(|r| {
-            let panel = track.scene_at(r.start_ms).screen.rect;
-            ZoomRegion { anchor: to_panel(r.anchor, sw, sh, panel), ..r }
-        })
-        .collect()
+/// Re-anchor every zoom region into THIS frame's screen panel, into `out` (a scratch buffer the
+/// caller keeps, so a 60 fps walk allocates nothing). Anchors arrive in canvas coords; the panel's
+/// placement is layout- and time-dependent, and the crop rect (`scene.src`) a display switch puts
+/// under it is too - so this runs once per frame, from the frame's own resolved scene. It used to
+/// run once per region, at the region's start: a layout transition mid-zoom then moved the panel
+/// out from under a pinned aim and the camera kept zooming into where the content HAD been
+/// (owner report 2026-09-14). Identity-ish when the layout never changes.
+pub fn anchor_frame(raw: &[ZoomRegion], scene: &Scene, out: &mut Vec<ZoomRegion>) {
+    out.clear();
+    out.extend(raw.iter().map(|r| ZoomRegion { anchor: to_panel(r.anchor, scene.src, scene.screen.rect), ..*r }));
 }
 
 #[cfg(test)]

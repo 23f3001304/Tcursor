@@ -21,6 +21,9 @@ export interface FxRequestRefs {
  *  clock, by the caller), so no second clock crosses into the request. */
 export interface FxRequestTick {
   frameLayout: PreviewLayout | null; fxW: number; fxH: number; screenScale: number;
+  /** CANVAS point (0..1 of the recorded frame) -> FX-render px - `fxFrameGeometry`'s `mapCanvas`.
+   *  It is only ever applied to `ClickSample` positions, which are canvas fractions; the cursor
+   *  point arrives already projected as `cpos`. */
   mapFn: (fx: number, fy: number) => [number, number] | null; cpos: [number, number] | null;
   resolvedSpot: ReturnType<typeof resolveSpotlight>; plan: ReturnType<typeof spotAlphaPlan>;
   cf: ClickFxSettings; clicks: ClickSample[]; t: number;

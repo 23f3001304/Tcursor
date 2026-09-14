@@ -136,6 +136,17 @@ Identical to `draw_cursor` up to the final blit, which branches:
 
 **The motion trail is never transformed.** It is a fading echo of where the cursor WAS; spinning each ghost independently reads as noise rather than motion.
 
+### draw_cursor_posed::alpha
+
+```rust
+pose: BusyPose, alpha: f32
+```
+
+Scales the whole sprite's opacity, 1.0 being opaque - what every pack drew before the glass material existed, and what `draw_cursor` and the non-glass `apply_enhanced` path still pass.
+
+A glass pack passes `fx_lens::SPRITE_ALPHA` so its baked highlights and rim sit ON the live refraction the FX pass just drew, instead of hiding it. The motion trail is scaled by it too: a trail brighter than the cursor leading it looks like a bug.
+
+`cursorxform::blit_transformed` takes the same parameter, so an animated busy cursor is as see-through as the pack's still ones.
 
 ## apply_enhanced
 
@@ -188,3 +199,15 @@ Per-frame convenience wrapper: updates the trail deque, computes bounce and pixe
 6. Call `draw_cursor` with the assembled parameters.
 
 - `pose: BusyPose` - forwarded to `draw_cursor_posed`; `cursorset::draw` computes it once per frame from the recorded cursor type and the selected pack.
+
+## blit_into
+
+```rust
+pub fn blit_into(out: &mut [u8], ow: u32, oh: u32, spr: &CursorSprite,
+                 dest: [f32; 4], alpha_mul: f32, clip: (i32, i32, i32, i32))
+```
+
+`blit` with the destination rect given outright as `[x0, y0, w, h]` instead of derived from a uniform scale, so a caller can STRETCH the sprite. That is what `cursormorph::draw_glass` does to dissolve one glass cursor state into the next through a single interpolated box - both sprites are drawn into the same rect, which is what makes the two shapes morph rather than slide past each other.
+
+`blit` now calls this with the rect its own `scale` implies, so the ordinary path is unchanged.
+

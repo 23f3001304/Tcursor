@@ -101,6 +101,7 @@ pub struct Zoom {
     pub zoom_in_ms: u32, pub zoom_out_ms: u32,
     pub layer: u32,
     pub cam_action: Option<CamZoomAction>,
+    pub smart_typing: bool,
 }
 ```
 
@@ -114,6 +115,7 @@ One zoom event in the timeline.
 - `easing` - *named easing curve (`"smooth"`, `"linear"`, `"spring"`); looked up by the compositor at render time.*
 - `layer` - *priority when this zoom overlaps another in time (higher wins) and the timeline row it renders on. Auto-assigned by `auto_layer` on creation, user-overridable via `UpdateZoom`.*
 - `cam_action` - *per-zoom webcam-on-zoom override. `None` inherits `ZoomSettings::resolved_cam_action`. Serialized only when set (`skip_serializing_if`), so re-saving a doc written before this field existed does not start emitting a new key.*
+- `smart_typing` - *smart typing duration (owner, 2026-09-14): the end follows the typing after the start. `edit::commands::apply_edit_op` refits `end_ms` through `ops::smart_zoom::refit` whenever this is switched on or the start moves, so the doc always carries a concrete `end_ms` and the timeline, the preview and the export need no new path. `#[serde(default)]`: docs written before it read `false`.*
 
 ### Used by
 
@@ -221,17 +223,29 @@ A time span that uses a named screen layout (e.g. `"screen"`, `"camera"`, `"pres
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct CameraMove {
     pub id: String, pub t_ms: u32, pub x: f32, pub y: f32, pub size: f32,
-    pub easing: String,
+    #[serde(default = "default_cam_easing")] pub easing: String,
+    #[serde(default = "default_cam_shape")] pub shape: String,
+    #[serde(default = "default_cam_roundness")] pub roundness: f32,
 }
 ```
 
-One keyframe of the webcam PiP's position + size track (`EditDoc.camera_moves`). An empty track is the default and is a no-op at render time - a doc with no `camera_moves` composites byte-identically to today.
+One keyframe of the webcam PiP's position + size + shape track (`EditDoc.camera_moves`). An empty track is the default and is a no-op at render time - a doc with no `camera_moves` composites byte-identically to today.
 
 - `id` - *stable string key (e.g. `"k0"`, `"k3"`) used to target a specific keyframe for update/removal without relying on list position.*
 - `t_ms` - *the frame time this keyframe is pinned to.*
 - `x` / `y` - *the PiP's center, as a fraction (`0.0`-`1.0`) of the output frame.*
 - `size` - *the PiP's size, as a fraction of the output frame; the interpolator (`CameraMoveTrack`) derives the other dimension from the mode's aspect.*
 - `easing` - *named easing curve (`"linear"`, `"smooth"`, `"spring"`) for the ramp into this keyframe; defaults to `"smooth"` when absent from JSON, matching `Zoom`/`LayoutSeg`'s back-compat pattern.*
+- `shape` - *the keyframe's own webcam shape: `"layout"` (inherit the layout's - the serde default, so every keyframe written before shapes existed on 2026-09-14 reads unchanged), `"circle"`, `"rounded"` or `"rect"`. `CameraMoveTrack` folds it into the pose as a corner fraction and morphs it between keyframes like the rect.*
+- `roundness` - *the `"rounded"` corner radius as a fraction of the panel's short side, `0.0`-`0.5`; ignored by the other shapes. Defaults to `DEFAULT_CAM_ROUNDNESS`.*
+
+## DEFAULT_CAM_ROUNDNESS
+
+```rust
+pub const DEFAULT_CAM_ROUNDNESS: f32 = 0.12;
+```
+
+The corner radius a keyframe gets when switched to `"rounded"` before its slider is touched - visibly rounded at bubble sizes without reading as a pill. Also `roundness`'s serde default, and what `EditOp::AddCameraMove` fills in when the op carries none.
 
 ## EditDoc
 

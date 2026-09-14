@@ -23,6 +23,7 @@ export function ShortcutsOverlay({ open, onClose }: { open: boolean; onClose: ()
 - An effect attaches a `window` `keydown` listener ONLY while `open` (so it never listens when closed) and calls `onClose` on `Escape`.
 - The scrim (`.e-modal-scrim`) closes on `onPointerDown`; the card itself (`.e-modal.e-shortcuts-modal`) stops that pointerdown from bubbling, same as `ConfirmDialog`/`ExportDialog`.
 - `AnimatePresence` + the same fade (scrim, 0.14s) / scale+y+fade (card, 0.16s tween, `ease: [0.4, 0, 0.2, 1]`) as every other editor modal.
+- A row is `min-height: 32px`, not a fixed 32 (width audit, 2026-09-14): a description that needs two lines in a 300px card - "Choose a range on the ruler" is already most of one - used to grow out of its row and overlap its neighbours. The `kbd` never shrinks or wraps; the description is what gives.
 
 ### Used by
 

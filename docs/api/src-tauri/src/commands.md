@@ -12,7 +12,7 @@ pub struct DisplayInfo { pub id: u32, pub label: String }
 Serializable descriptor for one display, returned by `list_displays`.
 
 - `id: u32` - numeric display identifier. *Why u32:* sufficient for current use; only the primary display (id 0) is returned today.
-- `label: String` - human-readable name shown in the frontend device picker.
+- `label: String` - human-readable name shown in the frontend device picker. For a display the size and primary flag ride on the end as `(WxH, Primary)`, `(Primary)` or `(WxH)`; the HUD's `parseTarget` splits them back out (the map in `TargetSheet` draws each monitor to scale from the size).
 
 ### Used by
 
@@ -100,6 +100,30 @@ Writes a raw webcam blob (webm) sent from the frontend to disk.
 
 1. Construct `path = Path::new(&folder).join("webcam.webm")`. *Why a fixed filename:* matches `ProjectPaths::webcam()`, so the exporter can locate the file via `ProjectPaths` without re-querying the frontend.
 2. Call `std::fs::write(path, bytes)`. Map error to `String`.
+
+## append_webcam
+
+```rust
+#[tauri::command]
+pub fn append_webcam(folder: String, bytes: Vec<u8>, segment: Option<u32>) -> Result<(), String>
+```
+
+Appends one `MediaRecorder` chunk to this take's webcam file DURING recording, so Stop has almost nothing left to write instead of one O(clip-length) blob. This is what the HUD actually uses; `save_webcam` above is the unused one-shot entry point.
+
+### Inputs
+
+- `folder: String` - the project folder `start_recording` returned. It is freshly created per recording, so the first append creates the file.
+- `bytes: Vec<u8>` - one chunk (a 1s `MediaRecorder` timeslice).
+- `segment: Option<u32>` - which webcam file the chunk belongs to, resolved by `session::record::webcam_segments::webcam_segment_name`: `None`/`Some(1)` is `webcam.webm`, `Some(n)` is `webcam_<n>.webm`. *Why the option exists:* a mid-take camera switch needs a SECOND `MediaRecorder` (one cannot change its stream) and therefore a second file; `preprocess` merges them back into one `webcam.webm` before the editor opens. `None` keeps a frontend that predates switching working unchanged.
+
+### Returns
+
+`Ok(())` on success. `Err(String)` with the `io::Error` message if the file cannot be opened or the write fails.
+
+### Implementation
+
+1. `webcam_segment_name(segment)` -> the file name; join it onto `folder`.
+2. Open with `create(true).append(true)` and `write_all` the chunk. Appending (not rewriting) is the whole point: the file grows a second at a time and is complete as soon as the last chunk lands.
 
 ## export_project
 

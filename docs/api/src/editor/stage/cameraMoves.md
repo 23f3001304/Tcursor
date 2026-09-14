@@ -1,19 +1,22 @@
 # src/editor/stage/cameraMoves.ts
 
-TS mirror of `CameraMoveTrack::sample` (`src-tauri/src/export/camera/moves.rs`), the export source of truth for the "Move" camera feature. Drives the webcam PiP's live-preview position+size so scrubbing the editor matches an export of the same doc frame-for-frame. An empty `camera_moves` list is a no-op - the caller keeps whatever layout-resolved PiP rect it already had.
+TS mirror of `CameraMoveTrack::sample` (`src-tauri/src/export/camera/moves.rs`), the export source of truth for the "Move" camera feature. Drives the webcam PiP's live-preview position, size and shape so scrubbing the editor matches an export of the same doc frame-for-frame. An empty `camera_moves` list is a no-op - the caller keeps whatever layout-resolved PiP rect it already had.
 
 **Task 27 - keyframes own only their span.** The keyframes govern exactly `[first - KF_BLEND_MS, last + KF_BLEND_MS]`; outside it `camMoveAt` is `null` and the layout segments own the panel, as if no keyframes existed. The old `staticPose` argument (an implicit `t=0` keyframe, which made one keyframe override the WHOLE clip) became `live`: the layout-resolved pose for THIS frame, which the track eases out of entering the span and back into leaving it - re-read every frame, so an exit blend chases a layout cross-fade that is still moving. Same five cases, same `KF_BLEND_MS`, as the Rust.
+
+**Shapes (2026-09-14).** A keyframe carries its own shape (`CameraMove.shape`/`roundness`), folded into the pose as `round` - a corner fraction of the panel's short side - and lerped between keyframes exactly like the rect, so a bubble can morph from a circle into a rounded card as it moves. `"layout"` (every keyframe written before this) inherits the live panel's shape, so old docs render as they always did.
 
 ## CamPose
 
 ```ts
-export interface CamPose { x: number; y: number; size: number }
+export interface CamPose { x: number; y: number; size: number; round?: number }
 ```
 
-One resolved webcam-PiP position+size at a preview time.
+One resolved webcam-PiP pose at a preview time.
 
 - `x` / `y` - the PiP's center, as a fraction (`0`-`1`) of the output frame - same units as `CameraMove.x`/`.y`.
-- `size` - the PiP's size, as a fraction of the output frame - same units as `CameraMove.size`. The caller derives the other dimension from the mode's aspect.
+- `size` - the PiP's height, as a fraction of the output frame - same units as `CameraMove.size`. The caller derives the width from the panel's aspect.
+- `round` - the corner radius as a fraction of the panel's SHORT side (`0` = rect, `0.5` = circle). Absent means "the static panel's radius, scaled with the resize": a drag draft, an arrangement pose, or a layout-shaped keyframe sampled with no live pose to inherit from. Rust `CamPose`'s `round: Option<f32>`.
 
 ## KF_BLEND_MS
 
@@ -35,8 +38,16 @@ The RAW `[first, last]` keyframe times of a track (unsorted input is fine - it s
 
 ### Used by
 
-- `src/editor/panels/CameraPanel.tsx` - clamps the playhead **into** this range (`min(max(t, first), last)`) to seed a keyframe ADDED outside the ownership window from the nearest end of the track, rather than jumping to frame-centre now that `camMoveAt` is `null` out there. Clamping into the padded window would land inside a blend and sample a partly-blended pose, so the unpadded range is the correct input here.
+- `src/editor/panels/CameraMoveField.tsx` - clamps the playhead **into** this range (`min(max(t, first), last)`) to seed a keyframe ADDED outside the ownership window from the nearest end of the track, rather than jumping to frame-centre now that `camMoveAt` is `null` out there. Clamping into the padded window would land inside a blend and sample a partly-blended pose, so the unpadded range is the correct input here.
 - `src/editor/timeline/CameraLane.tsx` does **not** call this: its span bar must follow a diamond mid-drag, so it pads its own drag-adjusted keyframe list (`kfs[0].t - KF_BLEND_MS` … `kfs[at end].t + KF_BLEND_MS`) inline instead of reading committed doc values.
+
+## shapeRound
+
+```ts
+export function shapeRound(shape: string, roundness: number): number | null
+```
+
+A keyframe's `shape`/`roundness` as the corner fraction `CamPose.round` carries: `"circle"` -> `0.5`, `"rect"` -> `0`, `"rounded"` -> `roundness` clamped to `[0, 0.5]`, anything else (`"layout"`) -> `null` = inherit. Mirrors Rust `shape_round`.
 
 ## camMoveAt
 
@@ -49,8 +60,8 @@ Resolves the PiP pose at time `t`, or `null` when the keyframes do not own that 
 ### Inputs
 
 - `moves: CameraMove[]` - `doc.camera_moves`, in any order. *Why sorted defensively:* the edit ops keep this array sorted by `t_ms`, but `camMoveAt` never trusts that from outside - it sorts a fresh copy (`[...moves].sort(...)`) rather than mutating the caller's array.
-- `t: number` - the preview's current playhead time in milliseconds, same cadence as `camAt`/`layoutAt`.
-- `live?: CamPose | null` - the LIVE layout-resolved PiP pose for THIS frame (derived from `PreviewLayout.cam`'s center + height, i.e. what `layoutAt` resolved before any override), or omitted/`null`. *Why per-frame, not a one-off static pose:* it is what the two blends ease to and from, and a layout cross-fade moves it while the exit blend is running. Omitted/`null` skips both blends (each snaps to the nearest end keyframe); the span rule itself never depends on it. Mirrors the Rust `sample`'s `live: Option<CamPose>`.
+- `t: number` - the preview's current playhead time in milliseconds (output clock), same cadence as `camAt`/`layoutAt`.
+- `live?: CamPose | null` - the LIVE layout-resolved PiP pose for THIS frame (`liveCamPose` of `PreviewLayout.cam`, i.e. what `layoutAt` resolved before any override), or omitted/`null`. *Why per-frame, not a one-off static pose:* it is what the two blends ease to and from, and a layout cross-fade moves it while the exit blend is running; it is also the shape a `"layout"` keyframe inherits. Omitted/`null` skips both blends (each snaps to the nearest end keyframe) and leaves an inheriting keyframe's `round` undefined; the span rule itself never depends on it. Mirrors the Rust `sample`'s `live: Option<CamPose>`.
 
 ### Returns
 
@@ -61,15 +72,16 @@ Resolves the PiP pose at time `t`, or `null` when the keyframes do not own that 
 
 1. Sort a copy of `moves` ascending by `t_ms` - `const ks = [...moves].sort((a,b) => a.t_ms - b.t_ms)`; empty -> `null`.
 2. `entry = max(0, first.t_ms - KF_BLEND_MS)`; `t < entry || t > last.t_ms + KF_BLEND_MS` -> `null`. **Case 1.**
-3. `t < first.t_ms` - **case 2, the entry blend:** `mix(live, pose(first), ease(first.easing, (t - entry) / (first.t_ms - entry)))`. Continuous at both ends (exactly `live` at `entry`, exactly the keyframe pose at `first`). No `live`, or a zero-length window (a keyframe at `t_ms = 0`) -> the first keyframe's pose.
-4. `t > last.t_ms` - **case 4, the exit blend:** `mix(pose(last), live, ease(last.easing, (t - last.t_ms) / KF_BLEND_MS))`. No `live` -> the last keyframe's pose.
-5. `t >= last.t_ms` -> the last keyframe's pose (also the single-keyframe instant, **case 5**: a lone keyframe eases in, hits its pose, eases back out - a hold needs two keyframes).
-6. **Case 3, in-span - unchanged math:** find `bi`, the first index whose `t_ms` exceeds `t`, giving the straddling pair `a = ks[bi-1]`, `b = ks[bi]`. `b.t_ms === a.t_ms` (coincident keyframe times) -> `b`'s pose, guarding the division. Else `f = ease(b.easing, (t - a.t_ms) / (b.t_ms - a.t_ms))` - progress measured from entering `a` toward `b`, eased with `b`'s OWN easing curve, using the same `ease` (`src/editor/timeline/layoutTrack.ts`) `layoutAt` uses - no new easing implementation. *Why `b`'s easing, not `a`'s:* matches `CameraMoveTrack::sample` and `layoutAt`, which ease into a newly-entered segment using that segment's own easing, not the one being left.
-7. Every blend and interpolation goes through the module-private `mix`, a component-wise lerp of `x`/`y`/`size`; `rectFromCenter` derives the rect from the RESULT once, so the panel's aspect handling applies to a blended pose too.
+3. `pose(k)` is a keyframe as a `CamPose`: its x/y/size, and `round = shapeRound(k.shape, k.roundness) ?? live?.round` - its own shape, else the live panel's, else undefined.
+4. `t < first.t_ms` - **case 2, the entry blend:** `mix(live, pose(first), ease(first.easing, (t - entry) / (first.t_ms - entry)))`. Continuous at both ends (exactly `live` at `entry`, exactly the keyframe pose at `first`). No `live`, or a zero-length window (a keyframe at `t_ms = 0`) -> the first keyframe's pose.
+5. `t > last.t_ms` - **case 4, the exit blend:** `mix(pose(last), live, ease(last.easing, (t - last.t_ms) / KF_BLEND_MS))`. No `live` -> the last keyframe's pose.
+6. `t >= last.t_ms` -> the last keyframe's pose (also the single-keyframe instant, **case 5**: a lone keyframe eases in, hits its pose, eases back out - a hold needs two keyframes).
+7. **Case 3, in-span - unchanged math:** find `bi`, the first index whose `t_ms` exceeds `t`, giving the straddling pair `a = ks[bi-1]`, `b = ks[bi]`. `b.t_ms === a.t_ms` (coincident keyframe times) -> `b`'s pose, guarding the division. Else `f = ease(b.easing, (t - a.t_ms) / (b.t_ms - a.t_ms))` - progress measured from entering `a` toward `b`, eased with `b`'s OWN easing curve, using the same `ease` (`src/editor/timeline/layoutTrack.ts`) `layoutAt` uses - no new easing implementation. *Why `b`'s easing, not `a`'s:* matches `CameraMoveTrack::sample` and `layoutAt`, which ease into a newly-entered segment using that segment's own easing, not the one being left.
+8. Every blend and interpolation goes through the module-private `mix`, a component-wise lerp of `x`/`y`/`size`/`round` (a `round` only one side knows is carried through unblended; two unknowns stay unknown); `rectFromCenter` derives the rect from the RESULT once, so the panel's aspect handling applies to a blended pose too.
 
 ### Behaviors worth knowing
 
-(Mirrors `moves_tests.rs` / `moves_span_tests.rs` - see `docs/api/src-tauri/src/export/camera/moves.md` for the Rust-side authority these correspond to. TS-side they are split the same way: `cameraMoves.test.ts` for the in-span math, `camMoveSpan.test.ts` for the span and blends.)
+(Mirrors `moves_tests.rs` / `moves_span_tests.rs` - see `docs/api/src-tauri/src/export/camera/moves.md` for the Rust-side authority these correspond to. TS-side they are split the same way: `cameraMoves.test.ts` for the in-span math and shapes, `camMoveSpan.test.ts` for the span and blends.)
 
 - Empty track -> `null` at any `t`.
 - `linear` easing at the exact midpoint between two keyframes yields the arithmetic mean of `x`/`y`/`size` to within `1e-6`.
@@ -79,13 +91,15 @@ Resolves the PiP pose at time `t`, or `null` when the keyframes do not own that 
 - Keyframes at `2000`/`4000` sampled at `3000` reproduce the pre-Task-27 value (`x = 0.40`, pinned literally) and are identical with and without a `live` pose - `live` has no influence mid-span. Same numbers as the Rust `mid_span_interpolation_is_unchanged_by_the_span_rewrite`.
 - With keyframes at `2000`/`4000` (span `[1650, 4350]`): `1000`/`5000` are `null`; `1649`/`4351` are `null` while `1650`/`4350` are not (the edges are inside); the entry blend equals `live` at `1650` and the keyframe pose at `2000` within `1e-4`, with the midpoint strictly between; and with a `live` pose sweeping linearly across the exit window, the blend at `4350` lands on `live(4350)` within `1e-4`, not the stale `live(4000)`.
 - One keyframe at `3000` is a bump: `null` at `2649` and `3351`, its own pose at `3000`, and exactly `live` at both window edges.
+- A circle keyframe at `0` and a rect keyframe at `1000` sample `round` `0.5`, `0`, and `0.25` at `500` (linear); a `"rounded"` keyframe carries its own roundness; `shapeRound("rounded", 9)` clamps to `0.5`.
+- A `"layout"` keyframe samples the live pose's `round` (`0.1`) and `undefined` without one; half way to a circle keyframe the inherited `0.1` morphs to `0.3`; with no live pose the circle's `0.5` is carried rather than invented.
 - `KF_BLEND_MS` is asserted to be `350` in the TS test as well, so a change on one side without the other fails immediately.
 
 ### Used by
 
-- `src/editor/stage/frameCam.ts` - `frameCamLayout` overrides the webcam rect fed to `drawPreview` when non-`null`, and falls through to the smart webcam-on-zoom action when `null` (which is now also the case outside the span); passes a `live` pose derived from `base.cam`.
-- `src/editor/stage/Stage.tsx` - `sampledPose` (drag-handle positioning) passes the same `live` derivation so the handle matches what's drawn, and falls back to that live pose when the sample is `null`.
-- `src/editor/panels/CameraPanel.tsx` - the Move-mode "Webcam size" slider reads the keyframed size at the playhead, falling back to the static `cam_size` wherever the sample is `null`.
+- `src/editor/stage/frameCam.ts` - `frameCamLayout` overrides the webcam rect fed to `drawPreview` when non-`null`, and falls through to the smart webcam-on-zoom action when `null` (which is now also the case outside the span); passes `liveCamPose(base.cam, ...)` as `live`.
+- `src/editor/stage/CamDragHandle.tsx` - `sampledPose` (drag-handle positioning) passes the same live pose so the handle matches what's drawn, and falls back to the layout's panel when the sample is `null`.
+- `src/editor/panels/CameraMoveField.tsx` - the Move-mode "Webcam size" slider reads the keyframed size at the playhead, falling back to the static `cam_size` wherever the sample is `null`.
 
 ## rectFromCenter
 
@@ -97,7 +111,7 @@ TS mirror of `rect_from_center` (`src-tauri/src/export/scene/mod.rs`) - converts
 
 ### Inputs
 
-- `p: CamPose` - the sampled pose (`camMoveAt`'s result).
+- `p: CamPose` - the sampled pose (`camMoveAt`'s result); `round` is not read here.
 - `ow` / `oh: number` - the output frame's pixel dimensions. In the preview, this is the canvas's backing store, sized from `PreviewLayout.canvas` (the same basis `PreviewLayout`'s fractions use, following the doc's chosen aspect); in the export, the render's actual output size.
 - `aspect: number` - the PiP panel's own width/height IN PIXELS (`1` square, `16/9` for a Wide panel), from `camAspect(baseLayout.cam, ow, oh)`. *Why the caller supplies it:* a `CamPose` carries height only, so without an aspect a single keyframe squared a Wide panel for the whole clip. Clamped to `>= 0.01`, matching the Rust `aspect.max(0.01)`.
 
@@ -114,7 +128,7 @@ TS mirror of `rect_from_center` (`src-tauri/src/export/scene/mod.rs`) - converts
 ### Notes
 
 - **Why divide by `ow` and `oh` separately, not a single scalar:** the rect's shape is defined in PIXELS (`w = h * aspect`), but `ow != oh` for a 16:9 output, so the fraction-space `w` (`w/ow`) and `h` (`h/oh`) come out different from each other - exactly mirroring what `preview_layout`'s Rust command does when it converts the export's pixel rect to fractions (`r.w / ow, r.h / oh`). The caller (`useCompositeLoop.ts`) multiplies these fractions back by the canvas's own `ow`/`oh` before drawing, so the pixel math round-trips exactly and the square renders as a true square, matching the export.
-- Radius is not part of this helper's output - the caller splices the existing (unoverridden) radius back in, scaled via `radiusScaleForResize` (Task 9 Part C) so the override composes correctly with a resize; "leave the camera panel radius as resolved AND SCALE IT" is the caller's contract, not this formula's.
+- Radius is not part of this helper's output - `overrideCamPanel` sets it, from the pose's own `round` or by scaling the existing one via `radiusScaleForResize`; "leave the camera panel radius as resolved AND SCALE IT" is the caller's contract, not this formula's.
 
 ## camAspect
 
@@ -139,7 +153,28 @@ The static PiP panel's PIXEL aspect (w/h) read off a `PreviewLayout.cam` tuple -
 
 ### Used by
 
-- `overrideCamPanel` (below) and `src/editor/stage/Stage.tsx` (the drag handle's `pipRect`), so the handle, the drawn preview, and the export all agree on a Wide panel's shape.
+- `overrideCamPanel` (below), so the handle, the drawn preview, and the export all agree on a Wide panel's shape.
+
+## liveCamPose
+
+```ts
+export function liveCamPose(cam: [number, number, number, number, number, ...number[]], ow: number, oh: number): CamPose
+```
+
+TS mirror of `static_cam_pose` (`src-tauri/src/export/camera/mod.rs`): the layout-resolved PiP panel as the pose the keyframe track eases out of and back into, and whose `round` a `"layout"`-shaped keyframe inherits.
+
+### Inputs
+
+- `cam` - `PreviewLayout.cam` (`[x, y, w, h, r, ...]`; `r` is the radius as a fraction of the output WIDTH, like x/w - `previewCanvas.ts` draws it as `fr * w`).
+- `ow` / `oh: number` - the output frame's pixel dims.
+
+### Returns
+
+`{ x: cam[0] + cam[2]/2, y: cam[1] + cam[3]/2, size: cam[3], round: (cam[4] * ow) / max(min(cam[2]*ow, cam[3]*oh), 0.001) }` - centre, height fraction, and the radius over the panel's short side in px (the `0.001` floor mirrors the Rust `.max(0.001)`).
+
+### Used by
+
+- `src/editor/stage/frameCam.ts` and `src/editor/stage/CamDragHandle.tsx` - the one derivation of the live pose, so the composite and the handle cannot disagree about what a keyframe inherits.
 
 ## radiusScaleForResize
 
@@ -167,7 +202,7 @@ Task 9 Part C. TS mirror of `override_camera`'s radius-scaling factor (`export/s
 
 ### Used by
 
-- `overrideCamPanel` (below) - scales both the spliced radius and ring width by this same factor.
+- `overrideCamPanel` (below) - scales the ring width, and the radius of a pose without a shape of its own, by this factor.
 
 ## overrideCamPanel
 
@@ -178,7 +213,7 @@ export function overrideCamPanel(
 ): [number, number, number, number, number, number, number, number, number]
 ```
 
-TS mirror of `override_camera` (`export/scene/mod.rs`) end-to-end: combines `rectFromCenter` + `radiusScaleForResize` into the single call site `useCompositeLoop.ts` needs, so that file doesn't have to re-derive the splice inline.
+TS mirror of `override_camera` (`export/scene/mod.rs`) end-to-end: combines `rectFromCenter` + the radius rule + `radiusScaleForResize` into the single call site `useCompositeLoop.ts`/`CamDragHandle.tsx` need, so neither re-derives the splice inline.
 
 ### Inputs
 
@@ -187,11 +222,16 @@ TS mirror of `override_camera` (`export/scene/mod.rs`) end-to-end: combines `rec
 
 ### Returns
 
-A new 9-tuple: `rectFromCenter(p, ow, oh, camAspect(baseCam, ow, oh))`'s `[x,y,w,h]`, followed by `baseCam[4]` (radius) and `baseCam[5]` (ring width) each scaled by `radiusScaleForResize(baseCam[3], newRect[3])`, followed by `baseCam[6..9]` (ring color) unchanged. Mirrors the Rust `Panel { rect, radius: radius*m, ring_px: ring_px*m, ..panel }` - alpha and ring color are never touched by the override, only rect/radius/ring-width scale.
+A new 9-tuple: `rectFromCenter(p, ow, oh, camAspect(baseCam, ow, oh))`'s `[x,y,w,h]`, then the radius - `p.round * min(w_px, h_px) / ow` when the pose carries a shape (a keyframed circle, rounded rect or rect, and the morph between them - the fraction of the NEW short side, handed back in the tuple's own fraction-of-`ow` unit), else `baseCam[4]` scaled by `radiusScaleForResize(baseCam[3], newRect[3])` - then `baseCam[5]` (ring width) scaled by that same factor, followed by `baseCam[6..9]` (ring color) unchanged. Mirrors the Rust `Panel { rect, radius, ring_px: ring_px*m, ..panel }` - alpha and ring color are never touched by the override.
+
+### Behaviors worth knowing
+
+- A 100x100 px static panel with a 12 px radius on a 1000x1000 canvas, posed at `size 0.4`: `round 0.5` gives a radius fraction `0.2` (200 px, half the 400 px side); `round 0` gives `0`; no `round` gives `0.048` (the static 12 px scaled 4x). `liveCamPose` of the same panel reads `round 0.12`.
 
 ### Used by
 
-- `src/editor/hooks/useCompositeLoop.ts` - replaces `baseLayout.cam` with `overrideCamPanel(baseLayout.cam, cp, c.width, c.height)` when a camera_moves/drag pose is active and a camera panel is resolved this frame, so the preview's PiP rect, radius, AND ring stay in parity with the export's `override_camera` after a keyframe resize.
+- `src/editor/stage/frameCam.ts` - replaces `baseLayout.cam` with `overrideCamPanel(baseLayout.cam, cp, c.width, c.height)` when a camera_moves/drag pose is active and a camera panel is resolved this frame, so the preview's PiP rect, radius, AND ring stay in parity with the export's `override_camera`.
+- `src/editor/stage/CamDragHandle.tsx` - the same call, so the handle's box and rounding hug the panel the composite is drawing, keyframed shape included.
 
 ## cameraMovesKey
 
@@ -199,7 +239,7 @@ A new 9-tuple: `rectFromCenter(p, ow, oh, camAspect(baseCam, ow, oh))`'s `[x,y,w
 export function cameraMovesKey(moves: CameraMove[]): string
 ```
 
-A cheap CONTENT signature for `moves` - `id:t_ms:x:y:size:easing` per entry, joined with `|` in array order. Added bug-sweep-2 Task 8 review round 2 (Important).
+A cheap CONTENT signature for `moves` - `id:t_ms:x:y:size:easing:shape:roundness` per entry, joined with `|` in array order. Added bug-sweep-2 Task 8 review round 2 (Important).
 
 ### Why this exists
 
@@ -207,7 +247,7 @@ A cheap CONTENT signature for `moves` - `id:t_ms:x:y:size:easing` per entry, joi
 
 ### Returns
 
-A string built from every field two `CameraMove`s could differ in (`id`, `t_ms`, `x`, `y`, `size`, `easing`) - two calls return the same string iff every entry, in the same array order, has identical values in all six fields. Order-sensitive: a same-set reorder still counts as a change (deliberate - see `cameraMoves.test.ts`; in practice this is fine because `add_camera_move`'s server-side sort makes order a function of `t_ms`, so a genuine reorder only happens alongside a real content change anyway). Deterministic and pure - no hashing, just string concatenation, cheap enough to call on every render of a small `camera_moves` array.
+A string built from every field two `CameraMove`s could differ in (`id`, `t_ms`, `x`, `y`, `size`, `easing`, `shape`, `roundness`) - two calls return the same string iff every entry, in the same array order, has identical values in all eight fields. Order-sensitive: a same-set reorder still counts as a change (deliberate - see `cameraMoves.test.ts`; in practice this is fine because `add_camera_move`'s server-side sort makes order a function of `t_ms`, so a genuine reorder only happens alongside a real content change anyway). Deterministic and pure - no hashing, just string concatenation, cheap enough to call on every render of a small `camera_moves` array.
 
 ### Used by
 

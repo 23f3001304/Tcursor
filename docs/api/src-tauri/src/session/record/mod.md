@@ -29,7 +29,7 @@ The reason passed to the capture-ended `Notify` when the OS - not the user - end
 ## DISPLAY_CHANGED
 
 ```rust
-pub const DISPLAY_CHANGED: &str = "Display changed — recording saved up to the change.";
+pub const DISPLAY_CHANGED: &str = "Display changed - recording saved up to the change.";
 ```
 
 The reason passed to the same `Notify` when the capture's OWN dimensions change mid-record (finding H1) - a recorded window maximized/restored/snapped, or a recorded display changed resolution, rotated, or was docked/undocked. Sent by the LEGACY ffmpeg path only. Its rawvideo pipe is sized once, at start, so it cannot keep encoding: it used to silently discard every frame from that instant on (`FfmpegFrameSink::write_or_skip`'s `Ok(false)` skip, forever) and now ends the take on the FIRST mismatched frame instead - `recording_session::RecordingSession::pump_once` latches its `mismatched` flag, which `video_sink::start_ffmpeg` reads. This distinct wording is what tells the HUD (and the user) it was a size change, not a closed window or display. The default GPU path no longer sends it at all: `gpu_frames::Cap::on_frame_arrived` fits a resized frame into the encoder's fixed canvas (`frame_scaler`) and keeps recording.
@@ -54,6 +54,18 @@ The `CloseRequested` safety net (task-6, ruling R6): if the main window tries to
 
 Thread-spawning helpers and persistence logic factored out of `recorder.rs` to keep that file under the 200-line cap. Key items: `save_inputs` (stops each input tracker and writes `events.json`, `actions.json`, `typing.json`, `cursor.json` before the video thread is joined), `save_session_files` (`sync.json` + `project.tcursor` + recents), `spawn_mic_thread` / `spawn_system_thread` (spawn the audio holder threads, or return `None` when that input is off), `poll_until_stopped` (the shared 50ms stop-poll loop, which is also what reports each source's level), `LEVEL_POLL_MS`, `audio_warning` (the `record-warning` message for an input that would not open).
 
+## segments
+
+The ledger of mid-take source switches (2026-09-14): the extra mic and webcam segments a take produced and the display switches it made, filled by the `switch_mic`, `mark_webcam_segment` and `switch_display` commands and written into `sync.json` at Stop. See `segments.md`.
+
+## switch_mic
+
+The `switch_mic` command: change the running take's microphone (or turn it off) by ending the current mic thread, joining it so its WAV is finalized, and spawning the next onto `mic_2.wav`, `mic_3.wav`... Each one is logged as a `Segment` and merged back into the single `mic.wav` by `export::preview::segments_audio` during preprocess. See `switch_mic.md`.
+
+## webcam_segments
+
+The camera half of mid-take source switching: `webcam_segment_name` (which file a chunk with a given segment index belongs in, shared by `commands::append_webcam` and the command below) and the `mark_webcam_segment` command (stamps where segment `n` starts on the recording clock, into `Running.segments.webcam`). See `webcam_segments.md`.
+
 ## recording_session
 
 Thin state machine wrapping one `FrameSource` and one `FrameSink`. Runs entirely on the `"video"` thread; has no threading primitives of its own. Key items: `RecordingSession` (owns source and sink, tracks frame count, timestamps, and whether a dimension mismatch ended the take), `RecordingSession::new`, `RecordingSession::pump_once` (pulls one frame and pushes it to the encoder at its pause-compressed timestamp; stops - and latches `dimension_mismatch()` - on the FIRST dimension-mismatched frame instead of skipping it forever), `RecordingSession::run` (variable-FPS loop with pause support, splitting the sink on each resume), `RecordingSession::run_paced` (delegates to `pacing::run_paced` for CFR mode), `RecordingSession::stop_and_finalize` (flushes the sink and returns the frame count), `RecordingSession::dimension_mismatch`, `SessionState` (lifecycle enum).
@@ -72,11 +84,23 @@ The default capture path: WGC surfaces straight into the Media Foundation `Video
 
 ## gpu_frames
 
-The GPU path's frame callback, split out of `gpu_record.rs`. Key items: `Cap` (the `GraphicsCaptureApiHandler` - builds the encoder from the first frame's own size, rebases each frame's encoder PTS onto the recording clock, fits a later-resized frame into that fixed size via `frame_scaler::FrameFit`, and reports an OS-closed capture), `CapFlags`, `EncoderSpec`, `FrameTimes`.
+The GPU path's frame callback, split out of `gpu_record.rs`. Key items: `Cap` (the `GraphicsCaptureApiHandler` - builds the encoder from the first frame's own size, rebases each frame's encoder PTS onto the recording clock, fits a later-resized frame into that fixed size via `frame_scaler::FrameFit`, and reports an OS-closed capture), `CapFlags`, `EncoderSpec`, `FrameTimes`. Its tests live in `gpu_frames_tests.rs` under `#[path]`.
+
+## gpu_restart
+
+Moving a running GPU capture onto another display or window mid-take without restarting the encoder (2026-09-14) - the recorder half of `switch_display`. Key items: `EncoderSeed` (the open encoder, the canvas size and the recording clock, lifted out of one capture for the next), `Cap::take_seed`, `GpuRecorder::restart`. See `gpu_restart.md`.
+
+## switch_display
+
+The `switch_display` command: restarts the capture on a new target and installs the `events::remap::Remap` that keeps every later mouse sample landing where the pixels are. See `switch_display.md`.
+
+## target_bounds
+
+Where a capture target sits on the desktop, in the coordinates the mouse hook reports. Split out of `video_sink.rs` when the origin started being needed twice - once per take, once per display switch. Key items: `get_target_bounds`.
 
 ## video_sink
 
-Picks between the two capture paths and normalises their stop. Key items: `VideoSink` (the enum), `VideoStart` (shared start config), `VideoStopped` (frames + timestamps + an optional finalize error, so a failure never costs the session files), `start_video`, `VideoSink::stop_and_collect`.
+Picks between the two capture paths and normalises their stop. Key items: `VideoSink` (the enum, including the `Dead` state a failed display switch leaves behind), `VideoStart` (shared start config), `VideoStopped` (frames + timestamps + an optional finalize error, so a failure never costs the session files), `start_video`, `VideoSink::switch`, `VideoSink::stop_and_collect`.
 
 ## pause_clock
 

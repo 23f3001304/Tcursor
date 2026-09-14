@@ -1,8 +1,10 @@
+import { useRef } from "react";
 import { motion } from "motion/react";
 import { IconArrowBarToLeft, IconArrowBarToRight, IconCut, IconEarOff, IconPlayerTrackNext, IconWand, IconX, IconZoomIn } from "@tabler/icons-react";
 import type { EditDoc, EditOp } from "../../lib/edit";
 import type { ClickSample } from "../../lib/ipcPreview";
 import type { Range } from "../timeline/useRangeSelect";
+import { MAGNET_RADIUS, MAGNET_STRENGTH, useMagnetic } from "../effects/useMagnetic";
 import { PLAY_SPRING, PRESS_TAP, TAP_SPRING } from "./transportMotion";
 
 /** How far past the playhead a click still counts as "the end of what I am doing now", and the
@@ -49,14 +51,26 @@ export function TransportTools({ locked, trimmed, onTrimIn, onTrimOut, onResetTr
     if (b > a) void onApply(op(a, b));
     setRange(null);
   };
+  // Magnetic pull (`effects/useMagnetic`) on the two Trim pills - the only tools in this group
+  // that are a decision rather than a toggle, and the pair Play is flanked by, so the three of
+  // them lean together as the pointer crosses the bar. The x/y MotionValues go straight onto the
+  // buttons (unlike Play, which needs a wrapper because its press already animates `y`): nothing
+  // here claims the translate channel. `motion.button` and a `style` is ALL these two gain - the
+  // press spring the look pass took off them stays off. Locked passes `strength: 0`, which makes
+  // the hook a full no-op: a pill that will ignore the click does not lean toward it.
+  const inRef = useRef<HTMLButtonElement>(null), outRef = useRef<HTMLButtonElement>(null);
+  const pull = locked ? 0 : MAGNET_STRENGTH;
+  const inMag = useMagnetic(inRef, MAGNET_RADIUS, pull), outMag = useMagnetic(outRef, MAGNET_RADIUS, pull);
   return (
     <div className="e-tgroup">
-      <button onClick={onTrimIn} className="e-tbtn" disabled={locked} title="Trim the start to the playhead (cut everything before it)">
+      <motion.button ref={inRef} style={{ x: inMag.x, y: inMag.y }}
+        onClick={onTrimIn} className="e-tbtn" disabled={locked} title="Trim the start to the playhead (cut everything before it)">
         <IconArrowBarToLeft size={15} /><span>In</span>
-      </button>
-      <button onClick={onTrimOut} className="e-tbtn" disabled={locked} title="Trim the end to the playhead (cut everything after it)">
+      </motion.button>
+      <motion.button ref={outRef} style={{ x: outMag.x, y: outMag.y }}
+        onClick={onTrimOut} className="e-tbtn" disabled={locked} title="Trim the end to the playhead (cut everything after it)">
         <IconArrowBarToRight size={15} /><span>Out</span>
-      </button>
+      </motion.button>
       {trimmed && (
         <motion.button onClick={onResetTrim} className="e-tg on" disabled={locked} title="Reset the trim range"
           whileTap={locked ? undefined : PRESS_TAP} transition={PLAY_SPRING}><IconX size={15} /></motion.button>

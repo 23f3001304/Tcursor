@@ -4,7 +4,7 @@
 // everything that could be wrong - the log mapping, the attack/release, the idle breath, the
 // reduced-motion freeze, the taper - lives here and is tested.
 
-import { AMP_MAX, AMP_MIN, IDLE_DB, damp, dbFromRms, heightFromRms } from "./level";
+import { AMP_MAX, AMP_MIN, IDLE_DB, damp, dbFromRms, levelFromRms } from "./level";
 import { TAU, sineY, type SineSpec } from "./sine";
 
 /** One drawn layer of the wave.
@@ -44,6 +44,12 @@ export const TAPER = 0.62;
  *  midline and its half-height IS that peak-to-peak height halved. */
 export const AMP_FLOOR_PX = AMP_MIN / 2;
 export const AMP_CEIL_PX = AMP_MAX / 2;
+/** The half-amplitude ceiling for a slot `h` px tall: 3px of air above and below at full scale,
+ *  never less than `AMP_CEIL_PX` (which is exactly this at the 30px the wave was designed in).
+ *  The take pill grew to a 40px slot and a wave still capped at 12px would have looked timid in it. */
+export function ceilFor(h: number): number {
+  return Math.max(AMP_CEIL_PX, h / 2 - 3);
+}
 /** Lag constants of the amplitude follower, seconds. Critically damped (`damp`) reaches ~95% of a
  *  step in 4.74 tau, so 0.02 is a ~95ms rise and 0.065 a ~300ms fall: a syllable lands at once,
  *  and the wave settles back slowly enough to read as a decay rather than a flicker. */
@@ -102,17 +108,18 @@ export function idleAmp(t: number): number {
 }
 
 /** Advance the wave by `dt` seconds given the latest mic and system RMS (both 0..1). Pure: the
- *  caller keeps the returned state and hands it back next frame.
+ *  caller keeps the returned state and hands it back next frame. `ceilPx` is the half-amplitude a
+ *  full-scale level reaches (`ceilFor` of the slot height; the 30px design's `AMP_CEIL_PX` by default).
  *
  *  One amplitude drives all four layers, taken from whichever source is louder - the meter answers
  *  "how loud is what this take is recording", and a second amplitude would only ask the viewer to
  *  tell two overlapping translucent shapes apart at 30px tall, which nobody can do. */
-export function voiceFrame(s: VoiceState, rmsMic: number, rmsSys: number, dt: number): VoiceState {
+export function voiceFrame(s: VoiceState, rmsMic: number, rmsSys: number, dt: number, ceilPx: number = AMP_CEIL_PX): VoiceState {
   const d = Math.max(0, Math.min(MAX_DT_S, dt));
   const loudest = Math.max(rmsMic, rmsSys);
   const quietS = dbFromRms(loudest) < IDLE_DB ? s.quietS + d : 0;
   const t = s.reduced ? 0 : s.t + d;
-  const target = quietS >= IDLE_AFTER_S ? idleAmp(t) : heightFromRms(loudest) / 2;
+  const target = quietS >= IDLE_AFTER_S ? idleAmp(t) : AMP_FLOOR_PX + levelFromRms(loudest) * (ceilPx - AMP_FLOOR_PX);
   if (s.reduced) return { ...s, t: 0, quietS, amp: target, ampV: 0 };
   const a = damp(s.amp, s.ampV, target, target > s.amp ? AMP_ATTACK_S : AMP_RELEASE_S, d);
   return { ...s, t, quietS, amp: a.value, ampV: a.vel };

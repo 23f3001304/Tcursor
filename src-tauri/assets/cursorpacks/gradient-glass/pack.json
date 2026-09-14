@@ -1,6 +1,7 @@
 {
   "id": "gradient-glass",
   "name": "Gradient Glass",
+  "category": "Glass and glow",
   "version": 2,
   "builtin": true,
   "busy": {

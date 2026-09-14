@@ -1,6 +1,7 @@
 {
   "id": "pixel",
   "name": "Pixel",
+  "category": "Retro",
   "version": 2,
   "builtin": true,
   "busy": {

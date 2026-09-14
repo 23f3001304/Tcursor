@@ -1,7 +1,7 @@
-import { PanelHeader } from "../panels/PanelHeader";
 import { NumberField } from "../controls/Controls";
 import { CurveEditor } from "./CurveEditor";
-import { Hint, InspectorShell, RemoveButton, Section, clock, secOf } from "./InspectorShape";
+import { CamShapeField } from "../panels/CamShapeField";
+import { Hint, InspectorHeader, InspectorShell, Section, secOf, secText } from "./InspectorShape";
 import type { CameraMove, EditDoc, EditOp } from "../../lib/edit";
 
 /** Inspector for the selected camera-move keyframe (a single-point `t_ms/x/y/size` entry on the
@@ -20,7 +20,9 @@ export function CameraMoveInspector({ move, dur, onApply, onClose }: {
 
   return (
     <InspectorShell kind="cam">
-      <PanelHeader title="Camera Move" lede={`Keyframe at ${clock(move.t_ms)}`} closeTitle="Deselect" onClose={onClose} />
+      <InspectorHeader title="Camera Move" range={`Keyframe at ${secText(move.t_ms)}`}
+        deleteLabel="Delete keyframe" onClose={onClose}
+        onDelete={() => { void onApply({ op: "remove_camera_move", id: move.id }); onClose(); }} />
 
       <Section title="Timing">
         <label className="e-field"><span className="e-fl">Time</span>
@@ -43,11 +45,16 @@ export function CameraMoveInspector({ move, dur, onApply, onClose }: {
         <Hint>Edits preview live.</Hint>
       </Section>
 
+      {/* The keyframe's own shape - the webcam morphs between keyframes' shapes exactly as it
+          moves between their positions. "Layout" keeps whatever the layout underneath uses. */}
+      <Section title="Shape">
+        <CamShapeField shape={move.shape} roundness={move.roundness}
+          onShape={(shape) => upd({ shape })} onRoundness={(roundness) => upd({ roundness })} />
+      </Section>
+
       <Section title="Transition">
         <CurveEditor value={move.easing} onChange={(easing) => upd({ easing })} />
       </Section>
-
-      <RemoveButton label="Delete keyframe" onClick={() => { void onApply({ op: "remove_camera_move", id: move.id }); onClose(); }} />
     </InspectorShell>
   );
 }

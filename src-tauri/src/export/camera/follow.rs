@@ -10,8 +10,8 @@ use crate::export::types::{FramePoint, ZoomRegion};
 pub(crate) const REF_STEP_MS: f32 = 1000.0 / 60.0;
 
 /// The first-order lerp factor for a step of `dt_ms`, from the per-60fps-frame setting `k_ref`.
-/// Shared by the camera's hold/zoom-out follow and the cursor low-pass (`export/cursor/mod.rs`),
-/// so one setting means one time constant no matter which filter or which output rate reads it.
+/// The camera's hold/zoom-out follow reads it (the cursor path is a function of time, not a filter),
+/// so one setting means one time constant no matter which output rate reads it.
 pub(crate) fn damping(k_ref: f32, dt_ms: f32) -> f32 {
     let k = k_ref.clamp(0.0, 1.0);
     if k >= 1.0 || k <= 0.0 { return k; }

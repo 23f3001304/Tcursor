@@ -71,7 +71,15 @@ Half-amplitude at silence, px. Derived from `level.ts`'s peak-to-peak pair rathe
 export const AMP_CEIL_PX: number   // AMP_MAX / 2
 ```
 
-Half-amplitude at 0 dBFS, px.
+Half-amplitude at full level, px, in the 30px slot the wave was designed for. `ceilFor` raises it for a taller slot.
+
+## ceilFor
+
+```ts
+export function ceilFor(h: number): number
+```
+
+The half-amplitude ceiling for a slot `h` px tall: `h / 2 - 3` (3px of air above and below at full level), never less than `AMP_CEIL_PX`, which is exactly this at 30px. The take pill grew to a 40px slot (2026-09-14) and a wave still capped at 12px looked timid in it; at 40px the ceiling is 17.
 
 ## AMP_ATTACK_S
 
@@ -188,15 +196,15 @@ The silent wave's half-amplitude at clock `t`: `AMP_FLOOR_PX` plus a slow cosine
 ## voiceFrame
 
 ```ts
-export function voiceFrame(s: VoiceState, rmsMic: number, rmsSys: number, dt: number): VoiceState
+export function voiceFrame(s: VoiceState, rmsMic: number, rmsSys: number, dt: number, ceilPx?: number): VoiceState
 ```
 
-Advance the wave by `dt` seconds given the latest mic and system RMS (both 0..1). Pure: the caller keeps the returned state and hands it back next frame.
+Advance the wave by `dt` seconds given the latest mic and system RMS (both 0..1). Pure: the caller keeps the returned state and hands it back next frame. `ceilPx` is the half-amplitude a full level reaches - `ceilFor` of the slot height, `AMP_CEIL_PX` when omitted.
 
 ### Behaviors
 
 - **One amplitude drives all four layers**, taken from whichever source is louder. The meter answers "how loud is what this take is recording"; a second amplitude would only ask the viewer to tell two overlapping translucent shapes apart at 30px tall, which nobody can do.
-- Log-mapped through `level.ts`'s `heightFromRms`, so each halving of loudness costs the same number of px.
+- Log-mapped through `level.ts`'s `levelFromRms` over its speech window (`FLOOR_DB`..`CEIL_DB`), then scaled between `AMP_FLOOR_PX` and `ceilPx`, so each halving of loudness costs the same number of px and ordinary speech fills most of the slot.
 - Attack and release are the same `damp` with two different lag constants, picked per frame by which way the level is moving.
 - After `IDLE_AFTER_S` of continuous silence the target becomes `idleAmp`; the first real sample resets `quietS` to `0` in the same frame.
 - Under reduced motion the clock stays `0` and the amplitude snaps straight to its target with no velocity - the level is still reported, but nothing drifts.

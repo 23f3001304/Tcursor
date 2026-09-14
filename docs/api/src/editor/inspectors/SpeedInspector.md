@@ -2,7 +2,7 @@
 
 The selected speed span's properties: how fast it runs, and the two edges it runs between. Routed to by `PropertiesSlot` whenever `sel` matches a `doc.speed` entry.
 
-Sections, in DOM order (pinned by `inspectorShape.test.tsx`): **Timing**, **Rate**, then Remove - the shared reading order from `InspectorShape.md`. Timing comes first here even though Factor is the more interesting control, because every inspector answers "when is this" before anything else; the header lede and the Timing fields are the same span, in clock time and in seconds.
+Sections, in DOM order (pinned by `inspectorShape.test.tsx`): **Timing**, **Rate** - the shared reading order from `InspectorShape.md`, with Delete in the header rather than last. Timing comes first here even though Factor is the more interesting control, because every inspector answers "when is this" before anything else; the header's span line and the Timing fields are the same numbers, in the same seconds.
 
 ## FACTOR_SNAPS
 

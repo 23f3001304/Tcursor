@@ -15,7 +15,7 @@ Pure inverse of `seed::zooms_from_regions`. Rebuilds one `ZoomRegion` per `Zoom`
 ### Inputs
 
 - `doc: &EditDoc` - the persisted edit document containing the user's zoom timeline and settings snapshot. *Why:* all zoom data lives here after the user edits it in the editor; the exporter reads this instead of re-running autozoom.*
-- `sw: u32`, `sh: u32` - source screen dimensions. *Why:* only consulted for the `ZoomTarget::Cursor` fallback; `Fixed` anchors (every seeded zoom) are reproduced exactly without these values.* Since a `Cursor` zoom also sets `follow_cursor`, `CameraSim` aims at the live cursor and never reads that fallback - it only keeps the field total.
+- `sw: u32`, `sh: u32` - source screen dimensions. *Why:* only consulted for the `ZoomTarget::Cursor` fallback; `Fixed` anchors (a Region-targeted zoom) are reproduced exactly without these values.* Since a `Cursor` zoom also sets `follow_cursor`, `CameraSim` aims at the live cursor and never reads that fallback - it only keeps the field total.
 
 ### Returns
 

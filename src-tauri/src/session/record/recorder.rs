@@ -13,6 +13,7 @@ use crate::session::paths::ProjectPaths;
 use crate::session::record::emit::{emitter, level_emitter};
 use crate::session::record::pause_totals::PauseTotals;
 use crate::session::record::recorder_threads::{spawn_mic_thread, spawn_system_thread};
+use crate::session::record::segments::{self, SharedSegments};
 use crate::session::record::video_sink::{start_video, VideoSink, VideoStart};
 
 pub(super) struct Running {
@@ -21,7 +22,7 @@ pub(super) struct Running {
     pub paused_totals: Arc<PauseTotals>,
     pub clock: Arc<dyn Clock>,
     pub video: VideoSink,
-    pub mic_thread: Option<JoinHandle<()>>,
+    pub mic_thread: Option<JoinHandle<()>>, pub mic_stop: Arc<AtomicBool>, // the CURRENT mic thread's own stop (`switch_mic`); `stop` is the take's
     pub system_thread: Option<JoinHandle<()>>,
     pub mouse: Option<MouseTracker>,
     pub keyboard: Option<KeyboardTracker>,
@@ -35,7 +36,7 @@ pub(super) struct Running {
     pub events_ms: u64,
     pub mic_start: Arc<AtomicU64>,
     pub system_start: Arc<AtomicU64>,
-    pub folder: String,
+    pub folder: String, pub segments: SharedSegments, // mid-take source switches (`segments.rs`), into sync.json at Stop
 }
 
 #[derive(Default)]
@@ -116,9 +117,10 @@ pub fn start_recording(
     // `level_emitter` feeds the HUD's live wave meter: one `audio-level` per open source every
     // ~50ms, straight from the capture that is actually writing the WAV - so a meter can only
     // move for audio this take is really recording.
+    let mic_stop = Arc::new(AtomicBool::new(false));
     let mic_thread = spawn_mic_thread(
         mic_id, paths.mic().to_string_lossy().into_owned(),
-        stop.clone(), paused.clone(), clock.clone(), mic_start.clone(), warn.clone(),
+        mic_stop.clone(), paused.clone(), clock.clone(), mic_start.clone(), warn.clone(),
         Some(level_emitter(&app, "mic")),
     );
     let system_thread = spawn_system_thread(
@@ -161,10 +163,11 @@ pub fn start_recording(
 
     *guard = Some(Running {
         stop, paused, paused_totals, clock, video,
-        mic_thread, system_thread, mouse, keyboard, cursor,
+        mic_thread, mic_stop, system_thread, mouse, keyboard, cursor,
         events_path: paths.events(), actions_path: paths.actions(),
         typing_path: paths.typing(), cursor_path: paths.cursor(),
         screen, started_unix_ms, events_ms, mic_start, system_start, folder: folder.clone(),
+        segments: segments::shared(),
     });
     crate::win::sys::brand_icon::set_recording(&app, true); // brand flair only - never fails the recording
     Ok(folder) // return the folder so the HUD can stream the webcam into it during recording

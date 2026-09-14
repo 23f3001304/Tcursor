@@ -52,12 +52,12 @@ pub fn probe_duration(video: &Path) -> Result<f64> {
 /// overwrote the wallpaper's staged bytes in the window between the write and ffmpeg's read: the
 /// background came back as `resize_ns.png` stretched to the full frame (what `preview_bg` then
 /// returned, and what `composite_at` drew under every panel).
-struct StagedInput(std::path::PathBuf);
+pub(crate) struct StagedInput(std::path::PathBuf);
 
 impl StagedInput {
     /// Write `bytes` to a fresh `$TEMP/cursorzoom_img_<pid>_<n>`: unique within the process by the
     /// counter, across processes by the pid, so concurrent decodes can never share an input file.
-    fn new(bytes: &[u8]) -> Result<Self> {
+    pub(crate) fn new(bytes: &[u8]) -> Result<Self> {
         use std::sync::atomic::{AtomicU64, Ordering};
         static SEQ: AtomicU64 = AtomicU64::new(0);
         let n = SEQ.fetch_add(1, Ordering::Relaxed);
@@ -65,7 +65,7 @@ impl StagedInput {
         std::fs::write(&path, bytes).context("write image temp")?;
         Ok(Self(path))
     }
-    fn path(&self) -> &Path { &self.0 }
+    pub(crate) fn path(&self) -> &Path { &self.0 }
 }
 
 impl Drop for StagedInput {

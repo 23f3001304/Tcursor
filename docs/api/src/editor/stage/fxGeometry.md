@@ -12,8 +12,14 @@ export interface FxFrameGeometry {
   fxH: number;
   screenScale: number;
   map: (fx: number, fy: number) => [number, number] | null;
+  mapCanvas: (cx: number, cy: number) => [number, number] | null;
 }
 ```
+
+The two mappings differ only once a mid-take display switch has cropped the picture, and confusing them is the bug they exist to prevent:
+
+- `map` takes a PANEL point (0..1 within the screen panel) - what the cursor track carries, since Rust already mapped it through the active source span.
+- `mapCanvas` takes a CANVAS point (0..1 of the recorded frame) - what a `ClickSample` carries - and is `map` composed with the active span's crop rect (`sourceSpans.ts`'s `toPanelFrac`), the TS mirror of Rust's `to_panel`. Pass it wherever click positions are projected: `drawMirroredRipples` and `requestFxOverlay`'s hits.
 
 - `fxW` / `fxH` - the FX render size in px, floored at 1 so a degenerate canvas can never produce a zero-sized request.
 - `screenScale` - the screen panel's height as a fraction of the FX frame height (= `layout.screen[3]`). The spotlight's `radius`/`feather` settings are fractions of the **screen**, so the caller pre-scales by this before the backend's `oh * frac`, mirroring the export's `fx_state_at` (`scene.screen.h / oh`). That is what makes the spotlight track the screen panel in every layout instead of the whole frame.

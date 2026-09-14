@@ -15,9 +15,17 @@ pub struct FxU {
     pub d: [f32; 4],                // spot_mode_id, time_s, keep_camera_lit(0/1), cam_radius(px)
     pub tint: [f32; 4],             // r, g, b (0..1), _pad
     pub color: [f32; 4],            // r, g, b (0..1), _pad
+    pub color2: [f32; 4],           // `color` rotated NEON_HUE_SHIFT of hue (Neon's 2nd tube), _pad
     pub hits: [[f32; 4]; MAX_HITS], // x, y, progress, _pad
     pub e: [f32; 4],                // video_mode_id, alpha, t, _pad
     pub cam: [f32; 4],              // camera-exclusion rect (px): min_x, min_y, max_x, max_y
+    // The glass cursor material (`fx_lens.wgsl`). `lens_b[1]`/`back_b[1]` are the on/off slots.
+    pub lens_a: [f32; 4],           // sprite lens box (px): centre x, centre y, w, h
+    pub lens_b: [f32; 4],           // busy angle (rad), on, click squash, ink progress (<0 = none)
+    pub lens_c: [f32; 4],           // ink origin (px): x, y, _pad, _pad
+    pub back_a: [f32; 4],           // cursor-back rounded rect (px): min_x, min_y, max_x, max_y
+    pub back_b: [f32; 4],           // corner radius (px), on, click squash, ink progress
+    pub back_c: [f32; 4],           // ink origin (px): x, y, ring-instead-of-drop, _pad
 }
 
 /// The shader's style id for a click style. SINGLE SOURCE OF TRUTH - the
@@ -27,6 +35,31 @@ pub fn style_id(s: ClickFxStyle) -> f32 {
         ClickFxStyle::None => 0.0, ClickFxStyle::Ripple => 1.0, ClickFxStyle::Pulse => 2.0,
         ClickFxStyle::Glow => 3.0, ClickFxStyle::Shockwave => 4.0,
         ClickFxStyle::Particles => 5.0, ClickFxStyle::Neon => 6.0,
+    }
+}
+
+/// Degrees of hue Neon's second tube is rotated from the user's tint. *Why in Rust and not in the
+/// shader:* an RGB->HSV->RGB round trip is a dozen lines of branchy WGSL run per fragment for a
+/// value that changes once per frame; here it is one `build_fx_u` call, and `clickdraw.rs` gets
+/// the same number for free instead of porting the shader version.
+pub const NEON_HUE_SHIFT: f32 = 30.0;
+
+/// Rotate `rgb` by `deg` degrees of hue, keeping saturation and value. Returns 0..1 components.
+pub fn hue_shift(rgb: [u8; 3], deg: f32) -> [f32; 3] {
+    let (r, g, b) = (rgb[0] as f32 / 255.0, rgb[1] as f32 / 255.0, rgb[2] as f32 / 255.0);
+    let (v, mn) = (r.max(g).max(b), r.min(g).min(b));
+    let c = v - mn;
+    let s = if v <= 0.0 { 0.0 } else { c / v };
+    let h6 = if c <= 0.0 { 0.0 }
+        else if v == r { ((g - b) / c).rem_euclid(6.0) }
+        else if v == g { (b - r) / c + 2.0 }
+        else { (r - g) / c + 4.0 };
+    let h = ((h6 * 60.0 + deg).rem_euclid(360.0)) / 60.0;
+    let f = h - h.floor();
+    let (p, q, t) = (v * (1.0 - s), v * (1.0 - s * f), v * (1.0 - s * (1.0 - f)));
+    match h.floor() as i32 % 6 {
+        0 => [v, t, p], 1 => [q, v, p], 2 => [p, v, t],
+        3 => [p, q, v], 4 => [t, p, v], _ => [v, p, q],
     }
 }
 
@@ -73,83 +106,24 @@ pub fn build_fx_u(state: &FxState, ow: u32, oh: u32) -> FxU {
         Some(v) => [video_mode_id(v.mode), v.alpha, v.t, 0.0],
         None => [0.0; 4],
     };
+    let c2 = hue_shift(state.color, NEON_HUE_SHIFT);
+    let (lens_a, lens_b, lens_c) = match state.lens.as_ref().and_then(|l| l.glass.as_ref()) {
+        Some(g) => (g.cbox, [g.angle, 1.0, g.squash, g.ink], [g.ink_at[0], g.ink_at[1], 0.0, 0.0]),
+        None => ([0.0; 4], [0.0; 4], [0.0; 4]),
+    };
+    let (back_a, back_b, back_c) = match state.lens.as_ref().and_then(|l| l.back.as_ref()) {
+        Some(b) => ([b.mn[0], b.mn[1], b.mx[0], b.mx[1]], [b.r, 1.0, b.squash, b.ink],
+                    [b.ink_at[0], b.ink_at[1], if b.ring { 1.0 } else { 0.0 }, 0.0]),
+        None => ([0.0; 4], [0.0; 4], [0.0; 4]),
+    };
     FxU {
         a: [ow as f32, oh as f32, style, n], b, c, d, tint,
         color: [state.color[0] as f32 / 255.0, state.color[1] as f32 / 255.0, state.color[2] as f32 / 255.0, 0.0],
-        hits, e, cam,
+        color2: [c2[0], c2[1], c2[2], 0.0],
+        hits, e, cam, lens_a, lens_b, lens_c, back_a, back_b, back_c,
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::export::fx::fx_state::{FxHit, FxState, Spot};
-    use crate::settings::model::{ClickFxStyle, SpotlightMode};
-
-    #[test]
-    fn style_id_covers_all_variants() {
-        use crate::settings::model::ClickFxStyle::*;
-        assert_eq!(style_id(None), 0.0);
-        assert_eq!(style_id(Ripple), 1.0);
-        assert_eq!(style_id(Pulse), 2.0);
-        assert_eq!(style_id(Glow), 3.0);
-        assert_eq!(style_id(Shockwave), 4.0);
-        assert_eq!(style_id(Particles), 5.0);
-        assert_eq!(style_id(Neon), 6.0);
-    }
-    #[test]
-    fn maps_style_hits_spot_and_color() {
-        let st = FxState { style: ClickFxStyle::Ripple, color: [255, 0, 0], intensity: 0.8,
-            hits: vec![FxHit { x: 10.0, y: 20.0, progress: 0.4 }],
-            spot: Some(Spot { cx: 5.0, cy: 6.0, dim: 0.5, radius_frac: 0.1, feather_frac: 0.1, alpha: 1.0,
-                mode: SpotlightMode::Classic, tint: [0, 0, 0], t: 0.0,
-                cam_rect: [0.0; 4], cam_radius: 0.0, dim_camera: true }), video: None };
-        let u = build_fx_u(&st, 1000, 2000);
-        assert_eq!(u.a, [1000.0, 2000.0, 1.0, 1.0]);     // ow, oh, style=ripple, 1 hit
-        assert_eq!(u.b[3], 1.0);                          // spot active
-        assert!((u.b[2] - 0.5).abs() < 1e-6);             // dim*alpha
-        assert!((u.color[0] - 1.0).abs() < 1e-6 && u.color[1] < 1e-6); // red normalized
-        assert_eq!(u.hits[0], [10.0, 20.0, 0.4, 0.0]);
-    }
-    #[test]
-    fn no_spot_sets_inactive() {
-        let st = FxState { style: ClickFxStyle::None, color: [0,0,0], intensity: 1.0, hits: vec![], spot: None, video: None };
-        assert_eq!(build_fx_u(&st, 8, 8).b[3], 0.0);
-    }
-    #[test]
-    fn spot_mode_id_and_tint_pack() {
-        use crate::settings::model::SpotlightMode::*;
-        assert_eq!(spot_mode_id(Classic), 0.0);
-        assert_eq!(spot_mode_id(Nebula), 4.0);
-        assert_eq!(spot_mode_id(Vignette), 5.0);
-        let st = crate::export::fx::fx_state::FxState { style: crate::settings::model::ClickFxStyle::None,
-            color: [0,0,0], intensity: 1.0, hits: vec![],
-            spot: Some(crate::export::fx::fx_state::Spot { cx: 1.0, cy: 2.0, dim: 0.5, radius_frac: 0.1,
-                feather_frac: 0.1, alpha: 1.0, mode: Nebula, tint: [255, 0, 128], t: 3.0,
-                cam_rect: [0.0; 4], cam_radius: 0.0, dim_camera: true }), video: None };
-        let u = build_fx_u(&st, 100, 100);
-        assert_eq!(u.d[0], 4.0);                 // mode = nebula
-        assert!((u.d[1] - 3.0).abs() < 1e-6);    // time
-        assert!((u.tint[0] - 1.0).abs() < 1e-6 && u.tint[2] > 0.49); // tint r=1, b~0.5
-    }
-    #[test]
-    fn dim_camera_false_sets_keep_flag_and_cam_rect() {
-        let st = FxState { style: ClickFxStyle::None, color: [0, 0, 0], intensity: 1.0, hits: vec![],
-            spot: Some(Spot { cx: 1.0, cy: 2.0, dim: 0.5, radius_frac: 0.1, feather_frac: 0.1, alpha: 1.0,
-                mode: SpotlightMode::Classic, tint: [0, 0, 0], t: 0.0,
-                cam_rect: [10.0, 20.0, 110.0, 220.0], cam_radius: 8.0, dim_camera: false }), video: None };
-        let u = build_fx_u(&st, 200, 200);
-        assert_eq!(u.d[2], 1.0, "dim_camera:false -> keep-camera-lit flag set");
-        assert_eq!(u.d[3], 8.0, "cam_radius packed into d[3]");
-        assert_eq!(u.cam, [10.0, 20.0, 110.0, 220.0], "cam rect packed verbatim");
-    }
-    #[test]
-    fn dim_camera_true_clears_keep_flag() {
-        let st = FxState { style: ClickFxStyle::None, color: [0, 0, 0], intensity: 1.0, hits: vec![],
-            spot: Some(Spot { cx: 1.0, cy: 2.0, dim: 0.5, radius_frac: 0.1, feather_frac: 0.1, alpha: 1.0,
-                mode: SpotlightMode::Classic, tint: [0, 0, 0], t: 0.0,
-                cam_rect: [0.0; 4], cam_radius: 0.0, dim_camera: true }), video: None };
-        let u = build_fx_u(&st, 100, 100);
-        assert_eq!(u.d[2], 0.0, "dim_camera:true -> keep-camera-lit flag clear (today's behavior)");
-    }
-}
+#[path = "fx_uniforms_tests.rs"]
+mod tests;

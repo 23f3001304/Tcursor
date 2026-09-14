@@ -30,11 +30,23 @@ pub struct LayoutPresetDto { pub screen: PanelRectDto, pub cam: PanelRectDto,
 #[derive(serde::Serialize)]
 pub struct SegRectDto { pub id: String, pub screen: Option<PanelRectDto>, pub cam: Option<PanelRectDto> }
 
+/// One SOURCE SPAN for the editor (`export::render::spans`): from `start_ms` on the output clock,
+/// the screen panel shows `src` of the recorded canvas - as FRACTIONS of it, so the stage can crop
+/// the proxy `<video>` (a different resolution from the source) by the very rect the export crops
+/// by. `transition_ms` is how long the switch takes; `fit` is how much smaller that span's screen
+/// panel is than the full-canvas one on each axis (`FrameRenderer::span_fit`), which is what lets
+/// the live preview give a switched-to display its own aspect without re-deriving any panel math.
+#[derive(serde::Serialize)]
+pub struct SourceSpanDto { pub start_ms: u32, pub src: [f32; 4], pub transition_ms: u32, pub fit: [f32; 2] }
+
 #[derive(serde::Serialize)]
 pub struct LayoutPresets {
     pub screen: LayoutPresetDto, pub camera: LayoutPresetDto, pub presenter: LayoutPresetDto,
     pub screen_only: LayoutPresetDto, pub camera_only: LayoutPresetDto,
     pub segs: Vec<SegRectDto>,
+    /// The take's source spans, in order, the first always at 0 with the whole canvas. Exactly one
+    /// entry unless a mid-take display switch cropped the take.
+    pub spans: Vec<SourceSpanDto>,
     /// `FrameRenderer::inset_w_frac` - the reference width (fraction of output width) the export's
     /// synthetic cursor scales against (`cursorset::draw`'s `panel` factor). NOT one of the panel
     /// rects above: it's a fixed baseline independent of the active preset/arrangement, so the
@@ -86,10 +98,16 @@ pub async fn preview_layouts(folder: String, app: tauri::AppHandle) -> Result<La
             // and nothing here needs a second lock of its own.
             let doc = crate::edit::seed::load_or_seed(paths);
             let segs = doc.layout.iter().map(|seg| seg_rect_dto(seg, || c.renderer.resolve_seg(seg), ow, oh)).collect();
+            let (cw, ch) = (c.meta.sw.max(1) as f32, c.meta.sh.max(1) as f32);
+            let spans = c.renderer.spans().iter().map(|s| {
+                let fit = c.renderer.span_fit(s.src);
+                SourceSpanDto { start_ms: s.start_ms, src: [s.src.x / cw, s.src.y / ch, s.src.w / cw, s.src.h / ch],
+                    transition_ms: crate::export::render::spans::SWITCH_MS, fit: [fit.0, fit.1] }
+            }).collect();
             Ok(LayoutPresets {
                 screen: one(LayoutId::Screen), camera: one(LayoutId::Camera), presenter: one(LayoutId::Presenter),
                 screen_only: one(LayoutId::ScreenOnly), camera_only: one(LayoutId::CameraOnly),
-                segs,
+                segs, spans,
                 inset_w: c.renderer.inset_w_frac(),
             })
         })

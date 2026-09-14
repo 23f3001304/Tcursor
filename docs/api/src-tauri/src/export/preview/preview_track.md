@@ -133,4 +133,27 @@ Ensures a low-res preview proxy `preview_<height>_rt.mp4` exists (transcoded onc
 
 1. Build the proxy path `preview_<h>_rt.mp4`. If it already exists, return it.
 2. Compute the stretch factor `k = real / enc`, where `real = edit::seed::true_duration_ms(paths) / 1000` (the recording's TRUE full duration, NOT `trim.out_ms` - which once a user actually trims is a sub-range, not the whole clip the proxy must cover) and `enc = probe_duration(video.mp4)` (the file's sped-up encoded length). When `|k - 1| > 0.02`, the video filter is `scale=-2:<h>,setpts=<k>*PTS` (stretch to true speed); otherwise just `scale=-2:<h>`.
-3. Run ffmpeg with that filter (`libx264 -preset veryfast -crf 27`, `yuv420p`, `+faststart`, no audio) via `ffcmd_bg` (below-normal priority, so the transcode yields to the UI instead of freezing it) inside `win::sys::proc::generate_once` (the pass is skipped if the proxy already exists and is serialized against the other editor-media transcodes, so `preprocess_project`'s post-record pass and the editor's own lazy `ensure_proxy` don't transcode the 4K source twice or storm the CPU as the editor opens), writing to a `win::sys::proc::tmp_sibling` then atomically renaming onto the proxy path, so an editor opening WHILE preprocessing is still running never loads a half-transcoded file. Return the path on success. *Why re-time the proxy rather than the master:* the export already corrects timing via `sync.json` frame selection (independent of `video.mp4`'s embedded PTS), so only the natively-played preview needs the fix; the `_rt` filename also invalidates any older sped-up proxy.
+3. Run ffmpeg with that filter (`libx264 -preset ultrafast -g 60 -crf 27`, `yuv420p`, `+faststart`, no audio; see `ensure_proxy_with_progress` for why those two) via `ffcmd_bg` (below-normal priority, so the transcode yields to the UI instead of freezing it) inside `win::sys::proc::generate_once` (the pass is skipped if the proxy already exists and is serialized against the other editor-media transcodes, so `preprocess_project`'s post-record pass and the editor's own lazy `ensure_proxy` don't transcode the 4K source twice or storm the CPU as the editor opens), writing to a `win::sys::proc::tmp_sibling` then atomically renaming onto the proxy path, so an editor opening WHILE preprocessing is still running never loads a half-transcoded file. Return the path on success. *Why re-time the proxy rather than the master:* the export already corrects timing via `sync.json` frame selection (independent of `video.mp4`'s embedded PTS), so only the natively-played preview needs the fix; the `_rt` filename also invalidates any older sped-up proxy.
+
+## ensure_proxy_with_progress
+
+```rust
+pub(crate) fn ensure_proxy_with_progress(folder: String, height: u32, on_progress: &dyn Fn(u32)) -> Result<String, String>
+```
+
+`ensure_proxy_blocking` (which is this with a no-op callback) reporting the transcode's own progress: ffmpeg runs with `-progress pipe:1 -nostats`, its stdout is read line by line on the calling thread, and every `out_time_us=` line becomes `on_progress(proxy_pct(line, real))`. *Why:* the proxy IS the wait between Stop and the editor (`preprocess::essential`), and a pill that sat at 0% for a minute on a long take read as hung.
+
+### Encoder settings (measured on a 5-minute 1080p60 take, 60s slices, 2026-09-14)
+
+- **No `-hwaccel`.** Hardware decode into the CPU `scale`/`setpts` filters measured 3x SLOWER than CPU decode (the surface download dominates), and `auto` once picked a frame format the filters rejected outright. CPU decode plus scale is the floor here, ~1.3s per 60s of video.
+- **`-preset ultrafast`**, not `veryfast`: 1.8s per 60s against 2.5s, and a preview does not need the compression. Hardware encoders did not help - the encode was never the wall.
+- **`-g 60`**: a keyframe every second, so the editor's seeks land fast and the filmstrip can decode keyframes only (`thumbs::ensure_thumbs_blocking`).
+
+## proxy_pct
+
+```rust
+pub(crate) fn proxy_pct(line: &str, real_secs: f64) -> Option<u32>
+```
+
+One line of ffmpeg's `-progress` stream -> percent of the proxy written, for `out_time_us=` lines only (`None` for the rest of its key=value chatter: `frame=`, `fps=`, `progress=`...). Output time is already stretched to the real duration by `setpts`, so it is measured against `real_secs` (floored at 0.05). Capped at 99: the last point is the caller's, once the file has been renamed into place. Tests: `preprocess.rs`.
+

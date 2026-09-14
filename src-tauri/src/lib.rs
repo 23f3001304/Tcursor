@@ -52,8 +52,11 @@ pub fn run() {
             session::record::recorder::pause_recording,
             session::record::recorder::resume_recording,
             session::record::recorder_stop::stop_recording,
+            session::record::switch_mic::switch_mic,
+            session::record::switch_display::switch_display,
             commands::save_webcam,
             commands::append_webcam,
+            session::record::webcam_segments::mark_webcam_segment,
             commands::export_project,
             commands::get_settings,
             commands::set_settings,
@@ -109,6 +112,9 @@ pub fn run() {
             // Probe the encoder off-thread now so the first recording's ffmpeg sink
             // is fast — audio capture must not start behind a slow first ffmpeg launch.
             std::thread::spawn(crate::encode::ffmpeg_encoder::prewarm);
+            // The background picker's 53 thumbnails: loaded from the cache dir, or rendered once
+            // and cached, before the editor can ask for them (see `bg_thumbs::prewarm`).
+            std::thread::spawn(crate::export::preview::bg_thumbs::prewarm);
             if let Some(win) = app.get_webview_window("main") {
                 #[cfg(windows)]
                 {

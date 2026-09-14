@@ -1,6 +1,7 @@
 {
   "id": "glove",
   "name": "Glove",
+  "category": "Playful",
   "version": 2,
   "builtin": true,
   "busy": {

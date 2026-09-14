@@ -28,13 +28,14 @@ One composited layer expressed as a rounded rectangle in output pixels.
 
 ```rust
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Scene { pub screen: Panel, pub camera: Panel }
+pub struct Scene { pub screen: Panel, pub camera: Panel, pub src: RectF }
 ```
 
 The complete frame geometry at one instant: screen is the zoomed base layer, camera is the fixed webcam overlay drawn on top.
 
 - `screen: Panel` - captured screen layer. *Why:* the compositor zooms the full base (which includes the screen panel) via a crop; keeping screen separate from camera means the camera is not zoomed.
 - `camera: Panel` - webcam overlay. *Why:* drawn after zoom so it stays fixed at its layout-resolved position regardless of zoom depth.
+- `src: RectF` - the sub-rect of the RECORDED CANVAS the screen panel shows, in source pixels. *Why:* A mid-take display switch keeps ONE encoder canvas and fits every later frame into it, so the file carries baked black bars from the switch on. The render undoes that by showing only the active SOURCE SPAN's `src` rect (`export::render::spans`). Both compositors sample the screen texture through it, and every canvas-to-panel map (`coordmap::to_panel`) goes through it, so the cursor, the click effects and the zoom anchors all land on the cropped picture. `full_src(sw, sh)` (the whole canvas) is the value for every take that never switched display.
 
 ### Used by
 
@@ -51,6 +52,8 @@ pub fn lerp(a: &Scene, b: &Scene, t: f32) -> Scene
 
 Component-wise linear interpolation between two scenes for cross-dissolve layout transitions. The caller supplies a pre-eased `t`.
 
+`src` does NOT interpolate: it SNAPS to `b`'s, like `ring_color`. A half-way crop rect would slice the bars of neither span; a display-switch transition instead pre-blends the two pictures into `b.src` before compositing (`render::screen_mix`), so one crop rect is all a compositor ever needs.
+
 ### Inputs
 
 - `a: &Scene` - source scene at t=0. *Why:* the layout track supplies two keyframe scenes bracketing the current time.
@@ -64,6 +67,18 @@ A new `Scene` with each `rect` field (`x`, `y`, `w`, `h`), `radius`, and `alpha`
 ### Behaviors worth knowing
 
 - `lerp_midpoint_is_between` (unit test): at t=0.5 the screen rect width lies exactly halfway between Screen-mode and Camera-mode widths.
+
+## Scene::with_src
+
+```rust
+pub fn with_src(self, src: RectF) -> Scene
+```
+
+The same scene showing `src` of the canvas. How `SpanTrack` stamps a span's own source rect onto a `Scene` that `resolve` built from that span's SIZE alone: `resolve` knows the span's width and height (which is what shapes the screen panel) but not where in the canvas the capture was fitted, so the offset is applied here.
+
+### Used by
+
+- `src-tauri/src/export/render/spans.rs` - `SpanTrack::raw`, once per span per frame.
 
 ## cam_action_at
 
@@ -177,24 +192,25 @@ Converts a sampled `CamPose` (Task 4's camera_moves interpolator output - center
 pub fn override_camera(panel: Panel, p: CamPose, ow: f32, oh: f32, aspect: f32) -> Panel
 ```
 
-Task 9 Part C. Applies a `camera_moves` keyframe override to a resolved camera `Panel`: replaces its rect via `rect_from_center` AND scales `radius`/`ring_px` by the height ratio, so a circle (`radius == min(w,h)/2` at its STATIC size) stays a true circle - and its ring stays proportionate - after a keyframe grows or shrinks the panel. Fixes the pre-Task-9 bug where only the rect was replaced, leaving `radius` at the panel's static value and distorting a circle into an ellipse-cropped-to-a-circle-mask look whenever a keyframe resized it.
+Task 9 Part C, plus keyframe shapes (2026-09-14). Applies a `camera_moves` keyframe override to a resolved camera `Panel`: replaces its rect via `rect_from_center`, sets its `radius` from the pose's own shape when it has one (`round`, a fraction of the NEW short side - a keyframed circle, rounded rect or rect, and the morph between them) or else scales the static `radius` by the height ratio, and scales `ring_px` by that ratio either way - so a circle (`radius == min(w,h)/2` at its STATIC size) stays a true circle and its ring stays proportionate after a keyframe grows or shrinks the panel. Fixes the pre-Task-9 bug where only the rect was replaced, leaving `radius` at the panel's static value and distorting a circle into an ellipse-cropped-to-a-circle-mask look whenever a keyframe resized it.
 
 ### Inputs
 
 - `panel: Panel` - the scene's currently-resolved camera panel (static size, from `resolve`). *Why take the whole `Panel`, not just its radius:* needs `rect.h` (the pre-override height) to compute the scale ratio, and preserves `alpha`/`ring_color` untouched via struct update syntax.
-- `p: CamPose` - the sampled camera-move keyframe pose (center + new height fraction).
+- `p: CamPose` - the sampled camera-move keyframe pose (center + new height fraction + optional corner fraction).
 - `ow: f32`, `oh: f32` - output canvas dimensions in pixels, forwarded to `rect_from_center`.
 - `aspect: f32` - the panel's own w/h, forwarded to `rect_from_center` so a Wide (16:9) panel keeps its shape through the override. The caller derives it from THIS panel's pre-override rect, so the two can never disagree.
 
 ### Returns
 
-A new `Panel` with `rect = rect_from_center(p, ow, oh, aspect)`, `radius = panel.radius * (new_h / old_h.max(0.001))`, `ring_px = panel.ring_px * (new_h / old_h.max(0.001))` (same ratio - both are proportional to panel size), and `alpha`/`ring_color` copied from `panel` unchanged (`old_h.max(0.001)` guards a degenerate zero-height static panel from dividing by zero).
+A new `Panel` with `rect = rect_from_center(p, ow, oh, aspect)`, `radius = round * min(rect.w, rect.h)` when `p.round` is `Some` else `panel.radius * (new_h / old_h.max(0.001))`, `ring_px = panel.ring_px * (new_h / old_h.max(0.001))`, and `alpha`/`ring_color` copied from `panel` unchanged (`old_h.max(0.001)` guards a degenerate zero-height static panel from dividing by zero). The two radius rules agree whenever the pose's `round` IS the static panel's own fraction (`static_cam_pose`), which is what a `"layout"` keyframe inherits - so an old doc renders as it always did.
 
 ### Behaviors worth knowing
 
 - `override_camera_keeps_circle_round_after_resize` (unit test): a 200x200 circle panel (`radius: 100`) overridden to a `CamPose` that resolves to 100x100 yields `radius: 50` - still exactly `min(w,h)/2`.
 - `override_camera_grows_radius_when_panel_grows` (unit test): a 100x100 panel (`radius: 50`, `ring_px: 4`) overridden to resolve 4x larger yields `radius: 200` and `ring_px: 16` - both scaled by the same 4x; `ring_color` and `alpha` are untouched.
 - `override_camera_matches_rect_from_center_position` (unit test): the returned `rect` is identical to calling `rect_from_center` directly - only `radius`/`ring_px` differ from a naive rect-only replacement.
+- `override_camera_takes_the_poses_own_shape_when_it_has_one` (unit test, `cam_tests.rs`): a 100x100 panel with a 12 px radius posed at 400 px: `round 0.5` -> `radius 200`, `round 0` -> `0`, a Wide 16:9 pose at `round 0.25` -> a quarter of the SHORT side (`50`, not the width) with the ring still scaled by the height ratio, and no `round` -> the static 12 px scaled 4x (`48`).
 
 ### Used by
 
@@ -246,7 +262,7 @@ A `Scene` with both panels fully resolved. Disabled panels (`alpha=0.0`) still h
 
 ## layout
 
-Resolves the active `Scene` at any video timestamp from the `SetLayout` action track, cross-fading between presets, and re-anchors zoom regions into the active screen panel. Key items: `LayoutTrack` struct, `LayoutTrack::new(actions, app, ow, oh, sw, sh, transition_ms)`, `LayoutTrack::scene_at(t_ms) -> Scene`, `anchor_regions(raw, track, sw, sh) -> Vec<ZoomRegion>`.
+Resolves the active `Scene` at any video timestamp from the `SetLayout` action track, cross-fading between presets, and re-anchors zoom regions into each frame's screen panel. Key items: `LayoutTrack` struct, `LayoutTrack::new(actions, app, ow, oh, sw, sh, transition_ms)`, `LayoutTrack::scene_at(t_ms) -> Scene`, `anchor_regions(raw, track, sw, sh) -> Vec<ZoomRegion>`.
 
 ## background
 

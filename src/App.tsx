@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
-import { setCapturable, getLaunchProject } from "./lib/ipc";
+import { setCapturable, getLaunchProject, getSettings } from "./lib/ipc";
+import { applyTheme } from "./hud/preferences/applyTheme";
 import { Hud } from "./hud/Hud";
 import { Editor } from "./editor/Editor";
+import { InterfaceEffects } from "./editor/effects/InterfaceEffects";
 
 type View = { v: "hud" } | { v: "editor"; folder: string };
 
@@ -45,12 +47,18 @@ export function App() {
   // file, the backend resolved its folder in `setup()`; route straight to the editor instead of
   // flashing the HUD first. A normal launch resolves `null` here and nothing happens. Warm-launch
   // (the app already running when another `.tcursor` is opened) is not covered - see the Rust
-  // `LaunchProject` doc comment.
+  // `LaunchProject` doc comment. The stored theme is applied here too, so a launch that never
+  // mounts the HUD (which re-applies it on every settings change) still honours "always light".
   useEffect(() => {
+    getSettings().then((s) => applyTheme(s.ui.theme, s.ui.accent)).catch(() => {});
     getLaunchProject().then((folder) => { if (folder) void openEditor(folder); }).catch(() => {});
   }, []);
 
+  // `InterfaceEffects` is the editor's click-ripple overlay. It mounts HERE, beside `Editor`
+  // rather than inside it, so the feature owns no part of the editor tree; it portals itself into
+  // the live `.editor` element for its tokens and its z-order (see its own doc comment). It is
+  // rendered only while the editor is up - the HUD has its own motion language and no ripples.
   return view.v === "editor"
-    ? <Editor folder={view.folder} onClose={closeEditor} />
+    ? <><Editor folder={view.folder} onClose={closeEditor} /><InterfaceEffects /></>
     : <Hud onEdit={openEditor} />;
 }

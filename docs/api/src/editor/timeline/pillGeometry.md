@@ -38,7 +38,7 @@ Returns `0` for `durMs <= 0` rather than dividing by zero. Unit-tested (`pillGeo
 export const PILL_EDGE_INSET_PCT = 0.6;
 ```
 
-The edge inset `pillLeftPct`/`pillWidthPct` apply on whichever side (or both) a pill's raw span actually touches the track's true 0%/100%, in percent of track width - exported so a caller/test can reference the exact same number rather than re-deriving it. Originally right-edge-only (Task 11); `editor.css` additionally lifts a HOVERED/SELECTED/DRAGGING pill's own z-index above `TrimOverlay`'s handle so the resize handles stay grabbable even where this percent inset alone isn't enough physical separation at a narrow track width (gate-feedback item 1, fix round 1: gated on interactivity, not on span, so an edge-touching pill that's ALSO independently trimmed away doesn't paint over `TrimOverlay`'s dimming stripe at rest).
+The edge inset `pillLeftPct`/`pillWidthPct` apply on whichever side (or both) a pill's raw span actually touches the track's true 0%/100%, in percent of track width - exported so a caller/test can reference the exact same number rather than re-deriving it. Originally right-edge-only (Task 11); `timeline.css` additionally lifts a HOVERED/SELECTED/DRAGGING pill's own z-index above `TrimOverlay`'s handle so the resize handles stay grabbable even where this percent inset alone isn't enough physical separation at a narrow track width (gate-feedback item 1, fix round 1: gated on interactivity, not on span, so an edge-touching pill that's ALSO independently trimmed away doesn't paint over `TrimOverlay`'s dimming stripe at rest).
 
 ## MIN_PILL_PCT
 

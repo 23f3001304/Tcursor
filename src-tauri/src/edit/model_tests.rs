@@ -12,7 +12,7 @@ fn sample_doc() -> EditDoc {
         trim: Trim { in_ms: 100, out_ms: 5000 },
         clip_ms: 5000,
         cuts: vec![Cut { id: "c0".into(), start_ms: 500, end_ms: 1000 }],
-        zooms: vec![Zoom { id: "z1".into(), start_ms: 200, end_ms: 800, target: ZoomTarget::Cursor, scale: 2.2, easing: "ease".into(), zoom_in_ms: 350, zoom_out_ms: 450, layer: 0, cam_action: None }],
+        zooms: vec![Zoom { id: "z1".into(), start_ms: 200, end_ms: 800, target: ZoomTarget::Cursor, scale: 2.2, easing: "ease".into(), zoom_in_ms: 350, zoom_out_ms: 450, layer: 0, cam_action: None, smart_typing: false }],
         speed: vec![Speed { id: "s1".into(), start_ms: 1000, end_ms: 2000, factor: 2.0 }],
         layout: vec![LayoutSeg { id: "l1".into(), start_ms: 0, end_ms: 5000, layout: "screen".into(), transition_ms: 350, easing: "smooth".into(),
             transition_out_ms: 0, easing_out: "smooth".into(), arrangement: None }],
@@ -107,7 +107,7 @@ fn zoom_target_fixed_serializes_with_xy() {
 #[test]
 fn camera_move_round_trip_save_load() {
     let mut doc = sample_doc();
-    doc.camera_moves = vec![CameraMove { id: "k1".into(), t_ms: 300, x: 0.5, y: 0.4, size: 0.3, easing: "smooth".into() }];
+    doc.camera_moves = vec![CameraMove { id: "k1".into(), t_ms: 300, x: 0.5, y: 0.4, size: 0.3, easing: "smooth".into(), shape: "layout".into(), roundness: DEFAULT_CAM_ROUNDNESS }];
     let p = tmp_path("edit_model_camera_move_round_trip.json");
     doc.save(&p).unwrap();
     let loaded = EditDoc::load(&p).unwrap();

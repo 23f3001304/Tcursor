@@ -34,13 +34,14 @@ Private fields include:
 - `layout: Layout` - output canvas dimensions and screen-panel geometry.
 - `track: LayoutTrack` - resolves the active `Scene` at any event time.
 - `cam_moves: CameraMoveTrack` - built once from `doc.camera_moves` (Task 4); `step_camera` samples it per frame to override the scene's camera-panel rect. Empty (the default) means "no override" - see `## camera` below.
-- `regions: Vec<ZoomRegion>` - re-anchored zoom regions for `CameraSim::step`.
+- `regions: Vec<ZoomRegion>` - zoom regions with RAW canvas-space anchors (`fromedit::regions_from_doc`). *Why raw:* `step_camera` re-anchors them into each frame's own screen panel (`layout::anchor_frame`), so a layout transition or display switch mid-zoom carries a pinned aim with the content instead of leaving the camera on where the panel used to be (2026-09-14).
+- `frame_regions: Vec<ZoomRegion>` - the scratch buffer that per-frame re-anchoring fills, handed to `CameraSim::step`; kept on the struct so a 60 fps walk allocates nothing.
 - `bg: Vec<u8>` - decoded background BGRA pixels; passed to compositor each frame.
 - `compositor: Box<dyn Compositor>` - GPU or CPU compositor, selected once at init.
 - `fx: Box<dyn FxRenderer>` - GPU or CPU FX renderer.
 - `sim: CameraSim` - stateful; must be stepped in frame-loop order.
 - `spot_sim: fx_state::SpotlightSim` - stateful spotlight animation phase (breathing/halo/etc.), stepped alongside `sim` each frame inside `fx_state::render`.
-- `cursor: Cursor` - single owner of the mouse-event log and the cursor low-pass/idealize state (also the FX event source, via `cursor.events()`). Replaces an older split where `FrameRenderer` held the event log directly alongside inline `cur_idx`/`cur_sx`/`cur_sy`/`cur_primed` smoothing fields, because a borrowed `Cursor<'a>` couldn't self-reference the same struct's event log without unsafe; `Cursor` now owns its data outright; constructed once in `new()` via `Cursor::new(events, screen, follow_alpha)` plus `set_idealize(path_idealize)`, and `step_camera` simply calls `self.cursor.at(ev_t, dt_ms)` - passing its own exact frame period through, so the cursor low-pass and the camera's filters agree on how long a frame is. *Why this matters for edits:* `reload_edit` can live-update the low-pass alpha and idealize amount in place (`set_a`/`set_idealize`) when only `smoothness`/`path_idealize` changed, without rebuilding the renderer.
+- `cursor: Cursor` - single owner of the mouse-event log and the cursor's polish settings - smoothness/idealize, applied by its rest/move path model (`cursor/path.md`) - (also the FX event source, via `cursor.events()`). Replaces an older split where `FrameRenderer` held the event log directly alongside inline `cur_idx`/`cur_sx`/`cur_sy`/`cur_primed` smoothing fields, because a borrowed `Cursor<'a>` couldn't self-reference the same struct's event log without unsafe; `Cursor` now owns its data outright; constructed once in `new()` via `Cursor::new(events, screen, smoothness)` plus `set_idealize(path_idealize)` and `set_tilt(tilt)` (both through their `_at` variants, so plain-OS mode gets the raw path and no lean), and `step_camera` simply calls `self.cursor.at(ev_t, dt_ms)` - passing its own exact frame period through, so the motion-tilt filter and the camera's filters agree on how long a frame is. *Why this matters for edits:* `reload_edit` can live-update all three in place (`set_smoothness`/`set_idealize`/`set_tilt`) when only `smoothness`/`path_idealize`/`tilt` changed, without rebuilding the renderer.
 - `cprep: Option<CursorPrep>` - decoded cursor sprite set; `None` for non-Enhanced styles (except the plain-OS arrow fallback, see `cursorset::draws_synthetic`).
 - `captured: Option<CapturedCursors>` - the recording's captured OS-cursor layer, decoded once (`export::cursor::captured`). `Some` means the REAL cursor can be composited, which is what the LIVE `System` style draws instead of the synthetic arrow; `None` is a pre-layer recording. Built in `new` beside `cprep`, for the same reason: it is edit-independent, so a warm preview must not redo it on every doc change.
 - `actions: Vec<ActionEvent>` - action log; used by `fx_state::render` for spotlight/hold/caption.
@@ -83,9 +84,19 @@ Follows the same sequence as the original `exporter::export` setup block (lines 
 ## FrameRenderer::composite_at
 
 ```rust
-pub fn composite_at(&mut self, pose: &FramePose, screen: &[u8],
+pub fn composite_at(&mut self, pose: &FramePose, screen: &[u8], prev: Option<&[u8]>,
                     webcam: Option<(&[u8], u32, u32)>, out: &mut Vec<u8>)
 ```
+
+`prev` is the screen frame the caller latched before the mid-take display switch this frame is inside (`FramePose::hold` says which frame to latch, `FramePose::mix` says a switch is in flight), and `None` on every frame outside one - which is every frame of a take that never switched. When both are present the held frame is resampled into the current span's rect and blended under it (`render::screen_mix`) BEFORE the compositor runs, so the cross-dissolve needs no second screen input in either compositor and the exporter and the one-shot preview reach it through one path.
+
+## spans
+
+The take's SOURCE SPANS and the display-switch transition - see `docs/api/src-tauri/src/export/render/spans.md`.
+
+## screen_mix
+
+The nv12 cross-dissolve a display switch runs through - see `docs/api/src-tauri/src/export/render/screen_mix.md`.
 
 Runs the full compositor + FX + cursor pipeline for one frame, writing the result into `out`. Expensive (GPU or multi-core CPU work).
 
@@ -106,6 +117,8 @@ Three sequential stages (identical to the original exporter loop body, lines ~13
 1. `compositor.composite_into(..., out)` - places screen + webcam into `out` with zoom crop and panel rounding.
 2. `fx_state::render(..., &self.cursor.screen(), self.has_webcam, ..., pose.out_t, pose.ev_t, ...)` - applies click rings, spotlight, video FX, and captions directly on `out`. BOTH clocks are passed: the doc's effect regions resolve at `pose.out_t` (`region_t`), while the raw click/hold/caption streams resolve at `pose.ev_t`. `self.cursor.screen()` supplies the capture origin so a click hit's raw desktop coordinates convert to screen-local the same way `Cursor`'s own `clicks`/`at` already do (`FrameRenderer` has no separate `ScreenInfo` field - it reads the one `Cursor` already owns). `self.has_webcam` gates the spotlight's camera-exclusion hole (see `FrameRenderer`'s field list above).
 3. The cursor, on `ev_t` (both cursor tracks are raw event streams, so they stay on the event clock). ONE of two paths runs, never both: `captured::draws_captured(self.settings.cursor.style, self.captured.is_some())` - live style is `System` and this recording has a layer - blits the REAL recorded bitmap via `CapturedCursors::draw`; otherwise `cursorset::draw` (if `cprep.is_some()`) blits the synthetic sprite with motion trail, bounce, and panel clipping. That one ALSO gets `pose.out_t`, the clock pack v2's animated busy cursor runs on - the only cursor input on the output clock rather than the event clock, so the animation is deterministic per rendered frame. That single gate is what confines the plain-OS arrow fallback to recordings with no layer to composite. Both take the same `(cur, cam, screen, inset_w, ev_t)` - the captured one additionally takes `self.sw`, the source width its `content_scale` needs - and project through the shared `cursorset::frame_placement`, so a style switch cannot move the cursor.
+
+The synthetic path also gets `self.cursor.tilt_deg()`, the motion lean the `Cursor` computed on the same frame `step_camera` asked it for a position, and `FrameRenderer::lenses` puts the identical value into `LensFrame.tilt_deg` - so the glass lens placed BEFORE the FX pass and the sprite blitted AFTER it lean by the same angle. The captured path is deliberately left out: that is the cursor that was actually on screen, and it never leaned.
 
 `FrameRenderer`'s small read-only accessors used only by preview commands outside the renderer (`bg`, `has_webcam`, `click_track`, `events_ms`, `actions`, `resolve_layout`) live in the sibling `accessors.rs` (split out purely for size) - see `accessors.md`.
 

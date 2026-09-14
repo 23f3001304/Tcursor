@@ -1,10 +1,12 @@
 # src/editor/stage/ripplePreview.ts
 
-Client-side mirror of the export's click-ripple rendering (joins the `camZoomAction.ts`/`layoutAt.ts`/`spotlightPreview.ts` TS-mirror family). Click ripples used to draw ONLY inside the backend FX-overlay PNG (`fxOverlay.ts`), requested at `FX_BUCKET_MS` cadence with single-flight gating - during playback that read as laggy/stuck rings, the highest-frequency element on screen getting the coarsest update rate. Drawing them here instead, straight on the preview canvas every rAF tick (`useCompositeLoop.ts`), fixes that for `stylesMirrored`'s two styles.
+Client-side mirror of the export's click FX (joins the `camZoomAction.ts`/`layoutAt.ts`/`spotlightPreview.ts` TS-mirror family). Click effects used to draw ONLY inside the backend FX-overlay PNG (`fxOverlay.ts`), requested at `FX_BUCKET_MS` cadence with single-flight gating - during playback that read as laggy/stuck rings, the highest-frequency element on screen getting the coarsest update rate. Drawing them here instead, straight on the preview canvas every rAF tick (`useCompositeLoop.ts`), fixes that for `stylesMirrored`'s styles.
 
-**Fallback, not a gap.** `stylesMirrored` is ONLY `{"ripple" (the default), "shockwave"}` - the two styles this pass prioritizes. The other four click-fx styles (Pulse/Glow/Neon/Particles) are NOT drawn here - `overlayNeedsClicks` instead gates `fxOverlay.ts`'s request so THOSE styles keep going through the backend overlay exactly as before this pass (laggy at `FX_BUCKET_MS` cadence, but still visible - not a silent regression to nothing). A follow-up extending `stylesMirrored` is a matter of adding their curves below from the same Rust/GPU sources cited per-function here; `overlayNeedsClicks` needs no changes itself when that happens, since it already excludes whatever's in `stylesMirrored`.
+**Fallback, not a gap.** `stylesMirrored` is `{"ripple" (the default), "shockwave", "pulse"}`. The other three click-fx styles (Glow/Neon/Particles) are NOT drawn here - `overlayNeedsClicks` instead gates `fxOverlay.ts`'s request so THOSE keep going through the backend overlay (laggy at `FX_BUCKET_MS` cadence, but still visible - not a silent regression to nothing). Extending the set is a matter of adding their curves below from the same sources cited per-function here; `overlayNeedsClicks` needs no changes itself, since it already excludes whatever is in `stylesMirrored`.
 
-Every curve is checked against its source line-for-line: `fx.wgsl` (the GPU shader the export/preview actually render with - `select_fx` prefers GPU, `fx_state.rs`) is the primary reference; `export/fx/clickdraw.rs` (the CPU fallback) is cited too where it independently documents the same simplifications this module makes (e.g. Shockwave's UV-warp).
+Every curve is checked against its source line-for-line: `export/fx/fx_clicks.wgsl` (the GPU shader the export and the preview actually render with - `select_fx` prefers GPU - and the reference look) is the primary reference; `export/fx/clickdraw.rs` (the CPU fallback) is cited where it independently documents the same simplification this module makes (Shockwave's refraction).
+
+**What this module deliberately does not reproduce.** Shockwave's band in the shader also warps the sampled background radially and splits R and B 2 px either side of that displacement (`fx.wgsl`, before the texture sample). That is a per-pixel resample of the frame underneath, which a 2D canvas draw cannot do cheaply; `clickdraw.rs` makes the identical trade for the identical reason. Here Shockwave is its ring plus its white leading rim. Everything else - the shared timing, the impact flash, Ripple's three rings and halo, Pulse's disc, rim and core - is mirrored exactly.
 
 ## RIPPLE_LIFE_MS
 
@@ -12,7 +14,7 @@ Every curve is checked against its source line-for-line: `fx.wgsl` (the GPU shad
 export const RIPPLE_LIFE_MS = 600;
 ```
 
-Click-effect lifetime, ms. MUST equal the export's `LIFE_MS` (`fx_state.rs`) and the OLD `fxOverlay.ts` `RIPPLE_MS` constant it supersedes - progress is elapsed/lifetime on both sides.
+Click-effect lifetime, ms. MUST equal the export's `LIFE_MS` (`fx_state.rs`) - progress is elapsed/lifetime on both sides.
 
 ## stylesMirrored
 
@@ -20,7 +22,11 @@ Click-effect lifetime, ms. MUST equal the export's `LIFE_MS` (`fx_state.rs`) and
 export const stylesMirrored: ReadonlySet<string>;
 ```
 
-The click-fx styles this module draws (`"ripple"`, `"shockwave"`). Checked by both the caller (`drawMirroredRipples`, skip the work entirely for an unmirrored style) and `drawRipplePreview` itself (safe to call standalone/in tests without relying on caller discipline).
+The click-fx styles this module draws (`"ripple"`, `"shockwave"`, `"pulse"`). Checked by both the caller (`drawMirroredRipples`, skip the work entirely for an unmirrored style) and `drawRipplePreview` itself (safe to call standalone/in tests without relying on caller discipline).
+
+### Behaviors
+
+- covers `"ripple"`, `"shockwave"` and `"pulse"`; does not cover `"glow"`, `"particles"`, `"neon"` or `"none"`.
 
 ## overlayNeedsClicks
 
@@ -28,16 +34,16 @@ The click-fx styles this module draws (`"ripple"`, `"shockwave"`). Checked by bo
 export function overlayNeedsClicks(style: string): boolean
 ```
 
-Whether `fxOverlay.ts`'s backend request still needs to carry click hits for `style`: `true` for every REAL click-fx style this module does NOT mirror (Pulse/Glow/Neon/Particles) - those keep falling back to the overlay exactly as before this pass. `false` for `stylesMirrored` (drawn client-side instead) and for `"none"` (nothing to draw either way): `style !== "none" && !stylesMirrored.has(style)`.
+Whether `fxOverlay.ts`'s backend request still needs to carry click hits for `style`: `true` for every REAL click-fx style this module does NOT mirror (Glow/Neon/Particles), `false` for `stylesMirrored` (drawn client-side instead) and for `"none"` (nothing to draw either way): `style !== "none" && !stylesMirrored.has(style)`.
 
 ### Behaviors
 
-- `false` for both mirrored styles (`"ripple"`, `"shockwave"`); `true` for each of the four unmirrored styles; `false` for `"none"`.
+- `false` for all three mirrored styles; `true` for each of the three unmirrored ones; `false` for `"none"`.
 
 ### Used by
 
 - `fxOverlay.ts` (`requestFxOverlay`) - gates whether it builds a `hits` array at all for the backend request.
-- `useCompositeLoop.ts` - gates whether it builds the `clicksStr` cache-key component (`""` when this returns `false`, since the request never varies with clicks in that case).
+- `useCompositeLoop.ts` / `fxRequestTick.ts` - gate whether the FX-request cache key varies with clicks (it does not when this is `false`).
 
 ## ActiveHit
 
@@ -45,7 +51,9 @@ Whether `fxOverlay.ts`'s backend request still needs to carry click hits for `st
 export interface ActiveHit { x: number; y: number; progress: number }
 ```
 
-`activeRippleHits`' output: one active click's raw 0..1 screen-content position (same basis `ClickSample` uses, NOT yet mapped to canvas px) and its progress 0..1 through its life. Structurally identical to `PixelHit`, kept as a distinct name for the coordinate space (pre-mapping).
+`x`/`y` are a 0..1 CANVAS position - a fraction of the recorded frame, NOT of the screen panel, and not yet in px. Mapping them is the caller's `mapFn`'s job, and after a mid-take display switch the two spaces differ: pass `fxFrameGeometry`'s `mapCanvas`, which folds in the active source span's crop the way Rust's `to_panel` does.
+
+`activeRippleHits`' output: one active click's raw 0..1 screen-content position (the basis `ClickSample` uses, NOT yet mapped to canvas px) and its progress 0..1 through its life. Structurally identical to `PixelHit`, kept as a distinct name for the coordinate space (pre-mapping).
 
 ## PixelHit
 
@@ -54,6 +62,42 @@ export interface PixelHit { x: number; y: number; progress: number }
 ```
 
 What `drawRipplePreview` actually draws: one active click already mapped to canvas px by the caller. Structurally identical to `ActiveHit`, kept as a distinct name for the coordinate space (post-mapping).
+
+## smoothstep
+
+```ts
+export function smoothstep(e0: number, e1: number, x: number): number
+```
+
+The GPU builtin, `t * t * (3 - 2t)` over the clamped `(x - e0) / (e1 - e0)`. Every feather and fade below is written in terms of it so the curves are the shader's, not an approximation of them.
+
+### Behaviors
+
+- 0 below `e0`, 1 above `e1`, 0.5 at the midpoint.
+
+## easeOut
+
+```ts
+export function easeOut(progress: number): number
+```
+
+TS mirror of `fx_clicks.wgsl::fx_ease` / `clickfx.rs::ease_out` - the shared radius easing for every click style, ease-out cubic `1 - (1 - p)^3`. Clamps outside 0..1.
+
+### Behaviors
+
+- pinned at the SAME five points as the Rust test `ease_out_is_pinned_at_five_points`: 0 / 0.578125 / 0.875 / 0.984375 / 1; clamps at -1 and 2.
+
+## rippleAlpha
+
+```ts
+export function rippleAlpha(progress: number, intensity: number): number
+```
+
+TS mirror of `fx_clicks.wgsl::fx_alpha` / `clickfx.rs::fade_alpha` - the full intensity for the first 55% of the life, then a smoothstep release to exactly 0: `(1 - smoothstep(0.55, 1, p)) * intensity`. Keeps its old name because every caller and the whole test file already use it.
+
+### Behaviors
+
+- pinned at the SAME five points as the Rust test `fade_alpha_is_pinned_at_five_points`: 1 / 1 / 1 / 0.5829904 / 0; `rippleAlpha(0.5, 0.5) === 0.5` (inside the hold, matching the Rust `fade_alpha(0.5, 0.5)`); clamps progress and intensity outside 0..1.
 
 ## activeRippleHits
 
@@ -65,19 +109,7 @@ TS mirror of `export/fx/clickfx.rs::hits_at` - which clicks are "alive" at `now`
 
 ### Behaviors
 
-- includes a click exactly at its start, excludes one exactly at its life boundary (the fixed off-by-one above), computes `progress` as elapsed/life, excludes a future click, keeps every simultaneously-alive click in order.
-
-## rippleAlpha
-
-```ts
-export function rippleAlpha(progress: number, intensity: number): number
-```
-
-TS mirror of fx.wgsl's per-hit `a` (line 169) / `clickfx::fade_alpha` - fades 1â†’0 over the life, scaled by the user's intensity setting: `clamp01(1 - clamp01(progress)) * clamp01(intensity)`.
-
-### Behaviors
-
-- full intensity at progress 0; exactly 0.25 at progress 0.5, intensity 0.5 (matches the Rust `clickfx.rs` test `fade_alpha(0.5,0.5)==0.25`); 0 at progress 1; clamps progress/intensity outside 0..1.
+- includes a click exactly at its start, excludes one exactly at its life boundary, computes `progress` as elapsed/life, excludes a future click, keeps every simultaneously-alive click in order.
 
 ## rippleRadiusPx
 
@@ -85,11 +117,25 @@ TS mirror of fx.wgsl's per-hit `a` (line 169) / `clickfx::fade_alpha` - fades 1â
 export function rippleRadiusPx(progress: number, oh: number): number
 ```
 
-TS mirror of fx.wgsl line 172 (`FX_RIPPLE`) / `clickfx::ripple_radius`: ring radius grows linearly to `oh * 0.06` over the life. `oh` is the OUTPUT frame height in px - the export's `oh`; in the preview, the REAL canvas height, not the downscaled FX-request resolution (see `drawMirroredRipples`' doc for why that's the right basis here).
+Ripple's lead-ring radius in OUTPUT px: `easeOut(progress) * oh * 0.06`. `oh` is the OUTPUT frame height (the export's `oh`; in the preview, the real canvas height - see `drawMirroredRipples`). The 2nd and 3rd rings are this same function at `progress - 0.15` / `progress - 0.30`.
 
 ### Behaviors
 
-- 0 at progress 0, `oh*0.06` at progress 1, half that at progress 0.5, clamped past 1.
+- 0 at progress 0, exactly `oh * 0.06` at progress 1, **52.5px at progress 0.5 for `oh = 1000`** (eased, pinning that it is no longer the linear 30), clamped past 1.
+
+## RIPPLE_RINGS
+
+```ts
+export const RIPPLE_RINGS: ReadonlyArray<{ offset: number; thick: number; gain: number }>;
+```
+
+Ripple's three rings, mirroring `fx_clicks.wgsl`'s `FX_RIPPLE` branch: launch offsets 0 / 0.15 / 0.30 of the life (0, 90 and 180 ms), thicknesses 0.6% / 0.45% / 0.3% of height, alpha gains 1 / 0.7 / 0.45. A ring only exists once its offset has passed.
+
+*Why a table rather than three inline draws:* the three differ only in these numbers, and having them in one place is what makes "each thinner and fainter than the last" checkable in a test instead of by reading.
+
+### Behaviors
+
+- the three offsets, thicknesses and gains are pinned exactly; the offsets times `RIPPLE_LIFE_MS` are the 90 ms and 180 ms launch delays.
 
 ## rippleThicknessPx
 
@@ -97,11 +143,11 @@ TS mirror of fx.wgsl line 172 (`FX_RIPPLE`) / `clickfx::ripple_radius`: ring rad
 export function rippleThicknessPx(oh: number): number
 ```
 
-TS mirror of fx.wgsl line 173 (`FX_RIPPLE` thickness): `max(oh * 0.006, 1)`.
+The lead ring's thickness, `max(oh * 0.006, 1)` - the shader's floor included, so a tiny preview canvas still draws a 1px line instead of nothing.
 
 ### Behaviors
 
-- `oh*0.006` for a normal size, floors at 1px for a small `oh`, exact at the floor boundary.
+- 6px at `oh = 1000`; floors at 1px for `oh = 100`.
 
 ## shockwaveRadiusPx
 
@@ -109,11 +155,11 @@ TS mirror of fx.wgsl line 173 (`FX_RIPPLE` thickness): `max(oh * 0.006, 1)`.
 export function shockwaveRadiusPx(progress: number, oh: number): number
 ```
 
-TS mirror of fx.wgsl line 186 (`FX_SHOCKWAVE` radius) - the ring-draw half only. The shader ALSO warps nearby background pixels radially around the ring (lines 96-108, a screen-space UV refraction) - a per-pixel background resample this 2D canvas draw can't reproduce cheaply. `clickdraw.rs`'s own CPU fallback makes the identical trade (see its `ClickFxStyle::Shockwave` comment: "the CPU path can't do" the warp either) and compensates with the same fainter `SHOCKWAVE_ALPHA_MUL` this mirrors - so the ring alone, without the warp, is an established simplification in this codebase, not a new one.
+Shockwave's ring radius, `easeOut(progress) * oh * 0.09` - the ring-draw half only (see the refraction note at the top).
 
 ### Behaviors
 
-- 0 at progress 0, `oh*0.09` at progress 1, half that at progress 0.5.
+- 0 at progress 0, `oh * 0.09` at progress 1, 78.75px at progress 0.5 for `oh = 1000` (eased, not the linear 45).
 
 ## shockwaveThicknessPx
 
@@ -121,11 +167,11 @@ TS mirror of fx.wgsl line 186 (`FX_SHOCKWAVE` radius) - the ring-draw half only.
 export function shockwaveThicknessPx(oh: number): number
 ```
 
-TS mirror of fx.wgsl line 187 (`FX_SHOCKWAVE` thickness): `max(oh * 0.008, 1)`.
+`max(oh * 0.008, 1)`.
 
 ### Behaviors
 
-- `oh*0.008` for a normal size, floors at 1px for a small `oh`.
+- 8px at `oh = 1000`; floors at 1px for `oh = 50`.
 
 ## SHOCKWAVE_ALPHA_MUL
 
@@ -133,52 +179,63 @@ TS mirror of fx.wgsl line 187 (`FX_SHOCKWAVE` thickness): `max(oh * 0.008, 1)`.
 export const SHOCKWAVE_ALPHA_MUL = 0.5;
 ```
 
-fx.wgsl line 188: the shockwave ring is additive at 0.5x the base alpha - deliberately fainter than Neon's 1.4x since the shader leans on the UV-warp (see `shockwaveRadiusPx`) for the rest of its punch.
+The shockwave ring is additive at 0.5x the base alpha - deliberately fainter than Neon's 1.4x, since the shader leans on the refraction for the rest of its punch.
+
+### Behaviors
+
+- is exactly 0.5.
+
+## pulseRadiusPx
+
+```ts
+export function pulseRadiusPx(progress: number, oh: number): number
+```
+
+Pulse's disc radius, `oh * (0.01 + 0.025 * easeOut(progress))` - 1% of height growing to 3.5%.
+
+### Behaviors
+
+- 10px then 35px at `oh = 1000` for progress 0 and 1; 31.875px at progress 0.5 (eased).
 
 ## drawMirroredRipples
 
 ```ts
 export function drawMirroredRipples(
-  ctx: CanvasRenderingContext2D, clicks: ClickSample[], now: number,
-  enabled: boolean, style: string, color: [number, number, number], intensity: number,
-  mapFn: (fx: number, fy: number) => [number, number] | null,
-  fxW: number, fxH: number, canvasW: number, canvasH: number,
-): void
+  ctx, clicks, now, enabled, style, color, intensity, mapFn, fxW, fxH, canvasW, canvasH): void
 ```
 
-Computes this tick's active, style-mirrored hits and draws them on the real canvas - the glue `useCompositeLoop.ts` calls straight from its rAF tick.
+Computes this tick's active, style-mirrored hits and draws them on the real canvas - the glue `useCompositeLoop.ts` calls straight from its rAF tick. No-ops (without touching `ctx`) for disabled FX, an unmirrored style, or no clicks.
 
-`enabled` (`clickfx.enabled`) is checked FIRST, before anything else - mirrors `fxOverlay.ts`'s `requestFxOverlay`, whose very first check is the same field, the master switch for the whole FX stack. A gate finding fixed a regression here: without this check, toggling "Click animations" off still drew ripple rings in the live preview (the export correctly draws none - `fx_state.rs`'s `render` returns early on `!enabled`).
-
-`mapFn` (built there) outputs `fxW`x`fxH`-space px, the resolution the backend renders the spotlight/video-fx overlay at; scaling its result by `(canvasW/fxW, canvasH/fxH)` reproduces the IDENTICAL panel/zoom mapping at the real canvas's resolution instead - the mapping is linear/homogeneous in fxW/fxH (every intermediate quantity `mapFn` derives from - dx/dy/dw/dh/cx0/cy0/cw/ch - scales with it), so this is equivalent to recomputing that whole geometry a second time at full scale, without actually doing so. Radius/thickness then use the real canvas height directly for the same reason (see `rippleRadiusPx`'s doc).
-
-No-ops via `drawRipplePreview` for a disabled clickfx, an unmirrored style, or no active hits - the (cheap) hit-list/mapping work still runs either way for the latter two, guarded by `stylesMirrored` up front so it's skipped entirely for a style this module doesn't draw.
+- `enabled` is `clickfx.enabled`, checked FIRST. It is the master switch for the whole FX stack, spotlight included - the export returns before drawing anything when it is off (`fx_state.rs`'s `render` gate), and `fxOverlay.ts`'s `requestFxOverlay` treats it as its own first check for the same reason. Without it here, turning "Click animations" off still drew effects in the live preview while the export correctly drew none.
+- `mapFn` (built in the caller) outputs `fxW`x`fxH`-space px, the resolution the backend renders the spotlight/video-fx overlay at. Scaling its result by `(canvasW/fxW, canvasH/fxH)` reproduces the IDENTICAL panel/zoom mapping at the real canvas's resolution, because the mapping is linear/homogeneous in `fxW`/`fxH` (every intermediate quantity `mapFn` derives from scales with it) - equivalent to recomputing that whole geometry at full scale without doing so. Radii then use the real canvas height directly for the same reason.
 
 ### Behaviors
 
-- no-op paths (disabled clickfx, unmirrored style, empty click list) never touch `ctx` at all, including when an active click and a mirrored style would otherwise draw - asserted with a throwing Proxy stub, not just a return-value check.
-
-### Used by
-
-- `useCompositeLoop` (`src/editor/hooks/useCompositeLoop.ts`) - called right after the base `drawPreview` composite and BEFORE the cached FX-overlay blit, so an active spotlight's dim composites on top of a ripple like every other preview element.
+- never touches `ctx` when `enabled` is false (the regression above), when the style is outside `stylesMirrored`, or when the click list is empty.
 
 ## drawRipplePreview
 
 ```ts
-export function drawRipplePreview(
-  ctx: CanvasRenderingContext2D, hits: PixelHit[], style: string,
-  color: [number, number, number], intensity: number, oh: number,
-): void
+export function drawRipplePreview(ctx, hits: PixelHit[], style, color, intensity, oh: number): void
 ```
 
 Draws every active, style-mirrored hit onto `ctx` (already the real canvas, full resolution). No-ops for a style not in `stylesMirrored`, an empty hit list, or a non-positive `oh`.
 
-Ripple blends normally (mirrors fx.wgsl's `mix`, an over-composite); Shockwave is additive (`globalCompositeOperation = "lighter"`, mirrors the shader's `color = color + ...`). Each ring's soft triangular coverage falloff (`(thick - |d-radius|) / thick`, clamped 0..1 - the exact per-pixel shape fx.wgsl computes) is reproduced losslessly via a 3-stop radial gradient: canvas gradients interpolate LINEARLY between stops, which is exactly what that falloff already is (a linear ramp up to the ring, then back down) - no per-pixel loop needed on the 2D canvas. The inner stop's offset is clamped to `>= 0` and the peak stop's to `>= ` the inner one, so the ripple's very first ~10% of life (`radius < thick`) degrades to a soft disc instead of an inverted gradient - matching what the shader itself produces there (`cov(0) > 0` in that regime).
+### What each style draws
+
+Every style opens with the shared **impact flash**: an additive white gaussian bloom of radius `oh * 0.015` scaled by `(1 - smoothstep(0, 0.14, p)) * intensity`, so the click reads as landing at a point about 80 ms before the style's own geometry has grown into anything.
+
+- **ripple** - an additive tint halo (gaussian at twice the lead ring's radius, gain `a * 0.15`), then the three `RIPPLE_RINGS` blended normally (the shader's `mix`, an over-composite).
+- **shockwave** - the tint ring additive at `SHOCKWAVE_ALPHA_MUL`, plus a white leading rim `oh * 0.004` outside it at gain `a * 0.35`.
+- **pulse** - the feathered disc blended normally, then an additive tint rim on its edge at gain `a * 0.6` and a solid additive white core of radius `oh * 0.006` faded out by `p = 0.3`.
+
+### How the shapes are drawn on a 2D canvas
+
+- **Rings** (`ringBand`): each ring's triangular coverage falloff (`(thick - |d - radius|) / thick`, clamped 0..1 - the exact per-pixel shape the shader computes) is reproduced losslessly by a 3-stop radial gradient, because canvas gradients interpolate LINEARLY between stops and that falloff already is a linear ramp up to the ring then back down. No per-pixel loop needed. The peak stop stays clamped at or above the base stop so a radius smaller than `thick` (a ring's first frames) degrades to a soft disc rather than an inverted gradient - which is what the shader itself produces there.
+- **Blooms** (`bloom`): `exp(-(d/r)^2)` out to `2r`, sampled at five stops (1, 0.7788, 0.3679, 0.1054, 0.0183). An approximation, but of a curve that is itself a soft glow, so the five stops are visually indistinguishable from the shader's per-pixel gaussian.
+- **Pulse's body** (`softDisc`): `1 - smoothstep(0.2, 1, d/r)` sampled at six stops. *Why the feather starts at a fifth of the radius:* a disc solid most of the way out reads as a flat sticker, which is what the old fixed-radius Pulse looked like; `clickdraw.rs`'s `soft_disc` uses the identical `0.2`.
+- **Composite modes**: `"lighter"` for everything the shader writes as `color + ...` (the flash, the halo, every rim and core, Shockwave's rings), `"source-over"` for what it writes as `mix(...)` (Ripple's rings, Pulse's body).
 
 ### Behaviors
 
-- no-op paths (unmirrored style, empty hits, non-positive `oh`) never touch `ctx` at all - asserted with a throwing Proxy stub, not just a return-value check.
-
-### Used by
-
-- `drawMirroredRipples` (this file).
+- never touches `ctx` for an unmirrored style, an empty hit list, or `oh <= 0`.

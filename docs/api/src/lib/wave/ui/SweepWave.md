@@ -14,7 +14,7 @@ The processing wave: one sine sweeping left to right with the dot as its scannin
 
 - `w`, `h` - drawing area in px.
 - `pct` - percent complete, or `undefined` for indeterminate work.
-- `done` - the completion state: the wave is flat and the dot hands over to a checkmark.
+- `done` - the completion state: the wave is flat, the flat line fades out, and the dot hands over to a checkmark.
 - `tone` - `"ai"` recolours to `--e-ai` for the director's pass; omitted uses `--e-primary`.
 
 ### Two modes, one component
@@ -26,7 +26,7 @@ With no `pct` (the AI director, which knows steps but not work left) the head is
 - The waveform itself also travels (one period per `TRAVEL_S`) under the envelope, so the wave reads as flowing rather than as a static shape whose left edge is being revealed.
 - `pct` and `amp` are read from a ref inside the draw, never from the effect's dependency list. An export's percent changes many times a second, and if the rAF loop restarted on each one the travel would reset its phase every percent - a visible judder. The loop's only dependencies are `reduced` and `done`; a second, tiny effect covers the still case, redrawing on any prop change while the loop is not running.
 - The dot's `cy` is the wave's own y at the head, so the scanning head and the crest are never two separate marks.
-- `done` parks the head mid-span rather than off the right edge - the dot has to be somewhere the checkmark can legibly draw itself, and the wave under it is flat by then anyway. The dot scales to zero on a spring while the checkmark draws itself with `pathLength`; this is the one stateful transition here, so Motion owns it while the sweep stays a rAF loop writing path data.
+- `done` parks the head mid-span rather than off the right edge - the dot has to be somewhere the checkmark can legibly draw itself, and the wave under it is flat by then anyway. The dot scales to zero on a spring, the flat stroke fades to nothing over 0.28s (a `motion.path` opacity tween; the rAF loop keeps writing its `d` through the same ref), and the checkmark draws itself with `pathLength`; these are the stateful transitions here, so Motion owns them while the sweep stays a rAF loop writing path data. The fade exists because a flat full-width accent stroke under a tick read as a red bar with a check drawn over it (owner, 2026-09-14), not as a wave that had settled.
 - Under reduced motion the wave is drawn once and the loop never starts: a determinate export still shows real progress (the head is at `pct`), an indeterminate pass shows a still wave, and both Motion transitions collapse to zero duration.
 
 ### Styling

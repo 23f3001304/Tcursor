@@ -87,8 +87,9 @@ pub fn save_inputs(
 /// editor's mount (it could still be transcoding when the editor opened), which is exactly the
 /// "preview still takes a while to load" lag; awaiting it with progress in the caller fixes that.
 pub fn save_session_files(folder: &str, frames: Vec<u64>, events_ms: u64,
-    mic_ms: Option<u64>, system_ms: Option<u64>, screen: ScreenInfo) {
-    let sync = crate::session::sync::SyncLog { frames, events_ms, mic_ms, system_ms };
+    mic_ms: Option<u64>, system_ms: Option<u64>, screen: ScreenInfo, segments: super::segments::SegmentLog) {
+    let sync = crate::session::sync::SyncLog { frames, events_ms, mic_ms, system_ms,
+        mic_segments: segments.mic, webcam_segments: segments.webcam, display_switches: segments.displays };
     if let Err(e) = sync.save(&Path::new(folder).join("sync.json")) { eprintln!("sync.json save failed: {e}"); }
     let paths = crate::session::paths::ProjectPaths { folder: std::path::PathBuf::from(folder) };
     let manifest = crate::session::project::manifest::ProjectManifest::new(screen.w, screen.h);
@@ -96,7 +97,7 @@ pub fn save_session_files(folder: &str, frames: Vec<u64>, events_ms: u64,
     crate::session::project::recents::touch(folder); // also makes fresh recordings show up as "recent"
 }
 
-/// Spawn the mic recording thread. `mic_id: None` means mic off — returns `None` immediately.
+/// Spawn the mic recording thread. `mic_id: None` means mic off - returns `None` immediately.
 /// cpal::Stream is !Send so mic must be created and destroyed on its own thread.
 pub fn spawn_mic_thread(
     mic_id: Option<String>,

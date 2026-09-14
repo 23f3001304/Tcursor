@@ -18,6 +18,7 @@ fn screen_panel_composites_onto_background() {
     let scene = Scene {
         screen: Panel { rect: RectF { x: 2.0, y: 2.0, w: 4.0, h: 4.0 }, radius: 0.0, alpha: 1.0, ring_px: 0.0, ring_color: [0, 0, 0] },
         camera: Panel { rect: RectF { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }, radius: 0.0, alpha: 0.0, ring_px: 0.0, ring_color: [0, 0, 0] },
+        src: crate::export::coordmap::full_src(4, 4),
     };
     let cam = Camera { cx: 4.0, cy: 4.0, scale: 1.0 };
     let mut out = Vec::new();
@@ -49,6 +50,7 @@ fn cpu_gpu_parity_cover_crops_a_wide_webcam_into_a_square_panel() {
     let scene = Scene {
         screen: Panel { rect: RectF { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }, radius: 0.0, alpha: 0.0, ring_px: 0.0, ring_color: [0, 0, 0] },
         camera: Panel { rect: RectF { x: 12.0, y: 8.0, w: 8.0, h: 8.0 }, radius: 0.0, alpha: 1.0, ring_px: 0.0, ring_color: [0, 0, 0] },
+        src: crate::export::coordmap::full_src(16, 12),
     };
     let cam = Camera { cx: 16.0, cy: 12.0, scale: 1.0 };
     let (mut cpu, mut gpu) = (Vec::new(), Vec::new());
@@ -82,6 +84,7 @@ fn cpu_gpu_parity_two_panels() {
     let scene = Scene {
         screen: Panel { rect: RectF { x: 8.0, y: 6.0, w: 30.0, h: 22.0 }, radius: 0.0, alpha: 1.0, ring_px: 0.0, ring_color: [0, 0, 0] },
         camera: Panel { rect: RectF { x: 40.0, y: 26.0, w: 18.0, h: 18.0 }, radius: 0.0, alpha: 1.0, ring_px: 0.0, ring_color: [0, 0, 0] },
+        src: crate::export::coordmap::full_src(32, 24),
     };
     let cam = Camera { cx: 32.0, cy: 24.0, scale: 1.0 };
     let mut cpu = Vec::new();

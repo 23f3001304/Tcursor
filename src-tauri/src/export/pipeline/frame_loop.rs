@@ -23,6 +23,11 @@ pub(super) struct Pipes {
     pub last_webcam: Option<(Vec<u8>, u32, u32)>,
     pub wc_fail: Option<String>, // first webcam decode error, if any (non-fatal - the screen is the deliverable)
     pub wc_frames: u64,          // webcam frames actually decoded - tells "absent" from "frozen"
+    /// The last screen frame of the span before a mid-take display switch, with that span's index
+    /// - what the switch's cross-dissolve blends FROM (`render::spans`). Latched on the one output
+    /// frame `FramePose::hold` names and released when the transition ends; `None` all take long
+    /// for a recording that never switched display.
+    pub held: Option<(usize, Vec<u8>)>,
 }
 
 #[derive(Default)]
@@ -81,7 +86,15 @@ pub(super) fn run(r: &mut FrameRenderer, pipes: &mut Pipes, plan: &[u64], video:
         let mut out = out_pool.take();
         let Some(screen) = pipes.spipe.held() else { failed = Some(anyhow!("no screen frame held at output frame {j}")); return false; };
         let wc_ref = pipes.last_webcam.as_ref().map(|(b, w, h)| (b.as_slice(), *w, *h));
-        r.composite_at(pose, screen, wc_ref, &mut out);
+        // The pre-switch picture for a display-switch dissolve, only while this frame is inside
+        // one and the held frame really is the span it wants (a cut can skip the latch frame).
+        let prev = pose.mix.as_ref()
+            .and_then(|m| pipes.held.as_ref().filter(|(i, _)| *i == m.prev_span))
+            .map(|(_, b)| b.as_slice());
+        // Copied WHILE the decode buffer is borrowed, stored after the composite releases it.
+        let to_hold = pose.hold.map(|i| (i, screen.to_vec()));
+        r.composite_at(pose, screen, prev, wc_ref, &mut out);
+        if let Some(h) = to_hold { pipes.held = Some(h); }
         timing.comp += c0.elapsed().as_micros();
         let s0 = Instant::now();
         let ok = tx.send(Frame { width: out_dims.0, height: out_dims.1, bgra: out, ts: Timestamp(video_start + ms(j as u64)) }).is_ok();

@@ -17,8 +17,13 @@ export const cameraTrack = (folder: string) => invoke<CamSample[]>("camera_track
  *  `cam`'s last 4 entries are the webcam ring: width (fraction of output width, 0 = no ring) then
  *  RGB 0..255 - mirrors the export's `Panel.ring_px`/`ring_color` riding alongside rect/radius.
  *  `canvas` is the resolved preview frame's pixel dimensions (follows `EditDoc.aspect`), so the
- *  editor sizes its canvas + `.e-stage` aspect-ratio from this instead of a hardcoded 16:9. */
-export interface PreviewLayout { screen: [number, number, number, number]; radius: number; cam: [number, number, number, number, number, number, number, number, number] | null; canvas: [number, number]; screenAlpha?: number; camAlpha?: number }
+ *  editor sizes its canvas + `.e-stage` aspect-ratio from this instead of a hardcoded 16:9.
+ *
+ *  `src` is the canvas sub-rect the screen panel shows (fractions of the recorded canvas), the
+ *  mirror of the export's `Scene.src`: the whole canvas (`[0,0,1,1]`, and the default when absent)
+ *  unless a mid-take display switch cropped it. Everything that maps a canvas point onto the panel
+ *  goes through it, exactly as Rust's `coordmap::to_panel` does. */
+export interface PreviewLayout { screen: [number, number, number, number]; radius: number; cam: [number, number, number, number, number, number, number, number, number] | null; canvas: [number, number]; screenAlpha?: number; camAlpha?: number; src?: [number, number, number, number] }
 export const previewLayout = (folder: string) => invoke<PreviewLayout>("preview_layout", { folder });
 
 /** One panel's rect (fraction of output, [x, y, w, h]) + corner radius (fraction of output width)
@@ -41,12 +46,23 @@ export type LayoutPresetName = "screen" | "camera" | "presenter" | "screen_only"
  *  (`scene::layout::resolve_seg_scene`) - the TS side never re-derives a pose, only picks which
  *  already-resolved rect to show (see `layoutTrack.ts`'s `layoutAt`). */
 export interface SegRectDto { id: string; screen: PanelRectDto | null; cam: PanelRectDto | null }
+/** One SOURCE SPAN of the take (mirrors Rust `export::render::spans::SourceSpan`): from `start_ms`
+ *  on the output clock, the screen panel shows `src` - `[x, y, w, h]` as fractions of the recorded
+ *  canvas - instead of the whole canvas. A take that never switched display has exactly one span,
+ *  at 0, covering `[0, 0, 1, 1]`. `transition_ms` is the switch's ease/cross-dissolve length;
+ *  `fit` is `[w, h]` ratios saying how much smaller that span's screen panel is than the
+ *  full-canvas one, so the live preview can give a switched-to display its own aspect by scaling
+ *  the resolved panel about its centre rather than re-deriving the export's panel math. */
+export interface SourceSpanDto { start_ms: number; src: [number, number, number, number]; transition_ms: number; fit: [number, number] }
 export interface LayoutPresets {
   screen: LayoutPresetDto; camera: LayoutPresetDto; presenter: LayoutPresetDto;
   screen_only: LayoutPresetDto; camera_only: LayoutPresetDto;
   /** One entry per `EditDoc.layout` segment, in doc order - not just posed ones, so a lookup by id
    *  is a single flat scan with no special-casing "this segment was never in the list". */
   segs: SegRectDto[];
+  /** The take's source spans in order, the first always at 0 with the whole canvas - one entry
+   *  unless a mid-take display switch cropped the take. */
+  spans: SourceSpanDto[];
   /** `FrameRenderer::inset_w_frac` - fraction of output width. The reference width the export's
    *  synthetic cursor scales against (`cursorset::draw`'s `panel` factor), NOT one of the panel
    *  rects above: a fixed baseline independent of the active preset/arrangement. `cursorPanel.ts`'s
@@ -66,6 +82,10 @@ export const clickTrack = (folder: string) => invoke<ClickSample[]>("click_track
 
 /** The export background (mesh/gradient) as a PNG data URL, so the canvas preview matches the export. */
 export const previewBg = (folder: string) => invoke<string>("preview_bg", { folder });
+/** The export's own composited frame at `timeMs` (clip time), as a JPEG data URL from the warm
+ *  Rust renderer - what the stage shows whenever playback is paused or a scrub has settled
+ *  (`useExactFrame`), so the picture being judged is a frame of the export. */
+export const previewFrame = (folder: string, timeMs: number) => invoke<string>("preview_frame", { folder, timeMs });
 
 /** One background-picker tile: a 96x54 thumbnail rendered by the EXPORT's own background code,
  *  so a tile is a true miniature of what picking it produces. `kind` is the `BackgroundKind` the

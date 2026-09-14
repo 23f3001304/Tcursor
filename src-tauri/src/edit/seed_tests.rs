@@ -21,7 +21,7 @@ fn fixture(name: &str, actions: Vec<ActionEvent>) -> ProjectPaths {
         events: vec![MouseEvent { t: 0, kind: EventKind::Move, x: 10, y: 10, button: None }] };
     log.save(&paths.events()).unwrap();
     ActionLog { actions }.save(&paths.actions()).unwrap();
-    SyncLog { frames: (0..=100).map(|k| VIDEO_START + k * 50).collect(), events_ms: 0, mic_ms: None, system_ms: None }
+    SyncLog { frames: (0..=100).map(|k| VIDEO_START + k * 50).collect(), events_ms: 0, mic_ms: None, system_ms: None, ..Default::default() }
         .save(&paths.sync()).unwrap();
     paths
 }
@@ -61,14 +61,16 @@ fn empty_regions_make_no_zooms() {
 }
 
 #[test]
-fn fields_map_faithfully_and_anchor_is_preserved_as_fixed() {
+fn fields_map_faithfully_and_the_zoom_follows_the_cursor() {
     let zs = zooms_from_regions(&[region(120, 880, 400, 300)]);
     let z = &zs[0];
     assert_eq!(z.start_ms, 120);
     assert_eq!(z.end_ms, 880);
     assert_eq!(z.scale, 2.2);
     assert_eq!(z.easing, "smooth");
-    assert_eq!(z.target, ZoomTarget::Fixed { x: 400.0, y: 300.0 });
+    // The click anchor is where the cursor is at the click, so following it starts in the same
+    // place a pinned target would and then tracks the hand (owner ruling 2026-09-14).
+    assert_eq!(z.target, ZoomTarget::Cursor);
 }
 
 #[test]

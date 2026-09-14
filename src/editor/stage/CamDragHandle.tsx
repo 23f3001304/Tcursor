@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import type { LayoutPresets, PreviewLayout } from "../../lib/ipc";
 import type { CameraMove, LayoutSeg } from "../../lib/edit";
-import { camAspect, cameraMovesKey, camMoveAt, rectFromCenter, type CamPose } from "./cameraMoves";
+import { cameraMovesKey, camMoveAt, liveCamPose, overrideCamPanel, type CamPose } from "./cameraMoves";
 import { mapPointerToCamFraction } from "./camDragMapper";
 import { layoutAt } from "../timeline/layoutTrack";
 import { isNaturalPlaybackTick } from "./playbackTick";
@@ -58,18 +58,16 @@ export function CamDragHandle({ layout, layoutPresets, layoutSegs, cameraMoves, 
   // The LIVE (un-overridden, layout-resolved) PiP pose the keyframe track eases to and from at
   // its span edges - same derivation useCompositeLoop.ts makes, so the handle matches the drawn
   // frame. Outside the span `camMoveAt` is null and this pose IS what's on screen.
-  const livePose = baseLayout?.cam
-    ? { x: baseLayout.cam[0] + baseLayout.cam[2] / 2, y: baseLayout.cam[1] + baseLayout.cam[3] / 2, size: baseLayout.cam[3] }
-    : null;
+  const livePose = baseLayout?.cam ? liveCamPose(baseLayout.cam, canvasW, canvasH) : null;
   const sampledPose = camMoveAt(cameraMoves, timeMs, livePose);
   const activePose = dragPose ?? sampledPose;
-  const pipRect: [number, number, number, number] | null = !baseLayout?.cam ? null
-    : activePose ? rectFromCenter(activePose, canvasW, canvasH, camAspect(baseLayout.cam, canvasW, canvasH))
-    : [baseLayout.cam[0], baseLayout.cam[1], baseLayout.cam[2], baseLayout.cam[3]];
+  // The panel the composite is drawing this frame: the keyframe/drag override applied to the
+  // layout's panel (same call the rAF loop makes), else the layout's panel as it is.
+  const panel = !baseLayout?.cam ? null : activePose ? overrideCamPanel(baseLayout.cam, activePose, canvasW, canvasH) : baseLayout.cam;
   // Match the handle's rounding to the webcam shape (radius/width ratio: ~50% circle, frac rounded,
-  // 0 rect) so it hugs the PiP instead of a boxy border sticking out past a round webcam.
-  const handleRadiusPct = baseLayout?.cam && baseLayout.cam[2] > 0
-    ? Math.min(50, (baseLayout.cam[4] / baseLayout.cam[2]) * 100) : 12;
+  // 0 rect) so it hugs the PiP instead of a boxy border sticking out past a round webcam - read
+  // off the OVERRIDDEN panel, so a keyframed shape (or morph) is what the handle hugs.
+  const handleRadiusPct = panel && panel[2] > 0 ? Math.min(50, (panel[4] / panel[2]) * 100) : 12;
 
   // Move-mode drag: a pointerdown on the handle records the start but does NOT move or commit
   // anything - the PiP only follows (and a keyframe is only written) once the pointer actually
@@ -98,10 +96,10 @@ export function CamDragHandle({ layout, layoutPresets, layoutSegs, cameraMoves, 
     detachRef.current = attachPointerGesture(move, () => { detachRef.current = null; });
   };
 
-  if (!pipRect) return null;
+  if (!panel) return null;
   return (
     <div className={`e-camdrag${dragPose ? " drag" : ""}`}
-      style={{ left: `${pipRect[0] * 100}%`, top: `${pipRect[1] * 100}%`, width: `${pipRect[2] * 100}%`, height: `${pipRect[3] * 100}%`, borderRadius: `${handleRadiusPct}%` }}
+      style={{ left: `${panel[0] * 100}%`, top: `${panel[1] * 100}%`, width: `${panel[2] * 100}%`, height: `${panel[3] * 100}%`, borderRadius: `${handleRadiusPct}%` }}
       title="Drag to reposition the webcam"
       onPointerDown={onHandlePointerDown} />
   );

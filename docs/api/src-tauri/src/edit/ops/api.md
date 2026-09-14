@@ -20,6 +20,7 @@ pub enum EditOp {
         zoom_in_ms: Option<u32>,
         zoom_out_ms: Option<u32>,
         layer: Option<u32>,
+        smart_typing: Option<bool>,
     },
     RemoveZoom { id: String },
     ClearZooms,
@@ -36,8 +37,10 @@ pub enum EditOp {
     AddEffect { kind: EffectKind, start_ms: u32, end_ms: u32 },
     UpdateEffect { id: String, start_ms: Option<u32>, end_ms: Option<u32>, fade_in_ms: Option<u32>, fade_out_ms: Option<u32>, mode: Option<String>, dim: Option<f32>, radius: Option<f32>, feather: Option<f32>, layer: Option<u32> },
     RemoveEffect { id: String },
-    AddCameraMove { t_ms: u32, x: f32, y: f32, size: f32 },
-    UpdateCameraMove { id: String, t_ms: Option<u32>, x: Option<f32>, y: Option<f32>, size: Option<f32>, easing: Option<String> },
+    AddCameraMove { t_ms: u32, x: f32, y: f32, size: f32,
+        #[serde(default)] shape: Option<String>, #[serde(default)] roundness: Option<f32> },
+    UpdateCameraMove { id: String, t_ms: Option<u32>, x: Option<f32>, y: Option<f32>, size: Option<f32>, easing: Option<String>,
+        #[serde(default)] shape: Option<String>, #[serde(default)] roundness: Option<f32> },
     RemoveCameraMove { id: String },
 }
 ```
@@ -46,7 +49,7 @@ Discriminated-union command type serialized to/from the Tauri IPC channel and th
 
 - `AddZoom` - *insert a zoom at `at_ms` lasting `dur_ms` with default scale (2.0) and target (Cursor); the most common shortcut action from the editor timeline.*
 - `AddZoomFull` - *same as `AddZoom` but the caller supplies `scale`; used by the AI director when it picks a specific zoom level from its plan.*
-- `UpdateZoom` - *partial update by `id`; only `Some` fields are written, so the frontend can patch a single changed field without re-transmitting the full zoom.*
+- `UpdateZoom` - *partial update by `id`; only `Some` fields are written, so the frontend can patch a single changed field without re-transmitting the full zoom. `smart_typing: Some(true)` marks the zoom as smart-typing; `apply` only stores the flag, and `edit::commands::apply_edit_op` then refits the end from the recording's typing (`ops::smart_zoom`) - the pure op cannot, since it has no access to `typing.json`.*
 - `RemoveZoom` - *drop a zoom by string id; triggered by the delete key and AI-plan rollback.*
 - `ClearZooms` - *drop every zoom in one step; the AI director's opening "rethink" move for the agentic auto-edit reveal - the frontend applies this first (when the doc already has zooms) so the reveal shows the mechanical seed-time auto-zooms clearing before the LLM's own picks land one at a time. Field-less, so it carries no payload beyond the `op` tag.*
 - `SetZoomCamAction` - *set (`Some`) or clear (`None`) one zoom's webcam-on-zoom override. **Why a dedicated op rather than a field on `UpdateZoom`:** that op's "field is `None` => leave unchanged" convention cannot express "clear back to inherit the global default" without an `Option<Option<_>>`, which serializes ambiguously over IPC.*
@@ -57,8 +60,8 @@ Discriminated-union command type serialized to/from the Tauri IPC channel and th
 - `AddLayoutSeg` / `UpdateLayoutSeg` / `RemoveLayoutSeg` - *add/patch/remove a named-layout segment (`"screen"`, `"camera"`, `"presenter"`, ...), auto-id `l{n}`, clamped to the clip duration. Both carry the exit-transition pair as `Option`s: on `Add` they seed the segment (omitted = `NEW_LAYOUT_TRANSITION_MS`, the same value the entry gets, so a new segment is symmetric - see that const), on `Update` they follow the usual "only `Some` fields are written" rule. `easing_out` runs through `valid_easing` like every other easing setter, and defaults to `"smooth"` - again the same as the entry.*
 - `SetArrangement` / `ClearArrangement` - *set/hide a segment's panel poses, or drop the arrangement so the segment resolves from its `layout` preset again (T34); dispatched to `edit::ops::arrangement::apply_arrangement`, which documents the full semantics. Each panel field is THREE-valued on the wire - key absent = "leave this panel alone", `null` = hide it, an object = that pose - which needs `arrangement::double_option` to deserialize, because plain `Option<Option<_>>` folds `null` into the outer `None` and would make "hide" indistinguishable from "don't touch". (This is the same ambiguity `SetZoomCamAction` exists to avoid; here the three-valued shape is unavoidable because two independent panels are patched by one op, so it is handled explicitly instead.)*
 - `AddEffect` / `UpdateEffect` / `RemoveEffect` - *add/patch/remove a Spotlight effect region; dispatched to `edit::ops::effects::apply_effect`.*
-- `AddCameraMove` - *append a webcam PiP keyframe at `t_ms` with center `(x, y)` and `size`, default easing `"smooth"`; auto-id `k{n}` (max existing `k`-suffix + 1); `t_ms` clamped to `[0, dur_bound(doc)]`, `x`/`y`/`size` clamped to `[0.0, 1.0]`. `doc.camera_moves` is kept sorted by `t_ms` after every add.*
-- `UpdateCameraMove` - *partial patch by `id`; only `Some` fields are written, same clamps as `AddCameraMove`; re-sorts `doc.camera_moves` by `t_ms` only when `t_ms` itself changed.*
+- `AddCameraMove` - *set the webcam PiP keyframe at `t_ms`: center `(x, y)`, `size`, and optionally `shape` (`valid_cam_shape`, default `"layout"`) and `roundness` (clamped `[0.0, 0.5]`, default `DEFAULT_CAM_ROUNDNESS`); default easing `"smooth"`; auto-id `k{n}` (max existing `k`-suffix + 1); `t_ms` clamped to `[0, dur_bound(doc)]`, `x`/`y`/`size` clamped to `[0.0, 1.0]`. **One keyframe per instant:** if a keyframe already sits at the (clamped) `t_ms`, its pose and shape are overwritten in place and its id/easing kept, rather than a duplicate pushed - the Move-mode slider commits with whatever doc it rendered with, which can be one IPC round-trip stale, so two quick commits both saying "add" used to stack a coincident duplicate that the sampler (which prefers the LAST coincident keyframe) then showed instead of the latest value. `doc.camera_moves` is kept sorted by `t_ms` after every add.*
+- `UpdateCameraMove` - *partial patch by `id`; only `Some` fields are written, same clamps/validation as `AddCameraMove`; re-sorts `doc.camera_moves` by `t_ms` only when `t_ms` itself changed.*
 - `RemoveCameraMove` - *drop a keyframe by id via `retain`; unknown ids are a no-op.*
 
 ### Used by

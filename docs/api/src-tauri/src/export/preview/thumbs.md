@@ -4,11 +4,41 @@ Editor-timeline media: cached ffmpeg helpers for the filmstrip thumbnails, the p
 
 **Off the main thread (Task 41).** All three IPC commands are `async fn`; each wraps a `_blocking` sibling (same body the sync command used to run) in `tauri::async_runtime::spawn_blocking`. Same freeze mechanism `ai::commands` fixed for Task 40: a non-`async` `#[tauri::command] fn` runs INLINE on the thread that received the IPC message (the app's main/UI thread), so a sync version of these would freeze the window for the whole ffmpeg pass - a proxy transcode (`ensure_proxy`, `preview_track.rs`) can run for seconds on a project OPEN. `preprocess::run` calls the `_blocking` functions directly (not the `async` commands) since it already runs off-thread on its own `std::thread::spawn`, outside any `.await` context.
 
+## FILMSTRIP_COUNT
+
+```rust
+pub(crate) const FILMSTRIP_COUNT: u32 = 9;
+pub(crate) const FILMSTRIP_HEIGHT: u32 = 80;
+```
+
+The filmstrip the editor actually draws, mirrored from `src/editor/timeline/filmstripPlan.ts` (which DERIVES the pair from the lane's drawn height and the editor window's usual width - see `filmstripPlan.md`). `preprocess::rest` pre-renders with exactly these, so the background pass fills the very `thumbs_9_80` dir the editor then asks for instead of leaving it a second ffmpeg run. A unit test asserts the pair still names that dir; keep the two sides in step.
+
+## FILMSTRIP_HEIGHT
+
+See `FILMSTRIP_COUNT` above - the two are one decision and are declared together.
+
+## thumbs_spec
+
+```rust
+pub(crate) fn thumbs_spec(count: u32, height: u32) -> (u32, u32, String)
+```
+
+The clamped count, the clamped EVEN height, and the cache dir name the pair owns (`thumbs_<count>_<height>`) - the one place those three are derived, so the ffmpeg args, the collect loop and the cache key can never disagree.
+
+### Inputs (what, and why it is needed)
+
+- `count: u32` - requested thumbnails, clamped 8..120. *Why:* a filmstrip needs at least a few tiles, and past ~120 the pass costs more than the strip is worth.
+- `height: u32` - requested pixel height, clamped 16..240 and rounded DOWN to even. *Why:* `scale=-2:h` only guarantees an even WIDTH; an odd height leaves the JPEG's 4:2:0 chroma plane half a line short.
+
+### Returns
+
+`(count, height, dir_name)`. The height is part of the dir name (it used to be a hard-coded `64`) so a taller lane re-renders its thumbnails at the size it draws them instead of silently upscaling a cached smaller set.
+
 ## ensure_thumbs
 
 ```rust
 #[tauri::command]
-pub async fn ensure_thumbs(folder: String, count: u32) -> Result<Vec<String>, String>
+pub async fn ensure_thumbs(folder: String, count: u32, height: u32) -> Result<Vec<String>, String>
 ```
 
 Tauri IPC command. `spawn_blocking(ensure_thumbs_blocking)`, `.await`ed, join failure mapped to `Err(String)`.
@@ -16,15 +46,15 @@ Tauri IPC command. `spawn_blocking(ensure_thumbs_blocking)`, `.await`ed, join fa
 ## ensure_thumbs_blocking
 
 ```rust
-pub(crate) fn ensure_thumbs_blocking(folder: String, count: u32) -> Result<Vec<String>, String>
+pub(crate) fn ensure_thumbs_blocking(folder: String, count: u32, height: u32) -> Result<Vec<String>, String>
 ```
 
-N evenly-spaced JPEG thumbnails (height 64) for the filmstrip, cached in `folder/thumbs_<count>_64/`.
+N evenly-spaced JPEG thumbnails at `height` px for the filmstrip, cached in `folder/thumbs_<count>_<height>/`.
 
 ### Inputs (what, and why it is needed)
 
 - `folder: String` - absolute project path. *Why:* locates the proxy/source video and the cache dir.
-- `count: u32` - number of thumbnails (clamped 8..120). *Why:* the timeline fits ~16 across its width.
+- `count: u32` / `height: u32` - the filmstrip's tile count and pixel height, both through `thumbs_spec`. *Why:* the lane is 80px tall and fits nine 16:9 tiles across the editor's usual width (`filmstripPlan.ts`); generating at the drawn height is what keeps a tile from being an upscaled smaller JPEG.
 
 ### Returns
 
@@ -33,7 +63,7 @@ N evenly-spaced JPEG thumbnails (height 64) for the filmstrip, cached in `folder
 ### Implementation
 
 1. If `thumb_0001.jpg` already exists in the cache dir, return the existing files.
-2. Else one ffmpeg pass over the re-timed proxy (`preview_720_rt.mp4`, else `video.mp4`): `-vf fps=<count>/<dur_s>,scale=-2:64 -q:v 4`, where `dur_s = edit::seed::true_duration_ms(paths) / 1000` - the recording's TRUE full duration, not `trim.out_ms` (a sub-range once a user actually trims): the filmstrip spans the whole scrubbable timeline regardless of trim. Reading the `_rt` proxy also yields the right thumbnail count - the raw `video.mp4` is sped up, so `fps=count/dur` over it would emit fewer than `count` frames. The `fps` filter is best-effort about the exact count; the collect loop tolerates a frame more/less.
+2. Else one ffmpeg pass over the re-timed proxy (`preview_720_rt.mp4`, else `video.mp4`): `-vf fps=<count>/<dur_s>,scale=-2:<height> -q:v 4`, with `-skip_frame nokey` when the source is the proxy - it carries a keyframe every second (`preview_track`'s `-g 60`), so decoding only keyframes gives the `fps` filter a sample per second to pick from at about half the cost (5.0s -> 2.9s on a 5-minute 1080p60 take); the raw capture's keyframes are seconds apart, so it is still decoded whole - where `dur_s = edit::seed::true_duration_ms(paths) / 1000` - the recording's TRUE full duration, not `trim.out_ms` (a sub-range once a user actually trims): the filmstrip spans the whole scrubbable timeline regardless of trim. Reading the `_rt` proxy also yields the right thumbnail count - the raw `video.mp4` is sped up, so `fps=count/dur` over it would emit fewer than `count` frames. The `fps` filter is best-effort about the exact count; the collect loop tolerates a frame more/less.
 
 ## ensure_waveform
 
@@ -50,7 +80,15 @@ Tauri IPC command. `spawn_blocking(ensure_waveform_blocking)`, `.await`ed, join 
 pub(crate) fn ensure_waveform_blocking(folder: String, which: String) -> Result<String, String>
 ```
 
-A waveform PNG for one source (`"system"` or `"mic"`), cached as `folder/wf_<which>.png`.
+A waveform PNG for one source (`"system"` or `"mic"`), cached as `folder/wf_<which>.png`. An absent WAV, or one that is header-only (`wav_is_empty`: 44 bytes, a source that was on but never delivered a sample, such as a silent loopback), returns `Ok("")` - "no audio", never a render attempt, because `showwavespic` fails on it and until 2026-09-14 that failure took the editor's other lane down with it.
+
+## wav_is_empty
+
+```rust
+pub(crate) fn wav_is_empty(wav: &Path) -> bool
+```
+
+True for a WAV that holds no samples: nothing past the 44-byte RIFF/fmt/data header (or a file whose metadata cannot be read). Test: `a_header_only_wav_yields_no_waveform_instead_of_an_error`.
 
 ### Inputs (what, and why it is needed)
 

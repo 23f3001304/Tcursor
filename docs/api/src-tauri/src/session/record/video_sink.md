@@ -5,10 +5,20 @@ Picks the recording video pipeline: GPU-native Media Foundation by default (cure
 ## VideoSink
 
 ```rust
-pub enum VideoSink { Gpu(GpuRecorder), Ffmpeg { thread, halt, stopper } }
+pub enum VideoSink { Gpu(GpuRecorder), Ffmpeg { thread, halt, stopper }, Dead(FrameTimes) }
 ```
 
 A live recording video pipeline. `Gpu` is the GPU-native path (`GpuRecorder`); `Ffmpeg` is the legacy WGC-readback -> `RecordingSession` -> `VfrSegments` path running on its own thread, kept as the manual + automatic fallback.
+
+`Dead` is neither: it is where a take lands when `switch` stopped the capture and its replacement never started. Nothing is recording and `video.mp4` has been finalized, but the variant still holds the shared `FrameTimes` the dead capture was pushing into - the same `Arc`, not a snapshot, so the last frames it wrote on its way out are in it too. `stop_and_collect` turns that into a `VideoStopped` with an error and a full timestamp list, so a failed switch costs the take its tail and nothing more. Without it, `switch` would have nothing to leave in `&mut self` after moving the recorder into `GpuRecorder::restart`, and a failed restart would take `sync.json` with it.
+
+## NO_GPU
+
+```rust
+const NO_GPU: &str = "switching needs the GPU encoder; turn the compatibility encoder off";
+```
+
+What `switch` refuses with when the take is on the legacy pipeline. Its rawvideo pipe is sized once at start and `RecordingSession::pump_once` ends the take on the first mismatched frame (`DISPLAY_CHANGED`), so there is nothing to restart into - and the message names the setting the user has to change rather than the internals.
 
 ## VideoStopped
 
@@ -53,7 +63,21 @@ Everything both capture paths need beside the target and the output path.
 pub fn start_video(cfg: VideoStart, target_id: Option<&str>, video_path: &str) -> Result<(VideoSink, u32, u32, i32, i32), String>
 ```
 
-Starts the video pipeline writing `video_path`. GPU-native unless `cfg.legacy` is set; on a `GpuRecorder::start` error it logs and falls back to ffmpeg, so recording never simply fails. Returns the sink plus the captured `(w, h, origin_x, origin_y)`, the origin coming from `get_target_bounds`.
+Starts the video pipeline writing `video_path`. GPU-native unless `cfg.legacy` is set; on a `GpuRecorder::start` error it logs and falls back to ffmpeg, so recording never simply fails. Returns the sink plus the captured `(w, h, origin_x, origin_y)`, the origin coming from `target_bounds::get_target_bounds`.
+
+## VideoSink::switch
+
+```rust
+pub fn switch(&mut self, cfg: VideoStart, target_id: &str, on_size: SizeHook) -> Result<(), String>
+```
+
+Moves a running capture to another display or window mid-take, keeping the encoder - so `video.mp4` stays one stream at one size and the editor never learns a second screen existed. `on_size` (`gpu_frames::SizeHook`) is told the replacement capture's first frame size; `switch_display` writes it into the switch record. The target's rectangle is not this function's business any more: `switch_display` asks `target_bounds::get_target_bounds` itself, before the restart, for the record and the `Remap`. `Err(NO_GPU)` on the legacy pipeline; `Err("display switch: …")` when the restart itself failed, with the sink left as `Dead`.
+
+### Implementation
+
+1. Refuse anything but `Gpu`.
+2. Take `frame_times()` off the live recorder and build the `Dead` stand-in from it, BEFORE anything is stopped.
+3. `std::mem::replace(self, dead)` to move the recorder out - `GpuRecorder::restart` consumes it - then `restart(gpu, Some(target_id), on_size)`, whose returned `(w, h)` estimate is dropped: the true size reaches the record through `on_size`. On success the new recorder goes back into `self`; on failure `self` stays `Dead` and the error is returned with the `display switch:` prefix.
 
 ## start_ffmpeg
 
@@ -71,4 +95,4 @@ When `run` ends while `cfg.stop` is still `false`, something other than a user S
 pub fn stop_and_collect(self) -> VideoStopped
 ```
 
-Stops the pipeline and finalizes `video.mp4`. GPU: delegates to `GpuRecorder::stop`. Ffmpeg: sets the halt flag, runs the stopper (WM_QUIT unblocks the WGC thread, closing the frame channel so `run()` ends), then joins the thread - a panicked thread becomes a `VideoStopped` with an `error` and no frames, rather than being propagated as a `Result`, so the caller's salvage path is identical in every failure mode.
+Stops the pipeline and finalizes `video.mp4`. GPU: delegates to `GpuRecorder::stop`. Ffmpeg: sets the halt flag, runs the stopper (WM_QUIT unblocks the WGC thread, closing the frame channel so `run()` ends), then joins the thread - a panicked thread becomes a `VideoStopped` with an `error` and no frames, rather than being propagated as a `Result`, so the caller's salvage path is identical in every failure mode. `Dead`: reads the timestamps a failed `switch` left behind and reports them with an error saying so; there is nothing left to stop or finalize.

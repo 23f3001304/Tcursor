@@ -42,6 +42,22 @@ pub fn events_ms(&self) -> u64
 
 The event-time base (the private `events_ms` field), so preview commands outside the renderer can map an event timestamp to output time the same way `click_track` does.
 
+## FrameRenderer::spans
+
+```rust
+pub fn spans(&self) -> &[SourceSpan]
+```
+
+The take's source spans (`render::spans`) - one full-canvas span unless a mid-take display switch cropped it. Exposed so `preview_layouts` hands the editor the very rects the export crops by, instead of the editor deriving a second set from `sync.json`.
+
+## FrameRenderer::span_fit
+
+```rust
+pub fn span_fit(&self, src: RectF) -> (f32, f32)
+```
+
+How much smaller (w, h) a span's screen panel is than the full-canvas one, as ratios about the panel centre: `inset_rect` at the span's own size over `inset_rect` at the canvas's. The live TS preview scales its layout-resolved screen rect by this to give a switched-to display its own aspect without re-running any pose math of its own; it is exact for the inset-based presets, and the paused stage shows the export's own frame either way (`useExactFrame`).
+
 ## FrameRenderer::time_map
 
 ```rust

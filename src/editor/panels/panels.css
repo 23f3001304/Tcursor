@@ -4,14 +4,16 @@
    Same three rules as controls/controls.css: surfaces read by lightness rather than strokes, one
    accent (--e-primary) reserved for on/selected state, one motion language. Three more that are
    specific to a 320px panel:
-     4. At most ONE level of card. A panel groups by SPACING, never by a box; `.e-tile` (and its
-        strip cousin `.e-rowtile` in controls.css) is that one card level.
+     4. At most ONE level of card. A panel groups by SPACING, never by a box; `.e-tile` is that
+        one card level, whether it holds a cursor glyph or a wallpaper thumbnail.
      5. Nothing hugs the left edge: every full-width control spans the content width.
      6. A panel fits its slot (about 620px on a 720px-tall window) without scrolling. That is a
-        budget, and it is what the usability pass spends: preset GRIDS became `TileRow` strips,
-        short slider pairs went two-up (`.e-two`), and whatever still did not fit went under the
-        panel's ONE `Disclosure`. */
-.editor { --e-plate: #55555b; }   /* the neutral glyph plate - see `.e-glyph-plate` */
+        budget, and it is what the arrangements pass spends: a preset library is a stack of
+        collapsible `CategorySection`s with only the chosen one open, short slider pairs went
+        two-up (`.e-two`), and whatever still did not fit went under the panel's ONE `Disclosure`.
+        NOTHING in a panel scrolls sideways - the owner's ruling on the strips this replaced. */
+/* The neutral glyph plate `--e-plate` (see `.e-glyph-plate` below) is declared with the rest of
+   the palette in editor.css, so both themes state it and `themeTokens.test.ts` can guard it. */
 
 /* ---- Panel shell ---------------------------------------------------------------------------
    Section rhythm 16px, row rhythm 10px, label 11px dim, control text 12.5px. The `.e-panel`
@@ -31,18 +33,40 @@
   color: var(--e-mut); }
 /* A group is a heading plus the rows it owns. Spacing alone separates them - 10px between rows
    inside a group, 16px between groups, 6px from a row's label to its control (`.e-field`).
-   A stack of `TileRow`s (`.e-rowstack`) is ONE block, not a section each: the five wallpaper
-   groups plus Custom read as one library, so 8px between strips and 16px to what follows. */
+   A stack of `CategorySection`s (`.e-secstack`) is ONE block, not a section each: the wallpaper
+   groups plus Your file read as one library, so 2px between headers and 16px to what follows. */
 .e-grp { display: flex; flex-direction: column; gap: 10px; }
 .e-grp + .e-grp, .e-grp + .e-field, .e-field + .e-grp, .e-grp + .e-more, .e-more + .e-grp {
   margin-top: var(--e-sp-3); }
 .e-grp > .e-field { margin-bottom: 0; }
-.e-rowstack { gap: 8px; }
+/* Self-sufficient, so a picker that is not itself a `.e-grp` (the Cursor panel's pack field, which
+   already has a heading of its own) still stacks its sections at the same 2px. */
+.e-secstack { display: flex; flex-direction: column; gap: 2px; }
 /* Two short controls side by side - the pass's main density move, for pairs whose own inline
    readouts already name them (Blur | Dim, Corner radius | Padding, Margin X | Margin Y). SHORT
    names only: `.e-fl-name` ellipsises, and an ellipsised label is worse than a stacked row. */
-.e-two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: start; }
+.e-two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; align-items: start; }
 .e-two > .e-field { margin-bottom: 0; min-width: 0; }
+
+/* ---- CategorySection (controls/CategorySection.tsx) -------------------------------------------
+   A panel may hold several of these, so they are quieter than a section heading, not louder: the
+   chevron and an 11px word, `Disclosure`'s idiom with a count after it. The rules live HERE rather
+   than in controls.css because only panels stack categories; the control itself is shared so the
+   Cursor and Background panels cannot drift apart.
+   The selected item's name rides at the right of a CLOSED header. It is the one place in this
+   pass that may ellipsise, and only as a safety valve for an imported pack with a very long name:
+   the name is never only here, it is captioned under its own tile one click away. */
+.e-cat-btn { display: flex; align-items: center; gap: 6px; width: 100%; height: 28px; padding: 0;
+  border: none; background: none; cursor: pointer; font: inherit; font-size: 11px; font-weight: 600;
+  color: var(--e-dim); text-align: left; transition: color .14s ease; }
+.e-cat-btn:hover { color: var(--e-fg); }
+.e-cat-chev { display: inline-flex; flex: none; }
+.e-cat-label { flex: none; }
+.e-cat-count { flex: none; font-weight: 500; color: var(--e-mut); font-variant-numeric: tabular-nums; }
+.e-cat-sel { margin-left: auto; min-width: 0; font-weight: 500; color: var(--e-mut);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.e-cat-body { overflow: hidden; }
+.e-cat-inner { padding: 6px 0 10px; }
 
 /* ---- PanelHeader ----------------------------------------------------------------------------
    No rule under the title: the 16px gap to the first group is the separation. The lede is one
@@ -62,23 +86,30 @@
    A raised plane, no border. Hover is one further lightness step and nothing else (tiles that all
    jump on hover read as jelly). Selected is a 2px inset accent ring, so a tile's own artwork is
    never darkened or tinted to say "chosen".
-   The cursor packs are a STRIP per group, not a wrapping grid: fifteen built-in packs four-up
-   cost four rows of the panel's height, and the same fifteen scroll sideways in one. The scroller
-   itself (and its reserved, hover-only scrollbar lane) is `.e-tilerow`'s rule in controls.css. */
-.e-tile-strip { gap: 8px; }   .e-tile-section + .e-tile-section { margin-top: 10px; }
-.e-tile-group { display: block; font-size: 11px; line-height: 1; font-weight: 500; color: var(--e-dim); margin: 0 0 4px; }
-.e-tile { position: relative; flex: none; width: 66px; box-sizing: border-box; display: flex;
-  flex-direction: column; align-items: center; gap: 5px; scroll-snap-align: start;
+   `.e-tile-grid` is the ONLY layout a tile library gets: a wrapping grid, three to a row at the
+   320px panel width, inside a `CategorySection` that is closed unless it holds the current
+   choice. No `overflow-x` anywhere in it - the strips it replaced hid most of every group behind
+   a sideways flick, and clipped the tooltip that was the only place a name appeared. */
+.e-tile-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;
+  align-items: stretch; }
+.e-tile { position: relative; box-sizing: border-box; display: flex;
+  flex-direction: column; align-items: center; gap: 5px;
   padding: 7px 5px 6px; border: none; border-radius: var(--e-r); background: var(--e-raised);
-  color: var(--e-mut); cursor: pointer; outline: none; overflow: hidden;
+  color: var(--e-mut); cursor: pointer; outline: none;
   transition: background-color .14s ease, box-shadow .14s ease, color .14s ease; }
 .e-tile:hover { background: var(--e-raised-hi); color: var(--e-fg); }
 .e-tile.on { color: var(--e-fg); box-shadow: inset 0 0 0 2px var(--e-primary); }
-/* Loading skeleton: an empty tile at a real tile's size, so the strip does not resize on resolve. */
-.e-tile-skel { height: 65px; flex: none; width: 66px; }
+.e-tile:focus-visible { box-shadow: inset 0 0 0 2px var(--e-fg); }
+.e-tile.on:focus-visible { box-shadow: inset 0 0 0 2px var(--e-primary), inset 0 0 0 4px var(--e-fg); }
+/* Loading skeleton: an empty tile at a real tile's height, so the grid does not resize on resolve. */
+.e-tile-skel { height: 78px; }
+/* The name is a CAPTION, never a tooltip and never a hover reveal: it is the whole reason a
+   library can be read at a glance. It WRAPS to two lines (never ellipsised - a truncated pack
+   name is the bug this pass fixed) and reserves both of them, so the tiles of a row line up; a
+   third line simply makes that row taller, because the grid stretches its items. */
 .e-tile-label { max-width: 100%; font-size: 10.5px; line-height: 1.2; font-weight: 500;
-  letter-spacing: -0.005em; text-align: center; white-space: nowrap; overflow: hidden;
-  text-overflow: ellipsis; pointer-events: none; }
+  letter-spacing: -0.005em; text-align: center; overflow-wrap: anywhere; min-height: 26px;
+  pointer-events: none; }
 /* The glyph plate. Every pack's PNG keeps its own colours - a cream cursor and an ink-black one
    are both what that pack actually draws - so legibility comes from a constant mid-grey plate
    behind the glyph rather than any filter, tint or shadow ON the glyph. `PackTile.tsx` fits each
@@ -87,26 +118,32 @@
   background: var(--e-plate); overflow: hidden; pointer-events: none; }
 .e-glyph-plate img { position: absolute; max-width: none; }
 
-/* The wallpaper face inside a `.e-rowtile` (controls.css). It was a 16:9 box in an 88px grid cell
-   until the usability pass; the strip now fixes the tile at 64x36, so the face just fills it. */
-.e-tile-img { display: block; width: 100%; height: 100%; background-size: cover;
-  background-position: center; pointer-events: none; }
+/* The wallpaper face inside a `.e-tile`: the full tile width at the 16:9 the thumbnails are
+   rendered at (96x54 in Rust), so a row of three is three whole pictures rather than three crops.
+   Its own rounding and clip, because the tile itself no longer clips anything. */
+.e-tile-img { display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: var(--e-r-sm);
+  overflow: hidden; background-size: cover; background-position: center; pointer-events: none; }
 
 /* ---- Import affordances ----------------------------------------------------------------------
    `.e-upload` (the cursor pack folder) is the quiet raised plane, full width, icon plus label - a
-   dashed box is a drop target's idiom and this one opens a file dialog. `.e-rowtile-add` is the
-   same affordance as the tile that LEADS the Background panel's Custom row, since importing is
-   one more way to pick a background rather than a separate mode. */
+   dashed box is a drop target's idiom and this one opens a file dialog. `.e-bgadd` is the same
+   affordance leading the Background panel's "Your file" section, since importing is one more way
+   to pick a background rather than a separate mode. The imported card takes the rest of the row,
+   so nothing here ever needs to scroll sideways. */
 .e-upload { width: 100%; height: 34px; box-sizing: border-box; background: var(--e-raised);
   border: none; border-radius: var(--e-r); color: var(--e-mut); font-size: 12px; font-weight: 500;
   display: flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer;
   box-shadow: var(--e-inset-hi); transition: background-color .14s ease, color .14s ease; }
 .e-upload:hover:not(:disabled) { background: var(--e-raised-hi); color: var(--e-fg); }
 .e-upload:disabled { opacity: .55; cursor: default; }
-.e-rowtile-add { display: flex; align-items: center; justify-content: center; color: var(--e-mut);
-  box-shadow: var(--e-inset-hi); }
-.e-rowtile-add:hover:not(:disabled) { color: var(--e-fg); }
-.e-rowtile-add:disabled { opacity: .55; cursor: default; }
+.e-bgassetwrap { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.e-bgassetrow { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.e-bgadd { flex: none; width: 64px; height: 36px; padding: 0; border: none;
+  border-radius: var(--e-r-sm); background: var(--e-raised); color: var(--e-mut); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; box-shadow: var(--e-inset-hi);
+  transition: background-color .14s ease, color .14s ease; }
+.e-bgadd:hover:not(:disabled) { background: var(--e-raised-hi); color: var(--e-fg); }
+.e-bgadd:disabled { opacity: .55; cursor: default; }
 .e-bgasset { flex: 1; min-width: 0; height: 36px; box-sizing: border-box; display: flex;
   align-items: center; gap: 4px; padding: 2px 2px 2px 0; border-radius: var(--e-r-sm);
   background: var(--e-raised); transition: background-color .14s ease, box-shadow .14s ease; }
@@ -150,21 +187,26 @@
 
 /* ---- AI Director. `.e-ai-err` and `.e-ai-log` are planes with an accent edge, never tinted
    bordered boxes; the log is the narration the director streams while it works. ------------- */
-.e-run { width: 100%; height: 38px; border: none; border-radius: var(--e-r);
-  background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,0)), var(--e-ai);
-  color: #fff; font-size: 12.5px; font-weight: 560; display: flex; align-items: center;
-  justify-content: center; gap: 8px; box-shadow: var(--e-inset-hi), var(--e-shadow-1);
-  transition: filter .14s ease, box-shadow .14s ease; }
-.e-run:hover:not(:disabled) { filter: brightness(1.08);
-  box-shadow: var(--e-inset-hi), var(--e-shadow-1), 0 6px 18px rgba(124,108,240,.28); }
+/* The panel's one primary action: 36px, full width, flat `--e-ai`. The gradient sheen and the
+   drop shadow it used to carry are gone (owner's read: still primary, but less tall and less
+   aggressive) - hover is a brightness step, nothing that lifts off the panel. */
+.e-run { width: 100%; height: 36px; border: none; border-radius: var(--e-r);
+  background: var(--e-ai);
+  color: var(--e-on-fill); font-size: 12.5px; font-weight: 560; display: flex; align-items: center;
+  justify-content: center; gap: 8px; box-shadow: var(--e-inset-hi);
+  transition: filter .14s ease; }
+.e-run:hover:not(:disabled) { filter: brightness(1.1); }
 .e-run:disabled { opacity: .6; cursor: default; box-shadow: none; }
+/* The one sentence under the button, then the three bullets: a quiet list, glyph at text colour,
+   no plate behind it - the button is the only thing in this panel that should catch the eye. */
+.e-ai-what { margin: 0; font-size: 11.5px; line-height: var(--e-text-hint-lh); color: var(--e-dim); }
 .e-ai-progress { height: 2px; border-radius: 999px; background: var(--e-bg); overflow: hidden; }
 .e-ai-progress-fill { height: 100%; background: var(--e-ai); }
-.e-ai-err { margin: 0; font-size: 11.5px; line-height: var(--e-text-hint-lh); color: #f7b4b4;
+.e-ai-err { margin: 0; font-size: 11.5px; line-height: var(--e-text-hint-lh); color: var(--e-err-fg);
   background: var(--e-raised); border-radius: var(--e-r-sm); padding: 9px 11px;
   box-shadow: inset 3px 0 0 var(--e-primary); }
 .e-ai-err .hint { display: block; margin-top: 4px; color: var(--e-dim); font-weight: var(--e-text-hint-weight); }
-.e-errline { margin: 0; font-size: 11.5px; line-height: var(--e-text-hint-lh); color: #f7b4b4; }
+.e-errline { margin: 0; font-size: 11.5px; line-height: var(--e-text-hint-lh); color: var(--e-err-fg); }
 .e-errline button { margin-left: 4px; background: none; border: none; padding: 0; color: inherit;
   font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
 .e-errline button:hover { color: var(--e-fg); }
@@ -181,11 +223,18 @@
 .e-ai-log-line::before { content: "\2192"; position: absolute; left: 2px; top: 0; color: var(--e-ai); }
 .e-ai-log-line.done { color: var(--e-ok); font-weight: 500; padding-left: 0; }
 .e-ai-log-line.done::before { content: none; }
-.e-sum { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
-.e-sum li { display: flex; align-items: center; gap: var(--e-sp-2); font-size: 12.5px; color: var(--e-mut); }
-.e-sum .ic { width: 28px; height: 28px; border-radius: var(--e-r-sm); background: var(--e-raised);
-  border: none; display: flex; align-items: center; justify-content: center;
-  color: var(--e-mut); flex: none; }
+.e-sum { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.e-sum li { display: flex; align-items: center; gap: var(--e-sp-1); font-size: 12px; color: var(--e-mut); }
+.e-sum svg { flex: none; color: var(--e-dim); }
+/* Engine: a setting, not the headline. One small labelled row at the foot of the panel, behind
+   the panel's single allowed full-bleed divider. It is the LAST block in flow rather than pinned
+   with `margin-top: auto`, so the Picker's menu (which only opens downward) has room to open
+   instead of being clipped by `.e-panel`'s own scroll box. */
+.e-ai-engine { display: flex; align-items: center; gap: 10px; margin-top: var(--e-sp-3);
+  padding-top: var(--e-sp-2); border-top: 1px solid var(--e-divider); }
+.e-ai-engine-l { flex: none; font-size: 11px; font-weight: 450; color: var(--e-dim); }
+.e-ai-engine > div { flex: 1; min-width: 0; max-width: 190px; margin-left: auto; }
+.e-ai-engine .e-picker-btn, .e-ai-engine .e-picker-shell { height: 30px; font-size: 12px; }
 
 /* ---- Panel-only odds and ends: the shared ghost button on panel metrics (a plane, no stroke, no
    14px slab padding), a wrapping colour row, and two one-line text idioms. -------------------- */
@@ -198,3 +247,59 @@
    `.e-hintline`: a sentence standing in for a control that would do nothing (see BackgroundPanel). */
 .e-hintrow { display: flex; justify-content: space-between; font-size: 11px; color: var(--e-dim); }
 .e-hintline { color: var(--e-dim); font-size: 11.5px; line-height: var(--e-text-hint-lh); margin: 0; }
+
+/* ---- The collapsible panel slot (ClassicShell) -----------------------------------------------
+   The rail is always there; the 320px panel beside it is not. `.e-panel-wrap` is the column that
+   animates its WIDTH between 0 and 320 while `.e-panel-slot` inside it holds its full width from
+   the first frame - the same two-element trick `.e-props-side`/`.e-props-frost` uses on the right,
+   and for the same reason: a panel that re-typesets itself while the column slides reads as junk.
+   The plane, the rounding and the clip therefore live out here, on the element that is actually
+   changing size. */
+.e-panel-wrap { flex: none; display: flex; min-height: 0; overflow: hidden;
+  border-radius: var(--e-r-lg); box-shadow: var(--e-inset-hi), var(--e-shadow-1); }
+.e-panel-wrap > .e-panel-slot { box-shadow: none; }
+
+/* ---- Layouts panel (LayoutsPanel.tsx) --------------------------------------------------------
+   Two halves: the picked layout's knobs, and the saved looks. No card around either - the panel's
+   one card level is `.e-tile`, and a look is a NAME, not a picture, so it is a row.
+
+   `.e-laypv` is the schematic under the layout picker. The boxes themselves are drawn by the
+   shared `LayoutPreview` (hud/components), whose `.lp-*` rules live in the HUD's stylesheet and so
+   never reach the editor; these restate them in editor tokens at a two-class specificity, which
+   also means they win wherever both stylesheets end up in one bundle. The screen panel is the
+   neutral plate every glyph sits on; the webcam panel carries the camera lane's own accent, the
+   same identity the timeline gives it. */
+.e-laypv { width: 100%; }
+.e-laypv .lp-stage { position: relative; width: 100%; padding-top: 56.25%; overflow: hidden;
+  border-radius: var(--e-r-sm); background: var(--e-bg); box-shadow: var(--e-inset-hi); }
+.e-laypv .lp-screen { position: absolute; background: var(--e-plate); }
+.e-laypv .lp-cam { position: absolute; background: var(--e-cam); }
+
+/* One saved look per row: the name takes the width, Apply and the kebab are flush right, and the
+   row's own actions (Rename, Delete) drop UNDER it rather than into a popover - a 320px panel has
+   nowhere to float a menu that would not cover the list it belongs to. */
+.e-lay-list { display: flex; flex-direction: column; }
+.e-lay-row { overflow: hidden; }
+.e-lay-rowtop { display: flex; align-items: center; gap: 6px; min-height: 30px; }
+.e-lay-name { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 500; color: var(--e-fg);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.e-lay-kebab { flex: none; width: 24px; height: 24px; padding: 0; border: none; background: none;
+  border-radius: var(--e-r-sm); color: var(--e-dim); cursor: pointer; display: flex;
+  align-items: center; justify-content: center; transition: color .14s ease, background-color .14s ease; }
+.e-lay-kebab:hover { color: var(--e-fg); background: var(--e-raised); }
+.e-lay-acts { display: flex; gap: 12px; padding-left: 2px; }
+/* The panel's one text-button idiom: no plane, no stroke, underlined on hover. Used for Apply,
+   Rename, Delete, Reset this layout and Make default, so every non-primary action reads alike. */
+.e-lay-txt { flex: none; align-self: flex-start; padding: 4px 0; border: none; background: none;
+  color: var(--e-mut); font: inherit; font-size: 11.5px; font-weight: 500; cursor: pointer;
+  transition: color .14s ease; }
+.e-lay-txt:hover { color: var(--e-fg); text-decoration: underline; }
+.e-lay-reset, .e-lay-default { align-self: flex-start; }
+.e-lay-namewrap { display: flex; flex-direction: column; gap: 6px; padding: 4px 0; }
+.e-lay-input { width: 100%; box-sizing: border-box; height: 30px; padding: 0 9px; border: none;
+  border-radius: var(--e-r-sm); background: var(--e-raised); color: var(--e-fg); font: inherit;
+  font-size: 12.5px; box-shadow: var(--e-inset-hi); outline: none; }
+.e-lay-input:focus-visible { box-shadow: inset 0 0 0 2px var(--e-fg); }
+.e-lay-input[aria-invalid="true"] { box-shadow: inset 0 0 0 2px var(--e-primary); }
+.e-lay-namebtns { display: flex; gap: 12px; }
+.e-lay-err { color: var(--e-err-fg); }

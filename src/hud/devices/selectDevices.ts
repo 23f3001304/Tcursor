@@ -23,17 +23,17 @@ export function resolveSelection(prev: DeviceState, displays: DisplayInfo[], mic
 }
 
 /** Split a capture target's backend-formatted label into a clean title + optional resolution.
- *  `list_displays` bakes "(Primary)" or "(WxH)" onto the end of a display's label - pulling it
- *  out lets the picker render it as a distinct badge/sub-line instead of raw parenthetical text.
- *  `primary` is true only for index 0 of the raw `listDisplays()` result: the backend always
+ *  `list_displays` bakes "(WxH, Primary)", "(Primary)" or "(WxH)" onto the end of a display's
+ *  label - pulling it out lets the card and the sheet render it as a badge, a sub-line and a
+ *  to-scale rectangle instead of raw parenthetical text. `primary` is true for the label that
+ *  says so, and for index 0 of the raw `listDisplays()` result regardless: the backend always
  *  enumerates the main monitor first (before any other displays or windows). Windows never carry
  *  a resolution/primary suffix - their raw title just gets `prettifyWindowLabel`'s path cleanup. */
 export function parseTarget(t: DisplayInfo, index: number): { title: string; resolution: string | null; primary: boolean } {
   if (t.kind === "window") return { title: prettifyWindowLabel(t.label), resolution: null, primary: false };
-  const m = /^(.*) \((Primary|\d+x\d+)\)$/.exec(t.label);
+  const m = /^(.*) \((?:(\d+x\d+)(, Primary)?|(Primary))\)$/.exec(t.label);
   const title = m ? m[1] : t.label;
-  const resolution = m && m[2] !== "Primary" ? m[2] : null;
-  return { title, resolution, primary: index === 0 && t.kind !== "window" };
+  return { title, resolution: m?.[2] ?? null, primary: Boolean(m?.[3] || m?.[4]) || index === 0 };
 }
 
 /** Strip Windows/cpal's device-name packaging for display. Only the *label* shown in a dropdown

@@ -1,6 +1,6 @@
 # src-tauri/src/export/cursor/mod.rs
 
-Stateful cursor position tracker that interpolates between throttled mouse samples and then applies an exponential low-pass filter so small jitter does not cause the on-screen cursor to jump in the rendered video. Owns its event log so it can live inside the `FrameRenderer` as the single owner of the events (also the source the FX layer reads). The tracker advances forward-only through the log for amortized O(1) lookups.
+The cursor's per-frame position: the raw interpolated recording, or - when the Cursor panel asks for any polish - the route `path::PathModel` draws between the points the recording actually rested and clicked at. Owns its event log so it can live inside the `FrameRenderer` as the single owner of the events (also the source the FX layer reads). Since 2026-09-14 the polish is a MODEL of the whole recording rather than a filter on it: the old exponential low-pass lagged the real cursor (a click landed before the drawn cursor arrived), and the old idealization drew straight strokes between clicks only, ignoring every rest without one. Both now leave every rest and click exactly where it was (`path.md`).
 
 ## Cursor
 
@@ -9,25 +9,22 @@ pub struct Cursor {
     events: Vec<MouseEvent>,
     screen: ScreenInfo,
     idx: usize,
-    sx: f32,
-    sy: f32,
-    a: f32,
-    idealize: f32,
-    anchors: Vec<(u32, f32, f32)>,
-    primed: bool,
+    path: path::PathModel,
+    smooth: f32,
+    ideal: f32,
+    tilt: tilt::Tilt,
+    tilt_max: f32,
 }
 ```
 
-Stateful cursor tracker that owns the mouse log and screen geometry.
-
 - `events` - the full mouse log in ascending time order. *Why owned (not borrowed):* the tracker lives inside `FrameRenderer` for the whole render; a borrow would make the renderer self-referential. Owning the single copy also lets FX rendering read it via `events()` instead of a second copy of the log.
 - `screen` - capture geometry (width, height, origin). *Why:* `raw_at` calls `to_frame`, which needs the screen rect to convert screen-space coordinates to frame-local pixels.
-- `idx` - the index of the last event at or before the most recently queried time. *Why mutable:* enables a forward-only scan rather than a binary search on every frame, amortising cost to O(1) per call when frames are queried in order.
-- `sx`, `sy` - smoothed position accumulators in frame-local float pixels. *Why floats:* the low-pass filter accumulates sub-pixel movement; rounding only happens on output.
-- `a` - the low-pass alpha (follow smoothness). *Why a field, not a constant:* it is settings-driven (`CursorSettings::follow_alpha`, from the editor's Cursor Smoothness slider) - lower `a` = a smoother, more deliberate glide. `set_a` updates it live so a settings change reflects via `FrameRenderer::reload_edit` without rebuilding the cursor.
-- `idealize` - path-idealization strength (0 = raw path, 1 = clean eased strokes between the anchors). Settings-driven (`CursorSettings::path_idealize`, the editor's Path Idealization slider); `set_idealize` updates it live.
-- `anchors` - `(t, x, y)` frame-local anchors (the first sample, every click, and the last sample) that the idealized path eases between, so a meandering real route becomes deliberate strokes to the clicks. Precomputed once in `new` by `compute_anchors`.
-- `primed` - whether `sx`/`sy` have been initialised. *Why:* the first call must seed the accumulator from the raw position rather than lerp toward it from (0, 0), which would produce an unwanted glide-in at the start of the recording.
+- `idx` - the index of the last event at or before the most recently queried time, for the raw path. *Why mutable:* a forward-only scan rather than a binary search on every frame, amortising to O(1) per call when frames are queried in order (`reset` rewinds it).
+- `path` - the offline rest/move model (`path::PathModel`), built once from the log in `new`. Stateless between calls: a lookup is a binary search by time, so the preview's rewind-and-rescan needs nothing from it.
+- `smooth` - `CursorSettings::smoothness`, 0..1: how glassy the glide between rests is (0 = the recording's own timing). `set_smoothness` updates it live.
+- `ideal` - `CursorSettings::path_idealize`, 0..1: how straight the route between rests is (0 = the raw route). `set_idealize` updates it live.
+- `tilt` - the motion-lean filter (`cursor/tilt.md`), fed the same position this struct hands back so the lean rides the path the cursor is actually drawn on. *Why it lives here and not in the draw:* it is stateful and must advance exactly once per frame, which is a property only the per-frame position lookup has.
+- `tilt_max` - that filter's cap in degrees (`tilt::max_deg` of `CursorSettings::tilt`); `0.0` means the filter is off and `at` skips it entirely. *Why the derived cap rather than the raw setting:* `at` runs per frame and the clamp/scale belongs at the setter, not in the loop.
 
 ### Used by
 
@@ -36,28 +33,36 @@ Stateful cursor tracker that owns the mouse log and screen geometry.
 ## Cursor::new
 
 ```rust
-pub fn new(events: Vec<MouseEvent>, screen: ScreenInfo, a: f32) -> Self
+pub fn new(events: Vec<MouseEvent>, screen: ScreenInfo, smoothness: f32) -> Self
 ```
 
-Constructs a `Cursor` that takes ownership of the log, with all smoothing state at zero and the given follow alpha.
+Constructs a `Cursor` that takes ownership of the log, builds its path model, and starts with the given glide strength, no idealization and the tilt off.
 
 ### Inputs
 
-- `events: Vec<MouseEvent>` - the full mouse log, assumed sorted ascending by `t`. *Why ascending:* the forward-only `idx` scan skips unseen events; out-of-order events would cause missed samples. *Why by value:* the renderer moves its single copy of the log in here.
+- `events: Vec<MouseEvent>` - the full mouse log, assumed sorted ascending by `t`. *Why ascending:* the forward-only `idx` scan skips unseen events; out-of-order events would cause missed samples (the path model drops them). *Why by value:* the renderer moves its single copy of the log in here.
 - `screen: ScreenInfo` - capture geometry, owned for the tracker's lifetime so `raw_at` can convert on every frame.
-- `a: f32` - the follow low-pass alpha (`CursorSettings::follow_alpha`). *Why passed in:* the smoothness is a user setting, not a constant; the renderer derives it from `settings.cursor.smoothness`.
+- `smoothness: f32` - `CursorSettings::smoothness_at` (0..1; 0 in plain-OS mode, which is the raw path). *Why passed in:* it is a user setting, not a constant.
 
 ### Returns
 
-`Cursor` with `idx = 0`, `sx = 0.0`, `sy = 0.0`, the given `a`, and `primed = false`.
+`Cursor` with `idx = 0`, the model built, `ideal = 0.0`, and the tilt filter off (`tilt_max = 0.0`) until `set_tilt` says otherwise.
 
-## Cursor::set_a
+## Cursor::reset
 
 ```rust
-pub fn set_a(&mut self, a: f32)
+pub fn reset(&mut self)
 ```
 
-Updates the follow-smoothing alpha in place. *Why it exists:* `FrameRenderer::reload_edit` calls it so a Cursor Smoothness settings change takes effect on the cheap edit-reload path, without rebuilding the whole cursor (which would re-decode the log).
+Rewinds the forward-only sample index **and** the tilt (`Tilt::reset`). *Why the tilt goes with it:* `FrameRenderer::snap_cursor` calls this at a cut, where the viewer never saw the frames the filter would lean across - a cursor arriving on the far side of a splice still leaning from the gesture before it would read as a glitch. The path model needs no rewind: it is a function of time (`a_rewound_cursor_answers_like_a_fresh_one`).
+
+## Cursor::set_smoothness
+
+```rust
+pub fn set_smoothness(&mut self, s: f32)
+```
+
+Updates the glide strength (clamped 0..1) in place. *Why it exists:* `FrameRenderer::reload_edit` calls it so a Cursor Smoothness settings change takes effect on the cheap edit-reload path, without rebuilding the whole cursor (which would re-decode the log). The path model rebuilds only its cached strokes, lazily, on the next lookup.
 
 ## Cursor::set_idealize
 
@@ -65,7 +70,27 @@ Updates the follow-smoothing alpha in place. *Why it exists:* `FrameRenderer::re
 pub fn set_idealize(&mut self, s: f32)
 ```
 
-Updates the path-idealization strength (clamped 0..1) in place. Like `set_a`, `FrameRenderer::reload_edit` calls it so a Path Idealization settings change takes effect on the cheap edit-reload path. At `at` time, when `idealize > 0` the smoothed position is blended toward `anchored_at` (the eased position along the click/endpoint anchor line).
+Updates the path-idealization strength (clamped 0..1) in place. Like `set_smoothness`, `FrameRenderer::reload_edit` calls it so a Path Idealization settings change takes effect on the cheap edit-reload path. Above 0, every move's polished route is pulled toward the straight chord between the rests it joins (`path.md`).
+
+## Cursor::set_tilt
+
+```rust
+pub fn set_tilt(&mut self, t: f32)
+```
+
+Updates the motion-tilt strength (`CursorSettings::tilt`, 0..1) in place, storing it as the derived cap `tilt::max_deg(t)`. Live-applied by `FrameRenderer::reload_edit` alongside `set_smoothness`/`set_idealize`, and set from `CursorSettings::tilt_at` in `FrameRenderer::new` so plain-OS mode gets 0.
+
+Turning it off (`t <= 0`) also calls `Tilt::reset`. *Why:* without it, dragging the slider to 0 mid-lean would freeze the sprite at whatever angle it happened to hold - the setting must mean "upright", not "stop updating".
+
+## Cursor::tilt_deg
+
+```rust
+pub fn tilt_deg(&self) -> f32
+```
+
+This frame's motion lean in degrees, clockwise-positive. Valid **after** `at`, which is what advances the filter - `FrameRenderer::composite_at` reads it on the same frame it just stepped and hands it to `cursorset::draw` and to `fx_lensbuild::LensFrame`, so the sprite, its glass lens and the frame that lens bends all tip by the same amount.
+
+*Why an accessor rather than a field on `FramePose`:* the pose is built by `step_camera` and consumed by callers that never draw a cursor (`camera_track`, the jank probe); the lean is only ever wanted at the moment of drawing, by a caller that already holds the renderer.
 
 ## Cursor::events
 
@@ -85,7 +110,7 @@ Borrows the owned mouse log. *Why it exists:* `FrameRenderer` keeps a single cop
 pub fn screen(&self) -> ScreenInfo
 ```
 
-Returns the recording's `ScreenInfo` (`Copy`, so this is a cheap read, not a second owner). *Why it exists:* `Cursor` already applies `coordmap::to_frame(&self.screen, ...)` to convert its own raw mouse points to screen-local (`clicks`, `compute_anchors`); FX rendering (`fx_state::render`) needs the same origin to convert click-hit coordinates the same way, so `FrameRenderer::composite_at` reads it through this accessor rather than the renderer storing a second copy of `ScreenInfo`.
+Returns the recording's `ScreenInfo` (`Copy`, so this is a cheap read, not a second owner). *Why it exists:* `Cursor` already applies `coordmap::to_frame(&self.screen, ...)` to convert its own raw mouse points to screen-local (`clicks`, `path::PathModel::new`); FX rendering (`fx_state::render`) needs the same origin to convert click-hit coordinates the same way, so `FrameRenderer::composite_at` reads it through this accessor rather than the renderer storing a second copy of `ScreenInfo`.
 
 ### Returns
 
@@ -101,7 +126,7 @@ Returns the recording's `ScreenInfo` (`Copy`, so this is a cheap read, not a sec
 pub fn clicks(&self) -> Vec<(u32, f32, f32)>
 ```
 
-Click (mouse-down) positions as `(event_time_ms, x, y)` where `x`/`y` are 0..1 fractions of the screen content - the same coordinate basis as the smoothed cursor (`to_frame`, then divide by the screen size). *Why it exists:* the editor preview draws click ripples; sharing the cursor's basis means a ripple lands exactly where the cursor clicked. `FrameRenderer::click_track` shifts these event times to output time.
+Click (mouse-down) positions as `(event_time_ms, x, y)` where `x`/`y` are 0..1 fractions of the screen content - the same coordinate basis as the drawn cursor (`to_frame`, then divide by the screen size). *Why it exists:* the editor preview draws click ripples; sharing the cursor's basis means a ripple lands exactly where the cursor clicked - and since the path model pins every click, exactly where the cursor IS at that instant. `FrameRenderer::click_track` shifts these event times to output time.
 
 ### Returns
 
@@ -113,29 +138,38 @@ Click (mouse-down) positions as `(event_time_ms, x, y)` where `x`/`y` are 0..1 f
 pub fn at(&mut self, t_ms: u32, dt_ms: f32) -> FramePoint
 ```
 
-Returns the smoothed cursor position in frame-local pixels at event-time `t_ms`.
+Returns the drawn cursor position in frame-local pixels at event-time `t_ms`.
 
 ### Inputs
 
-- `t_ms: u32` - the frame's event time in milliseconds. *Why:* the exporter passes the frame timestamp so the tracker can advance its internal index forward and interpolate between surrounding samples. Must be non-decreasing across calls (the index only advances).
-- `dt_ms: f32` - the caller's **exact** frame period (`render::OUT_STEP_MS` = 16.666667 at 60fps; the exporter computes `1000 / out_fps` from its settings-resolved rate). *Why an argument and not `t_ms` minus the previous `t_ms`:* the frame loops build `t_ms` as `k * 1000 / out_fps` in integer math, so differencing it reads 16/17/17/16 at 60fps - the clock's rounding, not a real timing difference - and a first-order filter turns that straight into a per-frame ripple. Same contract, same reason, as `CameraSim::step`'s `dt_ms` (`export/render/mod.md`).
+- `t_ms: u32` - the frame's event time in milliseconds. Must be non-decreasing across calls for the RAW path (the index only advances); the polished path does not care.
+- `dt_ms: f32` - the caller's **exact** frame period (`render::OUT_STEP_MS` = 16.666667 at 60fps; the exporter computes `1000 / out_fps` from its settings-resolved rate). Only the motion lean consumes it now: the path is a function of time, so it never lags and never depends on the output rate. Same contract, same reason, as `CameraSim::step`'s `dt_ms` (`export/render/mod.md`).
 
 ### Returns
 
-`FramePoint { x, y }` in frame-local integer pixels after low-pass smoothing. Always within the frame because `raw_at` returns the frame centre before the first event and `to_frame` clamps to frame bounds.
+`FramePoint { x, y }` in frame-local integer pixels. Frame centre before the first event.
 
 ### Implementation
 
-1. Advance `self.idx` forward while `events[idx + 1].t <= t_ms`. *Why one event at a time:* frames are queried in ascending order; this is amortised O(1) over the full export rather than O(log n) per frame.
-2. Call `raw_at(t_ms)` to get the interpolated, un-smoothed position.
-3. If `!self.primed`, set `sx = raw.x`, `sy = raw.y`, `primed = true`. *Why seed on first call:* prevents a large artificial lerp from (0, 0) to the true starting position at the opening frame.
-4. Otherwise apply exponential low-pass: `sx += (raw.x - sx) * follow::damping(self.a, dt_ms)` (same for `y`). `a` is the settings-driven follow alpha (`CursorSettings::follow_alpha`, default ~0.36) read as "fraction of the remaining error closed in one **60fps frame**": higher = snappier follow, lower = a smoother, more deliberate glide (the editor's Cursor Smoothness slider). *Why low-pass over raw positions:* recorded mouse data is typically throttled to 60-100 Hz and exhibits sample-to-sample jitter that would produce a visibly shaking cursor in the rendered video. *Why the `damping` conversion (H4 in the camera probe):* the raw alpha was applied once per STEP, so the same setting meant a different time constant at every output rate - ~4% off between a 16ms grid and the export's 16.667ms one, and ~100% off at a 30fps export. `export::camera::follow::damping` (`export/camera/follow.md`) turns the per-60fps-frame fraction into the equivalent fraction for this step, `1 - (1 - a)^(dt / 16.667)`, and is the **same** function the camera's own follow lerp uses - one definition, so the two filters cannot drift apart on what `smoothness` means. At exactly 60fps it returns `a` untouched, so the shipped trajectory is bit-identical (`jank_filter_tests::smoothing_off_is_bit_identical` did not move when this landed).
-5. Return `FramePoint { x: sx.round(), y: sy.round() }`.
+1. Advance `self.idx` forward while `events[idx + 1].t <= t_ms`, and take `raw_at(t_ms)` - the interpolated, un-smoothed position (frame centre before the first event).
+2. Before the first event, or with `smooth <= 0 && ideal <= 0` (plain-OS mode, or both sliders at 0): the raw position, verbatim - bit-identical to the recording (`no_polish_is_the_raw_interpolation_bit_for_bit`).
+3. Otherwise `path.at(t_ms, smooth, ideal)` - the polished route, which still passes through every rest and click exactly (`path.md`); the raw position is the fallback for an empty log.
+4. Step the motion-tilt filter (`Tilt::step`) with that FINAL position converted to reference px by `tilt::ref_scale`, unless `tilt_max` is 0, in which case the filter is skipped outright and costs nothing. *Why the final position:* an idealized stroke should lean into its own clean route, not the wander the viewer never sees.
+5. Return `FramePoint { x, y }` rounded from that same final position.
 
-### Behaviors
+### Behaviors (`mod_tests.rs`)
 
 - `center_before_first_event` - querying at t=0 before the first event returns frame centre (960, 540 for a 1920x1080 screen).
-- `smooths_toward_a_jump_target` - repeatedly querying against a held final position converges to within 2 pixels of the target.
+- `arrives_with_the_recording_not_after_it` - a jump to a target held from `t=100` is ON the target at `t=100` at smoothness 0, 0.6 and 1 (the old low-pass converged frames later).
+- `idealize_pulls_a_detour_toward_the_click_anchor_line` - a continuous throw arcing 800 px off the line between two clicks hugs the line at `ideal 1`, and the second click itself is exact.
+- `no_polish_is_the_raw_interpolation_bit_for_bit` - smoothness 0 + idealize 0 equals `raw_at` at every frame.
+- `a_thrown_cursor_leans_and_a_resting_one_does_not` - a 3 px/ms sweep leans past a degree, settles back upright once the cursor is held, and never leaves 0 while `set_tilt` has not been called.
+- `a_cut_snaps_the_lean_away_with_the_position` - `reset` drops the lean.
+- `a_rewound_cursor_answers_like_a_fresh_one` - a full sweep, `reset`, and the same sweep again are identical.
+
+## path
+
+Submodule (`cursor/path.rs`). The offline rest/move path model the polished cursor is drawn from: rests and clicks are the recording verbatim, moves between them are re-timed (Smoothness) and straightened (Path Idealization) with both ends pinned. Key items: `REST_MS`, `rest_px`, `PathModel`, `PathModel::new`, `PathModel::at` - full per-symbol docs in `cursor/path.md`.
 
 ## cursordraw
 
@@ -148,6 +182,10 @@ Submodule (`cursor/cursorset.rs`). Manages the per-type cursor sprite set: decod
 ## busy
 
 Submodule (`cursor/busy.rs`). Pack format v2's animated busy cursor: pure math turning an output-clock timestamp into "which frame, rotated how far, scaled how much". Key items: `BusyAnim` (spin/flip/pulse), `BusySpec` (a pack's declared animation plus its explicit frame count), `BusyPose`, `busy_pose` - full per-symbol docs in `cursor/busy.md`. Mirrored in TS by `src/editor/stage/cursorBusy.ts`.
+
+## tilt
+
+Submodule (`cursor/tilt.rs`). The motion lean: a low-pass on the drawn cursor's velocity feeding a lightly under-damped spring, on a fixed 1 ms substep grid so a 30 fps export matches a 60 fps one. Key items: `REF_W`, `MAX_DEG`, `Tilt`, `Tilt::step`, `target_deg`, `max_deg`, `ref_scale` - full per-symbol docs in `cursor/tilt.md`. Mirrored in TS by `src/editor/stage/cursorTilt.ts`, pinned against the same five instants.
 
 ## cursorxform
 

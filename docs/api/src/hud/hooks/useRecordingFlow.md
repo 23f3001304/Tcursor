@@ -32,11 +32,13 @@ Pure decision function: given the two `Promise.allSettled` results from stopping
 ### Returns
 
 - `screen.status === "rejected"` -> `{ err: "Recording failed: " + screen.reason }`, unconditionally - a webcam-side outcome (rejected or not) is not consulted at all once the screen itself failed.
-- Otherwise -> `{ folder: screen.value.folder, camWarn }`, where `camWarn` is `"Webcam track didn't finish — video saved without the camera overlay."` if `cam.status === "rejected"`, else `undefined`.
+- `screen.value.frames === 0` -> `{ err: "No video was captured. Nothing reached the screen encoder; try the take again." }`. The screen encoder can come up empty without erroring (2026-09-14: another process held the GPU's encoder sessions and the take had mic, webcam and cursor but no `video.mp4`); opening the editor on that showed a blank preview with no explanation.
+- Otherwise -> `{ folder: screen.value.folder, camWarn }`, where `camWarn` is `"Webcam track didn't finish. Video saved without the camera overlay."` if `cam.status === "rejected"`, else `undefined`.
 
 ### Behaviors (pinned by unit tests in `src/hud/hooks/useRecordingFlow.test.ts`)
 
 - Both settle fine -> the folder, `camWarn: undefined`.
+- The screen stop returned zero frames -> `{ err }` naming the empty take, never a folder to open.
 - Only the webcam side rejected -> the folder PLUS a `camWarn` (fix round 1, item 2 - this used to be a bare `console.warn`, invisible in the running app; `stopCore` now routes `camWarn` through `setErr` so it reaches the same banner every other take-level message uses).
 - Only the screen side rejected -> `{ err }`, even though the webcam side succeeded.
 - Both rejected -> still just `{ err }` from the screen side; the camera warning is dropped, not merged in.

@@ -1,6 +1,8 @@
 # src/hud/components/LayoutPreview.tsx
 
-Renders a miniature 16:9 stage preview of how the screen capture and webcam feed are composed for a given layout mode. Used inside the Preferences appearance editor to give users a live thumbnail as they adjust sizing, padding, and corner settings. This file exports one component; all geometry helpers are module-private.
+Renders a miniature 16:9 stage preview of how the screen capture and webcam feed are composed for a given layout mode, as a live thumbnail while the user adjusts sizing, padding and corner settings. This file exports one component; all geometry helpers are module-private.
+
+**Two callers, one copy of the geometry (2026-09-14).** The HUD's `SettingsAppearance` (editing the global config) and the editor's `LayoutMiniPreview` -> Layouts panel (editing a project). That is the reason this stayed a shared pure component rather than being reimplemented editor-side: the box arithmetic below is exactly what must not drift between two editors of the same five layouts. What the editor supplies for itself is only the surface, since the `.lp-*` rules live in `hud/settings/settings.css` in HUD tokens - see `LayoutMiniPreview.md`.
 
 ## LayoutPreview
 
@@ -38,5 +40,5 @@ All computed values are clamped to [0, 1] via the module-private `clamp(v, lo, h
 
 ### Notes
 
-- No animations are applied; the parent `SettingsAppearance` drives re-renders by passing updated `ma` on every control change.
+- No animations are applied; the parent (`SettingsAppearance`, or the editor's `LayoutMiniPreview`) drives re-renders by passing updated `ma` on every control change.
 - The `.lp-stage` CSS class must enforce the 16:9 aspect ratio externally (via `aspect-ratio: 16/9` or padding-bottom trick); the component itself only uses percentage-based positioning.

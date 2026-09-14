@@ -12,6 +12,9 @@ const COMMIT_DEBOUNCE_MS = 80;
 /** Snap a raw value to the nearest `step`, clamped to `[min, max]`, with output precision
  *  matching `step`'s own decimal places (so e.g. `step=0.01` never produces
  *  `0.30000000000000004`). Shared by the pointer-drag and keyboard input paths below. */
+/** `.e-slider-thumb`'s width (controls.css), which insets the rail by half on each side. */
+const THUMB = 14;
+
 export function snapToStep(raw: number, min: number, max: number, step: number): number {
   const stepsCount = Math.round((raw - min) / step);
   const stepped = Math.max(min, Math.min(max, min + stepsCount * step));
@@ -93,7 +96,9 @@ export function Slider({
   const updateValue = (clientX: number) => {
     if (!trackRef.current) return;
     const rect = trackRef.current.getBoundingClientRect();
-    const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    // The rail is inset by half a thumb on each side (`.e-slider-rail`), so the pointer maps onto
+    // the rail's own span, not the full strip: a press on the strip's first pixel is 0.
+    const pct = Math.max(0, Math.min(1, (clientX - rect.left - THUMB / 2) / Math.max(1, rect.width - THUMB)));
     const v = snapToStep(min + pct * (max - min), min, max, step);
     setDragValue(v);
     debouncedRef.current!(v);

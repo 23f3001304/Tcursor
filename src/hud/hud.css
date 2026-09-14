@@ -34,6 +34,11 @@
   --e-text-value-size: 12.5px; --e-text-value-weight: 560;
   --e-text-hint-size: 12px;   --e-text-hint-weight: 400;  --e-text-hint-lh: 1.45;
   --e-sp-1: 8px; --e-sp-2: 12px; --e-sp-3: 16px; --e-sp-4: 20px;
+
+  /* The card body's own height, which every body state other than the sources is pinned to: the
+     display picker (`.sheet`) and the Settings/Preferences panel (`.settings`, settings.css).
+     One token, so a body state can never be sized to a number the others have moved off. */
+  --sheet-h: 430px;
 }
 :root[data-theme="dark"] {
   --bg: #1c1c1e; --fg: #f5f5f7; --muted: #8e8e93; --line: rgba(255, 255, 255, 0.10);
@@ -61,8 +66,8 @@ body { display: flex; align-items: flex-start; justify-content: center; overflow
      own intrinsic width would silently rely on the two staying in sync. When they don't (a DPI
      change mid-session leaves the window's physical size stuck at a stale scale factor - see
      useHudWindowSize's onScaleChanged handler), width:100% clips gracefully at the real window
-     edge instead of rendering past it. `.hud.as-box` (settings.css) overrides this with its own
-     fixed 360px - two classes beats one, so that box state is unaffected. */
+     edge instead of rendering past it. There is no second window state to except any more: the
+     Settings/Preferences panel is a sheet inside the card, at the card's own width. */
   width: 100%; box-sizing: border-box; min-width: 0;
   position: relative; display: flex; flex-direction: column;
   background: var(--e-surface); border: 1px solid var(--e-line); border-radius: 14px;
@@ -71,82 +76,73 @@ body { display: flex; align-items: flex-start; justify-content: center; overflow
   letter-spacing: -0.011em;
   box-shadow: var(--e-inset-hi), var(--e-shadow-2);
   animation: hud-in 0.36s cubic-bezier(0.22, 1, 0.36, 1) both;
+  /* The bar's corners round into the pill's (and back) over the state swap, StateSwap.tsx. */
+  transition: border-radius 0.26s cubic-bezier(0.22, 1, 0.36, 1);
 }
+/* StateSwap.tsx's wrapper around whichever bar state is showing: a plain column so the idle
+   titlebar + row stack exactly as they did without it. */
+.swap { display: flex; flex-direction: column; min-width: 0; }
 @keyframes hud-in { from { opacity: 0; transform: translateY(8px) scale(0.99); } to { opacity: 1; transform: none; } }
 
-/* min-width:0 unblocks the shrink chain onto .banner below - same reasoning as .row (D5 clipping
-   hardening, review round 1 item 4): without it the titlebar's default min-width:auto would force
-   it (and .hud, and the window) wider than the warning banner's own content instead of eliding it. */
-.titlebar {
-  display: flex; align-items: center; justify-content: space-between; min-width: 0;
-  height: 28px; padding: 0 7px 0 13px; border-bottom: 1px solid var(--line);
-}
-.brand { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 11px; font-weight: 600; flex: none; }
+/* ---- The idle card (IdleCard.tsx) --------------------------------------------------------------
+   A 360px column: the header (brand, banner, window buttons - the drag region), the wide webcam
+   preview, three source rows, the toggle row and Record. Rows and the toggle row are raised planes
+   on the card's surface; Record is the one accent. */
+.card { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px 14px; min-width: 0; }
+.card-head { display: flex; align-items: center; justify-content: space-between; min-width: 0; height: 36px; }
+/* min-height is exactly what the sources stack already measures, so it changes nothing for them -
+   it holds the box for a body state that starts out empty (`Settings`/`Preferences` render null
+   until their first `getSettings()` resolves), so the card cannot collapse to its header for a
+   frame mid-flip. */
+.card-body { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: var(--sheet-h); }
+.brand { display: inline-flex; align-items: center; gap: 7px; color: var(--fg); font-size: 13px; font-weight: 600; flex: none; pointer-events: none; }
 .brand-mark {
   display: flex; align-items: center; justify-content: center; flex: none; box-sizing: border-box;
-  width: 14px; height: 14px; border-radius: 4px; background: var(--hover); border: 1px solid var(--line); color: var(--fg);
+  width: 26px; height: 26px; border-radius: 8px; background: var(--e-raised); border: 1px solid var(--e-line); color: var(--fg);
+  box-shadow: var(--e-inset-hi);
 }
-/* The one flexible member of the titlebar (review round 1 item 4): an OS-originated warning
+/* The one flexible member of the header (review round 1 item 4): an OS-originated warning
    string is unbounded length, so it - not .brand or .winctrls, both rigid - ellipsizes under
-   pressure. The full text still reaches the user via the `title` attribute (Hud.tsx). */
+   pressure. The full text still reaches the user via the `title` attribute. */
 .banner { color: #ff6b6b; font-size: 11px; margin-left: 10px; flex: 1 1 auto; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.winctrls { display: flex; gap: 2px; flex: none; }
+.winctrls { display: flex; align-items: center; gap: 2px; flex: none; }
+.winsep { width: 1px; height: 16px; background: var(--e-line-strong); margin: 0 4px; }
 .winbtn {
-  width: 24px; height: 24px; border: none; background: transparent; color: var(--muted);
-  border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer;
+  width: 26px; height: 26px; border: none; background: transparent; color: var(--muted);
+  border-radius: 7px; display: flex; align-items: center; justify-content: center; cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease;
 }
 .winbtn:hover { background: var(--hover); color: var(--fg); }
 .winbtn.close:hover { background: var(--accent); color: #fff; }
 .winbtn:disabled { opacity: 0.4; cursor: default; pointer-events: none; }
 
-/* min-width:0 unblocks the shrink chain below it (.pickers -> .dd -> .dd-trigger -> .dd-label) -
-   without it, the row's default min-width:auto would force it (and .hud, and the window) wider
-   than the available space instead of letting the labels ellipsize (D5 clipping hardening). */
-.row { display: flex; align-items: center; gap: 6px; padding: 12px; min-width: 0; }
-
-.grip {
-  display: flex; align-items: center; justify-content: center; width: 22px; height: 40px;
-  color: var(--muted); cursor: grab; flex: none; border-radius: 8px;
-  transition: color 0.15s ease, background 0.15s ease;
-}
-.grip:hover { color: var(--fg); background: var(--hover); }
-.grip:active { cursor: grabbing; }
-/* let clicks on the icon/title fall through to the drag region */
-.grip svg, .brand { pointer-events: none; }
-
-/* The three device pickers (camera/screen/mic) as one group, separated from each other and from
-   their neighbors by SPACING alone (D5 border doctrine - the pipe divider this replaced is
-   gone). flex:1 1 auto + min-width:0 makes this the row's primary shrink target: under scale
-   error the labels inside ellipsize before anything else in the bar gives (clipping hardening -
-   the rigid grip/camtoggle/toggle-group/timer/buttons all opt out via flex:none). */
-.pickers { display: flex; align-items: center; gap: var(--e-sp-2); min-width: 0; flex: 1 1 auto; }
-
-/* custom dropdown */
+/* Source rows: one raised plane each, a 34px lead (the icon), the device name, a chevron. The
+   screen row's chevron points right - it opens the sheet, not a menu. */
 .dd { position: relative; min-width: 0; }
-.dd-trigger {
-  display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 8px 0 11px; border-radius: 8px;
-  border: 1px solid transparent; background: transparent; color: var(--fg); font: inherit; cursor: pointer;
-  min-width: 0; max-width: 100%; transition: background 0.14s ease, border-color 0.14s ease;
+.dd-row {
+  display: flex; align-items: center; gap: 10px; width: 100%; height: 46px; padding: 0 10px 0 6px; border-radius: 12px;
+  border: 1px solid var(--e-line); background: var(--e-raised); color: var(--fg); font: inherit; cursor: pointer;
+  box-sizing: border-box; min-width: 0; box-shadow: var(--e-inset-hi); text-align: left;
+  transition: background 0.14s ease, border-color 0.14s ease;
 }
-/* Quiet ghost style: no fill/border at rest, raised material only on hover/open. */
-.dd-trigger:hover, .dd.open .dd-trigger { background: var(--e-raised); border-color: var(--e-line); }
-.dd-trigger .ico { color: var(--e-dim); flex: none; display: flex; }
+.dd-row:hover, .dd.open .dd-row { background: var(--hover); border-color: var(--e-line-strong); }
+.dd-row .ico { width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center; color: var(--e-dim); flex: none; }
+.dd-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
 .dd-label {
   color: var(--e-fg); font-size: var(--e-text-body-size); font-weight: 500; min-width: 0;
-  max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;
 }
-.dd-trigger .chev { color: var(--e-dim); flex: none; display: flex; transition: transform 0.18s ease; }
-.dd.open .dd-trigger .chev { transform: rotate(180deg); }
+.dd-sub { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dd-row .chev { color: var(--e-dim); flex: none; display: flex; transition: transform 0.18s ease; }
+.dd.open .dd-row .chev { transform: rotate(180deg); }
+.chev.right { transform: rotate(-90deg); }
 
-/* The mount-in is Motion now (design/premium-pass D6, Dropdown.tsx/TargetPicker.tsx's MENU_MOTION)
-   - the old `animation: menu-in` keyframe did the identical thing on open; closing is still a hard
-   cut either way (no AnimatePresence here - see MENU_MOTION's own comment for why: it would race
-   `useHudWindowSize` shrinking the actual OS window the instant the menu closes). */
+/* The menu (camera and mic rows) opens under its row, full width. The mount-in is Motion
+   (Dropdown.tsx's MENU_MOTION); closing is a hard cut - see that comment for why. */
 .dd-menu {
-  position: absolute; top: calc(100% + 6px); left: 0; min-width: 230px; z-index: 20;
-  background: var(--e-raised); border: 1px solid var(--e-line); border-radius: 10px; padding: 6px;
+  position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 20;
+  background: var(--e-raised); border: 1px solid var(--e-line); border-radius: 12px; padding: 6px;
   box-shadow: var(--e-shadow-2);
   max-height: 256px; overflow-y: auto;
 }
@@ -163,63 +159,44 @@ body { display: flex; align-items: flex-start; justify-content: center; overflow
 }
 .dd-item:hover { background: var(--hover); }
 .dd-item.sel { font-weight: 600; }
-.dd-item-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dd-item .ico { color: var(--e-dim); display: flex; flex: none; }
+.dd-item-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dd-check { color: var(--accent); flex: none; display: flex; }
-
-/* target picker: groups windows under their own header, decorates each row with the
-   resolution + a "Primary" badge for the main display - reuses .dd-trigger/.dd-menu/.dd-item. */
-.tp-menu { min-width: 270px; }
-.tp-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.tp-res { font-size: 11px; color: var(--muted); font-weight: 500; }
-.tp-trail { display: flex; align-items: center; gap: 8px; flex: none; }
 .tp-badge {
   font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
   color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 1px 6px; line-height: 1.5;
 }
-.tp-divider {
-  padding: 7px 10px 4px; margin-top: 4px; border-top: 1px solid var(--e-divider);
-  font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em;
-}
 
-/* camera preview tile (the on/off toggle is the camera icon in the controls row) */
+/* Camera preview: the card's wide 160px panel, the pill's 44px circle, or the original square. */
 .camtoggle {
   position: relative; width: 52px; height: 52px; border-radius: 10px; border: 1px solid var(--line);
   background: #0b0b0d; overflow: hidden; padding: 0; flex: none;
 }
+.camtoggle.round { width: 44px; height: 44px; border-radius: 22px; }
+.camtoggle.wide { width: 100%; height: 160px; border-radius: 12px; }
 .cam { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); display: block; }
 .cam.off { display: none; }
 .camoff { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--surface); color: var(--muted); }
+.camtoggle.wide .camoff svg { width: 28px; height: 28px; }
 
-.spacer { flex: 1; min-width: 8px; }
-
-.recmeter { display: flex; align-items: center; gap: 8px; padding: 0 6px; flex: none; }
-.recmeter .ico { color: var(--e-dim); display: flex; }
-.recmeter.muted { opacity: 0.65; }
-/* Same chip material as .paused-chip, not bare text - the recording bar's four indicators
-   (timer/meter/Paused/Muted) read as one family. */
-.recmeter .muted-label {
-  display: inline-flex; align-items: center; font-size: 10px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: 0.04em; color: var(--e-dim);
-  border: 1px solid var(--e-line); border-radius: 999px; padding: 2px 7px;
+/* Toggle row (cam/mic/sys/compat): one raised plane with four equal labelled segments, 1px
+   internal separators (border-doctrine: the GROUP gets the border/shadow, not each button). */
+.tog-row {
+  display: flex; align-items: stretch; height: 42px; border-radius: 12px; background: var(--e-raised);
+  border: 1px solid var(--e-line); box-shadow: var(--e-inset-hi); overflow: hidden; box-sizing: border-box;
 }
-/* The level meter's own rules live in src/lib/wave.css with the rest of the wave motif (`.w-voice`,
-   drawn by `VoiceWave.tsx`); only its ramp tokens `--wave-a`/`--wave-b` are declared here, since
-   they differ per theme. Its width comes from `RecMeter.tsx`'s `METER_W`, which
-   `useHudWindowSize.ts` reads directly. */
-
-.timer { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 14px; padding: 0 8px; min-width: 50px;
-  text-align: center; flex: none; transition: color 0.15s ease, opacity 0.15s ease; }
-.timer.paused { color: var(--e-dim); opacity: 0.7; }
-.paused-chip {
-  display: inline-flex; align-items: center; font-size: 10px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: 0.04em; color: var(--e-dim); flex: none;
-  border: 1px solid var(--e-line); border-radius: 999px; padding: 2px 7px; margin-right: 2px;
+.tog {
+  flex: 1; border: none; border-left: 1px solid var(--e-line); cursor: pointer; padding: 0;
+  background: transparent; color: var(--e-dim); display: flex; align-items: center; justify-content: center; gap: 6px;
+  font: inherit; font-size: 12px; font-weight: 600; min-width: 0; transition: background 0.12s ease, color 0.12s ease;
 }
-.exporting { font-family: "SF Mono", ui-monospace, monospace; font-size: 12px; color: var(--muted); padding: 0 8px; }
+.tog:first-child { border-left: none; }
+.tog svg { width: 16px; height: 16px; flex: none; }
+.tog:hover { background: var(--hover); color: var(--fg); }
+/* ON = a subtle accent-tinted fill + accent icon and label; OFF stays --e-dim on the plane. */
+.tog.on { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
 
-/* Same raised material as .btn.rec (review round 1 item 2 - Pause/Resume was left on the legacy
-   --surface, which in dark mode is noticeably LIGHTER than both the bar and the new --e-raised
-   tier, so it glowed next to the hero Record button on every recording). */
+/* The hero. `.btn` is the shared raised-button material the settings box also uses. */
 .btn {
   height: 40px; padding: 0 16px; border-radius: 8px; border: 1px solid var(--e-line); cursor: pointer; flex: none;
   background: var(--e-raised); color: var(--fg); font: inherit; font-weight: 600; font-size: 13px;
@@ -228,34 +205,85 @@ body { display: flex; align-items: flex-start; justify-content: center; overflow
   transition: background 0.14s ease, border-color 0.14s ease, transform 0.1s ease;
 }
 .btn:hover { background: var(--hover); border-color: var(--e-line-strong); }
-/* .rec's own press feedback is a Motion spring (Hud.tsx whileTap), not this CSS scale - excluded
-   here so the two don't fight over the same `transform`. */
+/* .rec's own press feedback is a Motion spring (RecordButton.tsx whileTap), not this CSS scale -
+   excluded here so the two don't fight over the same `transform`. */
 .btn:not(.rec):active { transform: scale(0.97); }
 .btn.rec {
-  height: 34px; padding: 0 18px; border-radius: 10px; background: var(--accent); border-color: transparent;
-  color: #fff; box-shadow: var(--e-inset-hi); transition: background 0.14s ease, filter 0.14s ease;
+  width: 100%; height: 48px; margin-top: 2px; border-radius: 14px; background: var(--accent); border-color: transparent;
+  color: #fff; font-size: 14px; box-shadow: var(--e-inset-hi); transition: background 0.14s ease, filter 0.14s ease;
 }
 .btn.rec:hover { filter: brightness(0.92); }
-.btn.rec .dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; }
-.btn.rec.is-rec { background: var(--fg); color: var(--bg); }
-.btn.rec.is-rec .dot { border-radius: 2px; background: var(--accent); animation: blink 1.3s ease-in-out infinite; }
-@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+.btn.rec:disabled { filter: saturate(0.4) brightness(0.8); cursor: default; }
+.btn.rec .dot { width: 9px; height: 9px; border-radius: 50%; background: #fff; }
 
-/* Segmented raised group (cam/mic/sys/game): one container carries the material (border-doctrine:
-   the GROUP gets the border/shadow, not each button) with 1px internal separators, replacing the
-   four floating .toggle squares this used to be. Rigid (flex:none) - never the row's shrink
-   target, see .pickers/.dd-label for what actually gives under scale-error pressure. */
-.toggle-group {
-  display: flex; align-items: stretch; border-radius: 10px; background: var(--e-raised);
-  border: 1px solid var(--e-line); box-shadow: var(--e-inset-hi); overflow: hidden; flex: none;
-}
-.toggle {
-  width: 32px; height: 32px; border: none; border-left: 1px solid var(--e-line); cursor: pointer;
-  background: transparent; color: var(--e-dim); display: flex; align-items: center; justify-content: center;
-  font-size: 15px; flex: none; transition: background 0.12s ease, color 0.12s ease;
-}
-.toggle:first-child { border-left: none; }
-.toggle:hover { background: var(--hover); color: var(--fg); }
-/* ON = a subtle accent-tinted fill (not the old solid --fg/--bg swap) + accent icon; OFF stays a
-   plain --e-dim icon on the group's own raised fill. */
-.toggle.on { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+/* ---- The "what to record" sheet (TargetSheet.tsx) -------------------------------------------------
+   Replaces the card body at the card body's own height, so the flip never resizes the window. */
+.sheet { display: flex; flex-direction: column; gap: 8px; height: var(--sheet-h); min-width: 0; }
+.sheet-head { display: flex; align-items: center; gap: 6px; height: 30px; margin-left: -4px; flex: none; }
+.sheet-title { font-size: var(--e-text-title-size); font-weight: var(--e-text-title-weight); color: var(--e-fg); }
+.sheet-sec { font-size: var(--e-text-label-size); font-weight: var(--e-text-label-weight); letter-spacing: var(--e-text-label-ls);
+  text-transform: uppercase; color: var(--e-dim); margin-top: 4px; flex: none; }
+.sheet-list { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; min-height: 0; flex: 1; margin: 0 -6px; padding: 0 6px 6px; }
+.sheet-list::-webkit-scrollbar { width: 10px; }
+.sheet-list::-webkit-scrollbar-track { background: transparent; }
+.sheet-list::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 999px; border: 3px solid var(--e-surface); background-clip: padding-box; min-height: 32px; }
+
+/* Target rows: the menu's row shape with a sub-line (size, Primary) under the name. */
+.dd-item.tgt { padding: 7px 10px 7px 8px; }
+.dd-item.tgt .ico { width: 28px; height: 28px; border-radius: 8px; align-items: center; justify-content: center; }
+.dd-item.tgt .dd-main { gap: 0; }
+.sheet-list .sheet-sec:not(:first-child) { margin-top: 10px; }
+
+/* ---- The take pill: the bar while recording or saving (TakeBar.tsx) --------------------------
+   One 60px row on the .hud surface itself (`.as-take` only rounds that surface into a pill and
+   pins it to TAKE_WIDTH via an inline style, centred, so it holds its shape while the window is
+   still gliding down to it), so nothing paints a second plane. The body drags the window: every
+   non-button child gives up its pointer events so a press anywhere but a button reaches the drag
+   region, the way the idle titlebar already works. The warning glyph is the one exception - its
+   message lives on hover. */
+.hud.as-take { border-radius: 31px; margin: 0 auto; }
+.take { display: flex; align-items: center; gap: 10px; height: 60px; padding: 0 8px; box-sizing: border-box; width: 100%; min-width: 0; }
+.take > :not(button) { pointer-events: none; }
+.take > .take-warn { pointer-events: auto; }
+.take-clock { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; flex: none; }
+.take-dot { width: 9px; height: 9px; border-radius: 5px; background: var(--accent); }
+.take.paused .take-dot { background: var(--e-dim); }
+.take-timer { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 17px; min-width: 52px; letter-spacing: -0.015em;
+  transition: color 0.15s ease; }
+.take.paused .take-timer { color: var(--e-dim); }
+.take-warn { width: 20px; height: 20px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; color: #fff; background: #e0762b; flex: none; cursor: help; }
+.take-slot { width: 150px; height: 40px; display: inline-flex; align-items: center; justify-content: center; margin-left: 4px; flex: none; }
+.take-slot-in { display: inline-flex; align-items: center; justify-content: center; }
+.take-paused { font-size: 13px; font-weight: 600; color: var(--e-dim); letter-spacing: 0.01em; }
+.take-btn { width: 42px; height: 42px; border-radius: 21px; border: none; padding: 0; background: transparent; color: var(--e-dim);
+  display: flex; align-items: center; justify-content: center; cursor: pointer; flex: none;
+  transition: background 0.12s ease, color 0.12s ease; }
+.take-btn:hover { background: var(--hover); color: var(--fg); }
+.take-btn.on { background: var(--hover); color: var(--fg); }
+.take-ico { display: flex; }
+.take.paused .take-btn:not(.stop) { color: var(--fg); }
+.take-btn.stop { background: var(--accent); color: #fff; }
+.take-btn.stop:hover { filter: brightness(0.92); }
+.take.saving { gap: 12px; padding: 0 20px; }
+.take-spin { display: flex; color: var(--e-dim); flex: none; }
+.take-label { font-size: 14px; font-weight: 600; flex: none; }
+.take-pct { font-variant-numeric: tabular-nums; font-size: 14px; color: var(--e-dim); flex: none; }
+.take-bar { flex: 1; height: 4px; border-radius: 2px; background: var(--e-line-strong); overflow: hidden; margin-left: 6px; }
+.take-fill { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+
+/* ---- The Sources sheet (SourcesSheet.tsx) ---------------------------------------------------
+   Hangs under the pill on the SAME .hud surface, which grows by exactly this box's height
+   (useHudWindowSize's SOURCES_HEIGHT is these numbers) and un-rounds from a pill into a panel
+   while it is open. Fixed height: the flip to the display list scrolls inside the same box, so
+   the window resizes once on open and once on close and never in between. */
+.hud.as-take.has-sources { border-radius: 22px; }
+/* The hairline is an inset shadow, not a border: a border would add a 169th px that
+   SOURCES_HEIGHT would then have to carry, for one line of paint. */
+.src-sheet { height: 168px; box-sizing: border-box; padding: 4px 8px 10px; display: flex; min-width: 0;
+  box-shadow: inset 0 1px 0 var(--e-divider); }
+.src-body { display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 0; }
+.src-sheet .dd { flex: none; }
+.src-sheet .dd-row { height: 46px; }
+.src-sheet .sheet { height: auto; flex: 1; min-height: 0; gap: 6px; }
+.src-sheet .sheet-head { height: 24px; }

@@ -32,6 +32,7 @@ export interface Zoom {
   zoom_out_ms: number;
   layer: number;
   cam_action?: CamZoomAction | null;
+  smart_typing?: boolean;
 }
 ```
 
@@ -46,6 +47,7 @@ One zoom segment within a recording.
 - `zoom_in_ms` / `zoom_out_ms: number` - independent ease-in and ease-out durations within the zoom's span, edited via `ZoomInspector`'s "Zoom in"/"Zoom out" fields (and its Subtle/Balanced/Punchy presets). *Why split from a single duration:* a punchy zoom-in paired with a slower zoom-out (or vice versa) is a distinct, common feel that one symmetric duration can't express.
 - `layer: number` - stacking index among zooms. Assigned by `layoutRegions` (`src/editor/timeline/layers.ts`) for timeline row placement, and read by `resolveCamAction` (`src/editor/stage/camZoomAction.ts`) to pick which of several time-overlapping zooms' `cam_action` governs the webcam - the highest layer wins, ties going to the last one, mirroring the Rust `max_by_key`.
 - `cam_action?: CamZoomAction | null` - per-zoom webcam override; absent or `null` inherits the global `ZoomSettings.cam_zoom_default`. Set via the `set_zoom_cam_action` op.
+- `smart_typing?: boolean` - smart typing duration: the end follows the typing after the start. Set through `update_zoom`'s `smart_typing`; the backend refits `end_ms` on that op and on every later start move (`ops::smart_zoom`), so the value on the wire is always a concrete `end_ms`. Absent on docs written before it, meaning fixed.
 
 ### Used by
 
@@ -252,8 +254,8 @@ export type EditOp =
   | { op: "add_effect"; kind: EffectKind; start_ms: number; end_ms: number }
   | { op: "update_effect"; id: string; start_ms?: number; end_ms?: number; fade_in_ms?: number; fade_out_ms?: number; mode?: string; dim?: number; radius?: number; feather?: number; layer?: number }
   | { op: "remove_effect"; id: string }
-  | { op: "add_camera_move"; t_ms: number; x: number; y: number; size: number }
-  | { op: "update_camera_move"; id: string; t_ms?: number; x?: number; y?: number; size?: number; easing?: string }
+  | { op: "add_camera_move"; t_ms: number; x: number; y: number; size: number; shape?: CamMoveShape; roundness?: number }
+  | { op: "update_camera_move"; id: string; t_ms?: number; x?: number; y?: number; size?: number; easing?: string; shape?: CamMoveShape; roundness?: number }
   | { op: "remove_camera_move"; id: string };
 ```
 
@@ -277,8 +279,8 @@ Discriminated union of all edit verbs. Each variant is tagged by the `op` string
 - `add_effect` - appends a new `EffectRegion` of `kind` for the given time range.
 - `update_effect` - patches any subset of an effect region's fields by `id`, including `layer` for overlap stacking.
 - `remove_effect` - deletes the effect region with the given `id`.
-- `add_camera_move` - appends a new webcam PiP keyframe (`CameraMove`) at `t_ms` with position `x`/`y` and `size`.
-- `update_camera_move` - patches any subset of a camera-move keyframe's fields by `id`: time, position, size, `easing`.
+- `add_camera_move` - sets the webcam PiP keyframe (`CameraMove`) at `t_ms` with position `x`/`y`, `size`, and optionally its `shape`/`roundness` (absent = `"layout"` / the backend default). An instant that already holds a keyframe is updated in place, not duplicated (Rust `EditOp::AddCameraMove`), so a slider committing twice before the doc round-trips cannot stack a stale twin.
+- `update_camera_move` - patches any subset of a camera-move keyframe's fields by `id`: time, position, size, `easing`, `shape`, `roundness`.
 - `remove_camera_move` - deletes the camera-move keyframe with the given `id`.
 
 ### Used by
@@ -301,10 +303,18 @@ export interface EffectRegion { id: string; kind: EffectKind; start_ms: number; 
 
 An editable effect region on the timeline (v1: spotlight), held in `EditDoc.effects`. The `add_effect` / `update_effect` / `remove_effect` `EditOp`s mutate it; the timeline lays them into layers (`layoutRegions`) and draws each as a draggable pill. `layer: number` doubles as that timeline row-stacking index and, for regions overlapping at the same instant, an explicit priority - the preview's `spotlightPreview.ts` picks the highest-`layer` region active at a given time (ties go to the last one in the array), mirroring the Rust `max_by_key` overlap rule.
 
+## CamMoveShape
+
+```ts
+export type CamMoveShape = "layout" | "circle" | "rounded" | "rect";
+```
+
+A keyframe's shape. `"layout"` inherits the layout's webcam shape (the meaning of every keyframe written before shapes existed on 2026-09-14); the other three are the keyframe's own. Mirrors the strings Rust `valid_cam_shape` accepts; the picker is `CamShapeField.tsx`'s `CAM_MOVE_SHAPES`.
+
 ## CameraMove
 
 ```ts
-export interface CameraMove { id: string; t_ms: number; x: number; y: number; size: number; easing: string }
+export interface CameraMove { id: string; t_ms: number; x: number; y: number; size: number; easing: string; shape: CamMoveShape; roundness: number }
 ```
 
 One webcam PiP keyframe on the Camera lane - a "Move mode" drag-and-drop point the export interpolates between (mirrors the Rust `CameraMove`). An empty `camera_moves` array is a no-op, byte-identical to before the feature existed.
@@ -314,6 +324,8 @@ One webcam PiP keyframe on the Camera lane - a "Move mode" drag-and-drop point t
 - `x` / `y: number` - the webcam panel's center position, 0..1 fraction of the output frame (same basis as `ZoomTarget`'s fixed point).
 - `size: number` - the webcam panel's size at this keyframe, 0..1 fraction of the output's short edge (same basis as `ModeAppearance.cam_size`).
 - `easing: string` - easing function name for the interpolation into this keyframe, same free-form string convention as `Zoom.easing`.
+- `shape: CamMoveShape` - the keyframe's own webcam shape, morphed between keyframes like the rect (`cameraMoves.md`). Always present on the wire (a serde default on the Rust side fills older docs).
+- `roundness: number` - the `"rounded"` corner radius as a fraction of the panel's short side, 0..0.5 (the same unit as `ModeAppearance.cam_radius`); ignored by the other shapes.
 
 ### Used by
 

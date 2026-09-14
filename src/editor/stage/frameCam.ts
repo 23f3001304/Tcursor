@@ -1,7 +1,7 @@
 import type { PreviewLayout } from "../../lib/ipc";
 import type { CameraMove, Zoom } from "../../lib/edit";
 import type { ZoomSettings } from "../../hud/settings/settings";
-import { camMoveAt, overrideCamPanel, type CamPose } from "./cameraMoves";
+import { camMoveAt, liveCamPose, overrideCamPanel, type CamPose } from "./cameraMoves";
 import { applyCamZoomAction, camZoomAlpha, resolveCamAction, resolvedCamDefault } from "./camZoomAction";
 
 /** The Move-mode draft the composite should HONOUR this frame: none while arrange mode owns the
@@ -32,9 +32,7 @@ export function frameCamLayout(
   ow: number, oh: number,
 ): PreviewLayout | null {
   if (!base?.cam) return base;
-  const live: CamPose = {
-    x: base.cam[0] + base.cam[2] / 2, y: base.cam[1] + base.cam[3] / 2, size: base.cam[3],
-  };
+  const live = liveCamPose(base.cam, ow, oh);
   const cp = drag ?? camMoveAt(moves, t, live);
   if (cp) return { ...base, cam: overrideCamPanel(base.cam, cp, ow, oh) };
   if (base.cam[2] >= base.screen[2]) return base;

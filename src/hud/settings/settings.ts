@@ -13,13 +13,35 @@ export interface AppearanceSettings {
   screen: ModeAppearance; screen_only: ModeAppearance; camera: ModeAppearance;
   camera_only: ModeAppearance; presenter: ModeAppearance;
 }
+/** One saved "look" - a name plus a snapshot of ALL FIVE layouts' appearance. Wire form of Rust's
+ *  `LayoutPreset` (settings/model.rs). Global (it lives in the app config, not in a recording's
+ *  `edit.json`), which is what lets the editor's Layouts panel apply the same look to a project
+ *  recorded months later. `id` is opaque and stable, so renaming a look keeps its row identity. */
+export interface LayoutPreset { id: string; name: string; appearance: AppearanceSettings }
 export type ThemeMode = "light" | "dark" | "system";
 /** `animated_brand` (Task 39) - the living-brand feel knob: whether `TcursorMark` flows/pulses
  *  for its recording/exporting/directing states, in the HUD and the editor's TopBar. `false`
  *  and `prefers-reduced-motion` both fall the mark back to its static idle rendering. */
-export interface InterfaceSettings { theme: ThemeMode; accent: [number, number, number]; animated_brand: boolean }
+export interface InterfaceSettings { theme: ThemeMode; accent: [number, number, number]; animated_brand: boolean;
+  /** The editor's own micro-interactions (`src/editor/effects/`): the click ripple under every
+   *  pointerdown in the chrome, and the magnetic pull the Play button and the Trim pills exert.
+   *  Mirrors Rust `InterfaceSettings::interface_effects`, which defaults it true for configs
+   *  written before the field existed. Nothing here reaches the EXPORT - the recording's own
+   *  click effects are `ClickFxSettings`. */
+  interface_effects: boolean }
 export type CursorStyle = "system" | "enhanced" | "hidden";
-export interface CursorSettings { style: CursorStyle; size: number; smoothness: number; path_idealize: number; motion_blur: number; click_bounce: boolean; bounce_intensity: number; pack: string }
+/** The glass shape drawn BEHIND the cursor, whatever pack it comes from (Rust `CursorBack`).
+ *  `"none"` is the original look; `"glass"` adds a refracting disc that morphs by cursor kind - a
+ *  vertical pill over text, stretching into a selection bar while the left button is held there.
+ *  Independent of the pack's own `material`: a plain pack can have a glass back, and a glass pack
+ *  can have none. */
+export type CursorBackStyle = "none" | "glass";
+export interface CursorSettings { style: CursorStyle; size: number; smoothness: number; path_idealize: number; motion_blur: number;
+  /** 0..1 motion lean (Rust `CursorSettings::tilt`): how far a fast cursor tips into its own
+   *  travel, and overshoots once coming back upright when it stops. Scales the 6-degree cap;
+   *  0 switches the filter off. Mirrored live by `src/editor/stage/cursorTilt.ts`. */
+  tilt: number;
+  click_bounce: boolean; bounce_intensity: number; pack: string; back: CursorBackStyle }
 export type ClickFxStyle = "none" | "ripple" | "pulse" | "glow" | "shockwave" | "particles" | "neon";
 export type SpotlightMode = "classic" | "blur" | "halo" | "breathing" | "nebula" | "vignette";
 export type VideoFxMode = "nebulawash" | "cinematicdim" | "screenfocus" | "colorpop";
@@ -72,4 +94,7 @@ export interface Settings {
   zoom: ZoomSettings; clickfx: ClickFxSettings; hotkeys: HotkeySettings; appearance: AppearanceSettings;
   cursor: CursorSettings; ui: InterfaceSettings; audio_offset_ms: number; background: BackgroundSettings;
   audio_mic_volume: number; audio_sys_volume: number; ai_model: string;
+  /** The user's saved layout looks, newest last (Rust `Settings::layout_presets`). Serde-defaulted
+   *  on the Rust side, so a config written before presets existed arrives as `[]`. */
+  layout_presets: LayoutPreset[];
 }

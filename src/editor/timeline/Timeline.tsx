@@ -15,6 +15,7 @@ import { RegionRows } from "./RegionRows";
 import { Playhead } from "./Playhead";
 import { Ruler, RangeOverlay, useSeek } from "./timelineRuler";
 import type { Range } from "./useRangeSelect";
+import "./timeline.css"; // the timeline's whole sheet, the way panels.css rides with PanelHeader
 
 /** Multi-track timeline (Filmora-style): an adaptive ruler (`timelineRuler.tsx`), a filmstrip clip,
  *  and a scrolling stack of tracks - Time, zoom, FX, layout (pills drag/resize via useRegionDrag),
@@ -23,7 +24,7 @@ import type { Range } from "./useRangeSelect";
  *  it stays aligned with the ruler ticks + pills regardless of the timeline's outer padding. */
 
 // Row-height constants shared by the lane label gutter and `.e-tracks`' own natural row layout
-// (editor.css uses the same 32/22/6 numbers) - a lane's gutter label slot is always exactly as
+// (timeline.css uses the same 32/22/6 numbers) - a lane's gutter label slot is always exactly as
 // tall as the lane's real content, never computed twice with a chance to drift.
 const ROW_H = 32, AUDIO_ROW_H = 22, GAP = 6;
 const laneHeight = (rows: number, rowH: number) => (rows > 0 ? rows * rowH + (rows - 1) * GAP : 0);
@@ -168,16 +169,18 @@ export const Timeline = memo(function Timeline({ doc, timeMs, dur, playing, onSe
         <div className="e-trackswrap">
           <div className="e-lanegutter" ref={gutterRef}>
             {lanes.map((l) => (
-              <div key={l.key} className="e-lanelabelrow" style={{ height: l.heightPx }}>
+              <div key={l.key} className={`e-lanelabelrow e-lane-${l.key}`} style={{ height: l.heightPx }}>
                 <span className={`e-lanelabel${l.active ? " on" : ""}`}>{l.label}</span>
               </div>
             ))}
           </div>
-          <div className="e-tracks" onScroll={onTracksScroll}>
-            {/* Band shade keys off this lane's INDEX in the already-filtered array, not its type -
-                a type->shade mapping put two same-shade lanes adjacent whenever only one of
-                {fx, layout} was present. */}
-            {lanes.map((l, i) => <div key={l.key} className={`e-lanerows e-band-${i % 2 ? "b" : "a"}`}>{l.body}</div>)}
+          {/* `data-ui-fx="off"`: the track stack is a drag surface (scrub, drag a pill, drag a
+              handle), so the editor's click ripple (`src/editor/effects/`) stays off it - a bloom
+              at the top of every drag would fire on the gesture's first frame, not on a click. */}
+          <div className="e-tracks" data-ui-fx="off" onScroll={onTracksScroll}>
+            {/* `e-lane-<key>` is the lane's identity in both columns: timeline.css hangs
+                `--lane-accent` off it, which colors this band's tint and the gutter dot. */}
+            {lanes.map((l) => <div key={l.key} className={`e-lanerows e-lane-${l.key}`}>{l.body}</div>)}
           </div>
           {/* Cuts cross the whole stack, outside `.e-tracks` - CutOverlay.md says why. */}
           <CutOverlay cuts={doc.cuts} dur={dur} sel={sel} onSel={onSel} />

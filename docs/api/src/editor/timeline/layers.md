@@ -28,4 +28,4 @@ Returns `0` for a hard cut (`transitionMs === 0`) and for a degenerate span (`0`
 
 ### Used by
 
-- `src/editor/timeline/Timeline.tsx` - written inline onto each `.e-layblk` as the `--fin` / `--fout` custom properties, which `editor.css` turns into the two end gradients.
+- `src/editor/timeline/Timeline.tsx` - written inline onto each `.e-layblk` as the `--fin` / `--fout` custom properties, which `timeline.css` turns into the two end gradients.

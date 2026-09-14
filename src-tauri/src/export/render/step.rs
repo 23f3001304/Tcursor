@@ -30,13 +30,18 @@ impl FrameRenderer {
         // Sample each consumer with its own base - never mix them.
         let (ev_t, out_t) = (t_clip_abs.saturating_sub(self.events_ms) as u32, t_out);
         let smooth = self.cursor.at(ev_t, dt_ms);
-        let mut scene = self.track.scene_at(out_t);
-        let cur = to_panel(smooth, self.sw, self.sh, scene.screen.rect);
+        // `dt_ms` IS the output frame period, so it names the frame rate the caller is producing -
+        // which is what decides exactly which frame a display switch dissolves FROM (`hold_tick`).
+        let fps = (1000.0 / dt_ms.max(0.001)).round().max(1.0) as u64;
+        let (mut scene, mix, hold) = self.track.frame_at(out_t, fps);
+        // Through the SPAN's source rect, not the canvas: after a display switch the panel shows
+        // only the fitted sub-rect, so a canvas point maps into the panel through that rect.
+        let cur = to_panel(smooth, scene.src, scene.screen.rect);
         let (ow, oh) = (self.layout.out_w as f32, self.layout.out_h as f32);
         // The LIVE layout-resolved PiP pose for this frame, read before any override: the keyframe
         // track eases out of it entering its span and back INTO it leaving (re-read every frame, so
         // an exit blend tracks a layout transition that is still moving). Not a one-off static pose.
-        let live = Some(static_cam_pose(scene.camera.rect, ow, oh));
+        let live = Some(static_cam_pose(&scene.camera, ow, oh));
         // A pose carries height only, so the override restores width from the STATIC panel's own
         // aspect - otherwise one keyframe silently squares a Wide (16:9) panel for the whole clip.
         let cam_aspect = scene.camera.rect.w / scene.camera.rect.h.max(0.001);
@@ -47,7 +52,11 @@ impl FrameRenderer {
             Some(p) => { scene.camera = crate::export::scene::override_camera(scene.camera, p, ow, oh, cam_aspect); true }
             None => false,
         };
-        let mut cam = self.sim.step(out_t, dt_ms, cur, &self.regions, &self.cfg);
+        // A pinned aim lives in canvas coords; put it into THIS frame's panel (through this frame's
+        // crop rect), so a layout transition or display switch mid-zoom carries the aim with the
+        // content instead of leaving the camera zooming into where the panel used to be.
+        crate::export::scene::layout::anchor_frame(&self.regions, &scene, &mut self.frame_regions);
+        let mut cam = self.sim.step(out_t, dt_ms, cur, &self.frame_regions, &self.cfg);
         if scene.screen.alpha < 0.5 {
             cam = Camera { cx: self.layout.out_w as f32 / 2.0, cy: self.layout.out_h as f32 / 2.0, scale: 1.0 };
         }
@@ -56,7 +65,7 @@ impl FrameRenderer {
             scene.camera = crate::export::scene::apply_cam_zoom_action(
                 scene.camera, action, cam.scale, target_scale);
         }
-        FramePose { ev_t, out_t, scene, cur, cam }
+        FramePose { ev_t, out_t, scene, cur, cam, mix, hold }
     }
 
     /// The one walk the exporter, the one-shot preview and `camera_track` share, so their cameras

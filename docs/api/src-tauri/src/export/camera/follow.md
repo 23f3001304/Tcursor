@@ -29,7 +29,7 @@ The first-order lerp factor for a step of `dt_ms`, converted from the per-60fps-
 
 ### Returns
 
-`1 - (1 - k_ref)^(dt_ms / REF_STEP_MS)`, with the degenerate settings short-circuited: `0` never moves and `1` snaps, at any step length (`1` is load-bearing for the cursor - it is plain-OS mode asking for no low-pass at all). A non-finite or absurd `dt_ms` falls back to / clamps toward `REF_STEP_MS` rather than producing NaN.
+`1 - (1 - k_ref)^(dt_ms / REF_STEP_MS)`, with the degenerate settings short-circuited: `0` never moves and `1` snaps, at any step length. A non-finite or absurd `dt_ms` falls back to / clamps toward `REF_STEP_MS` rather than producing NaN.
 
 ### Behaviors worth knowing
 

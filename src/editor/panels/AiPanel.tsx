@@ -13,14 +13,16 @@ import { engineDisplayName } from "../director/engineName";
 // a cheap opacity/y-4 tween, consistent with the existing dialog enters.
 const HINT_MOTION = { initial: { opacity: 0, y: -4 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -4 }, transition: { duration: 0.14 } };
 
+// The owner's three bullets, in their words and their order, on the glyphs this panel already had.
 const SUMMARY: [ComponentType<{ size?: number }>, string][] = [
-  [IconZoomIn, "Places zooms on your clicks"],
-  [IconVideo, "Punches the camera in"],
-  [IconCut, "Trims idle gaps"],
+  [IconZoomIn, "Zooms on clicks"],
+  [IconCut, "Removes idle time"],
+  [IconVideo, "Emphasizes important actions"],
 ];
 
-/** The AI Director rail panel: a real Engine picker (installed Ollama models), the auto-edit
- *  run button, and what it does. */
+/** The AI Director rail panel, in the hierarchy the owner asked for: title, the Auto-edit button,
+ *  one sentence saying what it does, three bullets, and the Engine picker demoted to a small
+ *  labelled row at the foot of the panel. What the button DOES is untouched. */
 export function AiPanel({
   running, exporting, error, log, onRun, model, onChangeModel, onAutoModel, progress, onClose,
 }: {
@@ -64,28 +66,15 @@ export function AiPanel({
   // which is already communicated by the Shimmer) - gate finding: the disabled run button gave
   // no reason why, so a user with no models pulled had nothing to go on but a dead button.
   const noModelsTitle = models !== null && models.length === 0
-    ? "No local Ollama models found - install one (`ollama pull <model>`), then Retry above."
+    ? "No local Ollama models found - install one (`ollama pull <model>`), then Retry below."
     : undefined;
 
   return (
     <div className="e-panel e-insp">
-      <PanelHeader title="AI Director" lede="Local edits from your clicks and keystrokes, via Ollama." onClose={onClose} />
+      <PanelHeader title="AI Director" lede="Auto-editing by a model running on this machine." onClose={onClose} />
 
-      {/* The choice this panel is about, first: which local model does the editing. */}
+      {/* The action first: one primary button, then whatever this run has to report. */}
       <div className="e-grp">
-        <div className="e-field">
-          <span className="e-fl">Engine</span>
-          {models === null ? (
-            <Shimmer className="e-picker-shell" />
-          ) : models.length === 0 ? (
-            <div className="e-picker-shell e-picker-empty" role="status" title={noModelsTitle}>
-              <span>No local models found</span>
-              <button type="button" onClick={loadModels} title="Look for installed Ollama models again">Retry</button>
-            </div>
-          ) : (
-            <Picker value={current} options={options} onChange={onChangeModel} ariaLabel="Engine" />
-          )}
-        </div>
         <button className="e-run" onClick={onRun} disabled={running || exporting || !models?.length}
           title={noModelsTitle} data-director-anchor="wand">
           {running
@@ -110,11 +99,10 @@ export function AiPanel({
         </AnimatePresence>
       </div>
 
-      {/* Then what it did, or - before a run - what it will do. */}
+      {/* Then what it does - replaced, once a run has narrated anything, by what it actually did. */}
       <div className="e-grp">
-        <span className="e-sechead">{log.length > 0 ? "Run" : "What it does"}</span>
+        <p className="e-ai-what">Automatically finds important moments and creates camera movement.</p>
         {log.length > 0 ? (
-          // Agentic reveal: each edit the director applies streams in here as a narration line.
           <div className="e-ai-log">
             {log.map((line, i) => (
               <motion.div key={i} className={`e-ai-log-line${line.startsWith("✓") ? " done" : ""}`}
@@ -129,10 +117,25 @@ export function AiPanel({
             {SUMMARY.map(([Icon, txt], i) => (
               <motion.li key={i} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }}
                 transition={{ type: "tween", duration: 0.16, ease: [0.4, 0, 0.2, 1], delay: 0.1 + i * 0.05 }}>
-                <span className="ic"><Icon size={15} /></span>{txt}
+                <Icon size={14} />{txt}
               </motion.li>
             ))}
           </ul>
+        )}
+      </div>
+
+      {/* The engine is a setting, not the headline: one small labelled row at the foot. */}
+      <div className="e-ai-engine">
+        <span className="e-ai-engine-l">Engine</span>
+        {models === null ? (
+          <Shimmer className="e-picker-shell" />
+        ) : models.length === 0 ? (
+          <div className="e-picker-shell e-picker-empty" role="status" title={noModelsTitle}>
+            <span>None found</span>
+            <button type="button" onClick={loadModels} title="Look for installed Ollama models again">Retry</button>
+          </div>
+        ) : (
+          <Picker value={current} options={options} onChange={onChangeModel} ariaLabel="Engine" />
         )}
       </div>
     </div>

@@ -1,0 +1,199 @@
+/* The stage, the transport under it, and the rail beside it - the editor's centre column, moved
+   out of editor.css by the 2026-09-14 look pass the way panels.css and controls.css were before
+   it. Imported once by `Stage.tsx`. Every rule here was defined in editor.css and is DELETED
+   there, not duplicated: editor.css is imported last by `Editor.tsx`, so a copy left behind would
+   quietly win every tie.
+
+   What the pass changed, in the owner's order:
+     1. The preview frame is the loudest thing on screen again - 12px of air around it instead of
+        26, a hairline instead of a 70px black halo.
+     2. Nothing floats over the preview. The old `.e-ftool` overlay is gone entirely; its aspect
+        cycle already existed as the transport's own chip and its three panel shortcuts already
+        existed as rail buttons, so moving it anywhere would have kept four duplicate controls.
+     3. `.e-viewseg` (Fit / Fill / 100%) is the one control this pass ADDS, and it sits in the
+        transport's right group with the other chips.
+     4. Rail buttons name themselves (`.e-tip`) and light up under the pointer.
+     5. `.e-tbtn`/`.e-chip` lost their gradient + hover lift: in a bar where Play is the hero,
+        eight secondary controls should not each rise off the surface when touched. */
+
+/* ---- Rail -------------------------------------------------------------------------------------
+   Floating sidebar: sits above the canvas with space around it (not edge-to-edge). Surface plane,
+   no border (border doctrine) - it separates from the canvas by the surface step + resting shadow. */
+.e-rail { width: 56px; flex: none; display: flex; flex-direction: column; align-items: center;
+  padding: 10px 0; gap: 4px; border-radius: var(--e-r-lg); background: var(--e-surface);
+  box-shadow: var(--e-inset-hi), var(--e-shadow-1); }
+/* `Tooltip` wraps each button, so the wrapper must add no box of its own. */
+.e-rail .e-tipwrap { flex: none; }
+.e-ric { position: relative; width: 42px; height: 42px; border-radius: var(--e-r); border: none;
+  background: transparent; color: var(--e-dim); display: flex; align-items: center; justify-content: center;
+  transition: color .12s ease, background-color .12s ease; }
+.e-ric > svg { position: relative; z-index: 1; }
+/* The hover state the owner asked for: the raised plane under the icon, the icon at full
+   foreground. Skipped on the active button, which already sits on `.e-ric-hl`'s own pill (and on
+   the AI tab that pill is violet-tinted - a grey fill underneath would muddy it). */
+.e-ric:not(.on):hover { background: var(--e-raised); color: var(--e-fg); }
+.e-ric.on { color: var(--e-fg); }
+.e-ric.ai.on { color: var(--e-ai); }
+/* Shared active slot (design/premium-pass D3): the only element that layout-animates between
+   tools - a flat --e-raised fill plus a 3px accent tick at the slot's own left edge, offset into
+   the rail's centering gutter. No border, no shadow: a passive location marker, not a button. */
+.e-ric-hl { position: absolute; inset: 0; border-radius: var(--e-r); background: var(--e-raised); z-index: 0; }
+.e-ric-hl::before { content: ""; position: absolute; left: -4px; top: 9px; bottom: 9px; width: 3px;
+  border-radius: 2px; background: var(--e-primary); }
+/* AI tab keeps its violet identity - a faint tint layered over the raised slot + a violet tick. */
+.e-ric.ai.on .e-ric-hl { background: color-mix(in srgb, var(--e-ai) 14%, transparent); }
+.e-ric.ai.on .e-ric-hl::before { background: var(--e-ai); }
+
+/* ---- Tooltip (controls/Tooltip.tsx) -----------------------------------------------------------
+   Placed to the RIGHT of its control (flipping left near the window's right edge), vertically
+   centred on it. The label is PORTALLED to the editor root and positioned in viewport coordinates
+   by `popoverPlace.ts`, so `left`/`top` arrive as inline styles and nothing here may set either:
+   an `overflow` ancestor (a tile strip, `.e-panel`'s scroll box, the inspector column) used to cut
+   it off, and clipping is DOM containment, not geometry. `position: fixed` rather than absolute for
+   the same reason - so a Motion `transform` on an ancestor cannot pull it back into a clip.
+   Vertical centring is placement's job, never a CSS `transform`: Motion writes the fade's own `x`
+   as an inline transform and would clobber one. Inert to the pointer, so it can never swallow the
+   click it is describing. z-index sits above the panels and the timeline but below the modals (100),
+   which the rail cannot be reached through anyway. */
+.e-tipwrap { position: relative; display: inline-flex; }
+.e-tip { position: fixed; height: 26px;
+  display: flex; align-items: center; padding: 0 9px; border-radius: var(--e-r-sm);
+  background: var(--e-card); color: var(--e-fg); box-shadow: var(--e-shadow-2);
+  font-size: var(--e-text-hint-size); font-weight: var(--e-text-hint-weight);
+  white-space: nowrap; pointer-events: none; z-index: 60; }
+
+/* ---- Stage ------------------------------------------------------------------------------------
+   12px of air, not 26: the preview is meant to dominate the centre, and the surrounding emptiness
+   was the owner's first complaint. `overflow: hidden` is what crops the Fill view - see below. */
+.e-stagewrap { flex: 1; position: relative; display: flex; align-items: center; justify-content: center;
+  min-width: 0; min-height: 0; padding: 12px; overflow: hidden; border-radius: var(--e-r-lg);
+  background: var(--e-stage-well); }
+/* Fill means fill: the frame takes the whole area, so the 12px ring goes with it. */
+.e-stagewrap.fill { padding: 0; }
+/* Full-composite preview. The stage IS the aspect-ratio sizer capped by both max-width and
+   max-height, so it's always the largest box (at the CHOSEN aspect) that fits the available area
+   WITHOUT cropping or distorting - the canvas just fills it. `aspect-ratio` here is only the
+   pre-load default (16:9, matching Stage.tsx's `DEFAULT_CANVAS`); Stage.tsx sets the box inline
+   (`stageFrameStyle`) from `layout.canvas` and the view mode, which wins once the preview loads.
+   The stage hugs the canvas exactly in every view mode, which the Move-mode drag handle, the aim
+   reticle and the arrange frames all rely on - they are positioned as a % of this box.
+   Frame: a hairline and the resting shadow, in place of the 70px black halo that used to ring it.
+   `--e-frame` is the frame's own ground. It is a token rather than the old literal #0b0b0d because
+   the canvas is `display: none` until a proxy exists (Stage.tsx), so this is the page the empty
+   and media-error states are actually read against - near-black under the dark theme, the raised
+   white plane under the light one, where dim grey copy on black would have been the one part of
+   the editor that never turned. Once the preview paints, the canvas covers it either way. */
+.e-stage { position: relative; display: flex; align-items: center; justify-content: center;
+  aspect-ratio: 16 / 9; max-width: 100%; max-height: 100%; min-height: 0; border-radius: var(--e-r-lg);
+  overflow: hidden; border: 1px solid var(--e-line); background: var(--e-frame);
+  box-shadow: var(--e-shadow-1); }
+/* Fill hands the stage a COVER box - wider or taller than the area - and lets the wrapper crop it.
+   Flex would otherwise shrink that box straight back to the area and undo the crop. */
+.e-stagewrap.fill > .e-stage { flex: none; }
+.e-canvas { display: block; width: 100%; height: 100%; }
+.e-stage-empty { margin: auto; color: var(--e-dim); font-size: var(--e-text-hint-size); display: flex;
+  flex-direction: column; align-items: center; gap: 10px; }
+/* Recoverable stage-media error card (StageMedia.tsx) - icon + reason + a Retry button that
+   clears `err` and bumps useEditorData's `reloadTick` to force the proxy effect to re-run. */
+.e-media-err { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 8px;
+  color: var(--e-dim); text-align: center; padding: 0 24px; }
+.e-media-err-title { margin: 0; font-size: var(--e-text-body-size); font-weight: var(--e-text-body-weight); color: var(--e-mut); }
+.e-media-err-reason { margin: 0; font-size: var(--e-text-hint-size); }
+.e-media-err .e-modal-btn { margin-top: 4px; height: 30px; padding: 0 12px; font-size: var(--e-text-body-size); }
+
+/* ---- Transport --------------------------------------------------------------------------------
+   One raised bar (design/premium-pass D3) floating below the stage rather than a full-width strip:
+   it sizes to its content and centers in the editor body's cross axis. Three clusters (tools /
+   play transport / view + volume) separated by `.e-tdiv`. */
+/* The bar WRAPS rather than overflowing (width audit, 2026-09-14). Its three groups are ~1000px of
+   fixed-size controls and none of them can shrink (every button has a pixel width and the time
+   readout is `nowrap`), so on any window under about 1100px the old `height: 44px` + no-wrap bar
+   ran straight past its own `max-width` and the right group - view mode and the volume control -
+   was cut off by `.editor`'s `overflow: hidden`. `min-height` instead of `height` plus `flex-wrap`
+   keeps the resting bar byte-identical at a normal window (one row, 34px of content inside a 44px
+   box) and lets it become two centred rows at 880px instead of losing controls off the edge. */
+.e-transport { flex: none; align-self: center; width: fit-content; max-width: calc(100% - 32px);
+  min-height: 44px; margin-bottom: var(--e-sp-1); padding: 0 var(--e-sp-3);
+  border-radius: var(--e-r); background: var(--e-raised); box-shadow: var(--e-inset-hi), var(--e-shadow-1);
+  display: flex; flex-wrap: wrap; align-items: center; align-content: center; justify-content: center;
+  gap: 5px var(--e-sp-2);
+  font-size: 13px; color: var(--e-mut); }
+.e-tgroup { display: flex; align-items: center; gap: 8px; }
+.e-tdiv { width: 1px; height: 20px; background: var(--e-border2); flex: none; margin: 0 2px; }
+/* Quiet ghost icon buttons (seek, cut, speed, silences, add-zoom, wand, mute, reset-trim): no
+   border at rest, only on hover/active - and a translucent wash (`--e-divider`) rather than the
+   opaque `--e-soft` fill, since the bar itself sits on that same raised plane. */
+.e-tg { width: 32px; height: 32px; border: 1px solid transparent; background: transparent; color: var(--e-mut);
+  border-radius: var(--e-r-sm); display: flex; align-items: center; justify-content: center;
+  transition: background .14s ease, color .14s ease, border-color .14s ease; }
+.e-tg:hover:not(:disabled) { background: var(--e-divider); border-color: var(--e-line-strong); color: var(--e-fg); }
+.e-tg.on { background: var(--e-divider); border-color: var(--e-line); color: var(--e-fg); }
+.e-tg.on:hover { border-color: var(--e-line-strong); }
+.e-tg:disabled { opacity: .4; cursor: default; }
+/* Trim: a labelled ghost pill, distinct from the bare icon tools beside it. Flat now - the
+   gradient fill and the 1px hover lift it used to share with `.e-chip` made eight secondary
+   controls all jump at the pointer in a bar whose one hero is Play. */
+.e-tbtn { height: 32px; padding: 0 12px; border: 1px solid var(--e-border); background: transparent;
+  color: var(--e-mut); border-radius: var(--e-r); font-size: 12.5px; font-weight: 500;
+  display: flex; align-items: center; gap: 6px;
+  transition: background .14s ease, color .14s ease, border-color .14s ease; }
+.e-tbtn:hover { background: var(--e-divider); color: var(--e-fg); border-color: var(--e-line-strong); }
+/* Trim "on" = a trim is currently active (the pill doubles as a reset button then). */
+.e-tbtn.on { color: var(--e-primary); border-color: color-mix(in srgb, var(--e-primary) 40%, transparent);
+  background: color-mix(in srgb, var(--e-primary) 8%, transparent); }
+.e-tbtn.on:hover { background: color-mix(in srgb, var(--e-primary) 14%, transparent);
+  border-color: color-mix(in srgb, var(--e-primary) 60%, transparent); }
+.e-tbtn:disabled { opacity: .45; cursor: default; }
+/* Single optical unit (design/premium-pass D3): current time at 13px/600 --e-fg, the dimmed
+   "/ total" tucked in tight rather than reading as two separate labels. */
+.e-time { font-variant-numeric: tabular-nums; color: var(--e-fg); font-weight: 600; font-size: 13px;
+  min-width: 106px; text-align: center; letter-spacing: -0.01em; white-space: nowrap; }
+.e-time .sep { color: var(--e-dim); font-weight: 400; margin: 0 2px; }
+.e-time .tot { color: var(--e-dim); font-weight: 500; }
+.e-time .e-time-clip { margin-left: 8px; color: var(--e-mut); font-weight: 400; font-size: 11px; }
+/* Right-group chip (aspect / quality): flat, bordered, 28px, 11px tabular - see `.e-tbtn`. */
+.e-chip { height: 28px; padding: 0 9px; border: 1px solid var(--e-border); background: transparent;
+  color: var(--e-mut); border-radius: var(--e-r-sm); font-size: 11px; font-weight: 500;
+  font-variant-numeric: tabular-nums; display: flex; align-items: center;
+  transition: background .14s ease, color .14s ease, border-color .14s ease; }
+.e-chip:hover { background: var(--e-divider); color: var(--e-fg); border-color: var(--e-line-strong); }
+.e-chip:disabled { opacity: .45; cursor: default; }
+/* View mode (ViewPicker.tsx): how the composited frame sits in the stage - Fit, Fill, 100%. The
+   app's segmented idiom, one plane lower to suit the raised bar it sits in: the track is an inset
+   well at the canvas plane and the chosen option is a raised pill on it (the same figure/ground the
+   `.e-ai-progress` track uses). 2 + 24 + 2 = the 28px the chips beside it stand at. No border - it
+   is one control, and the well already draws its extent. */
+.e-viewseg { display: flex; align-items: center; gap: 2px; padding: 2px; border-radius: var(--e-r-sm);
+  background: var(--e-bg); }
+.e-viewseg button { height: 24px; padding: 0 8px; border: none; background: transparent;
+  color: var(--e-dim); border-radius: 6px; font-size: 11px; font-weight: 500;
+  display: flex; align-items: center; transition: background .14s ease, color .14s ease; }
+.e-viewseg button:hover:not(.on) { color: var(--e-fg); }
+.e-viewseg button.on { background: var(--e-raised); color: var(--e-fg);
+  box-shadow: var(--e-inset-hi), var(--e-shadow-1); }
+/* Play is the hero (design/premium-pass D3): a 38px accent-filled circle with a white glyph -
+   plain by the owner's call (2026-09-14: the glass sphere was tried and rejected), just larger
+   and grounded with the button shadow so it reads as the one thing on the bar you press.
+   `.e-play-glow` is a same-size absolute overlay carrying the soft-glow token; Transport.tsx
+   remounts it (via a `key` that alternates with `playing`) so it pulses on every toggle. */
+.e-play { position: relative; width: 38px; height: 38px; border-radius: 50%;
+  background: var(--e-primary); color: var(--e-on-fill); border: none;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: var(--e-inset-hi), var(--e-shadow-btn), var(--e-shadow-1); transition: background .14s ease; }
+.e-play:hover:not(:disabled) { background: var(--e-primaryh); }
+.e-play:disabled { opacity: .4; cursor: default; box-shadow: none; }
+.e-play-glow { position: absolute; inset: 0; border-radius: 50%; pointer-events: none; box-shadow: var(--e-glow-primary); }
+/* Volume flyout: a fixed-width track that fades in with a small x-shift, taken out of flow so it
+   cannot widen the centered bar when it mounts. Vertical centering is `top: 0; height: 100%` (not a
+   transform Motion would clobber), and the 6px of breathing room lives INSIDE the flyout as padding
+   so the hover never crosses a gap.
+   It opens to the LEFT, over the bar (width audit, 2026-09-14). Volume is the last control in the
+   transport, the bar is centred at up to `100% - 32px`, and the flyout is 76px: anchored at the
+   wrapper's RIGHT edge it always reached past the bar's own right edge and, on anything under about
+   1150px, past the window - where `.editor`'s `overflow: hidden` simply ate it. Opening inward can
+   never leave the window, and the raised plane + radius keep it reading as a slot that slid out of
+   the button rather than a transparent strip laid over the view-mode control it covers. */
+.e-volwrap { display: flex; align-items: center; position: relative; }
+.e-volflyout { position: absolute; right: 100%; top: 0; height: 100%;
+  width: 76px; display: flex; align-items: center; overflow: hidden; padding-right: 6px;
+  border-radius: var(--e-r-sm); background: var(--e-raised); }

@@ -1,6 +1,6 @@
 # src/hud/devices/selectDevices.ts
 
-Pure data types and a default-selection helper for the display and audio input device lists, plus label-cleanup helpers for the capture-target and device pickers. No React, no side effects - just interfaces and functions. Consumed by `useDevices` to initialize selections after the IPC lists resolve, by `Hud` to clean up mic/camera dropdown labels, and by `TargetPicker` to render each target's row (and drop the app's own window from it).
+Pure data types and a default-selection helper for the display and audio input device lists, plus label-cleanup helpers for the capture-target and device pickers. No React, no side effects - just interfaces and functions. Consumed by `useDevices` to initialize selections after the IPC lists resolve, by `Hud` to clean up mic/camera dropdown labels, and by `TargetSheet` and `IdleCard` to render each target (and drop the app's own window from the list).
 
 ## DisplayInfo
 
@@ -11,14 +11,15 @@ export interface DisplayInfo { id: string; label: string; kind?: string }
 Descriptor for one capture target (a monitor or an app window) returned by the Tauri IPC `list_displays` command.
 
 - `id: string` - opaque target identifier: `"display:N"` for a monitor (`N` its enumeration index) or `"window:0x…"` for an app window (its HWND in hex). *Why opaque:* it round-trips straight into `startRecording`'s `targetId` argument; nothing on the frontend parses it.
-- `label: string` - human-readable string shown in the picker, e.g. `"Display 1: \\.\DISPLAY1 (Primary)"` or `"App: Notepad"`. The backend bakes a trailing `(Primary)` or `(WxH)` onto display labels - see `parseTarget`, which splits that back out for display.
+- `label: string` - human-readable string shown in the picker, e.g. `"Display 1: \\.\DISPLAY1 (2560x1440, Primary)"` or `"App: Notepad"`. The backend bakes a trailing `(WxH, Primary)`, `(Primary)` or `(WxH)` onto display labels - see `parseTarget`, which splits that back out for display.
 - `kind?: string` - `"display"` or `"window"`. *Why optional:* older cached/mocked data may omit it; callers that group by kind treat a missing value as `"display"` (i.e. `kind !== "window"`).
 
 ### Used by
 
 - `src/hud/hooks/useDevices.ts` - stores the list returned by `listDisplays`
-- `src/hud/devices/TargetPicker.tsx` - groups the list into displays vs. windows and renders each row
-- `src/hud/Hud.tsx` - passes the list to `TargetPicker`
+- `src/hud/devices/TargetSheet.tsx` - groups the list into displays (drawn as a map) vs. windows (a list)
+- `src/hud/components/IdleCard.tsx` - shows the chosen target on the screen row
+- `src/hud/Hud.tsx` - passes the list to `IdleCard`
 
 ## AudioInfo
 
@@ -108,22 +109,22 @@ Re-resolves a device selection against a fresh enumeration: keeps each of `prev.
 export function parseTarget(t: DisplayInfo, index: number): { title: string; resolution: string | null; primary: boolean }
 ```
 
-Splits a `DisplayInfo.label` into a clean `title` plus the pieces `TargetPicker` renders as a separate resolution sub-line and "Primary" badge, instead of showing the backend's raw parenthetical text verbatim. For a window target, delegates the whole `title` to `prettifyWindowLabel` instead (windows never carry a resolution/Primary suffix).
+Splits a `DisplayInfo.label` into a clean `title` plus the pieces the card's screen row and `TargetSheet` render as a resolution sub-line, a "Primary" badge and a to-scale rectangle, instead of showing the backend's raw parenthetical text verbatim. For a window target, delegates the whole `title` to `prettifyWindowLabel` instead (windows never carry a resolution/Primary suffix).
 
 ### Inputs
 
 - `t: DisplayInfo` - one target from a `listDisplays()` result.
-- `index: number` - `t`'s position in the raw (unfiltered) `listDisplays()` array. *Why the caller must pass it:* the backend only ever marks the very first monitor as `(Primary)`, and displays always enumerate before windows, so raw index 0 is the sole source of truth for `primary` - a target's position within a post-filtering subgroup would give the wrong answer once windows are involved.
+- `index: number` - `t`'s position in the raw (unfiltered) `listDisplays()` array. *Why the caller must pass it:* the backend enumerates the main monitor first, before any other display or window, so raw index 0 is primary even when a label carries no `Primary` word (a display whose size it could not read) - a target's position within a post-filtering subgroup would give the wrong answer once windows are involved. A label that says `Primary` is primary regardless of index.
 
 ### Returns
 
-- `title: string` - for `t.kind === "window"`, `prettifyWindowLabel(t.label)`. Otherwise `t.label` with a trailing `" (Primary)"` or `" (WxH)"` stripped, or `t.label` unchanged if it matches neither pattern (a display whose resolution the backend couldn't read).
+- `title: string` - for `t.kind === "window"`, `prettifyWindowLabel(t.label)`. Otherwise `t.label` with a trailing `" (WxH, Primary)"`, `" (Primary)"` or `" (WxH)"` stripped, or `t.label` unchanged if it matches none of those (a display whose resolution the backend couldn't read).
 - `resolution: string | null` - `null` for a window; otherwise the extracted `"WxH"` substring, or `null` when the label had no resolution suffix (the primary display, or one the backend can't measure).
 - `primary: boolean` - `index === 0 && t.kind !== "window"`. Always `false` for windows, even a hypothetical one at index 0.
 
 ### Used by
 
-- `src/hud/devices/TargetPicker.tsx` - calls it per row to render the title/resolution/badge
+- `src/hud/devices/TargetSheet.tsx` - calls it per row to render the title/resolution/badge
 
 ## cleanDeviceLabel
 
@@ -181,7 +182,7 @@ export function isOwnProcessWindow(t: DisplayInfo): boolean
 
 ### Used by
 
-- `src/hud/devices/TargetPicker.tsx` - filters this process's window out of the rendered rows.
+- `src/hud/devices/TargetSheet.tsx` - filters this process's window out of the rendered rows.
 
 ## prettifyWindowLabel
 

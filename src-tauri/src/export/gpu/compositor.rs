@@ -44,22 +44,26 @@ impl Compositor for CpuCompositor {
         // fast-path) works on packed BGRA exactly as before.
         let screen_bgra = crate::export::color::nv12_to_bgra(screen, sw, sh);
         let screen = &screen_bgra[..];
-        // Fast-path: 1:1 unzoomed full screen without camera PiP or corner rounding
-        if cam.scale <= 1.0001 && scene.camera.alpha <= 0.0 && scene.screen.alpha >= 0.999 && scene.screen.radius <= 0.1 && scene.screen.ring_px <= 0.1 && sw == ow && sh == oh && screen.len() == (ow * oh * 4) as usize {
+        // Fast-path: 1:1 unzoomed full screen without camera PiP or corner rounding. A span that
+        // crops the canvas (a mid-take display switch) is excluded: the raw copy would emit the
+        // black bars the crop exists to remove.
+        let whole = scene.src == crate::export::coordmap::full_src(sw, sh);
+        if whole && cam.scale <= 1.0001 && scene.camera.alpha <= 0.0 && scene.screen.alpha >= 0.999 && scene.screen.radius <= 0.1 && scene.screen.ring_px <= 0.1 && sw == ow && sh == oh && screen.len() == (ow * oh * 4) as usize {
             out.clear();
             out.extend_from_slice(screen);
             return;
         }
         let mut base = bg.to_vec();
-        // The screen panel is built from the source's own aspect (`inset_rect`/`Presenter`), so it
-        // is drawn whole; only the webcam needs the cover-crop (its panel's aspect is a setting).
-        draw_panel(&mut base, ow, oh, screen, sw, sh, scene.screen, false);
+        // The screen panel is shaped by its source's own aspect (`inset_rect`/`Presenter`), so it
+        // draws the whole of `scene.src` - the canvas, or one display switch's fitted rect within
+        // it. Only the webcam needs the cover-crop (its panel's aspect is a setting).
+        draw_panel(&mut base, ow, oh, screen, sw, sh, scene.screen, Source::Crop(scene.src));
         let (cx0, cy0, cw, ch) = crate::export::coordmap::crop(cam, ow, oh);
         let resized = resize_crop(&base, ow, oh, cx0 as f64, cy0 as f64, cw as f64, ch as f64, ow, oh);
         out.clear();
         out.extend_from_slice(&resized);
         if let Some((wc, ww, wh)) = webcam {
-            draw_panel(out, ow, oh, wc, ww, wh, scene.camera, true);
+            draw_panel(out, ow, oh, wc, ww, wh, scene.camera, Source::Cover);
         }
     }
 }
@@ -95,18 +99,28 @@ fn cover_rect(sw: u32, sh: u32, pw: u32, ph: u32) -> (f64, f64, f64, f64) {
     ((sw as f64 - w) / 2.0, (sh as f64 - h) / 2.0, w, h)
 }
 
+/// Which part of the source a panel draws.
+enum Source {
+    /// Exactly this sub-rect of the source (source px), stretched across the panel - the screen
+    /// panel's `Scene.src`. The whole canvas normally; one display switch's fitted rect per span.
+    Crop(crate::export::types::RectF),
+    /// Centre-crop the source to the panel's aspect first (`cover_rect`) - the webcam panel, whose
+    /// aspect is a user setting the one decode box does not follow (mirrored by `cover_uv`).
+    Cover,
+}
+
 /// Resize `src` (sw×sh) into `panel.rect` and blend onto `dst` with rounded-rect
 /// antialiased coverage times `panel.alpha`. No-op when invisible or degenerate.
 /// When `panel.ring_px > 0`, also blends a ring/border band just inside the panel
 /// edge (mirrors the GPU shader's post-camera-mix ring blend, same SDF/band formula).
-/// `cover`: centre-crop `src` to the panel's aspect first (`cover_rect`) instead of
-/// stretching the whole source across it - set for the webcam panel, whose aspect is a
-/// user setting the decode box does not follow (mirrored by `shader.wgsl`'s `cover_uv`).
-fn draw_panel(dst: &mut [u8], dw: u32, dh: u32, src: &[u8], sw: u32, sh: u32, panel: Panel, cover: bool) {
+fn draw_panel(dst: &mut [u8], dw: u32, dh: u32, src: &[u8], sw: u32, sh: u32, panel: Panel, from: Source) {
     if panel.alpha <= 0.0 { return; }
     let (pw, ph) = (panel.rect.w.round() as u32, panel.rect.h.round() as u32);
     if pw == 0 || ph == 0 { return; }
-    let (cx, cy, cw, ch) = if cover { cover_rect(sw, sh, pw, ph) } else { (0.0, 0.0, sw as f64, sh as f64) };
+    let (cx, cy, cw, ch) = match from {
+        Source::Cover => cover_rect(sw, sh, pw, ph),
+        Source::Crop(r) => (r.x as f64, r.y as f64, (r.w as f64).max(1.0), (r.h as f64).max(1.0)),
+    };
     let resized = resize_crop(src, sw, sh, cx, cy, cw, ch, pw, ph);
     let r = panel.radius.clamp(0.0, pw.min(ph) as f32 / 2.0);
     let a = panel.alpha.clamp(0.0, 1.0);

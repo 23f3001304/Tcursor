@@ -1,5 +1,6 @@
 use crate::export::camera::moves::CamPose;
-use crate::export::types::{Camera, Easing, FramePoint, RectF, ZoomConfig, ZoomRegion};
+use crate::export::scene::Panel;
+use crate::export::types::{Camera, Easing, FramePoint, ZoomConfig, ZoomRegion};
 
 /// Normalized easing curve `[0,1] -> [0,1]`. `Smooth` = smoothstep; `Linear` = identity;
 /// `Spring` = ease-out-back (a small overshoot past 1 near the end, then settle);
@@ -18,13 +19,14 @@ pub(crate) fn ease(e: Easing, p: f32) -> f32 {
     }
 }
 
-/// The camera panel's un-overridden (layout-resolved) rect as a `CamPose` - `CameraMoveTrack::
-/// sample`'s `live` argument, which its entry blend eases FROM and its exit blend eases back TO.
-/// Recomputed every frame from that frame's own scene, so a layout transition still in flight
-/// moves it. `ow`/`oh` are the output frame's pixel dims (same basis `rect_from_center` converts
-/// back into); inverse of that conversion (center + height fraction, not top-left rect).
-pub fn static_cam_pose(rect: RectF, ow: f32, oh: f32) -> CamPose {
-    CamPose { x: (rect.x + rect.w * 0.5) / ow, y: (rect.y + rect.h * 0.5) / oh, size: rect.h / oh }
+/// The un-overridden (layout-resolved) camera panel as a `CamPose` - `CameraMoveTrack::sample`'s
+/// `live` argument: what its blends ease from/to and what a shape-inheriting keyframe's `round`
+/// is. Recomputed every frame, so a layout transition still in flight moves it. The inverse of
+/// `rect_from_center` + `override_camera` (center + height fraction + corner fraction of the short side).
+pub fn static_cam_pose(panel: &Panel, ow: f32, oh: f32) -> CamPose {
+    let r = panel.rect;
+    CamPose { x: (r.x + r.w * 0.5) / ow, y: (r.y + r.h * 0.5) / oh, size: r.h / oh,
+              round: Some(panel.radius / r.w.min(r.h).max(0.001)) }
 }
 
 /// Shrink `(zi, zo)` proportionally so `zi + zo <= span`, keeping both ramps inside the pill.

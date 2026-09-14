@@ -14,7 +14,9 @@ use crate::export::types::{Layout, OverlayLayout};
 /// a preset-resolved panel is only ever exactly 0.0 or 1.0 anyway.
 const SHOWN_ALPHA: f32 = 0.004;
 
-fn cam_pose(p: PanelPose) -> CamPose { CamPose { x: p.cx, y: p.cy, size: p.size } }
+/// An arrangement pose carries no shape of its own (`round: None`): the preset's radius scales
+/// with the resize, exactly as it did before keyframes could carry a shape.
+fn cam_pose(p: PanelPose) -> CamPose { CamPose { x: p.cx, y: p.cy, size: p.size, round: None } }
 
 /// The screen panel's own aspect - the CAPTURED screen's, because every preset aspect-fits the
 /// source into its screen rect (`inset_rect`, and the derived small/presenter rects alike).
@@ -64,7 +66,9 @@ pub fn resolve_arrangement(a: &Arrangement, base: Scene, layout: &Layout, ov: &O
         // its proportion at any pose (and is the IDENTITY when the pose reproduces the preset).
         Some(p) => Panel { alpha: 1.0, ..override_camera(base.camera, cam_pose(p), ow, oh, cam_aspect(ov)) },
     };
-    Scene { screen, camera }
+    // `src` rides through from the preset scene: an arrangement poses PANELS, never what the screen
+    // panel is showing, so a posed segment on a switched-to display keeps that span's crop rect.
+    Scene { screen, camera, src: base.src }
 }
 
 #[cfg(test)]

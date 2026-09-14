@@ -1,11 +1,3 @@
-export const Grip = () => (
-  <svg width="10" height="20" viewBox="0 0 10 20" fill="currentColor">
-    <circle cx="2.5" cy="4" r="1.4" /><circle cx="7.5" cy="4" r="1.4" />
-    <circle cx="2.5" cy="10" r="1.4" /><circle cx="7.5" cy="10" r="1.4" />
-    <circle cx="2.5" cy="16" r="1.4" /><circle cx="7.5" cy="16" r="1.4" />
-  </svg>
-);
-
 export const Monitor = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <rect x="2" y="4" width="20" height="13" rx="2" /><path d="M8 21h8M12 17v4" />
@@ -97,5 +89,38 @@ export const Gamepad = () => (
     <line x1="6" y1="11" x2="10" y2="11" /><line x1="8" y1="9" x2="8" y2="13" />
     <line x1="15" y1="12" x2="15.01" y2="12" /><line x1="18" y1="10" x2="18.01" y2="10" />
     <path d="M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.01.101-.017.152C2.604 9.416 2 14.456 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.414-1.414A2 2 0 0 1 9.828 16h4.344a2 2 0 0 1 1.414.586L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.545-.604-6.584-.685-7.258-.007-.05-.011-.1-.017-.151A4 4 0 0 0 17.32 5z" />
+  </svg>
+);
+
+/* The take pill's controls (TakeBar.tsx): filled, not stroked, so an 18px glyph reads at a glance
+   on a 42px round button. */
+export const Pause = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+    <rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" />
+  </svg>
+);
+
+export const Play = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M8 5.5v13a1 1 0 0 0 1.5.87l11-6.5a1 1 0 0 0 0-1.74l-11-6.5A1 1 0 0 0 8 5.5z" />
+  </svg>
+);
+
+export const StopSquare = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="3" /></svg>
+);
+
+/* The take pill's Sources button: a mixer's three faders, one per input, which reads as "the
+   things feeding this take" without naming any one of them. */
+export const Sliders = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <path d="M5 4v5M5 15v5M12 4v9M12 19v1M19 4v1M19 11v9" />
+    <circle cx="5" cy="12" r="2.2" /><circle cx="12" cy="16" r="2.2" /><circle cx="19" cy="8" r="2.2" />
+  </svg>
+);
+
+export const AppWindow = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18M7 6.5h.01M10 6.5h.01" />
   </svg>
 );

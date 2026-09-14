@@ -1,15 +1,15 @@
 /* The six inspectors' own surface. Imported by shell/PropertiesSlot.tsx, which is the only thing
    that mounts them, so these rules load with the editor but stay out of editor.css's shared
-   vocabulary. Anything here is inspector-only: `.e-aimbtn`, `.e-del` and the old `.e-sec-hint`
+   vocabulary. Anything here is inspector-only: `.e-aimbtn`, the header and the old `.e-sec-hint`
    moved out of editor.css wholesale (no other caller), while shared classes the inspectors also
    use (.e-field, .e-seg, .e-ghostbtn, .e-chip, .e-switchrow) stay defined there and are only
    re-skinned here under a `.e-insp` ancestor, so the panels keep theirs untouched.
 
-   One shape, top to bottom: PanelHeader (what it is) -> Timing (when it is) -> the kind's own
-   sections (how it looks) -> the transition curve (how it moves) -> a quiet Remove. Three planes
-   (--e-surface panel < --e-raised control < one lightness step for "selected"), no bordered boxes,
-   one accent per inspector (--insp-accent, the clip kind's own lane color) used only for
-   interactive and selected state. */
+   One shape, top to bottom: the header (a lane-coloured dot, the kind's name, the span, and the
+   quiet Delete) -> the kind's sections, each behind a --e-divider hairline at a 20px rhythm.
+   Three planes (--e-surface panel < --e-raised control < one lightness step for "selected"), no
+   bordered boxes, one accent per inspector (--insp-accent, the clip kind's own lane color) used
+   only for interactive and selected state. */
 
 /* The lane accent each inspector borrows, so the panel and the pill it is editing agree. */
 .e-insp-zoom { --insp-accent: var(--e-zoom); }
@@ -19,13 +19,38 @@
 .e-insp-speed { --insp-accent: var(--e-speed); }
 .e-insp-cut { --insp-accent: var(--e-mut); }
 
-/* Section: 20px rhythm, an 11px --e-dim title and an optional right-aligned tabular readout on the
-   same row (the panel's one place for a derived value: the matched preset, the time a cut removes,
-   whether the composition is custom). */
+/* ---- Header ---------------------------------------------------------------------------------
+   Row one is the identity: the lane dot, the name, then two ghost icons. Row two is the span, in
+   the same seconds every field below it reads, indented to the title so the two lines read as one
+   block. Delete lives up here, at icon weight - it is the one thing in the panel a user least
+   often wants, so it never gets a full-width slab at the bottom. */
+.e-ihead { margin-bottom: var(--e-sp-3); }
+.e-ihead-top { display: flex; align-items: center; gap: var(--e-sp-1); }
+.e-idot { width: 8px; height: 8px; flex: none; border-radius: 50%;
+  background: var(--insp-accent, var(--e-fg)); }
+/* `.e-insp` in the selector so this beats editor.css's own `.e-panel h2` (which adds a 6px bottom
+   margin) on specificity rather than on source order, which favours whichever sheet loads last. */
+.e-insp .e-ihead h2 { margin: 0; font-size: var(--e-text-title-size); font-weight: var(--e-text-title-weight);
+  letter-spacing: -0.015em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.e-ihead-sp { flex: 1; min-width: var(--e-sp-1); }
+.e-ihicon { width: 28px; height: 28px; flex: none; padding: 0; border: none; border-radius: var(--e-r-sm);
+  background: transparent; color: var(--e-dim); display: flex; align-items: center; justify-content: center;
+  transition: background-color .14s ease, color .14s ease; }
+.e-ihicon:hover { background: var(--e-raised); color: var(--e-fg); }
+.e-ihicon.del:hover { background: color-mix(in srgb, var(--e-primary) 12%, transparent);
+  color: color-mix(in srgb, var(--e-primary) 72%, var(--e-fg)); }
+.e-ihead-range { margin: 6px 0 0 16px; font-size: var(--e-text-value-size);
+  font-weight: var(--e-text-value-weight); color: var(--e-mut); font-variant-numeric: tabular-nums;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---- Section rhythm -------------------------------------------------------------------------
+   20px above a section's title, a --e-divider hairline between two sections, 12px under the title.
+   The header owns its own gap, so the first section carries no rule and no extra space. */
 .e-isec { margin-top: var(--e-sp-4); }
-.e-phead + .e-isec { margin-top: 0; }
+.e-isec + .e-isec { padding-top: var(--e-sp-4); border-top: 1px solid var(--e-divider); }
+.e-ihead + .e-isec { margin-top: 0; }
 .e-isec-head { display: flex; align-items: baseline; justify-content: space-between;
-  gap: var(--e-sp-1); margin-bottom: 10px; }
+  gap: var(--e-sp-1); margin-bottom: var(--e-sp-2); }
 .e-isec-head h3 { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: .07em;
   text-transform: uppercase; color: var(--e-dim); white-space: nowrap; }
 .e-isec-val { min-width: 0; font-size: 11px; font-weight: 560; color: var(--e-mut);
@@ -36,27 +61,62 @@
 .e-ihint { margin: var(--e-sp-1) 0 0; font-size: var(--e-text-hint-size);
   font-weight: var(--e-text-hint-weight); line-height: var(--e-text-hint-lh); color: var(--e-dim); }
 
-/* Empty state: one quiet sentence, centred in the column. The right sidebar sits in this state
-   most of the time, so it has to read as a calm label, not a missing panel. */
-.e-insp-empty { margin: auto; padding: 0 20px; max-width: 26ch; text-align: center;
-  font-size: var(--e-text-hint-size); font-weight: var(--e-text-hint-weight);
-  line-height: var(--e-text-hint-lh); color: var(--e-dim); }
+/* ---- Hero value -----------------------------------------------------------------------------
+   The one number a section is really about, set big enough to be read from the stage: the section
+   below it is a row of equals, this is the thing the panel is for. The unit is a smaller, dimmer
+   suffix so the digits alone carry the weight. */
+.e-ihero { display: flex; align-items: baseline; gap: var(--e-sp-1); margin-bottom: 10px; }
+.e-ihero-v { font-size: 30px; font-weight: 600; line-height: 1; letter-spacing: -0.03em;
+  color: var(--e-fg); font-variant-numeric: tabular-nums; }
+.e-ihero-v i { font-style: normal; font-size: 17px; font-weight: 560; color: var(--e-mut); margin-left: 1px; }
+.e-ihero-l { font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--e-dim); }
+.e-iaim { margin-top: var(--e-sp-2); margin-bottom: 0; }
+
+/* ---- Grouped value row ----------------------------------------------------------------------
+   Three related numbers on ONE raised plane, split by hairlines rather than by three separate
+   controls: a label above its value, values right-aligned and tabular so the three line up as a
+   column of numbers. The steppers are a 16px pair on the right, quiet until hovered - the number
+   is the control's content, not the buttons.
+   The column count follows the CELL count (`valueRowColumns`, InspectorShape.tsx writes
+   `grid-template-columns` inline), and so do the hairlines between cells - a fixed `repeat(3, 1fr)`
+   put ZoomInspector's fourth timing cell alone on a second row with a divider against nothing, and
+   squeezed a two-minute recording's "125.30s" until `overflow: hidden` clipped the digits. */
+.e-ivals { display: grid; overflow: hidden;
+  border-radius: var(--e-r); background: var(--e-raised); box-shadow: var(--e-inset-hi); }
+.e-ival { min-width: 0; padding: 9px 10px 10px; display: flex; flex-direction: column; gap: 5px; }
+.e-ival-l { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--e-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.e-ival-row { display: flex; align-items: center; gap: 4px; }
+.e-ival-v { flex: 1; min-width: 0; text-align: right; font-size: 14px; font-weight: 600;
+  letter-spacing: -0.02em; color: var(--e-fg); font-variant-numeric: tabular-nums; }
+.e-ival-v i { font-style: normal; font-size: 11px; font-weight: 500; color: var(--e-mut); margin-left: 1px; }
+.e-ival-steps { display: flex; flex-direction: column; flex: none; }
+.e-ival-steps button { width: 16px; height: 12px; padding: 0; border: none; background: none;
+  color: var(--e-dim); display: flex; align-items: center; justify-content: center;
+  transition: color .14s ease; }
+.e-ival-steps button:hover:not(:disabled) { color: var(--e-fg); }
+.e-ival-steps button:disabled { opacity: .3; cursor: default; }
 
 /* Segmented choice row: one raised plane per option rather than buttons inside a box. The active
    plane is one lightness step up and carries the accent tick, which is a single Motion element
-   shared by the row (`layoutId`), so picking another option glides it there. */
+   shared by the row (`layoutId`), so picking another option glides it there.
+   The step mixes toward `--e-step` rather than toward a literal white: on the light palette
+   --e-raised is already #ffffff, so "one step up" there has to be a step toward black. */
 .e-preseg { display: flex; flex-wrap: wrap; gap: 5px; }
 .e-preseg-b { position: relative; flex: 1 1 auto; min-width: 0; box-sizing: border-box;
   padding: 8px 10px 11px; border: none; border-radius: var(--e-r-sm);
   background: var(--e-raised); color: var(--e-mut); box-shadow: var(--e-inset-hi); cursor: pointer;
   font-size: var(--e-text-body-size); font-weight: var(--e-text-body-weight);
   transition: background-color .14s ease, color .14s ease; }
-.e-preseg-b:hover:not(:disabled) { color: var(--e-fg); background: color-mix(in srgb, #fff 2.5%, var(--e-raised)); }
-.e-preseg-b.on { color: var(--e-fg); background: color-mix(in srgb, #fff 5%, var(--e-raised)); }
+.e-preseg-b:hover:not(:disabled) { color: var(--e-fg); background: color-mix(in srgb, var(--e-step) 2.5%, var(--e-raised)); }
+.e-preseg-b.on { color: var(--e-fg); background: color-mix(in srgb, var(--e-step) 5%, var(--e-raised)); }
 .e-preseg-b:disabled { opacity: .4; cursor: default; }
 .e-preseg-t { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .e-preseg-tick { position: absolute; left: 30%; right: 30%; bottom: 5px; height: 2px;
   border-radius: 2px; background: var(--insp-accent, var(--e-fg)); }
+/* The "Custom" disclosure under a preset row (the curve editor and the spring sliders). */
+.e-preseg + .e-more { margin-top: var(--e-sp-2); }
 
 /* Layout presets: the same planes, each holding a literal mini-canvas of that preset's own
    resolved panels (LayoutThumb, the schematic the timeline pill draws) instead of a word alone. */
@@ -72,7 +132,7 @@
   font-size: var(--e-text-body-size); font-weight: var(--e-text-body-weight);
   box-shadow: var(--e-inset-hi); cursor: pointer;
   transition: background-color .14s ease, color .14s ease; }
-.e-aimbtn:hover:not(:disabled) { color: var(--e-fg); background: color-mix(in srgb, #fff 3%, var(--e-raised)); }
+.e-aimbtn:hover:not(:disabled) { color: var(--e-fg); background: color-mix(in srgb, var(--e-step) 3%, var(--e-raised)); }
 .e-aimbtn.on { color: var(--e-fg); background: color-mix(in srgb, var(--insp-accent) 20%, var(--e-raised)); }
 .e-aimbtn:disabled { opacity: .45; cursor: not-allowed; }
 
@@ -81,20 +141,10 @@
 .e-insp .e-ghostbtn { padding: 10px; border: none; border-radius: var(--e-r-sm);
   background: var(--e-raised); box-shadow: var(--e-inset-hi); }
 .e-insp .e-ghostbtn:hover { color: var(--e-fg); transform: none;
-  background: color-mix(in srgb, #fff 3%, var(--e-raised)); box-shadow: var(--e-inset-hi); }
+  background: color-mix(in srgb, var(--e-step) 3%, var(--e-raised)); box-shadow: var(--e-inset-hi); }
 .e-insp .e-chip { border: none; background: var(--e-raised); box-shadow: var(--e-inset-hi); }
-.e-insp .e-chip:hover { background: color-mix(in srgb, #fff 3%, var(--e-raised)); }
+.e-insp .e-chip:hover { background: color-mix(in srgb, var(--e-step) 3%, var(--e-raised)); }
 .e-insp-reset { margin-top: 10px; }
-
-/* Remove, last: a ghost that only reddens on hover. A filled red slab would be the loudest thing
-   in a panel whose whole job is quiet chrome. */
-.e-del { margin-top: var(--e-sp-4); width: 100%; box-sizing: border-box; min-height: 40px; padding: 11px 12px;
-  border: none; border-radius: var(--e-r-sm); background: transparent; color: var(--e-dim);
-  font-size: var(--e-text-body-size); font-weight: var(--e-text-body-weight);
-  display: flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer;
-  transition: background-color .14s ease, color .14s ease; }
-.e-del svg { flex: none; opacity: .85; }
-.e-del:hover { background: rgba(239, 68, 68, .10); color: #f87171; }
 
 /* Transition curve: the named-curve row above ONE canvas. The canvas is a plane one step lighter
    with no border; `preserveAspectRatio="none"` stretches the 100x160 curve box across the panel,

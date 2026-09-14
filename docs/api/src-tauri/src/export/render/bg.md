@@ -30,6 +30,8 @@ Rebuilds the `EditState` with the renderer's own `full_dur_ms`, so a cut or spee
 
 Refresh the `edit.json`-derived state in place (zoom/layout/regions/effects/cam_moves) WITHOUT recreating the GPU compositor or re-probing dims - this is what makes a warm preview cheap. Moved here verbatim from `render/mod.rs`, plus one addition.
 
+The cursor's three settings-driven filters are live-applied here rather than waiting for a rebuild: `Cursor::set_smoothness` (Smoothness), `set_idealize` (Path Idealization) and `set_tilt` (Motion Tilt), each through its `_at` variant so switching the style to `System` on a recording with no baked OS cursor also flips the path to raw and the lean to none in the same call.
+
 `bg` is rebuilt ONLY when `BackgroundSettings` actually changed (`PartialEq`), because the rebuild shells out to ffmpeg and every other kind of edit must stay cheap. When it does rebuild, `set_bg_dynamic` is re-asserted on the compositor: an edit can turn a still background into a video one or back, and the GPU upload rule differs between the two.
 
 ## background

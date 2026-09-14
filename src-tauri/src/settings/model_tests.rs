@@ -61,6 +61,9 @@ fn partial_json_fills_defaults() {
     assert_eq!(back.ui, crate::settings::model::InterfaceSettings::default());
     assert_eq!(back.ui.theme, ThemeMode::Light);
     assert_eq!(back.ui.accent, [239, 68, 68]);
+    // old JSON without ui.interface_effects loads it ON, so the editor's ripples and the
+    // transport's magnetic pull ship enabled to an install that predates the field.
+    assert!(back.ui.interface_effects);
     // old JSON without background loads the Mesh default (today's bg.jpg, byte-identical)
     assert_eq!(back.background, crate::settings::background::BackgroundSettings::default());
     assert_eq!(back.background.kind, crate::settings::background::BackgroundKind::Mesh);
@@ -70,6 +73,47 @@ fn partial_json_fills_defaults() {
     assert_eq!(back.ai_model, "");
     // old JSON without camera_smoothing_ms loads 0 (smoothing off, bit-identical export)
     assert_eq!(back.zoom.camera_smoothing_ms, 0);
+    // a config written before saved layout looks existed loads with an EMPTY list, not an error
+    assert!(back.layout_presets.is_empty());
+}
+
+#[test]
+fn layout_presets_round_trip_and_default_empty() {
+    // (a) a config with no `layout_presets` key at all loads empty - the migration case.
+    let back: Settings = serde_json::from_str("{}").unwrap();
+    assert!(back.layout_presets.is_empty());
+    assert!(Settings::default().layout_presets.is_empty());
+
+    // (b) a saved look survives a write/read cycle with every one of the five layouts intact.
+    let mut look = crate::settings::appearance::AppearanceSettings::default();
+    look.presenter.pad = 0.075;
+    look.screen.cam_ring = Some(crate::settings::appearance::CamRing { width: 0.04, color: [1, 2, 3] });
+    let mut s = Settings::default();
+    s.layout_presets = vec![LayoutPreset { id: "p1".into(), name: "Bold".into(), appearance: look.clone() }];
+    let json = serde_json::to_string(&s).unwrap();
+    let back: Settings = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, s);
+    assert_eq!(back.layout_presets[0].name, "Bold");
+    assert_eq!(back.layout_presets[0].appearance, look);
+    assert_eq!(back.layout_presets[0].appearance.presenter.pad, 0.075);
+}
+
+#[test]
+fn interface_effects_defaults_on_and_round_trips() {
+    // (a) the default is ON - the feature ships enabled.
+    assert!(InterfaceSettings::default().interface_effects);
+    // (b) an InterfaceSettings whose JSON predates the field still loads ON, which is the whole
+    //     point of the `#[serde(default = "default_true")]`: `bool::default()` would be `false`.
+    let ui: InterfaceSettings = serde_json::from_str("{\"theme\":\"dark\"}").unwrap();
+    assert_eq!(ui.theme, ThemeMode::Dark);
+    assert!(ui.interface_effects);
+    // (c) an explicit `false` survives a full Settings round-trip - a user who turns it off keeps
+    //     it off across a restart (the field is not swallowed by the container default).
+    let mut s = Settings::default();
+    s.ui.interface_effects = false;
+    let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+    assert!(!back.ui.interface_effects);
+    assert_eq!(back, s);
 }
 
 #[test]

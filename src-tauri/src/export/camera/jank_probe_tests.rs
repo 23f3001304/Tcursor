@@ -15,14 +15,14 @@ pub fn cfg() -> ZoomConfig { ZoomConfig::default() } // follow_damping 0.10, the
 
 #[test]
 fn jank_probe_tables() {
-    println!("\n=== PART 1  jank probe: 12s synthetic scene, 1920x1080, cursor alpha {} ===",
-        jscene::ALPHA_DEFAULT);
+    println!("\n=== PART 1  jank probe: 12s synthetic scene, 1920x1080, cursor smoothness {} ===",
+        jscene::SMOOTH_DEFAULT);
     println!("  R1 follow_cursor 2.2 {:?}  R2 anchored 1.8 {:?}  R3 anchored 2.6 (corner) {:?}",
         jscene::R1, jscene::R2, jscene::R3);
     println!("  units: screen px per frame (a pan of d_cx shows as scale*d_cx; a scale step ds\n\
               \x20 slides content at the viewport edge by FW/(2*scale)*ds)\n");
     for g in [jscene::Grid::Export, jscene::Grid::Preview] {
-        let r = jscene::run(g, &cfg(), jscene::ALPHA_DEFAULT);
+        let r = jscene::run(g, &cfg(), jscene::SMOOTH_DEFAULT);
         println!("\n  --- {} : {} samples ---", g.name(), r.t.len());
         jm::print_jerk(g.name(), &r);
         let (a, b) = jm::window(&r, jscene::SWEEP.0, jscene::SWEEP.1);
@@ -42,8 +42,8 @@ fn preview_grid_vs_true_60fps() {
     // `camera_track` now walks the export's own frame index at the exact 16.667ms period, so the
     // two are the same grid and this compares them the way the editor does - interpolated at the
     // same instants - to pin that they agree exactly.
-    let (e, p) = (jscene::run(jscene::Grid::Export, &cfg(), jscene::ALPHA_DEFAULT),
-        jscene::run(jscene::Grid::Preview, &cfg(), jscene::ALPHA_DEFAULT));
+    let (e, p) = (jscene::run(jscene::Grid::Export, &cfg(), jscene::SMOOTH_DEFAULT),
+        jscene::run(jscene::Grid::Preview, &cfg(), jscene::SMOOTH_DEFAULT));
     let (mut dcx, mut dcy, mut ds, mut dpx, mut dcur) = (vec![], vec![], vec![], vec![], vec![]);
     let mut worst = (0u32, 0.0f32);
     for k in 0..=(jscene::DUR_MS / 4) {

@@ -1,6 +1,7 @@
 {
   "id": "cat",
   "name": "Cat",
+  "category": "Playful",
   "version": 2,
   "builtin": true,
   "busy": {

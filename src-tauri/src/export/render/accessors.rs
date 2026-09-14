@@ -33,6 +33,22 @@ impl FrameRenderer {
     /// event timestamp to output time the same way `click_track` does.
     pub fn events_ms(&self) -> u64 { self.events_ms }
 
+    /// The take's source spans (`render::spans`) - one full-canvas span unless a mid-take display
+    /// switch cropped it. Exposed so `preview_layouts` hands the editor the very rects the export
+    /// crops by, instead of the editor deriving a second set from `sync.json`.
+    pub fn spans(&self) -> &[crate::export::render::spans::SourceSpan] { self.track.spans() }
+
+    /// How much smaller (w, h) a span's screen panel is than the full-canvas one, as ratios about
+    /// the panel centre - `inset_rect` at the span's own size over `inset_rect` at the canvas's.
+    /// The live TS preview scales its layout-resolved screen rect by this to give a switched-to
+    /// display its own aspect without re-running any pose math of its own; it is exact for the
+    /// inset-based presets, and the paused stage shows the export's own frame either way.
+    pub fn span_fit(&self, src: crate::export::types::RectF) -> (f32, f32) {
+        let base = crate::export::coordmap::inset_rect(self.sw, self.sh, &self.layout);
+        let s = crate::export::coordmap::inset_rect(src.w.max(1.0) as u32, src.h.max(1.0) as u32, &self.layout);
+        (s.2 as f32 / base.2.max(1) as f32, s.3 as f32 / base.3.max(1) as f32)
+    }
+
     /// The clip-to-output clock map built from the doc's trim, cuts and speed spans.
     pub fn time_map(&self) -> &crate::export::remap::TimeMap { &self.map }
 

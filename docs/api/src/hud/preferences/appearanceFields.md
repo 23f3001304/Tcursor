@@ -175,23 +175,8 @@ Factory defaults for all five modes, shipped as code rather than a config file s
 
 - `src/hud/settings/SettingsAppearance.tsx` - reset-to-defaults button
 - `src/hud/Hud.tsx` - initial settings hydration fallback
-- `src/editor/panels/CameraPanel.tsx` - via `resetCameraAppearance` (screen mode only)
+- `src/editor/panels/layoutPresets.ts` - `resetLayout` (one layout back to its default) and `BUILTIN_PRESET` (the Layouts panel's undeletable "Default" row IS this constant)
+- `src/editor/panels/LayoutsPanel.tsx` / `CameraPanel.tsx` - the `?? DEFAULT_APPEARANCE` guard for a doc saved before a field existed
 
-## resetCameraAppearance
+**`resetCameraAppearance` is gone (2026-09-14).** It reset eight named webcam fields of the `screen` mode only, for the old Camera panel's header Reset - a scope bug from a Task 26 audit, fixed at the time by making the scope an explicit pure function. The Layouts panel resets a WHOLE layout instead, so the generalized `resetLayout(appearance, mode)` in `src/editor/panels/layoutPresets.ts` replaces it (and closes the same class of bug: a reset that writes `DEFAULT_APPEARANCE` wholesale silently resets all five). Its spec (`appearanceFields.test.ts`) went with it; `layoutPresets.test.ts` covers the replacement.
 
-```ts
-export function resetCameraAppearance(settings: AppearanceSettings): AppearanceSettings
-```
-
-`CameraPanel`'s Reset action. Writes only the webcam knobs that panel actually shows for the
-`screen` mode - `cam_size`, `cam_margin_x`, `cam_margin_y`, `cam_shape`, `cam_radius`,
-`cam_aspect`, `cam_corner`, `cam_ring` - from `DEFAULT_APPEARANCE.screen`, leaving `pad`/
-`screen_size`/`screen_radius` on `screen` untouched (`BackgroundPanel` owns `pad`/`screen_radius`)
-and the other four appearance modes (`screen_only`/`camera`/`camera_only`/`presenter`) completely
-untouched. *Why this exists:* the panel previously called `onChange(DEFAULT_APPEARANCE)` directly,
-silently resetting all five modes - a scope bug from a Task 26 audit, fixed here by making the
-reset scope an explicit, testable pure function instead of inlining it in the component.
-
-### Used by
-
-- `src/editor/panels/CameraPanel.tsx` - `PanelHeader`'s `onReset`

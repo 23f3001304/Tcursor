@@ -9,7 +9,7 @@ Editor-preview cursor commands. Expose the export's selected cursor pack and the
 pub struct CursorSpriteDto { pub kind: CursorType, pub url: String, pub hot: [f32; 2], pub canvas_h: u32 }
 ```
 
-One cursor sprite for the canvas preview. `kind` serializes to the lowercase cursor-type name (`arrow`, `hand`, `resize_ns`, …) — the frontend keys its sprite map by it. `url` is a `data:image/png;base64,…` of the cropped (and, for a dark theme, RGB-inverted) sprite. `hot` is the hotspot as a 0..1 fraction of the cropped sprite. `canvas_h` is the original PNG height, so all shapes scale on one basis (the same the export uses).
+One cursor sprite for the canvas preview. `kind` serializes to the lowercase cursor-type name (`arrow`, `hand`, `resize_ns`, …) - the frontend keys its sprite map by it. `url` is a `data:image/png;base64,…` of the cropped (and, for a dark theme, RGB-inverted) sprite. `hot` is the hotspot as a 0..1 fraction of the cropped sprite. `canvas_h` is the original PNG height, so all shapes scale on one basis (the same the export uses).
 
 ## CursorPackDto
 
@@ -25,6 +25,16 @@ pub struct CursorPackDto {
 The recording's selected pack, ready for the canvas preview: one sprite per kind, the pack's explicit busy frames (empty unless it ships `busy_NN.png`), and its declared busy animation.
 
 `busy` + `busy_frames` are what let the preview run the SAME `busy_pose` the export does, so a paused preview shows exactly the frame the export would write for that instant. `cursor_sprites` returning a struct rather than a bare `Vec` is what makes room for them.
+
+### CursorPackDto::material
+
+```rust
+pub material: Option<String>,
+```
+
+The selected pack's `material` (`"glass"`, else `None`), carried to the canvas preview alongside the sprites.
+
+The preview draws a glass pack's sprite at the same reduced alpha the export blits it at, and cross-fades its states the same way, so the LIVE canvas approximates the paused exact frame the backend renders into the same pixels. It cannot refract - see the deliberate differences in `docs/api/src/editor/stage/cursorGlass.md`.
 
 ## cursor_sprites
 
@@ -140,3 +150,4 @@ Event time -> output time in ms: `events_ms - frames[0]`, read straight from `sy
 - `a_recording_with_no_layer_has_no_captured_cursor` - an empty folder yields `None` rather than an error.
 
 **Dark-theme invert is gated on `pack::theme_inverts`** (2026-09-13): only the embedded default set is flipped; a bundled or imported pack's data URLs carry its real colours, exactly as the export draws them.
+

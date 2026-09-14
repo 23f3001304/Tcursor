@@ -11,9 +11,11 @@ describe("DEFAULT_CURSOR_SETTINGS (Task 26 commit 1 - CursorPanel reset default 
       smoothness: 0.6,
       path_idealize: 0.0,
       motion_blur: 0.35,
+      tilt: 0.35,
       click_bounce: true,
       bounce_intensity: 0.5,
       pack: "default",
+      back: "none",
     });
   });
 });

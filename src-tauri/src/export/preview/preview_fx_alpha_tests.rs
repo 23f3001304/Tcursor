@@ -6,7 +6,7 @@ use super::*;
 /// black/white reconstruct `render_fx_overlay` uses (just without the PNG/base64 round-trip).
 fn spot_alpha_channel(fx: &dyn FxRenderer, w: u32, h: u32, alpha: f32, mode: SpotlightMode) -> Vec<u8> {
     let state = FxState {
-        style: ClickFxStyle::None, color: [0, 0, 0], intensity: 1.0, hits: vec![], video: None,
+        style: ClickFxStyle::None, color: [0, 0, 0], intensity: 1.0, hits: vec![], video: None, lens: None,
         spot: Some(Spot { cx: w as f32 / 2.0, cy: h as f32 / 2.0, dim: 0.6, radius_frac: 0.13,
             feather_frac: 0.10, alpha, mode, tint: [130, 90, 255], t: 0.0,
             cam_rect: [0.0; 4], cam_radius: 0.0, dim_camera: true }),

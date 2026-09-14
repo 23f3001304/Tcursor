@@ -27,8 +27,10 @@ export const cameraTrack = (folder: string) => invoke<CamSample[]>("camera_track
 ## PreviewLayout
 
 ```ts
-export interface PreviewLayout { screen: [number, number, number, number]; radius: number; cam: [number, number, number, number, number, number, number, number, number] | null; canvas: [number, number]; screenAlpha?: number; camAlpha?: number }
+export interface PreviewLayout { screen: [number, number, number, number]; radius: number; cam: [number, number, number, number, number, number, number, number, number] | null; canvas: [number, number]; screenAlpha?: number; camAlpha?: number; src?: [number, number, number, number] }
 ```
+
+`src` is the canvas sub-rect the screen panel shows (fractions of the recorded canvas), the mirror of the export's `Scene.src`: the whole canvas (`[0, 0, 1, 1]`, and the default when absent) unless a mid-take display switch cropped it. `drawPreview` crops the screen video by it and `fxGeometry`'s `mapCanvas` maps canvas points through it, exactly as Rust's `coordmap::to_panel` does.
 
 The static export framing as fractions of the output (mirrors the Rust `PreviewLayout`): `screen` is the screen rect `[x, y, w, h]`, `radius` the corner radius (fraction of width), and `cam` the webcam PiP rect+ring `[x, y, w, h, radius, ringPx, ringR, ringG, ringB]` or `null` when hidden - `ringPx` is a fraction of output width (0 = no ring) and `ringR/G/B` are 0..255, mirroring the export's `Panel.ring_px`/`ring_color` riding alongside the rect/radius. `canvas` is the resolved preview frame's pixel dimensions `[w, h]` (follows `EditDoc.aspect`, via `Layout::resolve` on the Rust side) - `Stage.tsx` sizes its `<canvas>` and `.e-stage`'s aspect-ratio from this instead of a hardcoded 16:9. The canvas compositor frames the screen and webcam from this so the preview matches the export.
 
@@ -107,6 +109,7 @@ export interface LayoutPresets {
   screen: LayoutPresetDto; camera: LayoutPresetDto; presenter: LayoutPresetDto;
   screen_only: LayoutPresetDto; camera_only: LayoutPresetDto;
   segs: SegRectDto[];
+  spans: SourceSpanDto[];
   inset_w: number;
 }
 ```
@@ -120,6 +123,18 @@ All 5 layout presets' panel rects, keyed by name, plus `segs` - one entry per `E
 - `src/editor/hooks/useEditorData.ts` - fetched via `previewLayouts` into state, passed down to `Stage`.
 - `src/editor/timeline/layoutTrack.ts` - `layoutAt` cross-fades between presets AND per-segment overrides as the playhead crosses `LayoutSeg` boundaries.
 - `src/editor/hooks/useCompositeLoop.ts` - held in a ref so the per-frame compositing loop can resolve the current layout (and `inset_w`, for the cursor's panel scale/clip) without waiting on React state.
+
+## SourceSpanDto
+
+```ts
+export interface SourceSpanDto { start_ms: number; src: [number, number, number, number]; transition_ms: number; fit: [number, number] }
+```
+
+One SOURCE SPAN of the take (mirrors Rust `export::render::spans::SourceSpan`): from `start_ms` on the output clock, the screen panel shows `src` - `[x, y, w, h]` as fractions of the recorded canvas - instead of the whole canvas. A mid-take display switch keeps ONE encoder canvas and fits every later frame into it, so the recording carries baked black bars from the switch on; the render shows only the active SOURCE SPAN's rect instead (`export::render::spans`).
+
+`transition_ms` is the switch's ease and cross-dissolve length; `fit` is `[w, h]` ratios saying how much smaller that span's screen panel is than the full-canvas one, so the live preview can give a switched-to display its own aspect by scaling the resolved panel about its centre rather than re-deriving the export's panel math (`sourceSpans.ts`'s `fitPanel`).
+
+A take that never switched display has exactly one span, at 0, covering `[0, 0, 1, 1]` with `fit` `[1, 1]`.
 
 ## previewLayouts
 
@@ -162,6 +177,19 @@ export const clickTrack = (folder: string) => invoke<ClickSample[]>("click_track
 ### Returns
 
 `Promise<ClickSample[]>` - the mouse-down track for the whole timeline, so the editor can draw click ripples matching the export's click FX.
+
+## previewFrame
+
+```ts
+export const previewFrame = (folder: string, timeMs: number) => invoke<string>("preview_frame", { folder, timeMs })
+```
+
+The export's own composited frame at `timeMs` (clip time) as a JPEG data URL, from the warm Rust renderer (`export::preview::preview_frame`). Called by `useExactFrame` whenever the stage's playhead rests, so the frame being judged is a frame of the export.
+
+### Inputs
+
+- `folder` (`string`) - project directory.
+- `timeMs` (`number`) - the instant, clip time, whole milliseconds.
 
 ## previewBg
 

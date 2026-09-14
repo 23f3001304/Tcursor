@@ -2,6 +2,8 @@
 
 The preview's background: what the stage is handed, what it holds, and how one frame of it is drawn.
 
+Like `previewCanvas.ts`, everything drawn here is EXPORT pixels and is therefore theme-independent: the dim is the same `out = src * (1 - dim)` black overlay Rust applies, and the `#2c2c42 -> #131318` gradient is the placeholder that stands in for a background PNG that has not landed yet - both would be wrong if they turned with the editor's light theme, because neither is chrome. The frame's surrounding chrome (the stage well and the frame's own ground) IS themed, via `--e-stage-well` and `--e-frame` in `stage.css`.
+
 **Two paths, and the split is the whole design.** For everything STATIC (wallpaper, colour, gradient, an imported still) the backend already returns the finished background as a PNG at the output size - cover-fitted, blurred and DIMMED - so the preview blits it exactly as it always has, and re-applying any of that here would double it. For a VIDEO or GIF the backend cannot hand over sixty images a second, so this file draws the moving asset itself: cover-fit with the same rect math the webcam PiP uses, then the dim as a black overlay.
 
 **Parity for a moving background is "the same frame within one output frame", not pixel-identical.** The preview resamples through the browser's decoder and the export through ffmpeg's `-r`, so a single-frame difference at a cut is expected and is not a bug. Everything about WHICH frame is shown is shared: both sides count from the recording's own frame 0 and wrap by the asset's duration.

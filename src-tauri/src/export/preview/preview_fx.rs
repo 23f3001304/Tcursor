@@ -132,7 +132,7 @@ fn render_fx_overlay(
         _ => None,
     };
     let hits: Vec<FxHit> = hits.iter().map(|h| FxHit { x: h[0], y: h[1], progress: h[2] }).collect();
-    let state = FxState { style: click_style_of(&style), color, intensity, hits, spot, video };
+    let state = FxState { style: click_style_of(&style), color, intensity, hits, spot, video, lens: None };
 
     // Render onto opaque black and opaque white, then invert the over-composite for alpha.
     let n = (ow * oh * 4) as usize;

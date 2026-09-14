@@ -54,7 +54,7 @@ impl Compositor for GpuCompositor {
         // convert (a raw passthrough would emit nv12 bytes as bgra). The GPU pass is cheap anyway.
         let g = &self.gpu;
         let (wc_data, ww, wh) = webcam.unwrap_or((&[0u8; 4], 1, 1));
-        let u = build_uniforms(scene, cam, layout, webcam.map(|(_, w, h)| (w, h)));
+        let u = build_uniforms(scene, cam, layout, webcam.map(|(_, w, h)| (w, h)), (sw, sh));
         // Hashed BEFORE the lock: it is a strided read over the whole ~8 MB background (~0.1-0.3 ms,
         // cache-miss bound), and nothing about it needs the cached resources. Skipped entirely for a
         // dynamic (video) background, which re-uploads either way - so the hash would be pure cost.

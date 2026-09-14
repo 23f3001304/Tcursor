@@ -101,35 +101,52 @@ Maps a screen-local frame pixel into the composited base frame (output pixels be
 ### Used by
 
 - `src-tauri/src/export/camera/autozoom.rs` - converts click anchors to base-frame coords.
-- `src-tauri/src/export/scene/layout.rs` - re-anchors zoom regions into the active panel.
+- `src-tauri/src/export/scene/layout.rs` - `anchor_frame` re-anchors zoom regions into each frame's panel.
+
+## full_src
+
+```rust
+pub fn full_src(sw: u32, sh: u32) -> RectF
+```
+
+The whole recorded canvas as a source rect: `(0, 0, sw, sh)`. The `Scene.src` of a take that never switched display, what `scene::resolve` stamps on every scene it builds, and the "no crop" argument every `to_panel` caller passes when there is no display switch. Dimensions are floored at 1 so a degenerate probe cannot produce a zero-width rect the mapping would divide by.
+
+### Used by
+
+- `src-tauri/src/export/scene/mod.rs` - `resolve` sets `Scene.src` from it.
+- `src-tauri/src/export/render/spans.rs` - span 0 of every take.
+- `src-tauri/src/export/gpu/compositor.rs` - the CPU fast-path's "is this the whole canvas" test.
 
 ## to_panel
 
 ```rust
-pub fn to_panel(p: FramePoint, sw: u32, sh: u32, rect: RectF) -> FramePoint
+pub fn to_panel(p: FramePoint, src: RectF, rect: RectF) -> FramePoint
 ```
 
-Maps a screen-local frame pixel into any panel rect (output pixels). Generalizes `to_base` to work with the active layout's screen panel instead of the default inset.
+Maps a CANVAS pixel into any panel rect (output pixels) THROUGH the source sub-rect the panel is showing. Generalizes `to_base` to any panel placement AND any crop.
 
 ### Inputs
 
-- `p: FramePoint` - position in the raw capture buffer. *Why:* cursor positions come in frame-local pixels.
-- `sw: u32, sh: u32` - capture dimensions. *Why:* normalizes `p` to 0..1 before scaling into the panel.
+- `p: FramePoint` - position in the raw capture buffer. *Why:* cursor, click and zoom-anchor positions all come in canvas pixels.
+- `src: RectF` - the sub-rect of the canvas the panel is showing (`Scene.src`). *Why:* A mid-take display switch keeps ONE encoder canvas and fits every later frame into it, so the file carries baked black bars from the switch on. The render undoes that by showing only the active SOURCE SPAN's `src` rect (`export::render::spans`). `full_src(sw, sh)` gives back the old `x / sw * rect.w` formula exactly, which is what keeps a take with no switch byte-identical.
 - `rect: RectF` - the active screen panel rect (from `Scene`). *Why:* the layout may be Screen, Camera, or Presenter; each places the screen panel differently.
 
 ### Returns
 
-`FramePoint` in output panel pixels. Screen origin maps to `rect.x, rect.y`; screen center maps to the panel center.
+`FramePoint` in output panel pixels. `src`'s origin maps to `rect.x, rect.y`; `src`'s centre maps to the panel centre. Points outside `src` (on the other display's picture) map outside the panel rather than being clamped onto it - every caller clips instead.
 
 ### Behaviors worth knowing
 
 - `to_panel_maps_into_rect` (unit test): (960, 540) in a 1920x1080 capture maps to (500, 350) in a rect at (100, 50, 800x600).
-- Origin (0,0) maps exactly to the rect origin.
+- `a_full_canvas_src_reproduces_the_old_formula` (unit test): the no-switch pin, checked at five points.
+- `a_span_src_maps_the_fitted_rect_onto_the_whole_panel` (unit test): a 16:10 display fitted at x 96..1824 of a 1920 canvas maps that band onto the whole panel.
 
 ### Used by
 
-- `src-tauri/src/export/pipeline/exporter.rs` - converts the cursor position each frame.
+- `src-tauri/src/export/render/step.rs` - converts the cursor position each frame.
 - `src-tauri/src/export/fx/fx_state.rs` - converts click positions for FX overlay placement.
+- `src-tauri/src/export/scene/layout.rs` - `anchor_frame` re-anchors every zoom region, every frame.
+- `src/editor/stage/sourceSpans.ts` - `toPanelFrac` is the TS mirror.
 
 ## crop
 

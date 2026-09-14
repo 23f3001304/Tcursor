@@ -1,10 +1,12 @@
 import type { RefObject } from "react";
 import { IconCrosshair } from "@tabler/icons-react";
-import { PanelHeader } from "../panels/PanelHeader";
 import type { CamZoomAction, EditDoc, EditOp, Zoom, ZoomTarget } from "../../lib/edit";
-import { NumberField, Slider } from "../controls/Controls";
+import { Disclosure, Slider } from "../controls/Controls";
 import { CurveEditor } from "./CurveEditor";
-import { Hint, InspectorShell, RemoveButton, SegRow, Section, TimingRow, secOf, spanLede } from "./InspectorShape";
+import {
+  Hint, InspectorHeader, InspectorShell, SegRow, type SegOption, Section, ValueRow, secOf, spanRange,
+} from "./InspectorShape";
+import { FEEL_PRESETS, activeFeel, feelPatch } from "./zoomFeel";
 
 /** The two target modes the picker offers. `ZoomTarget::Fixed{x,y}` is the whole Region model -
  *  the old "Center" button was only ever `fixed{0.5,0.5}`, so a doc written by it selects Region
@@ -47,17 +49,13 @@ export function zoomScopedSeekMs(nowMs: number, startMs: number, endMs: number):
   return Math.round((startMs + endMs) / 2);
 }
 
-export const PRESETS = [
-  { name: "Subtle", scale: 1.6, zoom_in_ms: 400, zoom_out_ms: 500, easing: "smooth" },
-  { name: "Balanced", scale: 2.2, zoom_in_ms: 350, zoom_out_ms: 450, easing: "smooth" },
-  { name: "Punchy", scale: 2.8, zoom_in_ms: 200, zoom_out_ms: 300, easing: "spring" },
-];
-
-/** The preset a zoom currently matches on all four fields, or "Custom". */
-export function activePreset(z: Pick<Zoom, "scale" | "zoom_in_ms" | "zoom_out_ms" | "easing">): string {
-  const p = PRESETS.find((p) => Math.abs(p.scale - z.scale) < 0.05 && p.zoom_in_ms === z.zoom_in_ms
-    && p.zoom_out_ms === z.zoom_out_ms && p.easing === z.easing);
-  return p ? p.name : "Custom";
+/** The Timing row's duration switch: a fixed end, or one that follows the typing after the start
+ *  (the backend refits `end_ms` from `typing.json`; see `ops::smart_zoom`). */
+export function durationOptions(smart: boolean): SegOption[] {
+  return [
+    { key: "fixed", label: "Fixed", on: !smart, title: "The end stays where you put it" },
+    { key: "smart", label: "Smart typing", on: smart, title: "The end follows the typing after the start" },
+  ];
 }
 
 export function ZoomInspector({ zoom, dur, onApply, onClose, aimMode, moveMode, onAimMode, timeMsRef, onSeek }: {
@@ -68,7 +66,7 @@ export function ZoomInspector({ zoom, dur, onApply, onClose, aimMode, moveMode, 
   const upd = (patch: Partial<Omit<Extract<EditOp, { op: "update_zoom" }>, "op" | "id">>) =>
     void onApply({ op: "update_zoom", id: zoom.id, ...patch });
   const mode = targetMode(zoom.target);
-  const cur = activePreset(zoom);
+  const feel = activeFeel(zoom);
   const span = secOf(zoom.end_ms - zoom.start_ms);
   // Discoverability fix (live debug: "none of these settings work" was wiring working but
   // invisible outside the span) - jump the playhead into the zoom whenever a scoped control
@@ -80,20 +78,18 @@ export function ZoomInspector({ zoom, dur, onApply, onClose, aimMode, moveMode, 
 
   return (
     <InspectorShell kind="zoom">
-      <PanelHeader title="Zoom" lede={spanLede(zoom.start_ms, zoom.end_ms)} closeTitle="Deselect" onClose={onClose} />
-
-      <Section title="Timing">
-        <TimingRow startMs={zoom.start_ms} endMs={zoom.end_ms} durMs={dur}
-          onStart={(start_ms) => upd({ start_ms })} onEnd={(end_ms) => upd({ end_ms })} />
-        <Hint>Drag the block on the timeline to move it.</Hint>
-      </Section>
+      <InspectorHeader title="Zoom" range={spanRange(zoom.start_ms, zoom.end_ms)}
+        deleteLabel="Delete zoom" onClose={onClose}
+        onDelete={() => { void onApply({ op: "remove_zoom", id: zoom.id }); onClose(); }} />
 
       <Section title="Framing">
-        <label className="e-field">
-          <Slider min={1} max={4} step={0.1} value={zoom.scale} onChange={(v) => upd({ scale: v })}
-            accentColor="var(--e-zoom)" ariaLabel="Scale" label="Scale" formatValue={(v) => `${v.toFixed(1)}x`} />
-        </label>
-        <div className="e-field">
+        <div className="e-ihero">
+          <span className="e-ihero-v">{zoom.scale.toFixed(1)}<i>x</i></span>
+          <span className="e-ihero-l">Scale</span>
+        </div>
+        <Slider min={1} max={4} step={0.1} value={zoom.scale} onChange={(v) => upd({ scale: v })}
+          accentColor="var(--e-zoom)" ariaLabel="Scale" />
+        <div className="e-field e-iaim">
           <span className="e-fl">Target</span>
           <SegRow ariaLabel="Target" onPick={(k) => {
             if (k === "cursor") onAimMode(false);
@@ -113,6 +109,36 @@ export function ZoomInspector({ zoom, dur, onApply, onClose, aimMode, moveMode, 
         <Hint>Applies while this zoom is active, scrub inside it to preview.</Hint>
       </Section>
 
+      <Section title="Timing" value={`${span.toFixed(2)}s of ${secOf(dur)}s`}>
+        <ValueRow ariaLabel="Timing" cells={[
+          { label: "Start", sec: secOf(zoom.start_ms), min: 0, max: secOf(zoom.end_ms),
+            onChange: (v) => upd({ start_ms: Math.round(v * 1000) }) },
+          { label: "End", sec: secOf(zoom.end_ms), min: secOf(zoom.start_ms), max: secOf(dur),
+            onChange: (v) => upd({ end_ms: Math.round(v * 1000) }) },
+          { label: "In", sec: secOf(zoom.zoom_in_ms), min: 0, max: span,
+            onChange: (v) => upd({ zoom_in_ms: Math.round(v * 1000) }) },
+          { label: "Out", sec: secOf(zoom.zoom_out_ms), min: 0, max: span,
+            onChange: (v) => upd({ zoom_out_ms: Math.round(v * 1000) }) },
+        ]} />
+        <div className="e-field e-iaim">
+          <span className="e-fl">Duration</span>
+          <SegRow ariaLabel="Duration" options={durationOptions(!!zoom.smart_typing)} onPick={(k) => upd({ smart_typing: k === "smart" })} />
+        </div>
+        <Hint>{zoom.smart_typing
+          ? "The end lands one hold after the last key of the typing that starts here, and refits whenever you move the start."
+          : "Drag the block on the timeline to move it, or its right edge to change where it ends."}</Hint>
+      </Section>
+
+      {/* The readout says "Custom" only when nothing is lit - with a preset matched the row already
+          says which one, and repeating it on the heading row would be the same word twice. */}
+      <Section title="Feel" value={feel ? undefined : "Custom"}>
+        <SegRow ariaLabel="Feel" options={FEEL_PRESETS.map((p) => ({ key: p.name, label: p.name, on: feel === p.name }))}
+          onPick={(k) => { const patch = feelPatch(k); if (patch) upd(patch); }} />
+        <Disclosure id="zoom-feel" label="Custom">
+          <CurveEditor value={zoom.easing} onChange={(easing) => upd({ easing })} />
+        </Disclosure>
+      </Section>
+
       <Section title="Webcam during zoom">
         <SegRow ariaLabel="Webcam during zoom"
           options={CAM_ACTION_OPTIONS.map((o) => ({ key: o.label, label: o.label, on: isCamActionSelected(zoom.cam_action, o.value) }))}
@@ -121,22 +147,6 @@ export function ZoomInspector({ zoom, dur, onApply, onClose, aimMode, moveMode, 
             if (opt) { void onApply({ op: "set_zoom_cam_action", id: zoom.id, action: opt.value }); seekIntoSpan(); }
           }} />
       </Section>
-
-      <Section title="Feel" value={cur}>
-        <SegRow ariaLabel="Feel" options={PRESETS.map((p) => ({ key: p.name, label: p.name, on: cur === p.name }))}
-          onPick={(k) => { const p = PRESETS.find((p) => p.name === k); if (p) upd({ scale: p.scale, zoom_in_ms: p.zoom_in_ms, zoom_out_ms: p.zoom_out_ms, easing: p.easing }); }} />
-        <div className="e-field2" style={{ marginTop: 12 }}>
-          <label className="e-field"><span className="e-fl">Zoom in</span>
-            <NumberField step={0.05} min={0} max={span} value={secOf(zoom.zoom_in_ms)}
-              onChange={(v) => upd({ zoom_in_ms: Math.round(v * 1000) })} /></label>
-          <label className="e-field"><span className="e-fl">Zoom out</span>
-            <NumberField step={0.05} min={0} max={span} value={secOf(zoom.zoom_out_ms)}
-              onChange={(v) => upd({ zoom_out_ms: Math.round(v * 1000) })} /></label>
-        </div>
-        <CurveEditor value={zoom.easing} onChange={(easing) => upd({ easing })} />
-      </Section>
-
-      <RemoveButton label="Delete zoom" onClick={() => { void onApply({ op: "remove_zoom", id: zoom.id }); onClose(); }} />
     </InspectorShell>
   );
 }

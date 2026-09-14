@@ -5,8 +5,8 @@
 // longer match any of them.
 import type { BackgroundSettings } from "../../hud/settings/settings";
 import type { BackgroundThumb } from "../../lib/ipc";
-import { ColorInput, Slider } from "../controls/Controls";
-import { WallpaperRow, tilesOf } from "./WallpaperGrid";
+import { CategorySection, ColorInput, defaultOpenIndex, Slider } from "../controls/Controls";
+import { thumbGroups, TileGrid, TileGridSkeleton } from "./WallpaperGrid";
 
 type Rgb = [number, number, number];
 const same = (a: Rgb | null | undefined, b: Rgb | null | undefined) =>
@@ -27,12 +27,22 @@ export function GradientTab({
   setBg,
 }: {
   bg: BackgroundSettings;
-  thumbs: BackgroundThumb[];
+  /** `null` while the thumbnails are still loading. */
+  thumbs: BackgroundThumb[] | null;
   setBg: (patch: Partial<BackgroundSettings>) => void;
 }) {
+  if (thumbs === null) {
+    return (
+      <div className="e-grp e-secstack">
+        <CategorySection id="bg.gradient.loading" label="Presets" count={0} defaultOpen><TileGridSkeleton /></CategorySection>
+      </div>
+    );
+  }
   const presets = thumbs.filter((t) => t.kind === "gradient");
   const selectedId = bg.kind === "gradient" ? (presets.find((t) => isPreset(t, bg))?.id ?? null) : null;
   const mid = bg.gradient_mid ?? null;
+  const groups = thumbGroups(thumbs, "gradient");
+  const open = defaultOpenIndex(groups.map((g) => g.tiles.some((t) => t.id === selectedId)));
 
   const apply = (id: string) => {
     const g = presets.find((t) => t.id === id)?.gradient;
@@ -46,10 +56,16 @@ export function GradientTab({
 
   return (
     <>
-      {/* The twelve presets as one strip, the same row the wallpaper groups are - the heading IS
-          the row's label, so there is no section head above it saying the same word. */}
-      <div className="e-grp e-rowstack">
-        <WallpaperRow label="Presets" tiles={tilesOf(thumbs, "gradient")} selectedId={selectedId} onSelect={apply} />
+      {/* The presets as collapsible sections, the same ones the Wallpapers tab is made of (the
+          backend puts all twelve in one group, "Presets"). The section header IS the heading, so
+          there is no `.e-sechead` above it saying the same word. */}
+      <div className="e-grp e-secstack">
+        {groups.map((g, i) => (
+          <CategorySection key={g.name} id={`bg.grad.${g.name}`} label={g.name} count={g.tiles.length}
+            selectedName={g.tiles.find((t) => t.id === selectedId)?.name ?? null} defaultOpen={i === open}>
+            <TileGrid tiles={g.tiles} selectedId={selectedId} onSelect={apply} />
+          </CategorySection>
+        ))}
       </div>
 
       <div className="e-grp">

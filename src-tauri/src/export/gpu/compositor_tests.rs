@@ -1,5 +1,6 @@
 // Tests for export::gpu::compositor, split out so compositor.rs stays under the size limit.
 use super::*;
+use crate::export::coordmap::full_src;
 use crate::export::scene::{Panel, Scene};
 use crate::export::types::{Camera, Layout, RectF};
 
@@ -21,7 +22,7 @@ fn screen_panel_composites_onto_background() {
     let screen = nv12_screen(4, 4, [0, 0, 255, 255]); // BGRA red -> nv12
     let bg = solid(8, 8, [255, 0, 0, 255]);      // BGRA blue
     let layout = Layout { out_w: 8, out_h: 8, pad_px: 1, screen_scale: 1.0, screen_radius_px: 8.0 * 0.016 };
-    let scene = Scene { screen: panel(2.0, 2.0, 4.0, 4.0, 1.0), camera: panel(0.0, 0.0, 0.0, 0.0, 0.0) };
+    let scene = Scene { screen: panel(2.0, 2.0, 4.0, 4.0, 1.0), camera: panel(0.0, 0.0, 0.0, 0.0, 0.0), src: full_src(4, 4) };
     let cam = Camera { cx: 4.0, cy: 4.0, scale: 1.0 };
     let mut out = Vec::new();
     CpuCompositor.composite_into(&screen, 4, 4, None, cam, &bg, &layout, &scene, &mut out);
@@ -63,7 +64,7 @@ fn a_wide_webcam_in_a_square_panel_shows_the_centre_not_a_squash() {
     let screen = nv12_screen(4, 4, [0, 0, 0, 255]);
     let bg = solid(8, 8, [40, 40, 40, 255]);
     let layout = Layout { out_w: 8, out_h: 8, pad_px: 1, screen_scale: 1.0, screen_radius_px: 0.0 };
-    let scene = Scene { screen: panel(0.0, 0.0, 0.0, 0.0, 0.0), camera: panel(2.0, 2.0, 4.0, 4.0, 1.0) };
+    let scene = Scene { screen: panel(0.0, 0.0, 0.0, 0.0, 0.0), camera: panel(2.0, 2.0, 4.0, 4.0, 1.0), src: full_src(4, 4) };
     let cam = Camera { cx: 4.0, cy: 4.0, scale: 1.0 };
     let mut out = Vec::new();
     CpuCompositor.composite_into(&screen, 4, 4, Some((&webcam, 12, 4)), cam, &bg, &layout, &scene, &mut out);
@@ -82,7 +83,7 @@ fn ring_paints_a_band_just_inside_the_camera_edge_and_leaves_center_alone() {
     let mut cam_panel = panel(2.0, 2.0, 20.0, 20.0, 1.0);
     cam_panel.ring_px = 3.0;
     cam_panel.ring_color = [255, 0, 0]; // RGB red -> BGRA [0,0,255,255]
-    let scene = Scene { screen: panel(0.0, 0.0, 0.0, 0.0, 0.0), camera: cam_panel };
+    let scene = Scene { screen: panel(0.0, 0.0, 0.0, 0.0, 0.0), camera: cam_panel, src: full_src(4, 4) };
     let cam = Camera { cx: 12.0, cy: 12.0, scale: 1.0 };
     let mut out = Vec::new();
     CpuCompositor.composite_into(&screen, 4, 4, Some((&webcam, 20, 20)), cam, &bg, &layout, &scene, &mut out);
@@ -106,14 +107,14 @@ fn zero_ring_px_leaves_panel_byte_identical_to_no_ring_field() {
     let screen = nv12_screen(4, 4, [0, 0, 0, 255]);
     let bg = solid(14, 14, [40, 40, 40, 255]);
     let layout = Layout { out_w: 14, out_h: 14, pad_px: 1, screen_scale: 1.0, screen_radius_px: 0.0 };
-    let scene = Scene { screen: panel(0.0, 0.0, 0.0, 0.0, 0.0), camera: panel(2.0, 2.0, 10.0, 10.0, 1.0) };
+    let scene = Scene { screen: panel(0.0, 0.0, 0.0, 0.0, 0.0), camera: panel(2.0, 2.0, 10.0, 10.0, 1.0), src: full_src(4, 4) };
     let cam = Camera { cx: 7.0, cy: 7.0, scale: 1.0 };
     let mut baseline = Vec::new();
     CpuCompositor.composite_into(&screen, 4, 4, Some((&webcam, 10, 10)), cam, &bg, &layout, &scene, &mut baseline);
     // Same scene, but camera.ring_px explicitly 0.0 with a non-black color set - must be a no-op.
     let mut cam_panel = panel(2.0, 2.0, 10.0, 10.0, 1.0);
     cam_panel.ring_color = [200, 100, 50];
-    let scene2 = Scene { screen: panel(0.0, 0.0, 0.0, 0.0, 0.0), camera: cam_panel };
+    let scene2 = Scene { screen: panel(0.0, 0.0, 0.0, 0.0, 0.0), camera: cam_panel, src: full_src(4, 4) };
     let mut out = Vec::new();
     CpuCompositor.composite_into(&screen, 4, 4, Some((&webcam, 10, 10)), cam, &bg, &layout, &scene2, &mut out);
     assert_eq!(out, baseline, "ring_px == 0.0 must never touch pixels, regardless of ring_color");
@@ -126,7 +127,7 @@ fn disabled_and_degenerate_panels_do_not_panic() {
     let bg = solid(8, 8, [255, 0, 0, 255]);
     let layout = Layout { out_w: 8, out_h: 8, pad_px: 1, screen_scale: 1.0, screen_radius_px: 8.0 * 0.016 };
     // camera panel larger than output + screen disabled: must not OOB or panic.
-    let scene = Scene { screen: panel(0.0, 0.0, 8.0, 8.0, 0.0), camera: panel(2.0, 2.0, 20.0, 20.0, 1.0) };
+    let scene = Scene { screen: panel(0.0, 0.0, 8.0, 8.0, 0.0), camera: panel(2.0, 2.0, 20.0, 20.0, 1.0), src: full_src(8, 8) };
     let cam = Camera { cx: 4.0, cy: 4.0, scale: 1.0 };
     let mut out = Vec::new();
     CpuCompositor.composite_into(&screen, 8, 8, Some((&webcam, 4, 4)), cam, &bg, &layout, &scene, &mut out);

@@ -31,11 +31,14 @@ fn smoothing_off_is_bit_identical() {
     // instead of differencing whole-millisecond timestamps, and `0xf32c_73d4_f690_57e7` before an
     // anchored region stopped sliding toward a far-away cursor (`follow::aim` is anchor-only), and
     // `0xf680_77c4_4f43_36fb` before the scale was floored at full frame (the `Some -> None`
-    // handoff's velocity carry dipped it a hair under 1.0 after every ramp-out).
-    let r = js::run(js::Grid::Export, &cfg(), js::ALPHA_DEFAULT);
+    // handoff's velocity carry dipped it a hair under 1.0 after every ramp-out), and
+    // `0x0824_ea72_2c9b_d85f` before the cursor stopped being a lagging low-pass and became the
+    // rest/move path model (`export/cursor/path.rs`) - the camera follows a cursor that now
+    // arrives with the recording, so every sample of the trajectory moved on purpose.
+    let r = js::run(js::Grid::Export, &cfg(), js::SMOOTH_DEFAULT);
     assert_eq!(cfg().smoothing_ms, 0, "the default must stay off");
     assert_eq!(r.t.len(), 721, "the probe's sample count changed - the pin is no longer comparable");
-    assert_eq!(fingerprint(&r), 0x0824_ea72_2c9b_d85f, "smoothing_ms = 0 changed the shipped trajectory");
+    assert_eq!(fingerprint(&r), 0x58da_34b7_41e9_0fd3, "smoothing_ms = 0 changed the shipped trajectory");
 }
 
 /// Frames the filtered run must be advanced by to best match the raw one over `[t0, t1]`, i.e.
@@ -65,12 +68,12 @@ fn peak_vel_t(r: &js::Run, t0: u32, t1: u32) -> u32 {
 
 #[test]
 fn smoothing_before_after() {
-    let raw = js::run(js::Grid::Export, &cfg(), js::ALPHA_DEFAULT);
+    let raw = js::run(js::Grid::Export, &cfg(), js::SMOOTH_DEFAULT);
     println!("\n=== PART 2  critically-damped post-pass, export 60fps grid ===");
     println!("  whole run (12s), screen px per frame^2:");
     jm::print_jerk("smoothing_ms = 0", &raw);
     for ms in [120u32, 250] {
-        let f = js::run(js::Grid::Export, &ZoomConfig { smoothing_ms: ms, ..cfg() }, js::ALPHA_DEFAULT);
+        let f = js::run(js::Grid::Export, &ZoomConfig { smoothing_ms: ms, ..cfg() }, js::SMOOTH_DEFAULT);
         jm::print_jerk(&format!("smoothing_ms = {ms}"), &f);
         let (lag, resid) = best_lag(&raw, &f, js::SWEEP.0, js::SWEEP.1 + 400);
         let (i0, i1) = jm::window(&raw, js::SWEEP.0, js::SWEEP.1 + 400);
@@ -93,7 +96,7 @@ fn smoothing_tames_the_worst_spike_but_cannot_remove_it() {
     // margin (H1b, cx 129.8 px/f2); `follow::aim` removed the aim discontinuity itself and the
     // window is down to 6.7. What is left is the residue a causal post-pass can only spread over
     // its settle time - which is exactly the point: more smoothing must never raise it.
-    let raw = js::run(js::Grid::Export, &cfg(), js::ALPHA_DEFAULT);
+    let raw = js::run(js::Grid::Export, &cfg(), js::SMOOTH_DEFAULT);
     let worst = |r: &js::Run| {
         let s = jm::series(r);
         let (a, b) = jm::window(r, 9200, 9700);
@@ -104,7 +107,7 @@ fn smoothing_tames_the_worst_spike_but_cannot_remove_it() {
     println!("  smoothing_ms =   0: cx {bx:.1}  cy {by:.1}");
     let mut prev = bx;
     for ms in [60u32, 120, 250, 400] {
-        let f = js::run(js::Grid::Export, &ZoomConfig { smoothing_ms: ms, ..cfg() }, js::ALPHA_DEFAULT);
+        let f = js::run(js::Grid::Export, &ZoomConfig { smoothing_ms: ms, ..cfg() }, js::SMOOTH_DEFAULT);
         let (fx, fy) = worst(&f);
         println!("  smoothing_ms = {ms:>3}: cx {fx:.1}  cy {fy:.1}   ({:+.0}% cx vs off)",
             (fx / bx - 1.0) * 100.0);

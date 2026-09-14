@@ -1,6 +1,6 @@
 # src/editor/panels/CameraMoveField.tsx
 
-The Camera panel's "how it moves" group: the Move-in-preview switch and, directly under it, the only two controls that switch enables. Split out of `CameraPanel.tsx` by the panel pass, which moved this group to the bottom of the panel so that the switch sits above what it enables rather than four groups away from it.
+The Camera panel's "how it moves" group: the Move-in-preview switch and, directly under it, the controls that switch enables - the keyframed webcam size and shape at the playhead, and the button that commits a drag as a keyframe. Split out of `CameraPanel.tsx` by the panel pass, which moved this group to the bottom of the panel so that the switch sits above what it enables rather than four groups away from it.
 
 All the keyframe arithmetic lives here; `CameraPanel` is left as a flat read of the panel's flow.
 
@@ -21,14 +21,14 @@ export function CameraMoveField({ doc, timeMs, applyOp, moveMode, onMoveModeChan
 
 ### Behavior
 
-**Webcam size in Move mode** writes to the `camera_moves` keyframe at the playhead (creating one if none is within the snap window) instead of to the static appearance size. Which is why `CameraPanel` drops `cam_size` from its own Size group while `moveMode` is on: one slider with that name, in the place that currently owns it.
+**Webcam size and Shape in Move mode** write to the `camera_moves` keyframe at the playhead (creating one if none is within the snap window) instead of to the static appearance. Size is the slider; Shape is a `CamShapeField` (`CamShapeField.md`) reading the keyframe found by `camKeyframeAt` (`"layout"` when none is there yet), so a shape pick on an empty instant creates the keyframe carrying it. Both go through one `commit(patch)`.
 
-**`setKfSize` deliberately does not clear `camDraftRef`** (review round 2, Important - unlike `addKeyframeHere`). It fires on every slider tick during a drag and reads `camDraftRef.current` each time to preserve a PENDING stage drag's x/y across the whole gesture. Clearing after the first tick would drop that x/y (falling back to `nearestPose`/0.5 on the very next tick, mid-drag) - worse than the narrower known gap it leaves: `camDraftRef.current.size` can go stale against what a slider commit just wrote, so a PiP drag started immediately afterwards seeds `start.size` from the stale value. Pre-existing, not introduced by M6's fix, and not a one-liner to close without the regression above.
+**`commit` keeps a pending drag, and keeps it CURRENT.** It fires on every slider tick and reads `camDraftRef.current` each time, folding the draft's x/y into the keyframe so a drag in progress is not lost mid-gesture. It also writes the committed size back into the draft (`{ ...d, size }`). *Why that matters (the bug fixed 2026-09-14):* the composite draws `camDraftRef` in PREFERENCE to the keyframe (`frameCamLayout`'s `drag ?? camMoveAt(...)`), so a draft left holding the pre-slider size kept the PiP at that size no matter what the slider wrote - after any drag, the size slider looked dead. Updating the draft in step closes that gap, and also means a PiP drag started right after seeds `start.size` from the size just committed rather than a stale one. The draft is still never CLEARED here - only by the button below or by moving the playhead.
 
-**`addKeyframeHere`** saves the drafted pose - or the sampled one if nothing was dragged - as a keyframe at the playhead, and is the ONLY thing that commits: a bare drag never does. It clears `camDraftRef` once used (M6, review round 1 Important 3): the draft exists to survive playback ticks until this action consumes it, and leaving it behind would let a stale pose seed the next drag. The button's label flips to "Update keyframe at playhead" when `camKeyframeAt` finds one already there.
+**`addKeyframeHere`** saves the drafted pose - or the sampled one if nothing was dragged - as a keyframe at the playhead, and is the ONLY thing that commits a drag: a bare drag never does. It clears `camDraftRef` once used (M6, review round 1 Important 3): the draft exists to survive playback ticks until this action consumes it, and leaving it behind would let a stale pose seed the next drag. The button's label flips to "Update keyframe at playhead" when `camKeyframeAt` finds one already there.
 
 **Seeding outside the span.** `nearestPose` samples the track at the time clamped into `camKfRange`, so adding a keyframe past either end continues from where the track left off instead of jumping to frame-centre. The live layout pose is not available in this panel.
 
 ### Used by
 
-- `src/editor/panels/CameraPanel.tsx` - the last group in the panel.
+- `src/editor/panels/CameraPanel.tsx` - since 2026-09-14, essentially the WHOLE panel: everything else there was per-layout appearance and moved to Layouts (`CameraPanel.md`), leaving the header, this field, and one hint line. `staticSize` still comes from `settings.screen.cam_size`.

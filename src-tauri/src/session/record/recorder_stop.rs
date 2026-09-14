@@ -55,6 +55,7 @@ fn stop_blocking(app: &tauri::AppHandle) -> Result<RecordingResult, String> {
 
     // Signal the audio threads to stop; the video pipeline is stopped below.
     running.stop.store(true, Ordering::SeqCst);
+    running.mic_stop.store(true, Ordering::SeqCst); // the mic thread has its own flag (`switch_mic`)
     if let Some(t) = running.mic_thread { let _ = t.join(); }
     if let Some(t) = running.system_thread { let _ = t.join(); }
 
@@ -72,8 +73,9 @@ fn stop_blocking(app: &tauri::AppHandle) -> Result<RecordingResult, String> {
     // and no sync.json, so the export would have synthesised a timeline and mis-placed the mic.
     let stopped = running.video.stop_and_collect();
     let pick = |c: &AtomicU64| { let v = c.load(Ordering::SeqCst); (v > 0).then_some(v) };
+    let segments = std::mem::take(&mut *running.segments.lock().unwrap_or_else(|e| e.into_inner()));
     save_session_files(&running.folder, stopped.frame_ts, running.events_ms,
-        pick(&running.mic_start), pick(&running.system_start), running.screen);
+        pick(&running.mic_start), pick(&running.system_start), running.screen, segments);
 
     // `_stopping` drops here, releasing the guard now that the old take is fully detached from
     // the process-global input hooks.

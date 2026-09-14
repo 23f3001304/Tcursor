@@ -6,14 +6,19 @@ import { Camera } from "./icons";
  *  preview kept showing, and the camera stayed live, in the saving bar) has a single, obvious
  *  home instead of another inline conditional in an already-dense render.
  *
- *  Owns no state - purely a rendering of the truth its props already carry. `Hud.tsx` renders this
- *  ONLY while `!saving` (hides the tile entirely); the actual camera LED going off is
+ *  Owns no state - purely a rendering of the truth its props already carry. The idle bar and the
+ *  take pill (`TakeBar`, as `round`) both render it; the saving pill does not, and the actual camera LED going off is
  *  `useWebcamPreview`'s own `enabled` gate (`Hud.tsx` passes `camOn && !saving`) releasing the
  *  underlying `MediaStream` - this component just stops SHOWING a tile once that stream is gone,
  *  it never owns the stream itself. */
-export function CamTile({ camRef, camOn, camLive }: { camRef: RefCallback<HTMLVideoElement>; camOn: boolean; camLive: boolean }) {
+export function CamTile({ camRef, camOn, camLive, shape }: {
+  camRef: RefCallback<HTMLVideoElement>; camOn: boolean; camLive: boolean;
+  /** `"wide"` is the idle card's preview across its width, `"round"` the take pill's 44px circle
+   *  (`.camtoggle.wide` / `.camtoggle.round`); unset is the original 52px square. */
+  shape?: "wide" | "round";
+}) {
   return (
-    <div className="camtoggle" title="Camera preview">
+    <div className={`camtoggle${shape ? ` ${shape}` : ""}`} title="Camera preview">
       <video ref={camRef} className={`cam ${camOn && camLive ? "" : "off"}`} autoPlay muted playsInline />
       {!(camOn && camLive) && <span className="camoff"><Camera /></span>}
     </div>

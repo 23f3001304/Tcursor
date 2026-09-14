@@ -11,6 +11,7 @@ pub struct Uniforms {
     screen_min: [f32; 2], screen_max: [f32; 2],
     cam_min: [f32; 2], cam_max: [f32; 2],
     zoom_center: [f32; 2],
+    src_min: [f32; 2], src_max: [f32; 2],
     inv_scale: f32,
     screen_r: f32, camera_r: f32,
     screen_a: f32, camera_a: f32,
@@ -41,8 +42,11 @@ Packed uniform struct sent to the WGSL compositing shader. All coordinates are U
 ## build_uniforms
 
 ```rust
-pub fn build_uniforms(scene: &Scene, cam: Camera, layout: &Layout, has_webcam: bool) -> Uniforms
+pub fn build_uniforms(scene: &Scene, cam: Camera, layout: &Layout, webcam: Option<(u32, u32)>,
+                      screen: (u32, u32)) -> Uniforms
 ```
+
+`webcam` is the DECODED webcam frame's `(w, h)` (`None` = no webcam), whose aspect the shader cover-crops to the camera panel. `screen` is the decoded SCREEN frame's `(w, h)`, needed only to normalize `scene.src` into the texture UV pair `src_min`/`src_max` - the sub-rect of the canvas the screen panel shows. That pair is `(0,0)..(1,1)` for every take that never switched display, so the shader samples exactly as it always did; after a mid-take display switch it is the fitted rect of the switched-to display, which is how the capture's baked black bars are cropped away. The struct keeps every `vec2` front-loaded: 7 vec2 (56B) + 10 f32 (40B) + 1 vec4 (16B) = 112B, a multiple of 16 as the uniform address space requires.
 
 Constructs a `Uniforms` value from the current frame's compositing state.
 

@@ -1,15 +1,21 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use wgpu::util::DeviceExt;
 use crate::export::fx::fx_state::{FxRenderer, FxState};
 use crate::export::fx::fx_uniforms::build_fx_u;
 use crate::export::gpu::{align_up, FORMAT};
 
-/// GPU FX renderer: uploads the composited frame, runs fx.wgsl (spotlight + clicks),
-/// reads the result back. Selected when an adapter is available.
+/// GPU FX renderer: uploads the composited frame, runs fx.wgsl (spotlight + clicks + the glass
+/// cursor lens), reads the result back. Selected when an adapter is available.
 pub struct GpuFx {
     device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>, sampler: wgpu::Sampler,
     bind_layout: wgpu::BindGroupLayout, pipeline: wgpu::RenderPipeline,
     out_tex: wgpu::Texture, out_view: wgpu::TextureView, readback: wgpu::Buffer, padded_bpr: u32,
+    /// The cursor lens mask (`fx_lens::LensMask`), uploaded once per (pack, kind) and kept until a
+    /// different one is asked for. One entry is enough: a frame draws ONE cursor, and a shape
+    /// change re-uploads 16 KB. Behind a `Mutex` because `FxRenderer::apply` takes `&self`.
+    mask: Mutex<Option<(u64, wgpu::TextureView)>>,
+    /// The 1x1 opaque texture bound when no lens is live - the layout always needs a binding.
+    blank: wgpu::TextureView,
 }
 
 fn build_pipeline(device: &wgpu::Device) -> (wgpu::BindGroupLayout, wgpu::RenderPipeline) {
@@ -23,9 +29,18 @@ fn build_pipeline(device: &wgpu::Device) -> (wgpu::BindGroupLayout, wgpu::Render
             wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false, min_binding_size: None }, count: None },
+            wgpu::BindGroupLayoutEntry { binding: 3, visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None },
         ] });
+    // ONE module from THREE files: fx.wgsl (uniforms, spotlight, video fx), fx_clicks.wgsl (every
+    // click style), fx_lens.wgsl (the glass cursor material). Split purely for the 200-line budget;
+    // WGSL resolves module-scope names out of order, so fs_main can call `clicks()` and `lens_fx()`
+    // from the halves appended after it.
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("fx"), source: wgpu::ShaderSource::Wgsl(include_str!("fx.wgsl").into()) });
+        label: Some("fx"), source: wgpu::ShaderSource::Wgsl(concat!(
+            include_str!("fx.wgsl"), "\n", include_str!("fx_clicks.wgsl"), "\n",
+            include_str!("fx_lens.wgsl")).into()) });
     let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("fxpl"), bind_group_layouts: &[&bind_layout], push_constant_ranges: &[] });
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -60,8 +75,24 @@ impl GpuFx {
         let readback = device.create_buffer(&wgpu::BufferDescriptor { label: Some("fxread"),
             size: (padded_bpr * oh) as u64, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false });
-        Some(GpuFx { device, queue, sampler, bind_layout, pipeline, out_tex, out_view, readback, padded_bpr })
+        let blank = r8_texture(&device, &queue, 1, 1, &[255]);
+        Some(GpuFx { device, queue, sampler, bind_layout, pipeline, out_tex, out_view, readback,
+            padded_bpr, mask: Mutex::new(None), blank })
     }
+}
+
+/// Upload `a` as a single-channel R8 texture and return its view. `write_texture` (not a buffer
+/// copy) so an arbitrary sprite width needs no 256-byte row padding.
+fn r8_texture(device: &wgpu::Device, queue: &wgpu::Queue, w: u32, h: u32, a: &[u8]) -> wgpu::TextureView {
+    let size = wgpu::Extent3d { width: w.max(1), height: h.max(1), depth_or_array_layers: 1 };
+    let tex = device.create_texture(&wgpu::TextureDescriptor { label: Some("fxmask"), size,
+        mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::R8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST, view_formats: &[] });
+    queue.write_texture(tex.as_image_copy(), a,
+        wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(w.max(1)), rows_per_image: Some(h.max(1)) },
+        size);
+    tex.create_view(&Default::default())
 }
 
 impl FxRenderer for GpuFx {
@@ -76,11 +107,23 @@ impl FxRenderer for GpuFx {
         let u = build_fx_u(state, ow, oh);
         let ubuf = g.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("fxu"), contents: bytemuck::bytes_of(&u), usage: wgpu::BufferUsages::UNIFORM });
+        // The lens mask, re-uploaded only when the (pack, kind) behind it actually changed. A
+        // poisoned lock is recovered rather than propagated: this runs on a Tauri command thread
+        // for the editor preview, where a panic takes out the overlay (see `readback_into`).
+        let glass = state.lens.as_ref().and_then(|l| l.glass.as_ref());
+        let mut cache = g.mask.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(gl) = glass {
+            if cache.as_ref().map(|(k, _)| *k) != Some(gl.mask.key) {
+                *cache = Some((gl.mask.key, r8_texture(&g.device, &g.queue, gl.mask.w, gl.mask.h, &gl.mask.a)));
+            }
+        }
+        let mask = match (glass, cache.as_ref()) { (Some(_), Some((_, v))) => v, _ => &g.blank };
         let bind = g.device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("fxbg"),
             layout: &g.bind_layout, entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&fv) },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&g.sampler) },
                 wgpu::BindGroupEntry { binding: 2, resource: ubuf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(mask) },
             ] });
         let mut enc = g.device.create_command_encoder(&Default::default());
         {

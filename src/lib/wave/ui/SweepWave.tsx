@@ -16,9 +16,11 @@ const DOT_R = 3.5;
  *  `pct` of the width on the wave's trailing crest, and the whole wave's amplitude decays to flat
  *  as that reaches 100, so "nearly done" is legible from the shape alone before the number is read.
  *
- *  `done` flattens the wave and hands over to the checkmark, which draws itself from the dot's
- *  last position - the one stateful transition here, so Motion owns it while the sweep itself
- *  stays a rAF loop writing path data.
+ *  `done` flattens the wave, fades the flat line away and hands over to the checkmark, which
+ *  draws itself from the dot's last position - the one stateful transition here, so Motion owns
+ *  it while the sweep itself stays a rAF loop writing path data. The line has to go: a flat
+ *  full-width accent stroke under a tick read as a red bar with a check drawn over it (owner,
+ *  2026-09-14), not as a wave that had settled.
  *
  *  Under reduced motion the wave is drawn once at the current `pct` with no travel and no sweep
  *  loop; a determinate export still shows real progress, an indeterminate pass shows a still wave. */
@@ -66,7 +68,8 @@ export function SweepWave({ w = 300, h = 34, pct, done = false, tone }: {
   return (
     <svg className={`w-wave w-sweep${tone === "ai" ? " ai" : ""}`} width={w} height={h}
       viewBox={`0 0 ${w} ${h}`} aria-hidden="true" focusable="false">
-      <path ref={path} className="w-stroke front" />
+      <motion.path ref={path} className="w-stroke front" animate={{ opacity: done ? 0 : 1 }}
+        transition={reduced ? { duration: 0 } : { duration: 0.28, ease: [0.4, 0, 0.2, 1] }} />
       <motion.circle ref={dot} className="w-dot" cx={0} cy={mid} r={DOT_R}
         animate={{ scale: done ? 0 : 1 }}
         transition={reduced ? { duration: 0 } : { type: "spring", stiffness: 420, damping: 26 }}

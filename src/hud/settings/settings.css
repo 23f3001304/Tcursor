@@ -2,30 +2,29 @@
 .winbtn.gear { color: var(--muted); }
 .winbtn.gear:hover { background: var(--hover); color: var(--fg); }
 
-/* Settings box: replaces the bar. The open/close spring and tab transitions are
-   driven by Motion (AnimatePresence) in the components -- transform/opacity only, no blur. */
-.hud.as-box { width: 360px; }
-.settings-wrap { width: 100%; }
-.settings { display: flex; flex-direction: column; height: 420px; }
+/* Settings/Preferences: a sheet inside the idle card's body, the display picker's box exactly
+   (owner 2026-09-14 - it used to close the card and morph the window into its own box). The card
+   supplies the padding and the frost (IdleCard's flip); the panel owns only its height - the
+   card body's `--sheet-h`, so the window never resizes for it - and its scrolling body. */
+.settings { display: flex; flex-direction: column; gap: 8px; height: var(--sheet-h); min-width: 0; }
 
-/* Header row matches editor.css's PanelHeader (title + a hairline), so the box reads as the same
-   kind of panel as the editor's - see e-phead in editor.css. */
-.settings-head {
-  display: flex; align-items: center; gap: 6px; height: 40px; padding: 0 10px 0 6px; flex: none;
-  /* --e-divider (review round 1 item 1), not --line - a flat section divider is quieter than a
-     raised-element hairline (D1 doctrine); --line was louder, the opposite direction. */
-  border-bottom: 1px solid var(--e-divider);
-}
+/* Head reads as `.sheet-head` (hud.css): the same 30px row with a back arrow pulled out to the
+   card's own left edge. No hairline - the tabs under it already separate it from the body, and a
+   divider that stops at the card's padding reads as a line someone forgot to delete (D1). */
+.settings-head { display: flex; align-items: center; gap: 6px; height: 30px; margin-left: -4px; flex: none; }
 .settings-title { font-size: var(--e-text-title-size); font-weight: var(--e-text-title-weight); color: var(--e-fg); pointer-events: none; }
 
 /* Segmented-group treatment (same material as the HUD bar's .toggle-group): a recessed --e-bg
    track holding a popped-up --e-raised active pill, instead of the old flat --hover/--surface pair. */
-.tabs { display: flex; gap: 4px; background: var(--e-bg); padding: 3px; border-radius: 9px; margin: var(--e-sp-2) var(--e-sp-2) var(--e-sp-1); flex: none; }
+.tabs { display: flex; gap: 4px; background: var(--e-bg); padding: 3px; border-radius: 9px; flex: none; }
 .tab { flex: 1; padding: 6px 0; border: none; border-radius: 6px; background: transparent; color: var(--e-dim);
   font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; transition: background 0.16s ease, color 0.16s ease; }
 .tab.on { background: var(--e-raised); color: var(--e-fg); box-shadow: var(--e-inset-hi), var(--e-shadow-1); }
 
-.settings-body { flex: 1; overflow-y: auto; padding: 2px var(--e-sp-3) var(--e-sp-3); }
+/* The one thing that scrolls: a tab taller than the card's body scrolls in here, and the card (and
+   so the window) stays exactly as tall as it is with the sources showing. The negative margin lets
+   the scrollbar sit in the card's own padding instead of pushing the controls in. */
+.settings-body { flex: 1; min-height: 0; overflow-y: auto; margin: 0 -6px; padding: 0 6px 6px; }
 .tab-panel { display: flex; flex-direction: column; gap: var(--e-sp-4); }
 
 /* Inset rounded-pill scrollbar (WebView2 is Chromium). */

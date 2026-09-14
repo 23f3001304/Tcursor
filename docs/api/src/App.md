@@ -34,11 +34,18 @@ Each step runs through `safe()` so one failure cannot abort the rest. It makes t
 **`closeEditor()`.**
 Reverses the changes through `safe()`: `setCapturable(false)`, restore always-on-top and non-resizable, clear the minimum size with `setMinSize(null)` (*why:* the `880x560` editor floor would otherwise block shrinking back), `setSize` to the 980x132 HUD bar and `center()` it, then switch `view` back to `{ v: "hud" }`.
 
-**Cold-start file association (`useEffect` on `[]`, runs once).**
-Calls `getLaunchProject()`; a non-null folder means this process was launched by double-clicking a `.tcursor` file, and calls `openEditor(folder)` to route straight to the editor instead of the HUD. A normal launch resolves `null` and nothing happens - the effect runs after the initial render, so the HUD still mounts first and is briefly visible before the switch on a `.tcursor` launch. Failures (rejected promise) are swallowed; there is nothing useful to show if this fails. *Warm-launch is not covered:* if TCursor is already running when another `.tcursor` is opened, the OS starts a second process rather than notifying this one - see the Rust `LaunchProject` doc comment.
+**Startup (`useEffect` on `[]`, runs once).**
+First applies the stored theme: `getSettings()` then `applyTheme(s.ui.theme, s.ui.accent)`, which stamps `data-theme` on the document root and sets `--accent`. `Hud` re-applies the theme on every settings change and OS theme flip, but a launch that goes straight to the editor never mounts the HUD, so without this line an "always light" or "always dark" preference would only take effect once the HUD had been shown. Failures are swallowed; the stylesheet's `prefers-color-scheme` fallback stands until the settings arrive.
+Then the cold-start file association: calls `getLaunchProject()`; a non-null folder means this process was launched by double-clicking a `.tcursor` file, and calls `openEditor(folder)` to route straight to the editor instead of the HUD. A normal launch resolves `null` and nothing happens - the effect runs after the initial render, so the HUD still mounts first and is briefly visible before the switch on a `.tcursor` launch. Failures (rejected promise) are swallowed; there is nothing useful to show if this fails. *Warm-launch is not covered:* if TCursor is already running when another `.tcursor` is opened, the OS starts a second process rather than notifying this one - see the Rust `LaunchProject` doc comment.
 
 **Render.**
 A ternary -- no `AnimatePresence` here. `Editor` receives `folder` and `onClose`. `Hud` receives `onEdit`, which is `openEditor`. When `view.v` is `"hud"` the `Editor` is fully unmounted; its local state (playback position, selection, doc) is discarded when the user goes back to the HUD.
+
+The editor branch renders a fragment: `<Editor>` **and** `<InterfaceEffects />` (`src/editor/effects/InterfaceEffects.tsx`), the editor's click-ripple overlay.
+
+*Why it mounts here and not inside the editor.* The micro-interaction feature deliberately owns no part of the editor tree - `Editor.tsx` and `shell/ClassicShell.tsx` are another surface's files - so its one component hangs off the view switch instead, beside the thing it decorates. It is **portalled** into the live `.editor` element at runtime, for its `--e-*` palette tokens (custom properties inherit only to descendants) and for its z-order (it has to sit under `.e-modal-scrim`, which lives inside `.editor`'s own stacking context); see [InterfaceEffects](editor/effects/InterfaceEffects.md).
+
+*Why only on the editor branch.* The HUD has its own motion language and no ripples, and rendering the overlay there would leave a window-wide `pointerdown` listener attached across every recording. Unmounting with the view is what guarantees it costs nothing while the app is doing its actual job.
 
 ### Notes
 

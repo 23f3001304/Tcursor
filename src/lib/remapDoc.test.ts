@@ -33,7 +33,7 @@ describe("remapDoc (parity with edit::remap_doc)", () => {
     d.trim = { in_ms: 500, out_ms: 9000 };
     d.cuts.push({ id: "c0", start_ms: 1000, end_ms: 2000 });
     d.speed.push({ id: "s0", start_ms: 2500, end_ms: 3500, factor: 2 });
-    d.camera_moves.push({ id: "m0", t_ms: 1500, x: 0.5, y: 0.5, size: 0.3, easing: "smooth" });
+    d.camera_moves.push({ id: "m0", t_ms: 1500, x: 0.5, y: 0.5, size: 0.3, easing: "smooth", shape: "layout", roundness: 0.12 });
     const r = remapDoc(d, fixtureMap());
     expect(r.camera_moves[0].t_ms).toBe(500);
     expect(r.trim).toEqual({ in_ms: 0, out_ms: 0 });

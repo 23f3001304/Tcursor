@@ -15,7 +15,7 @@ fn fixture(name: &str) -> ProjectPaths {
     let log = EventLog { started_unix_ms: 0, screen: ScreenInfo { w: 1920, h: 1080, origin_x: 0, origin_y: 0 },
         events: vec![MouseEvent { t: 0, kind: EventKind::Move, x: 10, y: 10, button: None }] };
     log.save(&paths.events()).unwrap();
-    SyncLog { frames: (0..=100).map(|k| VIDEO_START + k * 50).collect(), events_ms: 0, mic_ms: None, system_ms: None }
+    SyncLog { frames: (0..=100).map(|k| VIDEO_START + k * 50).collect(), events_ms: 0, mic_ms: None, system_ms: None, ..Default::default() }
         .save(&paths.sync()).unwrap();
     paths
 }

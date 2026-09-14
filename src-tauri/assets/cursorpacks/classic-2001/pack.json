@@ -1,6 +1,7 @@
 {
   "id": "classic-2001",
   "name": "Classic 2001",
+  "category": "Retro",
   "version": 2,
   "builtin": true,
   "busy": {

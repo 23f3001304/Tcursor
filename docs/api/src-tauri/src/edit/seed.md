@@ -27,19 +27,19 @@ Converts a slice of auto/manual `ZoomRegion`s into `Zoom` entries with stable id
 
 ### Returns
 
-`Vec<Zoom>` of the same length as `regions`. Ids are `z0`, `z1`, ... in input order. Each zoom uses `ZoomTarget::Fixed { x: anchor.x, y: anchor.y }` (not `Cursor`), preserving the click-site anchor from the recording.
+`Vec<Zoom>` of the same length as `regions`. Ids are `z0`, `z1`, ... in input order. Every zoom uses `ZoomTarget::Cursor` - it follows the cursor; the region's click anchor is not carried.
 
 ### Implementation
 
 1. Enumerate `regions`.
-2. For each `(i, r)`: assign `id = "z{i}"`, copy `start_ms`, `end_ms`, `scale` from the region, convert `easing` via `easing_str`, set `target = ZoomTarget::Fixed { x: r.anchor.x as f32, y: r.anchor.y as f32 }`.
-3. *Why `Fixed` not `Cursor`:* the anchor is the click point that triggered the zoom - locking it to a fixed coordinate keeps the camera in the same spot a re-render of the same recording would use, avoiding drift from cursor position at playback time.
+2. For each `(i, r)`: assign `id = "z{i}"`, copy `start_ms`, `end_ms`, `scale` from the region, convert `easing` via `easing_str`, set `target = ZoomTarget::Cursor`.
+3. *Why `Cursor` (2026-09-14; it was `Fixed { anchor }` before):* an auto zoom fires on a click, and at that instant the cursor IS the region's anchor, so a following zoom lands where the pinned one did and then tracks the hand instead of staying nailed to the click point. The owner found a fresh recording's auto zooms showing as "Region" in the inspector and ruled they should follow. A user who wants a pinned aim switches that zoom to Region. The old rationale - a seeded doc rendering byte-identically to the pre-editor export - is no longer a goal; `regions_from_doc` still round-trips every other field (`fromedit_tests::regions_round_trip_through_edit_doc`).
 
 ### Behaviors
 
 - `ids_are_deterministic_and_count_matches` - three regions yield `z0`, `z1`, `z2` with `len == 3`.
 - `empty_regions_make_no_zooms` - empty input produces an empty vec.
-- `fields_map_faithfully_and_anchor_is_preserved_as_fixed` - all fields copy correctly; target is `Fixed` with the exact anchor coordinates.
+- `fields_map_faithfully_and_the_zoom_follows_the_cursor` - all fields copy correctly; the target is `Cursor`.
 - `easing_names_map` - `Smooth -> "smooth"`, `Linear -> "linear"`, `Spring -> "spring"`.
 - `easing_str` also renders `Easing::Cubic` back to its `cubic(x1,y1,x2,y2)` wire form via `export::cubic::format_cubic`, so a seeded doc round-trips a custom curve byte-identically (unlike `Spring`, whose params a string cannot hold).
 

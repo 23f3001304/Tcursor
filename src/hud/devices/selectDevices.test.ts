@@ -45,6 +45,11 @@ describe("resolveSelection", () => {
 });
 
 describe("parseTarget", () => {
+  it("reads a (WxH, Primary) suffix as both a resolution and the primary flag", () => {
+    const r = parseTarget({ id: "display:0", label: "Display 1: \\\\.\\DISPLAY1 (2560x1440, Primary)", kind: "display" }, 0);
+    expect(r).toEqual({ title: "Display 1: \\\\.\\DISPLAY1", resolution: "2560x1440", primary: true });
+  });
+
   it("marks index 0 primary and strips the (Primary) suffix", () => {
     const r = parseTarget({ id: "display:0", label: "Display 1: \\\\.\\DISPLAY1 (Primary)", kind: "display" }, 0);
     expect(r).toEqual({ title: "Display 1: \\\\.\\DISPLAY1", resolution: null, primary: true });

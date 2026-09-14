@@ -39,12 +39,12 @@ fn plain_os_mode_strips_the_polish_and_keeps_the_raw_path() {
     let (sys, enh) = (cursor_with(CursorStyle::System), cursor_with(CursorStyle::Enhanced));
     assert!(sys.plain_os(false) && !sys.plain_os(true), "only System + no baked cursor is plain-OS");
     assert!(!enh.plain_os(false) && !enh.plain_os(true), "Enhanced is never plain-OS");
-    // Raw recorded path: alpha 1.0 makes Cursor::at return the interpolated sample verbatim.
-    assert_eq!(sys.follow_alpha_at(false), 1.0);
+    // Raw recorded path: smoothness 0 + idealize 0 makes Cursor::at return the interpolated sample verbatim.
+    assert_eq!(sys.smoothness_at(false), 0.0);
     assert_eq!(sys.idealize_at(false), 0.0);
     // Every other combination keeps the user's smoothing exactly as before.
-    assert_eq!(sys.follow_alpha_at(true), sys.follow_alpha());
-    assert_eq!(enh.follow_alpha_at(false), enh.follow_alpha());
+    assert_eq!(sys.smoothness_at(true), sys.smoothness);
+    assert_eq!(enh.smoothness_at(false), enh.smoothness);
 }
 
 #[test]
@@ -52,6 +52,68 @@ fn invert_rgb_black_to_white_keeps_alpha() {
     let mut px = [0u8, 0, 0, 255];
     invert_rgb(&mut px);
     assert_eq!(px, [255, 255, 255, 255]);
+}
+
+/// An opaque `w x h` sprite whose hotspot is its centre, so a rotation about the hotspot is a
+/// rotation about the whole box - which makes the expected bounding box plain trigonometry.
+fn block(w: u32, h: u32) -> CursorSprite {
+    CursorSprite { bgra: vec![255; (w * h * 4) as usize], w, h, hot: (0.5, 0.5), canvas_h: h }
+}
+
+/// A `CursorPrep` built by hand (one arrow sprite, no track, no pack animation) - `prep` itself
+/// decodes PNGs through ffmpeg, which a unit test must not need.
+fn prep_of(spr: CursorSprite) -> CursorPrep {
+    let mut set = HashMap::new();
+    set.insert(CursorType::Arrow, spr);
+    CursorPrep { set, track: CursorTrack::default(), click_ms: vec![], recent: VecDeque::new(),
+        busy: None, busy_frames: vec![], glass: false, masks: HashMap::new(), drags: vec![] }
+}
+
+/// The `(x0, y0, x1, y1)` of every pixel the draw put ink on (alpha > 0), end-exclusive.
+fn ink_box(out: &[u8], ow: u32) -> (i32, i32, i32, i32) {
+    let (mut lo, mut hi) = ((i32::MAX, i32::MAX), (i32::MIN, i32::MIN));
+    for (i, px) in out.chunks_exact(4).enumerate() {
+        if px[3] == 0 { continue; }
+        let (x, y) = ((i as u32 % ow) as i32, (i as u32 / ow) as i32);
+        lo = (lo.0.min(x), lo.1.min(y));
+        hi = (hi.0.max(x + 1), hi.1.max(y + 1));
+    }
+    (lo.0, lo.1, hi.0, hi.1)
+}
+
+#[test]
+fn a_tilted_cursor_is_the_same_sprite_rotated_about_its_hotspot() {
+    let (ow, oh) = (1000u32, 1000u32);
+    let screen = Panel { rect: RectF { x: 0.0, y: 0.0, w: 1000.0, h: 1000.0 }, radius: 0.0,
+        alpha: 1.0, ring_px: 0.0, ring_color: [0, 0, 0] };
+    let cam = Camera { cx: 500.0, cy: 500.0, scale: 1.0 }; // scale 1 -> the projection is identity
+    let c = CursorSettings { style: CursorStyle::Enhanced, size: 3.0, motion_blur: 0.0,
+        click_bounce: false, ..Default::default() };
+    let boxed = |tilt: f32| {
+        let mut cp = prep_of(block(8, 16));
+        let mut out = vec![0u8; (ow * oh * 4) as usize];
+        draw(&mut cp, &mut out, ow, oh, FramePoint { x: 500, y: 500 }, cam, &screen, 1000.0,
+            0, 0, &c, true, tilt);
+        ink_box(&out, ow)
+    };
+    // size_px = 3.0 * 1000 * 0.033 -> the 16px-tall sprite is drawn 99px tall, 49.5 wide.
+    let (tw, th) = (99.0f32 * 8.0 / 16.0, 99.0f32);
+    let flat = boxed(0.0);
+    assert_eq!((flat.2 - flat.0, flat.3 - flat.1), (tw.round() as i32, th as i32), "upright box");
+    let lean = boxed(6.0);
+    assert_ne!(lean, flat, "6 degrees must actually move pixels");
+    // The rotated rectangle's own extents - nothing may fall outside them by more than the
+    // bilinear sampler's one-pixel skirt, which is what "only within the expected rotation" means.
+    let (sin, cos) = (6.0f32.to_radians().sin(), 6.0f32.to_radians().cos());
+    let (want_w, want_h) = (tw * cos + th * sin, tw * sin + th * cos);
+    assert!(((lean.2 - lean.0) as f32 - want_w).abs() <= 2.0, "width {} want {want_w}", lean.2 - lean.0);
+    assert!(((lean.3 - lean.1) as f32 - want_h).abs() <= 2.0, "height {} want {want_h}", lean.3 - lean.1);
+    // And the hotspot stays put: the box is still centred on the cursor point, so a leaning cursor
+    // does not drift off the thing it is pointing at.
+    for b in [flat, lean] {
+        assert!((((b.0 + b.2) as f32 / 2.0) - 500.0).abs() <= 1.0, "centre x of {b:?}");
+        assert!((((b.1 + b.3) as f32 / 2.0) - 500.0).abs() <= 1.0, "centre y of {b:?}");
+    }
 }
 
 #[test]

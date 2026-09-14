@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { AMP_MAX, AMP_MIN, IDLE_DB, damp, dbFromRms, heightFromRms } from "./level";
+import { AMP_MAX, AMP_MIN, CEIL_DB, FLOOR_DB, IDLE_DB, damp, dbFromRms, heightFromRms, levelFromRms } from "./level";
 
 describe("dbFromRms", () => {
   it("floors digital silence well under the idle threshold instead of returning -Infinity", () => {
@@ -16,19 +16,24 @@ describe("dbFromRms", () => {
 });
 
 describe("heightFromRms", () => {
-  it("is flat at silence and full height at 0 dBFS", () => {
+  it("is flat at silence and full height from the ceiling up, a taller slot's max included", () => {
     expect(heightFromRms(0)).toBe(AMP_MIN);
+    expect(heightFromRms(Math.pow(10, CEIL_DB / 20))).toBeCloseTo(AMP_MAX, 10);
     expect(heightFromRms(1)).toBeCloseTo(AMP_MAX, 10);
+    expect(heightFromRms(1, 34)).toBeCloseTo(34, 10);
   });
 
-  it("is LOG mapped: the halfway dB lands halfway up, not the halfway RMS", () => {
-    const half = Math.pow(10, IDLE_DB / 2 / 20); // -25 dBFS
+  it("is LOG mapped over a speech window: the halfway dB lands halfway up, not the halfway RMS", () => {
+    const half = Math.pow(10, (FLOOR_DB + CEIL_DB) / 2 / 20); // -31 dBFS
     expect(heightFromRms(half)).toBeCloseTo((AMP_MIN + AMP_MAX) / 2, 6);
-    expect(heightFromRms(0.5)).toBeGreaterThan((AMP_MIN + AMP_MAX) * 0.7); // -6 dB is still loud
+    expect(levelFromRms(half)).toBeCloseTo(0.5, 6);
+    expect(levelFromRms(0.03)).toBeGreaterThan(0.45); // -30 dBFS, quiet speech, already well off the line
+    expect(FLOOR_DB).toBeGreaterThanOrEqual(IDLE_DB);
   });
 
-  it("clamps anything below the idle floor to flat", () => {
-    expect(heightFromRms(Math.pow(10, (IDLE_DB - 20) / 20))).toBe(AMP_MIN);
+  it("clamps anything below the floor to flat", () => {
+    expect(heightFromRms(Math.pow(10, (FLOOR_DB - 5) / 20))).toBe(AMP_MIN);
+    expect(levelFromRms(0)).toBe(0);
   });
 });
 

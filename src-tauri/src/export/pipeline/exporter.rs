@@ -62,14 +62,14 @@ pub fn export(paths: &ProjectPaths, settings: ExportSettings, on_progress: impl 
         Ok(())
     });
 
-    let spipe = ScreenPipe::spawn(&paths.video(), screen_bytes, None, depth, out_fps)?;
+    let spipe = ScreenPipe::spawn(&paths.video(), screen_bytes, meta.screen_crop, None, depth, out_fps)?;
     let wpipe = if paths.webcam().exists() {
         Some(WebcamPipe::spawn(&paths.webcam(), meta.video_start, wc_dims, wc_bytes, depth, out_fps)?)
     } else { None };
     let bgpipe = video_source(r.background(), &paths.folder).and_then(|src|
         BgPipe::open(&src, (out_w, out_h), r.background().dim_clamped(), depth, out_fps)
             .map_err(|e| eprintln!("[EXPORT] background video: {e} - using its still first frame")).ok());
-    let mut pipes = frame_loop::Pipes { spipe, wpipe, bgpipe, last_webcam: None, wc_fail: None, wc_frames: 0 };
+    let mut pipes = frame_loop::Pipes { spipe, wpipe, bgpipe, last_webcam: None, wc_fail: None, wc_frames: 0, held: None };
 
     // The frame plan names the recording frame every output frame shows (`TimeMap::frame_plan`): a
     // trim-only doc gives exactly the old `k_in..=k_last`; cuts and speed spans skip or repeat frames.
@@ -82,7 +82,7 @@ pub fn export(paths: &ProjectPaths, settings: ExportSettings, on_progress: impl 
     let export_start = std::time::Instant::now();
     let clock = frame_loop::Clock { video_start: meta.video_start, out_fps };
     let (sent, timing) = frame_loop::run(&mut r, &mut pipes, &plan, &paths.video(), &clock, (out_w, out_h), &out_pool, &tx, &on_progress)?;
-    let frame_loop::Pipes { spipe, wpipe, bgpipe, last_webcam, mut wc_fail, wc_frames } = pipes;
+    let frame_loop::Pipes { spipe, wpipe, bgpipe, last_webcam, mut wc_fail, wc_frames, held: _ } = pipes;
     let had_webcam = wpipe.is_some();
     if let (Some(w), Some((buf, _, _))) = (wpipe.as_ref(), last_webcam) { w.recycle(buf); }
 

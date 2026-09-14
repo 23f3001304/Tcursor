@@ -1,0 +1,34 @@
+/* The editor's interface micro-interactions: the click-ripple overlay (`InterfaceEffects.tsx`).
+   Two rules and nothing else - the magnetic pull is entirely Motion's, and the focus ring lives in
+   `editor.css` beside the `:focus-visible` rule it replaces (it must not depend on this feature's
+   own on/off switch: a keyboard user always gets a ring).
+
+   No keyframes anywhere in here. Everything that moves is a Motion transform on the span itself;
+   this sheet only says what the ripple is MADE of. */
+
+/* The overlay. Portalled into `.editor`, so the palette tokens below resolve (they are declared on
+   `.editor` and inherit only to its descendants) and so z-index 99 sits under `.e-modal-scrim`'s
+   100 while clearing the panels, the timeline and the director layers (<51). `inset: 0` on a fixed
+   box means the ripples' `left`/`top` are plain client coordinates. */
+.e-ui-fx { position: fixed; inset: 0; z-index: 99; pointer-events: none; }
+
+/* One ripple. Drawn at its FINAL 56px and only ever scaled, so a bloom costs one composited
+   transform and never a layout; the negative margins centre it on the pointer without a
+   `translate` that would fight Motion for the transform. The ring is `--e-line-strong` - the
+   editor's own "this hairline is active" value, the one the hover and focus states of every
+   bordered control already reach for, which is what keeps a ripple reading as part of the chrome
+   rather than as a colour of its own. */
+.e-ui-ripple {
+  position: absolute; width: 56px; height: 56px; margin: -28px 0 0 -28px;
+  border-radius: 50%; will-change: transform, opacity;
+  box-shadow: inset 0 0 0 1.5px var(--e-line-strong);
+}
+/* The accent tint: the play button, Export, and anything already engaged (`.on`/`aria-current`).
+   The ring goes red and picks up `--e-glow-primary`, the palette's soft accent glow - used here
+   verbatim rather than mirrored, because unlike a focused button this element owns its whole
+   box-shadow and has nothing to clobber. Those clicks land hotter without changing the shape. */
+.e-ui-ripple.accent {
+  box-shadow:
+    inset 0 0 0 1.5px color-mix(in srgb, var(--e-primary) 80%, transparent),
+    var(--e-glow-primary);
+}

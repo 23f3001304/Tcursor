@@ -1,6 +1,6 @@
 # src/editor/stage/camKeyframeAt.ts
 
-Shared "is there already a keyframe at the playhead?" helper for the two `camera_moves` editing paths that write to *the current keyframe* rather than always adding a new one: dragging the webcam PiP in the preview (`Stage.tsx`, Move mode) and the Webcam-size slider (`CameraPanel.tsx`, Move mode). Keeping this in one place means both agree on the snap window and the update-vs-add decision.
+Shared "is there already a keyframe at the playhead?" helper for the `camera_moves` editing paths that write to *the current keyframe* rather than always adding a new one: the Move-mode panel's size slider and shape picker, and its Add/Update keyframe button (`CameraMoveField.tsx`). Keeping this in one place means all of them agree on the snap window and the update-vs-add decision.
 
 ## CAM_KF_SNAP_MS
 
@@ -9,6 +9,14 @@ export const CAM_KF_SNAP_MS = 60;
 ```
 
 Frames within this many milliseconds of the playhead are treated as "the same keyframe" - about a frame or two at 30fps, so a slightly-off-exact click still lands on the intended keyframe instead of stacking a near-duplicate a few ms away.
+
+## CamKfPatch
+
+```ts
+export interface CamKfPatch { x?: number; y?: number; size?: number; shape?: CamMoveShape; roundness?: number }
+```
+
+The fields one commit may set. `shape`/`roundness` are the keyframe's own shape (`"layout"` = inherit the layout's webcam shape); a brand-new keyframe leaves them to the backend's defaults when the patch does not carry them, so a size-only commit never invents a shape.
 
 ## camKeyframeAt
 
@@ -35,7 +43,7 @@ Linear scan tracking the closest candidate within the snap window (`Math.abs(m.t
 export async function commitCamKeyframe(
   moves: CameraMove[],
   timeMs: number,
-  patch: { x?: number; y?: number; size?: number },
+  patch: CamKfPatch,
   fallback: { x: number; y: number; size: number },
   onApply: (op: EditOp) => Promise<EditDoc | null>,
 ): Promise<EditDoc | null>
@@ -46,8 +54,8 @@ Commits a `camera_moves` edit at the playhead: updates the existing keyframe wit
 ### Inputs
 
 - `moves` / `timeMs` - passed straight to `camKeyframeAt` to find the target keyframe.
-- `patch: { x?, y?, size? }` - the field(s) this call is actually changing (e.g. the drag commits `{ x, y }`; the size slider commits `{ size }`).
-- `fallback: { x, y, size }` - the full pose to use when creating a brand-new keyframe, so a caller that only cares about one axis doesn't have to know the other two when there's nothing to update yet (e.g. the size slider passes the *current* x/y as the fallback so a first keyframe doesn't jump the PiP to `(0,0)`).
+- `patch: CamKfPatch` - the field(s) this call is actually changing (e.g. the button commits `{ x, y, size }`; the size slider `{ size }`; the shape picker `{ shape }`).
+- `fallback: { x, y, size }` - the full pose to use when creating a brand-new keyframe, so a caller that only cares about one field doesn't have to know the others when there's nothing to update yet (e.g. the size slider passes the *current* x/y as the fallback so a first keyframe doesn't jump the PiP to `(0,0)`).
 - `onApply: (op: EditOp) => Promise<EditDoc | null>` - the shared edit-op applier (`Editor.tsx`'s `applyOp`).
 
 ### Returns
@@ -57,9 +65,12 @@ Whatever `onApply` returns - the updated `EditDoc`, or `null` on failure.
 ### Implementation
 
 1. `camKeyframeAt(moves, timeMs)` - if found, `onApply({ op: "update_camera_move", id: existing.id, ...patch })`.
-2. Else `onApply({ op: "add_camera_move", t_ms: Math.round(timeMs), x: patch.x ?? fallback.x, y: patch.y ?? fallback.y, size: patch.size ?? fallback.size })`.
+2. Else `onApply({ op: "add_camera_move", t_ms: Math.round(timeMs), x: patch.x ?? fallback.x, y: patch.y ?? fallback.y, size: patch.size ?? fallback.size, shape?, roundness? })` - the two shape fields only when the patch carries them.
+
+### Notes
+
+- `moves` is whatever the caller rendered with, which can be one IPC round-trip stale during a slider drag, so two quick commits could both decide "add". The backend folds an add at an instant that already holds a keyframe into an in-place update (`EditOp::AddCameraMove`), so that race cannot stack duplicates - which mattered, because `camMoveAt` prefers the LAST coincident keyframe and the stale duplicate would have won.
 
 ### Used by
 
-- `src/editor/stage/Stage.tsx` - the Move-mode drag handle, on pointer-up, with `patch: { x, y }`.
-- `src/editor/panels/CameraPanel.tsx` - the Webcam-size slider, in Move mode, with `patch: { size }`.
+- `src/editor/panels/CameraMoveField.tsx` - every Move-mode commit: the size slider and shape picker (each a partial patch, with a pending drag's x/y folded in), and the Add/Update keyframe button (the full pose).

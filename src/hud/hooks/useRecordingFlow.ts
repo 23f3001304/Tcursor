@@ -29,6 +29,10 @@ export function settleStop(
   cam: PromiseSettledResult<void>,
 ): StopOutcome {
   if (screen.status === "rejected") return { err: `Recording failed: ${screen.reason}` };
+  // The screen encoder can come up empty without erroring (2026-09-14: another process held the
+  // GPU's encoder sessions and the take had mic, webcam and cursor but no video.mp4); opening the
+  // editor on that showed a blank preview with no explanation.
+  if (screen.value.frames === 0) return { err: "No video was captured. Nothing reached the screen encoder; try the take again." };
   const camWarn = cam.status === "rejected"
     ? "Webcam track didn't finish. Video saved without the camera overlay."
     : undefined;
@@ -37,7 +41,7 @@ export function settleStop(
 
 /** Owns the record -> stop -> preprocess -> edit lifecycle, so `Hud` only wires UI to it. Stop
  *  drops the recording UI immediately (screen finalize + webcam flush run in parallel), then runs
- *  the FULL editor-preview preprocessing pass (`preprocess_project`: proxy/thumbs/waveforms/
+ *  the editor-preview preprocessing pass (`preprocess_project`: the proxy is awaited, thumbs/waveforms/
  *  preview-audio/edit.json) and reports its progress as `savePct`, so the editor opens onto
  *  already-built artifacts instead of opening while that work is still racing along on a detached
  *  background thread (the old `thumbs::prewarm` behavior) - THAT race was why the preview could

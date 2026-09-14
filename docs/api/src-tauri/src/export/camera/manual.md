@@ -19,7 +19,7 @@ Scans `actions` for `ZoomHoldStart` / `ZoomHoldEnd` pairs and emits one `ZoomReg
 
 ### Returns
 
-`Vec<ZoomRegion>` - one entry per matched pair, in time order. Anchors are screen-local; `layout::anchor_regions` re-anchors them into the active screen panel.
+`Vec<ZoomRegion>` - one entry per matched pair, in time order. Anchors are screen-local; `layout::anchor_frame` re-anchors them into each frame's screen panel.
 
 ### Implementation
 

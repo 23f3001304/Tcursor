@@ -75,8 +75,8 @@ impl ScreenPipe {
     /// `depth` sizes both the bounded channel and the recycled buffer pool. Decodes at
     /// `out_fps` (like `WebcamPipe::spawn`) so the decode rate-converts to the export's
     /// output rate instead of running at the source's native capture rate.
-    pub fn spawn(video: &Path, screen_bytes: usize, target_dims: Option<(u32, u32)>, depth: usize, out_fps: u64) -> Result<ScreenPipe> {
-        let dec = RawDecoder::spawn(video, out_fps as f64, false, None, None, target_dims, "nv12", screen_bytes)?;
+    pub fn spawn(video: &Path, screen_bytes: usize, crop: Option<(u32, u32)>, target_dims: Option<(u32, u32)>, depth: usize, out_fps: u64) -> Result<ScreenPipe> {
+        let dec = RawDecoder::spawn(video, out_fps as f64, false, None, crop, None, target_dims, "nv12", screen_bytes)?;
         let pool = BufPool::new(depth, screen_bytes);
         let returner = pool.returner();
         let (tx, rx) = sync_channel::<(Vec<u8>, usize)>(depth);
@@ -112,7 +112,7 @@ impl ScreenPipe {
     }
 }
 
-/// Webcam decode thread — one frame per output frame (1:1, no superseding). Simpler than
+/// Webcam decode thread - one frame per output frame (1:1, no superseding). Simpler than
 /// `ScreenPipe`; the caller recycles each buffer via `recycle` after compositing it.
 pub struct WebcamPipe {
     rx: Receiver<Vec<u8>>,
@@ -129,7 +129,7 @@ impl WebcamPipe {
     /// decode box (`render::meta::webcam_box`) - ONE box for the whole export, which each panel
     /// cover-crops to its own aspect at composite time; it is not any panel's own `(w, h)`.
     pub fn spawn(webcam: &Path, video_start: u64, dims: (u32, u32), wc_bytes: usize, depth: usize, out_fps: u64) -> Result<WebcamPipe> {
-        let dec = RawDecoder::spawn(webcam, out_fps as f64, false, Some(video_start), Some(dims), None, "bgra", wc_bytes)?;
+        let dec = RawDecoder::spawn(webcam, out_fps as f64, false, Some(video_start), None, Some(dims), None, "bgra", wc_bytes)?;
         let pool = BufPool::new(depth, wc_bytes);
         let returner = pool.returner();
         let (tx, rx) = sync_channel::<Vec<u8>>(depth);

@@ -1,8 +1,12 @@
 # src/editor/panels/AiPanel.tsx
 
-Left panel rendered when the "AI Director" rail tab is active. Displays a real Engine picker (Ollama models installed locally) with honest loading/empty/error states, the auto-edit run button, an inline error line, and either a staggered Motion list summarizing what the AI director does (before the first run) or a live terminal-style log of what it actually did (once `log` has lines).
+Left panel rendered when the "AI Director" rail tab is active: the Auto-edit run button, one sentence saying what it does, three bullets, and - demoted to the foot of the panel - a real Engine picker (Ollama models installed locally) with honest loading/empty/error states. Once `log` has lines, a live terminal-style narration of what the director actually did replaces the bullets.
 
-**Flow (panel pass, 2026-09-13).** Two groups: the choice and the action (Engine, Auto-edit, progress, error), then the outcome under a heading that reads "What it does" before a run and "Run" once there are log lines. Nothing moved and nothing was renamed; the grouping is what makes the run button read as belonging to the engine above it rather than floating between two unrelated blocks. The log box and the error line are raised planes now, not bordered boxes - the error keeps its red text and gains a 3px accent edge instead of a tinted, outlined card.
+**Flow (look pass, 2026-09-14).** The owner dictated this panel's hierarchy: title, then the Auto-edit button, then "Automatically finds important moments and creates camera movement.", then the bullets Zooms on clicks / Removes idle time / Emphasizes important actions. So the order inverted - the ACTION is now the first thing under the header and the Engine picker, which used to open the panel, is one small labelled row at the bottom behind the panel's single allowed divider. Nothing about what the button does changed, and neither did the model-defaulting or the gating.
+
+Three things got quieter with it: the run button is 36px (was 38) on a flat `--e-ai` with no gradient sheen and no drop shadow, hover is a brightness step; the bullets lost their 28px raised icon plates and sit at 12px `--e-mut` with the glyph at `--e-dim`; and the "What it does" / "Run" section heading is gone, since a sentence followed by three bullets does not need a label over it.
+
+**Flow (panel pass, 2026-09-13, superseded above).** Two groups: the choice and the action (Engine, Auto-edit, progress, error), then the outcome under a heading. The log box and the error line became raised planes rather than bordered boxes - the error keeps its red text and a 3px accent edge, and that part still stands.
 
 ## AiPanel
 
@@ -34,9 +38,13 @@ Renders the AI Director configuration panel and run control.
 
 ### Behavior
 
-**Header (Task 26).** Renders via the shared `PanelHeader` (title "AI Director", the same lede as before) rather than a hand-rolled `<h2>`/`<p className="e-lede">` pair - consistent with every other panel. No `onReset` is passed (there's nothing here to reset to defaults).
+**Header (Task 26).** Renders via the shared `PanelHeader` - title "AI Director", one-line lede ("Auto-editing by a model running on this machine.", reworded in the look pass so it doesn't say the same thing as the sentence under the button). No `onReset` is passed (there's nothing here to reset to defaults).
 
-**Engine picker (loading/empty/error - Task 26; empty-state affordance - sweep-2 gate finding).**
+**The sentence and the bullets.** `.e-ai-what` carries the owner's sentence verbatim; `SUMMARY` is the module-level array of three `[Icon, string]` pairs behind the bullets, in the owner's words and order (Zooms on clicks / Removes idle time / Emphasizes important actions) on the glyphs this panel already had - `IconZoomIn`, `IconCut`, `IconVideo`. They still enter staggered (`delay: 0.1 + i * 0.05`), which is what makes them read as three distinct actions rather than a paragraph in list clothing.
+
+**Engine picker (loading/empty/error - Task 26; empty-state affordance - sweep-2 gate finding; demoted to the panel's foot in the look pass).**
+It is now one `.e-ai-engine` row - an 11px "Engine" label, the control pushed to the right at 30px tall and at most 190px wide - sitting last in flow behind a `--e-divider` hairline. Last IN FLOW, not pinned with `margin-top: auto`: `Picker`'s menu only opens downward, and a row pinned to the very bottom of a `overflow-y: auto` panel would open it straight into the clip. The empty state's text shortens to "None found" to fit the narrower row; its Retry button, its `role="status"` and `noModelsTitle` are unchanged.
+
 `models: string[] | null` - `null` means the `listOllamaModels()` fetch (a real IPC call hitting Ollama's `/api/tags`) is in flight; `loadModels` (a `useCallback`, re-run on mount and by the Retry button) resets it to `null` then calls the fetch, resolving to the real list or, on rejection, `[]`. Three renders of the Engine field, keyed on `models`:
 - `null` -> a `Shimmer` skeleton (`.e-picker-shell`, sized to match the `Picker` button) instead of the control.
 - `[]` (resolved empty, or the fetch rejected - e.g. Ollama isn't running) -> a disabled value-row, same `.e-picker-shell` footprint as the other two states plus `.e-picker-empty` (flex row, dim text) so the field never reads as literally blank: "No local models found" with a **Retry** button (re-runs `loadModels`) and a `title` (`noModelsTitle`) spelling out what to do. The `Picker` is not rendered at all in this state - it never presents a hardcoded placeholder model name as if it were actually installed and selectable.
@@ -61,7 +69,7 @@ When `error` is non-null, it's passed through `friendlyAiError` (`src/editor/dir
 While `log` is non-empty, it replaces the feature-summary list entirely with a terminal-style `.e-ai-log` block: each line is a `motion.div` that slides/fades in (`x: -8 -> 0`, `opacity: 0 -> 1`, a `0.24s` tween), and any line starting with `"✓"` gets the `done` class (a visual "completed step" treatment). *Why replace rather than append:* the log IS the "what I did" narration for the run that's in progress or just finished, so showing the static three-bullet summary alongside it would be redundant - the panel shows one or the other, keyed on `log.length > 0`.
 
 **Feature summary list (fallback).**
-Shown only while `log` is empty (no run yet). `SUMMARY` is a module-level array of three `[Icon, string]` pairs: zooms-on-clicks, camera punch-in, idle-gap trimming. Rendered as `motion.li` elements with a staggered entrance: `delay: 0.1 + i * 0.05`, `opacity: 0 -> 1`, `y: 5 -> 0`. *Why staggered:* communicates that the three items are distinct, sequential actions, and draws the eye down the list.
+Shown only while `log` is empty (no run yet) - see "The sentence and the bullets" above for what it now says. Rendered as `motion.li` elements with a staggered entrance: `delay: 0.1 + i * 0.05`, `opacity: 0 -> 1`, `y: 5 -> 0`. *Why staggered:* communicates that the three items are distinct, sequential actions, and draws the eye down the list.
 
 ### Notes
 

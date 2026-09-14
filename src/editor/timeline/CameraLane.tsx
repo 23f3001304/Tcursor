@@ -1,10 +1,17 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import type { EditDoc, EditOp } from "../../lib/edit";
-import { CURVE_GLYPHS } from "./curveGlyphs";
+import type { Rect } from "../controls/popoverPlace";
+import { CameraCurvePop } from "./CameraCurvePop";
 import { KF_BLEND_MS } from "../stage/cameraMoves";
 import { snapKeyframeMs } from "./camSnap";
 import { pastDragThreshold } from "../hooks/dragThreshold";
+
+/** The span bar's fill: the Camera lane accent at 12%, spelled as a `color-mix` off the token so
+ *  it follows the theme the way every other camera-coloured mark in this lane does. The ramp
+ *  widths are per-span (they come from the blend windows), which is why the gradient is built
+ *  inline here rather than living in `timeline.css` with the rest of the lane. */
+const CAM_12 = "color-mix(in srgb, var(--e-cam) 12%, transparent)";
 
 /** Camera-move keyframe lane: a diamond per doc.camera_moves entry at (t_ms/dur)*100%, over a
  *  dashed baseline (the track). A glowing segment is drawn between each consecutive pair - that's
@@ -27,9 +34,10 @@ export const CameraLane = memo(function CameraLane({ doc, dur, sel, onSel, onApp
   const startT = useRef(0);
   const movedRef = useRef(false); // past the click threshold since this drag began - gates `move`'s LIVE update only, not the commit (see `up`)
   const [drag, setDrag] = useState<{ id: string; t_ms: number } | null>(null);
-  // Open transition-curve popover: the destination keyframe id, the anchor % (segment midpoint),
-  // and its current easing (for the live highlight). null = closed.
-  const [pick, setPick] = useState<{ id: string; leftPct: number; easing: string } | null>(null);
+  // Open transition-curve popover: the destination keyframe id, the clicked segment's viewport
+  // rect (the popover is portalled, so it places from a real box rather than a percentage inside a
+  // lane that clips it), and its current easing for the live highlight. null = closed.
+  const [pick, setPick] = useState<{ id: string; anchor: Rect; easing: string } | null>(null);
 
   const beginDrag = useCallback((e: React.PointerEvent, id: string, t_ms: number) => {
     e.stopPropagation();
@@ -109,6 +117,9 @@ export const CameraLane = memo(function CameraLane({ doc, dur, sel, onSel, onApp
   const kfs = doc.camera_moves
     .map((m) => ({ id: m.id, easing: m.easing, t: drag?.id === m.id ? drag.t_ms : m.t_ms }))
     .sort((a, b) => a.t - b.t);
+  // Stable identity, so `CameraCurvePop`'s scroll/resize listeners are not torn down and re-added
+  // on every render of this lane (a playhead tick re-renders it).
+  const closePick = useCallback(() => setPick(null), []);
   // Commit a curve to the destination keyframe; keep the popover open so curves can be auditioned.
   const setEasing = (id: string, easing: string) => {
     void onApply({ op: "update_camera_move", id, easing });
@@ -134,8 +145,8 @@ export const CameraLane = memo(function CameraLane({ doc, dur, sel, onSel, onApp
         {hasWebcam && doc.camera_moves.length === 0 && <span className="e-camempty">Turn on Move in preview to keyframe the webcam</span>}
         {span && (
           <div className="e-camspan" style={{ left: `${pct(span.from)}%`, width: `${pct(span.to - span.from)}%`,
-            background: `linear-gradient(90deg, rgba(224,93,158,0) 0%, rgba(224,93,158,.12) ${Math.min(ramp, 50)}%,`
-              + ` rgba(224,93,158,.12) ${Math.max(100 - ramp, 50)}%, rgba(224,93,158,0) 100%)` }} />
+            background: `linear-gradient(90deg, transparent 0%, ${CAM_12} ${Math.min(ramp, 50)}%,`
+              + ` ${CAM_12} ${Math.max(100 - ramp, 50)}%, transparent 100%)` }} />
         )}
         {kfs.slice(1).map((b, i) => {
           const a = kfs[i];
@@ -143,7 +154,11 @@ export const CameraLane = memo(function CameraLane({ doc, dur, sel, onSel, onApp
             <div key={`seg-${a.id}-${b.id}`} className={`e-camseg${pick?.id === b.id ? " on" : ""}`}
               style={{ left: `${pct(a.t)}%`, width: `${pct(b.t - a.t)}%` }}
               title={`${b.easing.replace(/_/g, " ")} transition - click to change it`}
-              onPointerDown={(e) => { e.stopPropagation(); setPick({ id: b.id, leftPct: (pct(a.t) + pct(b.t)) / 2, easing: b.easing }); }} />
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                const r = e.currentTarget.getBoundingClientRect();
+                setPick({ id: b.id, anchor: { left: r.left, top: r.top, width: r.width, height: r.height }, easing: b.easing });
+              }} />
           );
         })}
         {kfs.map((m) => (
@@ -156,20 +171,8 @@ export const CameraLane = memo(function CameraLane({ doc, dur, sel, onSel, onApp
         ))}
       </div>
       {pick && (
-        // `onPointerDown` stopPropagation: without it, every click here bubbled to `.e-tlbody`'s
-        // own scrub handler (Timeline.tsx), which seeks the playhead + pauses playback AND takes
-        // pointer capture - stealing the button's own `onClick` (the easing choice) half the time
-        // too (M3).
-        <div className="e-campop" style={{ left: `${pick.leftPct}%` }} onPointerDown={(e) => e.stopPropagation()}>
-          {CURVE_GLYPHS.map((c) => (
-            <button key={c.key} type="button" title={c.name}
-              className={`e-campop-b${pick.easing === c.key ? " on" : ""}`}
-              onClick={() => setEasing(pick.id, c.key)}>
-              <svg viewBox="0 -30 100 160"><path d={c.path} fill="none"
-                stroke={pick.easing === c.key ? "var(--e-fg)" : "var(--e-mut)"} strokeWidth="8" strokeLinecap="round" /></svg>
-            </button>
-          ))}
-        </div>
+        <CameraCurvePop anchor={pick.anchor} easing={pick.easing}
+          onPick={(key) => setEasing(pick.id, key)} onDismiss={closePick} />
       )}
     </div>
   );

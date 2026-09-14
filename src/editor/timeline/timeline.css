@@ -1,0 +1,337 @@
+/* The editor timeline's own sheet: the ruler, the filmstrip clip, the trim/cut/range overlays, the
+   labelled lane stack and every pill, keyframe and waveform row inside it. Imported by
+   `Timeline.tsx` (the same way `panels.css` rides along with `PanelHeader.tsx`) and lifted out of
+   `editor.css` wholesale in the timeline-readability pass, so the timeline's rules live next to the
+   components that use them and nothing is defined in two places. Tokens only - every colour here
+   is an `--e-*` from `.editor` in `editor.css`.
+
+   Shared by a couple of non-timeline callers, because they reuse a timeline COMPONENT: `.e-shimmer`
+   (`Shimmer.tsx`, also used by `AiPanel`/`CursorPackField`) and `.e-laythumb*` (`LayoutThumb.tsx`,
+   also used by `LayoutInspector`'s header). CSS is global, so both keep working. */
+
+/* The 88px left padding is the lane label gutter's own space: `.e-lanegutter` is 72px wide and
+   sits 8px clear of the track, so anything under 80px clips the labels against the window edge. */
+.e-timeline { flex: none; border-top: 1px solid var(--e-border2); background: var(--e-surface);
+  padding: 8px 16px 14px 88px; position: relative; }
+/* Ruler sits on the CANVAS plane (Task D2), not the surrounding --e-surface panel - a deliberate
+   step DOWN in depth so the timeline reads as an instrument bolted onto the stage, not another
+   flat panel. Ticks are a barely-there hairline; nothing here is interactive. Confirmed as the
+   intended reading of "the ruler bar has NO background (canvas plane)" (spec review, round 1):
+   an explicit `--e-bg`, not merely "no background" (which would inherit `.e-timeline`'s surface). */
+.e-ruler { position: relative; height: 18px; font-size: 10px; color: var(--e-dim);
+  font-variant-numeric: tabular-nums; margin-bottom: 7px; background: var(--e-bg);
+  cursor: pointer; user-select: none; touch-action: none; }
+/* Each 10px label has a 1x4px hairline tick beneath it, pinned to the tick's time. The tick is
+   `--e-divider` (the sheet's quietest hairline) rather than the bespoke 6%-white it used to be -
+   same weight, one fewer raw colour, and it stays in step if the divider token ever moves. */
+.e-ruler span { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap;
+  padding-bottom: 5px; }
+.e-ruler span::after { content: ""; position: absolute; left: 50%; bottom: 0; transform: translateX(-50%);
+  width: 1px; height: 4px; background: var(--e-divider); }
+.e-ruler span:first-child { transform: none; }
+.e-ruler span:first-child::after { left: 0; transform: none; }
+.e-tlbody { position: relative; cursor: pointer; }
+/* Trim overlay (TrimOverlay.tsx): dims the head/tail outside SetTrim's range across the whole
+   track stack, with a raised grip handle at each edge (in/out). The dimmed fill (Task D2) is a
+   diagonal repeating-linear-gradient - a PATTERN fill, not chrome decoration, so it's exempt from
+   the no-gradients-on-chrome rule - alternating an 8px dark band with a lighter 8px one, so the
+   excluded region reads as textured/excluded rather than a flat black scrim. The pattern itself is
+   `--e-trimdim` (editor.css): the dark theme's 55%-black band would be a bruise on a light
+   timeline, so each palette carries its own pair of band alphas. */
+.e-trimdim { position: absolute; top: 0; bottom: 0; z-index: 3; pointer-events: none;
+  background: var(--e-trimdim); }
+/* Trim grip: a raised (--e-raised) capsule spanning the track height with 3 dots at its center -
+   the "grip" affordance - rather than the old flat accent line. Border stays a plain hairline at
+   rest/hover (border doctrine) and turns accent ONLY while this specific handle is the one being
+   dragged (`.active`, set from TrimOverlay's own `drag.mode`). Plain CSS color transitions, not
+   Motion - a static hover/active state, not the kind of stateful animation Motion is reserved for. */
+.e-trimhandle { position: absolute; top: 0; bottom: 0; width: 9px; margin-left: -4.5px; cursor: ew-resize;
+  z-index: 6; display: flex; align-items: center; justify-content: center; }
+.e-trimhandle::before { content: ""; position: absolute; inset: 0; border-radius: 4px;
+  background: var(--e-raised); border: 1px solid var(--e-line);
+  box-shadow: var(--e-inset-hi), var(--e-shadow-1); transition: border-color .14s ease, box-shadow .14s ease; }
+.e-trimhandle::after { content: ""; position: relative; z-index: 1; width: 3px; height: 3px;
+  border-radius: 50%; background: var(--e-mut); box-shadow: 0 -7px 0 var(--e-mut), 0 7px 0 var(--e-mut); }
+.e-trimhandle:hover::before { border-color: var(--e-line-strong); }
+.e-trimhandle.active::before { border-color: var(--e-primary);
+  box-shadow: var(--e-inset-hi), var(--e-shadow-1), 0 0 6px color-mix(in srgb, var(--e-primary) 40%, transparent); }
+/* Filmstrip clip: frame thumbnails filling the width, in an inset (3D) well. Thumbnails darken
+   20% (Task D2) so the strip reads as CONTEXT for the lanes above it, not competing content.
+   80px tall (1.5x the old 54px, owner 2026-09-14: "the thumbnails are extremely small and
+   repetitive") and asked for at exactly that height - `filmstripPlan.ts` derives BOTH the height and
+   the tile count, so a tile is a real 16:9-ish frame instead of an upscaled 64px sliver, and there
+   are nine of them across the usual window instead of sixteen near-identical ones.
+   A 1px `--e-bg` rule between tiles (border-box, so the strip still totals exactly 100%) gives the
+   strip its frame-by-frame read: without it a slow-moving recording smears into one long image. */
+.e-filmstrip { display: flex; height: 80px; border-radius: 6px; margin-bottom: 8px; overflow: hidden;
+  background: var(--e-card); border: 1px solid var(--e-line);
+  box-shadow: var(--e-inset-hi), inset 0 -6px 12px rgba(0,0,0,.22); }
+.e-filmstrip img { height: 100%; object-fit: cover; display: block; pointer-events: none; filter: brightness(.8);
+  box-sizing: border-box; border-left: 1px solid var(--e-bg); }
+.e-filmstrip img:first-child { border-left: 0; }
+/* Loading skeleton (Shimmer.tsx) - reused via `className` on Filmstrip/AudioTrack's own box
+   classes so the skeleton is pixel-identical in size to the loaded content. The sweep itself is
+   Motion-animated (`x`, a repeating tween in Shimmer.tsx), not a CSS @keyframes loop. */
+.e-shimmer { position: relative; overflow: hidden; }
+.e-shimmer-sweep { position: absolute; top: 0; bottom: 0; left: 0; width: 40%;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--e-step) 4%, transparent), transparent); }
+/* Track stack: scrolls when many effect layers appear; ruler + filmstrip stay above. */
+.e-tracks { display: flex; flex-direction: column; gap: 6px; max-height: 230px; overflow-y: auto; overflow-x: hidden; padding-bottom: 2px; }
+.e-tracks::-webkit-scrollbar { width: 11px; }
+.e-tracks::-webkit-scrollbar-track { background: transparent; }
+.e-tracks::-webkit-scrollbar-thumb { background: var(--e-dim); border-radius: 999px;
+  border: 3px solid var(--e-bg); background-clip: padding-box; min-height: 40px; }
+.e-tracks:hover::-webkit-scrollbar-thumb { background: var(--e-mut); background-clip: padding-box; }
+/* Lane label gutter (Timeline.tsx's `lanes` array, mapped once into `.e-lanegutter`'s labels and
+   once into `.e-tracks`' row bodies). `.e-lanegutter` is a SIBLING of `.e-tracks`, not nested
+   inside it - `.e-tracks`' `overflow-y: auto` forces `overflow-x` to clip too (a single element's
+   two overflow axes can't independently be "auto" and "visible" - the CSS spec computes the
+   visible one as auto whenever the other isn't visible), with no exception for a descendant that
+   tries to escape via absolute positioning: clipping is DOM-containment-based, not geometry-based.
+   As a sibling, `.e-lanegutter` sits entirely outside that clip. It doesn't scroll with `.e-tracks`
+   automatically, though (they're separate scroll contexts) - `Timeline.tsx`'s `onTracksScroll`
+   mirrors `.e-tracks`' scrollTop onto it on every scroll event, keeping the two columns locked
+   together. Crucially: `.e-lanegutter` is `position: absolute` within `.e-trackswrap`, so it takes
+   NO width away from `.e-tracks` - `.e-tracks` stays exactly 100% of `.e-tlbody`'s own width, the
+   same reference `seekAt`/`useRegionDrag` use for their ms<->px math, untouched by any of this. */
+.e-trackswrap { position: relative; }
+/* Both overflow axes stated, not just `overflow-y`: a single element cannot have one axis clipped
+   and the other visible, so `overflow-y: hidden` alone computed `overflow-x` to AUTO - which would
+   hand the gutter its own horizontal scrollbar the moment a lane name outgrew 72px, and that
+   scrollbar's height would then push the label rows out of step with `.e-tracks`' rows. */
+.e-lanegutter { position: absolute; right: 100%; margin-right: 8px; top: 0; width: 72px;
+  max-height: 230px; overflow: hidden; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
+/* Left-aligned, not right: the dots line up in one column, which is what makes the gutter read as
+   a track header list rather than as ragged marginalia. The row is as tall as its lane's real
+   content (`laneHeight`, Timeline.tsx), so the label centres against the lane it names. */
+.e-lanelabelrow { display: flex; align-items: center; justify-content: flex-start; flex: none; }
+/* Lane identity (timeline-readability pass, owner: "the ZOOM / FX / CAMERA / AUDIO labels are
+   currently easy to miss"). 11px uppercase at 80% --e-fg - a real label, not the 10.5px --e-dim
+   overline it was, which lost against the lanes it names - preceded by a 6px dot in the lane's own
+   accent. The dot is the ::before of the label itself, so the gutter keeps its two-element markup.
+   `.on` (this lane owns the current selection) goes full --e-fg and rings the dot. */
+.e-lanelabel { font-size: 11px; font-weight: var(--e-text-label-weight);
+  letter-spacing: var(--e-text-label-ls); text-transform: uppercase;
+  color: color-mix(in srgb, var(--e-fg) 80%, transparent);
+  display: inline-flex; align-items: center; gap: 7px;
+  white-space: nowrap; transition: color .14s ease; }
+.e-lanelabel::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--lane-accent); transition: box-shadow .14s ease; }
+.e-lanelabel.on { color: var(--e-fg); }
+.e-lanelabel.on::before { box-shadow: 0 0 0 3px color-mix(in srgb, var(--lane-accent) 22%, transparent); }
+/* Per-lane accent, set on BOTH columns' wrappers from the lane's `key` (Timeline.tsx maps its
+   `lanes` array into `e-lane-<key>`), so a lane's dot and its band always agree. Audio is the one
+   lane with no accent of its own in the palette and no selectable content either - a neutral
+   --e-mut dot is the honest reading, not a colour borrowed from an interactive lane.
+   The neutral default comes FIRST: `.e-lanerows` and `.e-lane-zoom` are both one-class selectors,
+   so the later rule wins on an element carrying both, and a default declared after these would
+   quietly repaint every lane grey. */
+.e-lanerows, .e-lanelabelrow { --lane-accent: var(--e-mut); }
+.e-lane-time { --lane-accent: var(--e-speed); }
+.e-lane-zoom { --lane-accent: var(--e-zoom); }
+.e-lane-fx { --lane-accent: var(--e-fx); }
+.e-lane-layout { --lane-accent: var(--e-layout); }
+.e-lane-camera { --lane-accent: var(--e-cam); }
+.e-lane-audio { --lane-accent: var(--e-mut); }
+/* Lane band (timeline-readability pass, replaces Task D2's alternating --e-surface/--e-surface-alt
+   parity shade): the whole lane - every row in it AND the gaps between them - is tinted 5% toward
+   its own accent, so a lane reads as one continuous band with an identity instead of as a stack of
+   interchangeable grey boxes. Flat container, so border doctrine still says no border: the lanes
+   separate by tint, plus one --e-divider hairline drawn INSIDE the 6px gap by a pseudo-element
+   (zero layout cost, so `.e-tracks` and the gutter keep the identical row heights `laneHeight`
+   computes for both columns). */
+.e-lanerows { position: relative; display: flex; flex-direction: column; gap: 6px;
+  border-radius: var(--e-r); background: color-mix(in srgb, var(--lane-accent) 5%, var(--e-surface)); }
+.e-lanerows + .e-lanerows::before { content: ""; position: absolute; left: 0; right: 0; top: -3px;
+  height: 1px; background: var(--e-divider); }
+/* The rows themselves are transparent now - the band behind them is what they sit on, so the four
+   pill rows keep only their box; the radius they used to need for their own fill is gone.
+   `.e-audiorow`/`.e-camrow` keep theirs: those two clip real content (the waveform image, the
+   camera span) to the rounded corner. */
+.e-zoomrow { position: relative; height: 32px; }
+/* Pill base (Task D2, replaces the old flat full-saturation slabs): --e-raised tinted 12% toward
+   the lane's own accent (`--pill-accent`, set once per class below) via color-mix, a 3px accent
+   bar inset from the left edge (box-shadow, so it respects the border-radius without a 4th DOM
+   layer), --e-inset-hi's top-light, and a resting hairline border - the raised-interactive-element
+   treatment the border doctrine calls for. `--pill-fill` is stashed in its own custom property
+   (not just inlined into `background`) so `.e-layblk`'s fade-ramp pseudo-elements below can fade
+   INTO the exact same computed color instead of the stale `--e-surface` they used to reference,
+   which no longer matches this pill's own fill. The pill stays --e-raised-based, a plane ABOVE the
+   lane band's 5% tint, so a pill still reads as an object sitting on its lane. */
+.e-zblk, .e-fxblk, .e-layblk, .e-spdblk { position: absolute; top: 0; height: 32px; border-radius: 7px; cursor: grab;
+  overflow: hidden; display: flex; align-items: stretch; user-select: none; touch-action: none;
+  --pill-fill: color-mix(in srgb, var(--pill-accent) 12%, var(--e-raised));
+  background: var(--pill-fill); border: 1px solid var(--e-line);
+  box-shadow: inset 3px 0 0 var(--pill-accent), var(--e-inset-hi), var(--e-shadow-1);
+  transition: border-color .14s ease, box-shadow .14s ease, transform .14s ease; }
+.e-zblk { --pill-accent: var(--e-zoom); }
+.e-fxblk { --pill-accent: var(--e-fx); }
+.e-layblk { --pill-accent: var(--e-layout); }
+.e-zblk.drag, .e-fxblk.drag, .e-layblk.drag, .e-spdblk.drag { cursor: grabbing;
+  box-shadow: inset 3px 0 0 var(--pill-accent), var(--e-inset-hi), var(--e-shadow-2); }
+/* Selected = an accent-tinted border (mixed into --e-line-strong, not a flat accent) + the
+   popover-depth shadow - replaces the old per-lane colored outline+glow trio. */
+.e-zblk.sel, .e-fxblk.sel, .e-layblk.sel, .e-spdblk.sel { transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--pill-accent) 35%, var(--e-line-strong));
+  box-shadow: inset 3px 0 0 var(--pill-accent), var(--e-inset-hi), var(--e-shadow-2); }
+/* Resize-handle grabbability over TrimOverlay (item 1 fix round 1, controller ruling
+   2026-09-02): z-index 7 - above `.e-trimhandle`'s 6 - applies ONLY while a pill is
+   interactive-relevant (hovered, selected, or being dragged), never statically by whether its
+   span touches the clip's true edge. The original static rule (any edge-touching pill, always)
+   painted a pill OVER `.e-trimdim`'s dimming stripe (z-index 3) whenever that same edge was ALSO
+   independently trimmed - a state-honesty regression (trimmed content read as included). At rest
+   every pill now stays at z-index auto (stack level 0, below `.e-trimdim`), exactly as it did
+   before this whole fix existed; the bump only exists for the moment a user is actually about to
+   grab (or is dragging) a handle, which is also the only moment it needs to win the race. */
+.e-zblk:hover, .e-fxblk:hover, .e-layblk:hover, .e-spdblk:hover,
+.e-zblk.sel, .e-fxblk.sel, .e-layblk.sel, .e-spdblk.sel,
+.e-zblk.drag, .e-fxblk.drag, .e-layblk.drag, .e-spdblk.drag { z-index: 7; }
+/* --e-fg on the pill's own 12%-accent-over---e-raised fill: whichever accent is furthest from the
+   ground it is mixed into, the fill stays within one step of --e-raised, so the label clears 12:1
+   on every lane in the dark theme and 14.7:1 in the light one. */
+.e-zlabel { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; color: var(--e-fg);
+  font-size: 11px; font-weight: 600; pointer-events: none; white-space: nowrap; overflow: hidden; }
+.e-zh { width: 11px; flex: none; cursor: ew-resize; position: relative; touch-action: none; }
+.e-zh::after { content: ""; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 2px; height: 12px; border-radius: 2px;
+  background: color-mix(in srgb, var(--e-step) 55%, transparent); opacity: 0;
+  transition: opacity .14s ease; }
+.e-zblk:hover .e-zh::after, .e-spdblk:hover .e-zh::after { opacity: 1; }
+.e-zh:hover::after { height: 16px; background: color-mix(in srgb, var(--e-step) 90%, transparent); opacity: 1; }
+/* Tiny pills: below this width the icon+text label can't fit without clipping, so it hides
+   entirely (a bare color chip still reads and stays draggable) rather than showing a sliver of
+   cut-off text. `container-type` scopes the query to the pill's OWN resolved width, not the
+   viewport, so it reacts as the SAME pill's live drag-resize crosses the threshold. `min-width`
+   keeps a short region's hit target (drag body + both edge handles) usable even at near-zero
+   duration, where the percentage width alone would shrink to a few px. */
+.e-zblk, .e-fxblk, .e-layblk, .e-spdblk { container-type: inline-size; min-width: 18px; }
+/* 46px, not 34: the label is a glyph plus "2.5x", about 44px, and between 34 and 44 it was drawn
+   and cut in half by the block's own overflow (owner's screenshot, 2026-09-14). Whole or gone. */
+@container (max-width: 46px) { .e-zlabel { display: none; } }
+/* T34 L4: the layout pill's thumbnail hides FIRST, at a wider breakpoint than the "hide the whole
+   label" one above - a narrow pill keeps its preset name readable a while longer, losing only the
+   little schematic, before the same 34px rule above takes the text too. Scoped to `.e-layblk`
+   only (the zoom/FX lanes' plain icons never grow this wide, so they don't need the extra step). */
+@container (max-width: 48px) { .e-layblk .e-laythumb { display: none; } }
+/* Audio track: quiet, low-contrast waveform with a small source icon (system vs mic). */
+.e-audiorow { position: relative; height: 22px; border-radius: var(--e-r); overflow: hidden; }
+.e-audiorow img { width: 100%; height: 100%; object-fit: fill; opacity: .5; display: block; pointer-events: none; }
+.e-trackicon { position: absolute; left: 5px; top: 50%; transform: translateY(-50%); z-index: 2;
+  color: var(--e-dim); display: flex; opacity: .85; pointer-events: none; }
+/* Effect layer row; the spotlight pill itself is the shared `.e-fxblk` rule above
+   (`--pill-accent: var(--e-fx)`). */
+.e-fxrow { position: relative; height: 32px; }
+/* Layout segment row; the pill itself is the shared `.e-layblk` rule above
+   (`--pill-accent: var(--e-layout)`). Fade ramps: static gradients at each end, widths set inline
+   from the segment's own in/out transition durations (transitionRampPct, capped at 40% so the two
+   can never meet) - fading INTO `--pill-fill` (the pill's own tinted fill color, Task D2), not a
+   flat surface color, so the ramp blends into the pill it's actually drawn on. A hard cut is 0%
+   wide and therefore invisible. */
+.e-layrow { position: relative; height: 32px; }
+.e-layblk::before, .e-layblk::after { content: ""; position: absolute; top: 0; bottom: 0;
+  pointer-events: none; z-index: 0; }
+.e-layblk::before { left: 0; width: var(--fin, 0%);
+  background: linear-gradient(to right, var(--pill-fill), rgba(0,0,0,0)); }
+.e-layblk::after { right: 0; width: var(--fout, 0%);
+  background: linear-gradient(to left, var(--pill-fill), rgba(0,0,0,0)); }
+.e-layblk > * { position: relative; z-index: 1; }
+/* Time lane (TimeLane.tsx): speed spans on the shared pill plane above, with the one lane accent
+   the palette was missing (`--e-speed`) so the lane reads apart from Zoom/FX/Layout at a glance. */
+.e-timerow { position: relative; height: 32px; }
+.e-spdblk { --pill-accent: var(--e-speed); }
+/* Cut spans (CutOverlay.tsx): the time a cut removes, hatched across the whole track stack. A
+   PATTERN fill, not chrome decoration - the same exemption `.e-trimdim` takes - 45-degree 1px
+   --e-dim stripes at 18% over a 40% --e-bg scrim, and no border at rest. The 1px accent edges
+   arrive only on hover (or while selected), so a resting timeline stays quiet. z-index 2 puts it
+   over the lane rows and under `.e-trimdim`'s own dimming (3), so trimmed-out time still reads as
+   excluded even where a cut also sits inside it. */
+.e-cut { position: absolute; top: 0; bottom: 0; z-index: 2; cursor: pointer;
+  background:
+    repeating-linear-gradient(45deg, color-mix(in srgb, var(--e-dim) 18%, transparent) 0 1px, transparent 1px 6px),
+    color-mix(in srgb, var(--e-bg) 40%, transparent);
+  transition: box-shadow .14s ease; }
+.e-cut:hover, .e-cut.sel { box-shadow: inset 1px 0 0 var(--e-primary), inset -1px 0 0 var(--e-primary); }
+/* The edges still appear, they just stop easing in; `CutOverlay`'s enter/leave is gated by `useReducedMotion` in TS. */
+@media (prefers-reduced-motion: reduce) { .e-cut { transition: none; } }
+/* Range selection (timelineRuler.tsx, the ruler's Shift+drag): a translucent accent wash with the
+   same 1px accent edges, drawn across the track body so what Cut and Speed will act on is
+   unmistakable. Never interactive - the gesture that made it is how it is changed. */
+.e-range { position: absolute; top: 0; bottom: 0; z-index: 4; pointer-events: none;
+  background: color-mix(in srgb, var(--e-primary) 12%, transparent);
+  box-shadow: inset 1px 0 0 var(--e-primary), inset -1px 0 0 var(--e-primary); }
+/* T34 L4: the layout pill's thumbnail (`LayoutThumb.tsx`) - a schematic of the segment's OWN
+   resolved panels (`arrThumb.ts`), shared verbatim (same viewBox, just a bigger rendered size) by
+   `LayoutInspector`'s 48x28 header thumbnail. --e-layout/--e-cam echo the lane accent and the
+   camera accent, same colors `ArrangeOverlay`/`CameraLane` already use for "this is the screen"
+   vs "this is the webcam". */
+.e-laythumb { flex: none; display: block; }
+.e-laythumb-screen { fill: none; stroke: var(--e-layout); stroke-width: 1.4; }
+.e-laythumb-cam { fill: var(--e-cam); opacity: .9; }
+/* Camera-move lane: keyframes are single-point diamonds, not start/end regions, so one row
+   holds every keyframe (no layer-stacking like the zoom/fx/layout tracks above). */
+.e-camlane { position: relative; } /* wraps the row so the curve popover escapes its overflow */
+.e-camrow { position: relative; height: 32px; border-radius: var(--e-r); overflow: hidden; }
+/* Dashed baseline = the camera track guide (the PiP holds along it); the solid glow segments
+   below mark the spans where it actually animates, between two consecutive keyframes. */
+.e-cambase { position: absolute; top: 50%; left: 10px; right: 10px; height: 0; margin-top: -1px;
+  border-top: 1.5px dashed var(--e-border2); opacity: .7; pointer-events: none; }
+.e-camempty { position: absolute; left: 10px; right: 10px; top: 50%; transform: translateY(-50%);
+  font-size: 11px; color: var(--e-dim); pointer-events: none; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+/* The span the keyframes actually OWN: [first - KF_BLEND_MS, last + KF_BLEND_MS]. Outside it the
+   layout segments own the webcam panel, so the bar simply stops. The gradient (set inline, since
+   the ramp width depends on the span's own length) fades in/out across the two blend windows -
+   a STATIC fill, hence plain CSS and not Motion. Behind the diamonds and segments. */
+.e-camspan { position: absolute; top: 3px; bottom: 3px; z-index: 0; pointer-events: none;
+  border-radius: 5px; }
+/* Transition segment: click to pick the easing into the later keyframe (the e-campop popover). */
+.e-camseg { position: absolute; top: 50%; height: 8px; margin-top: -4px; border-radius: 4px; z-index: 1;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--e-cam) 36%, transparent),
+    color-mix(in srgb, var(--e-cam) 66%, transparent)); cursor: pointer;
+  box-shadow: 0 0 10px color-mix(in srgb, var(--e-cam) 26%, transparent);
+  transition: filter .12s ease, box-shadow .12s ease; }
+.e-camseg:hover { filter: brightness(1.25); box-shadow: 0 0 14px color-mix(in srgb, var(--e-cam) 42%, transparent); }
+.e-camseg.on { filter: brightness(1.3);
+  box-shadow: 0 0 0 1px var(--e-cam), 0 0 16px color-mix(in srgb, var(--e-cam) 50%, transparent); }
+/* Keyframe diamond (Task D2): the same accent-tinted-raised treatment as the lane pills above -
+   --e-raised mixed 12% toward --e-cam, a resting hairline, --e-inset-hi - so a keyframe reads as
+   the same kind of object as a pill, just shaped differently, not a separate visual language.
+   Motion owns the transform (scale + rotate), so it is centered by margin - a CSS transform here
+   gets clobbered by Motion (that bug rendered these as off-center squares). */
+.e-camkf { position: absolute; top: 50%; width: 13px; height: 13px; margin: -6.5px 0 0 -6.5px;
+  border-radius: 2px; cursor: grab; touch-action: none; z-index: 3;
+  background: color-mix(in srgb, var(--e-cam) 12%, var(--e-raised));
+  border: 1px solid var(--e-line); box-shadow: var(--e-inset-hi), var(--e-shadow-1);
+  transition: border-color .14s ease, box-shadow .14s ease; }
+.e-camkf:active { cursor: grabbing; z-index: 5; }
+.e-camkf.sel { border-color: color-mix(in srgb, var(--e-cam) 35%, var(--e-line-strong));
+  box-shadow: var(--e-inset-hi), var(--e-shadow-2); }
+/* Transition-curve popover: floats above the clicked segment, 6 curve glyphs in a 3-col grid.
+   Flat wrapper (border doctrine: no border) - the interactive buttons inside keep theirs.
+   PORTALLED and placed in viewport coordinates (`CameraCurvePop.tsx`), so `left`/`top` arrive
+   inline and nothing here may set them: drawn in flow it was clipped on both axes - horizontally by
+   `.e-tracks` for a keyframe near either end of the clip, and entirely when Camera was the first
+   lane in the stack, since it opens upward out of a 32px row. No `transform` for the centring
+   either - placement centres it, and a CSS transform here would also make this element a containing
+   block that re-clips nothing but costs the fixed positioning its meaning. */
+.e-campop { position: fixed; z-index: 130;
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; width: 170px; padding: 6px;
+  background: var(--e-card); border-radius: var(--e-r);
+  box-shadow: var(--e-shadow-pop); }
+.e-campop-b { display: flex; align-items: center; justify-content: center; height: 34px; padding: 3px;
+  background: var(--e-soft); border: 1px solid var(--e-border); border-radius: var(--e-r-sm);
+  cursor: pointer; transition: border-color .12s ease, background .12s ease; }
+.e-campop-b:hover { border-color: var(--e-mut); }
+.e-campop-b.on { border-color: var(--e-fg); background: var(--e-card); }
+.e-campop-b svg { width: 100%; height: 100%; overflow: visible; }
+/* Playhead (Playhead.tsx) - unchanged by the readability pass, moved here with the rest of the
+   timeline. Glow (Task D2): a blurred bar behind the line, opacity-only Motion-driven ON while
+   dragging - never a CSS transition on box-shadow (expensive to animate live) and never lit at
+   rest, so the line stays a plain confident accent stroke until the user actually grabs it.
+   The grab head is the brand's dot (`.w-ph-head` in src/lib/wave.css - the mark rotated 90
+   degrees), together with its drag ripple. It is still the ONE interactive part of an otherwise
+   pointer-events:none playhead: `.e-ph` stays click-through so body scrubbing is unaffected, and
+   the head's own pointerdown bubbles straight up to `.e-tlbody`'s existing scrub handler. */
+.e-ph { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--e-primary); z-index: 5; pointer-events: none; }
+.e-ph-glow { position: absolute; top: 0; bottom: 0; left: 50%; width: 12px; margin-left: -6px;
+  background: var(--e-primary); filter: blur(6px); opacity: 0; pointer-events: none; }

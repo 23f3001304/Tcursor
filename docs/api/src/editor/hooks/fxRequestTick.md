@@ -18,6 +18,8 @@ export interface FxRequestTick { frameLayout, fxW, fxH, screenScale, mapFn, cpos
 
 Everything one tick already computed that the request needs. `t` is CLIP time: the ripples are keyed to click events on the clip clock; the spotlight arrives already resolved by the caller (on the output clock, against the remapped effects), so no second clock crosses into the request.
 
+`mapFn` is a CANVAS point (0..1 of the recorded frame) to FX-render px - `fxFrameGeometry`'s `mapCanvas`. It is only ever applied to `ClickSample` positions, which are canvas fractions; the cursor point arrives already projected as `cpos`.
+
 ## fxRequestTick
 
 ```ts

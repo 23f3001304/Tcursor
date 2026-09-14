@@ -77,6 +77,59 @@ fn list_packs_puts_the_embedded_default_first_then_every_bundled_pack() {
     assert!(shipped.len() >= 15, "expected the bundled packs, got {:?}", packs.len());
 }
 
+/// The sections the Cursor panel's picker curates, mirrored from `panels/packCategories.ts`.
+const KNOWN_CATEGORIES: &[&str] = &["Classic", "Glass and glow", "Playful", "Drawn", "Retro", "Imported"];
+
+#[test]
+fn the_embedded_default_pack_is_listed_under_classic() {
+    // It is the plain system arrow, and its category is stated HERE rather than in a pack.json,
+    // because the embedded set is the one pack with no manifest of its own.
+    assert_eq!(list_packs(None)[0].category, "Classic");
+    assert_eq!(DEFAULT_PACK_CATEGORY, "Classic");
+}
+
+#[test]
+fn every_bundled_pack_manifest_declares_a_known_category() {
+    // Read the repo's OWN asset folder rather than whatever the test binary resolves as a
+    // resource root, so this pins the manifests that actually ship. A pack with no category would
+    // land in "Imported" beside the user's own imports, which is exactly the wrong shelf.
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets").join("cursorpacks");
+    let mut seen = 0;
+    for entry in std::fs::read_dir(&dir).expect("the bundled cursorpacks folder") {
+        let path = entry.expect("cursorpacks entry").path();
+        if !path.is_dir() { continue; }
+        let m = read_meta(&path).unwrap_or_else(|| panic!("{path:?} has no readable pack.json"));
+        let category = m.category.unwrap_or_default();
+        assert!(KNOWN_CATEGORIES.contains(&category.as_str()) && category != IMPORTED_CATEGORY,
+            "{path:?} declares category {category:?}");
+        seen += 1;
+    }
+    assert!(seen >= 15, "expected the fifteen bundled packs, found {seen}");
+}
+
+#[test]
+fn a_pack_with_no_category_of_its_own_lists_under_imported() {
+    // v1 is the only shape `pack_import` writes, so this is every pack the user brings in.
+    let dir = std::env::temp_dir().join(format!("tcursor-packlist-cat-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("pack.json"), br#"{"id":"mine","name":"Mine"}"#).unwrap();
+    assert_eq!(read_pack_meta(&dir, false).unwrap().category, "Imported");
+    // A blank one is exactly as useless as no key at all, and trimming keeps "Playful " together
+    // with "Playful" rather than opening a second section for it.
+    assert_eq!(category_or_imported(Some("   ".to_string())), "Imported");
+    assert_eq!(category_or_imported(None), "Imported");
+    assert_eq!(category_or_imported(Some(" Playful ".to_string())), "Playful");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_freshly_imported_pack_gets_the_same_category_a_relisting_would_give_it() {
+    let info = imported_info("mine".into(), "Mine".into(), Path::new("C:/nope"));
+    assert_eq!(info.category, IMPORTED_CATEGORY);
+    assert!(!info.builtin);
+}
+
 #[test]
 fn one_id_is_one_row_even_if_an_import_shares_a_bundled_name() {
     // Bundled packs are listed first, and a later folder claiming the same id is dropped - the

@@ -8,7 +8,7 @@ import { camMoveAt, cameraMovesKey, radiusScaleForResize, rectFromCenter } from 
 // keyframes own, and the two blends at its edges) live in camMoveSpan.test.ts, mirroring the
 // Rust split into moves_tests.rs / moves_span_tests.rs.
 const kf = (t_ms: number, x: number, y: number, size: number, easing: string, id = "k"): CameraMove =>
-  ({ id, t_ms, x, y, size, easing });
+  ({ id, t_ms, x, y, size, easing, shape: "layout", roundness: 0.12 });
 
 describe("camMoveAt", () => {
   it("empty track samples to null", () => {

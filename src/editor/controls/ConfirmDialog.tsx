@@ -33,7 +33,7 @@ export function ConfirmDialog({ open, title, body, confirmLabel, danger, dontAsk
                   alignItems: "center", justifyContent: "center", transition: "background .12s ease, border-color .12s ease",
                   border: `1px solid ${dontAsk ? "var(--e-primary)" : "var(--e-border2)"}`,
                   background: dontAsk ? "var(--e-primary)" : "var(--e-soft)" }}>
-                  {dontAsk && <IconCheck size={11} stroke={3.5} color="#fff" />}
+                  {dontAsk && <IconCheck size={11} stroke={3.5} color="var(--e-on-fill)" />}
                 </span>
                 <span>{dontAskLabel}</span>
               </label>

@@ -1,6 +1,14 @@
 # src/editor/stage/StageMedia.tsx
 
-The Stage's hidden native media elements: the screen and webcam `<video>`s that `useCompositeLoop` reads every frame via `canvas.drawImage` (never actually shown on screen - see `HIDDEN`), the mixed preview `<audio>`, and (on `err`) a recoverable error card with a Retry button. Extracted from `Stage.tsx` to keep that file under the 200-line limit. Holds no state of its own - `Stage` owns the refs, the `err` string, and every event-handler closure; this component only renders what it's handed.
+The Stage's hidden native media elements: the screen and webcam `<video>`s that `useCompositeLoop` reads every frame via `canvas.drawImage` (never actually shown on screen - see `HIDDEN`), the mixed preview `<audio>`, and (on `err`) a recoverable error card with a Retry button. Holds no state of its own - `Stage` owns the refs, the `err` string, and every event-handler closure; this component only renders what it's handed.
+
+## MEDIA_ERR
+
+```ts
+export const MEDIA_ERR: string[]
+```
+
+`HTMLMediaElement.error.code` (1..4) to a human-readable reason, indexed directly; index 0 is the unused `""` slot so the code IS the index. `Stage`'s `onScreenError` handler maps through it and falls back to `"load failed"`.
 
 ## StageMedia
 
@@ -28,9 +36,5 @@ Renders (in order) the screen `<video>` when `src` is set, the webcam `<video>` 
 
 ### Notes
 
-- `HIDDEN` (an inline `position: absolute; width: 1; height: 1; opacity: 0; pointerEvents: none` style) keeps both `<video>`s off-screen but still decoding - moved here from `Stage.tsx` since it's now only used by this file.
-- The component returns a Fragment, not a wrapping element, so extracting it does not add any DOM node between `.e-stage` and these children.
-
-### Used by
-
-- `src/editor/stage/Stage.tsx` - renders one `<StageMedia>`, passing the three refs it created via `useRef` plus its local `err` state, `onRetry`, and the load/seek/error handler closures.
+- `HIDDEN` (an inline `position: absolute; width: 1; height: 1; opacity: 0; pointerEvents: none` style) keeps both `<video>`s off-screen but still decoding.
+- The component returns a Fragment, not a wrapping element, so it adds no DOM node between `.e-stage` and these children.

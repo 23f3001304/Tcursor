@@ -146,7 +146,7 @@ Maps a CANVAS pixel into any panel rect (output pixels) THROUGH the source sub-r
 - `src-tauri/src/export/render/step.rs` - converts the cursor position each frame.
 - `src-tauri/src/export/fx/fx_state.rs` - converts click positions for FX overlay placement.
 - `src-tauri/src/export/scene/layout.rs` - `anchor_frame` re-anchors every zoom region, every frame.
-- `src/editor/stage/sourceSpans.ts` - `toPanelFrac` is the TS mirror.
+- `src/editor/stage/canvas/sourceSpans.ts` - `toPanelFrac` is the TS mirror.
 
 ## crop
 

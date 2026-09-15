@@ -47,6 +47,14 @@ pub(crate) fn valid_layout(s: &str) -> String
 
 Coerces a layout preset wire-name to one of `screen` / `camera` / `presenter` / `screen_only` / `camera_only`; anything else becomes `"screen"` (which is also the "empty means default" fallback the layout track uses for gaps).
 
+## CAM_KF_SNAP_MS
+
+```rust
+pub(crate) const CAM_KF_SNAP_MS: u32 = 60;
+```
+
+Keyframes within this many ms of an `AddCameraMove` are the SAME keyframe and are updated in place (`api.md`, `AddCameraMove`). The number is the panel's own snap window (`camKeyframeAt.ts::CAM_KF_SNAP_MS`), so the backend agrees with the frontend about what "at the playhead" means: a commit made against a doc one round-trip stale still lands on the keyframe it meant instead of stacking a near-duplicate a few ms away, which the sampler would then prefer.
+
 ## valid_cam_shape
 
 ```rust
@@ -68,7 +76,8 @@ Coerces an easing wire-name to something `easing_from` can actually reconstruct,
 1. One of the six named curves (`linear`, `smooth`, `spring`, `ease_in`, `ease_out`, `ease_in_out`) - returned verbatim.
 2. A well-formed `spring(stiffness,damping[,mass])` - re-emitted through `export::spring::format_spring`, which **canonicalises** the text (fixed 3 decimals, always all three fields, so the stored value is byte-stable and the frontend's `formatSpring` writes the identical bytes), **fills in the default mass**, and **applies the range clamps** from `parse_spring`. `spring(99999,-4,50)` is stored as `spring(2000.000,0.000,10.000)`, not rejected.
 3. A well-formed custom `cubic(x1,y1,x2,y2)` - re-emitted through `export::cubic::format_cubic`, same canonicalise-and-clamp deal (the x-clamp from `parse_cubic`). A client that sends `cubic(-1,0.5,2,0.5)` gets `cubic(0.000,0.500,1.000,0.500)` stored.
-4. Anything else degrades to `"smooth"` - the tuned default, matching what the TS `ease` mirror falls through to for an unparseable name. Note the bare word `"spring"` is arm 1, not arm 2: it stays a bare word, and `easing_from` resolves it to `SPRING_DEFAULT`.
+4. A well-formed `keys(t v in_dx in_dy out_dx out_dy mode, ...)` - re-emitted through `export::keys::format_keys`, same canonicalise-and-clamp deal: 3 decimals everywhere, keys sorted by time, each handle's x offset clamped into its own segment, the first key's `in` and the last key's `out` zeroed, and `-0.000` written as `0.000`. `keys(1 1 -0.4 0 0 0 b,0 0 0 0 0.1 0.7 b)` is stored in time order, not rejected. See `export/keys.md` for the form and the reasons.
+5. Anything else degrades to `"smooth"` - the tuned default, matching what the TS `ease` mirror falls through to for an unparseable name. Note the bare word `"spring"` is arm 1, not arm 2: it stays a bare word, and `easing_from` resolves it to `SPRING_DEFAULT`.
 
 ### Used by
 
@@ -76,5 +85,6 @@ Coerces an easing wire-name to something `easing_from` can actually reconstruct,
 
 ### Behaviors worth knowing
 
-- `valid_easing_keeps_named_curves_and_canonicalises_cubics` - pins all four arms, including both clamps, the default mass, and the `cubic(1,2)` / `spring(170)` arity failures degrading to `"smooth"`.
+- `valid_easing_keeps_named_curves_and_canonicalises_cubics` - pins the first three arms, including both clamps, the default mass, and the `cubic(1,2)` / `spring(170)` arity failures degrading to `"smooth"`.
+- `valid_easing_canonicalises_keyframed_curves` - pins the `keys(...)` arm: the canonical text, out-of-order keys sorted, and four ways to be unparseable (9 keys, a first `t` of 0.1, a last `t` of 0.9, a bad mode letter) all degrading to `"smooth"`. *Why these four:* they are the failures a buggy client is most likely to produce, and silently storing any of them would leave a region whose curve the renderer and the preview would each guess at differently.
 - `auto_layer_finds_lowest_free_layer` / `auto_layer_reuses_a_free_layer_that_does_not_overlap`.

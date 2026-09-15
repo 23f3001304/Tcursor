@@ -44,4 +44,4 @@ Single-frame preview engine: renders one composited frame at an arbitrary scrub 
 
 ## remap
 
-The clip-to-output clock map (`TimeMap`): trim, cuts and speed spans as kept segments with factors and output starts, `out_of`/`clip_of` between the two clocks, and `frame_plan` (the recording frame every output frame shows). The exporter, the one-shot preview and `camera_track` all walk the same plan; `edit::remap_doc` moves every region onto the output clock before the renderer builds its tracks. Mirrored by `src/lib/remap.ts`.
+The clip-to-output clock map (`TimeMap`): trim, cuts and speed spans as kept segments with factors and output starts, `out_of`/`clip_of` between the two clocks, and `frame_plan` (the recording frame every output frame shows). The exporter, the one-shot preview and `camera_track` all walk the same plan; `edit::remap_doc` moves every region onto the output clock before the renderer builds its tracks. Mirrored by `src/shared/math/remap.ts`.

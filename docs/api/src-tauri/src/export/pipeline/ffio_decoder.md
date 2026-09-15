@@ -30,7 +30,7 @@ A spawned ffmpeg process emitting a continuous stream of raw BGRA frames at a fi
 
 - `src-tauri/src/export/pipeline/mod.rs` - `ScreenPipe::spawn` and `WebcamPipe::spawn` each spawn one `RawDecoder`.
 - `src-tauri/src/export/pipeline/bg_pipe.rs` - `BgPipe::open` spawns one through `spawn_args`, with its own looping arg list.
-- `src-tauri/src/export/pipeline/pipeline_decode.rs` - `spawn_screen`/`spawn_webcam` decode-thread bodies read frames from a `RawDecoder` in a loop.
+- `src-tauri/src/export/pipeline/mod.rs` - the `spawn_screen`/`spawn_webcam` decode-thread bodies read frames from a `RawDecoder` in a loop.
 - `src-tauri/src/export/preview/mod.rs` - the preview engine spawns short-lived decoders directly to grab a single frame at an arbitrary time.
 
 ## RawDecoder::spawn

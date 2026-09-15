@@ -1,6 +1,6 @@
 # src-tauri/src/export/pipeline/ffio.rs
 
-FFmpeg and ffprobe spawn helpers and bundled-image decode/crop utilities. All public functions here are pure I/O adapters over the bundled ffmpeg/ffprobe binary located by `win::proc::ffcmd`; they contain no export logic or state. The continuous raw-BGRA-stream decoder (`RawDecoder`) lives in the sibling `ffio_decoder.rs` (re-exported here as `ffio::RawDecoder`, so every existing import path is unchanged) - see `ffio_decoder.md`.
+FFmpeg and ffprobe spawn helpers and bundled-image decode/crop utilities. All public functions here are pure I/O adapters over the bundled ffmpeg/ffprobe binary located by `process::proc::ffcmd`; they contain no export logic or state. The continuous raw-BGRA-stream decoder (`RawDecoder`) lives in the sibling `ffio_decoder.rs` (re-exported here as `ffio::RawDecoder`, so every existing import path is unchanged) - see `ffio_decoder.md`.
 
 ## probe_dims
 

@@ -11,7 +11,12 @@
         budget, and it is what the arrangements pass spends: a preset library is a stack of
         collapsible `CategorySection`s with only the chosen one open, short slider pairs went
         two-up (`.e-two`), and whatever still did not fit went under the panel's ONE `Disclosure`.
-        NOTHING in a panel scrolls sideways - the owner's ruling on the strips this replaced. */
+        NOTHING in a panel scrolls sideways - the owner's ruling on the strips this replaced.
+     7. The 320px is `--e-panel-w` now, and every size below is a rung off `--e-density`
+        (`shell/density.ts`, the laptop pass of 2026-09-15). The column narrows to 288 and then 248
+        on a laptop, but the type narrows with it: at the 288px step the scale is 0.86, so the
+        panel holds about 335 design-px of content - MORE than the 320 it was drawn against, which
+        is why rule 6's budget survives a 768px-tall screen instead of being spent by it. */
 /* The neutral glyph plate `--e-plate` (see `.e-glyph-plate` below) is declared with the rest of
    the palette in editor.css, so both themes state it and `themeTokens.test.ts` can guard it. */
 
@@ -23,19 +28,19 @@
    `.editor` prefix, not a bare `.e-panel`: editor.css is imported last by `Editor.tsx`, so a
    same-specificity rule here would lose to the one still living there. */
 .editor .e-panel { padding: var(--e-sp-3) var(--e-sp-3) var(--e-sp-4); }
-.e-panel .e-field { gap: 6px; margin-bottom: 10px; }
+.e-panel .e-field { gap: calc(6px * var(--e-density)); margin-bottom: calc(10px * var(--e-density)); }
 .e-panel .e-field:last-child { margin-bottom: 0; }
-.e-panel .e-fl { font-size: 11px; font-weight: 450; color: var(--e-dim); gap: 10px; }
-.e-panel .e-switchrow { min-height: 30px; font-size: 12.5px; font-weight: 480; }
+.e-panel .e-fl { font-size: var(--e-text-micro-size); font-weight: 450; color: var(--e-dim); gap: calc(10px * var(--e-density)); }
+.e-panel .e-switchrow { min-height: calc(30px * var(--e-density)); font-size: var(--e-text-body-size); font-weight: 480; }
 /* Sentence case, not an uppercase overline: at 11px the tracking an overline needs costs more
    width than a 320px panel has to spare, and it shouts where this panel wants to be quiet. */
-.e-panel .e-sechead { font-size: 11px; font-weight: 600; letter-spacing: 0; text-transform: none;
+.e-panel .e-sechead { font-size: var(--e-text-micro-size); font-weight: 600; letter-spacing: 0; text-transform: none;
   color: var(--e-mut); }
 /* A group is a heading plus the rows it owns. Spacing alone separates them - 10px between rows
    inside a group, 16px between groups, 6px from a row's label to its control (`.e-field`).
    A stack of `CategorySection`s (`.e-secstack`) is ONE block, not a section each: the wallpaper
    groups plus Your file read as one library, so 2px between headers and 16px to what follows. */
-.e-grp { display: flex; flex-direction: column; gap: 10px; }
+.e-grp { display: flex; flex-direction: column; gap: calc(10px * var(--e-density)); }
 .e-grp + .e-grp, .e-grp + .e-field, .e-field + .e-grp, .e-grp + .e-more, .e-more + .e-grp {
   margin-top: var(--e-sp-3); }
 .e-grp > .e-field { margin-bottom: 0; }
@@ -45,7 +50,7 @@
 /* Two short controls side by side - the pass's main density move, for pairs whose own inline
    readouts already name them (Blur | Dim, Corner radius | Padding, Margin X | Margin Y). SHORT
    names only: `.e-fl-name` ellipsises, and an ellipsised label is worse than a stacked row. */
-.e-two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; align-items: start; }
+.e-two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: calc(10px * var(--e-density)); align-items: start; }
 .e-two > .e-field { margin-bottom: 0; min-width: 0; }
 
 /* ---- CategorySection (controls/CategorySection.tsx) -------------------------------------------
@@ -56,8 +61,8 @@
    The selected item's name rides at the right of a CLOSED header. It is the one place in this
    pass that may ellipsise, and only as a safety valve for an imported pack with a very long name:
    the name is never only here, it is captioned under its own tile one click away. */
-.e-cat-btn { display: flex; align-items: center; gap: 6px; width: 100%; height: 28px; padding: 0;
-  border: none; background: none; cursor: pointer; font: inherit; font-size: 11px; font-weight: 600;
+.e-cat-btn { display: flex; align-items: center; gap: 6px; width: 100%; height: var(--e-ctl-sm); padding: 0;
+  border: none; background: none; cursor: pointer; font: inherit; font-size: var(--e-text-micro-size); font-weight: 600;
   color: var(--e-dim); text-align: left; transition: color .14s ease; }
 .e-cat-btn:hover { color: var(--e-fg); }
 .e-cat-chev { display: inline-flex; flex: none; }
@@ -66,7 +71,7 @@
 .e-cat-sel { margin-left: auto; min-width: 0; font-weight: 500; color: var(--e-mut);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .e-cat-body { overflow: hidden; }
-.e-cat-inner { padding: 6px 0 10px; }
+.e-cat-inner { padding: calc(6px * var(--e-density)) 0 calc(10px * var(--e-density)); }
 
 /* ---- PanelHeader ----------------------------------------------------------------------------
    No rule under the title: the 16px gap to the first group is the separation. The lede is one
@@ -78,7 +83,7 @@
    than on source order (which favours editor.css - see the note on `.e-panel`'s padding above). */
 .e-panel .e-phead h2, .e-phead h2 { margin: 0; font-size: var(--e-text-title-size); font-weight: var(--e-text-title-weight);
   letter-spacing: -0.015em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.e-phead .e-lede { margin: 3px 0 0; font-size: 11.5px; color: var(--e-dim);
+.e-phead .e-lede { margin: 3px 0 0; font-size: var(--e-text-small-size); color: var(--e-dim);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .e-hicons { display: flex; align-items: center; gap: 2px; flex: none; }
 
@@ -90,11 +95,12 @@
    320px panel width, inside a `CategorySection` that is closed unless it holds the current
    choice. No `overflow-x` anywhere in it - the strips it replaced hid most of every group behind
    a sideways flick, and clipped the tooltip that was the only place a name appeared. */
-.e-tile-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;
+.e-tile-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--e-sp-1);
   align-items: stretch; }
 .e-tile { position: relative; box-sizing: border-box; display: flex;
   flex-direction: column; align-items: center; gap: 5px;
-  padding: 7px 5px 6px; border: none; border-radius: var(--e-r); background: var(--e-raised);
+  padding: calc(7px * var(--e-density)) calc(5px * var(--e-density)) calc(6px * var(--e-density));
+  border: none; border-radius: var(--e-r); background: var(--e-raised);
   color: var(--e-mut); cursor: pointer; outline: none;
   transition: background-color .14s ease, box-shadow .14s ease, color .14s ease; }
 .e-tile:hover { background: var(--e-raised-hi); color: var(--e-fg); }
@@ -102,19 +108,19 @@
 .e-tile:focus-visible { box-shadow: inset 0 0 0 2px var(--e-fg); }
 .e-tile.on:focus-visible { box-shadow: inset 0 0 0 2px var(--e-primary), inset 0 0 0 4px var(--e-fg); }
 /* Loading skeleton: an empty tile at a real tile's height, so the grid does not resize on resolve. */
-.e-tile-skel { height: 78px; }
+.e-tile-skel { height: calc(78px * var(--e-density)); }
 /* The name is a CAPTION, never a tooltip and never a hover reveal: it is the whole reason a
    library can be read at a glance. It WRAPS to two lines (never ellipsised - a truncated pack
    name is the bug this pass fixed) and reserves both of them, so the tiles of a row line up; a
    third line simply makes that row taller, because the grid stretches its items. */
-.e-tile-label { max-width: 100%; font-size: 10.5px; line-height: 1.2; font-weight: 500;
-  letter-spacing: -0.005em; text-align: center; overflow-wrap: anywhere; min-height: 26px;
+.e-tile-label { max-width: 100%; font-size: var(--e-text-label-size); line-height: 1.2; font-weight: 500;
+  letter-spacing: -0.005em; text-align: center; overflow-wrap: anywhere; min-height: calc(26px * var(--e-density));
   pointer-events: none; }
 /* The glyph plate. Every pack's PNG keeps its own colours - a cream cursor and an ink-black one
    are both what that pack actually draws - so legibility comes from a constant mid-grey plate
    behind the glyph rather than any filter, tint or shadow ON the glyph. `PackTile.tsx` fits each
    sprite by its alpha content box, so the arrows read the same size whatever the file's padding. */
-.e-glyph-plate { position: relative; width: 34px; height: 34px; border-radius: var(--e-r-sm);
+.e-glyph-plate { position: relative; width: var(--e-ctl-md); height: var(--e-ctl-md); border-radius: var(--e-r-sm);
   background: var(--e-plate); overflow: hidden; pointer-events: none; }
 .e-glyph-plate img { position: absolute; max-width: none; }
 
@@ -130,36 +136,36 @@
    affordance leading the Background panel's "Your file" section, since importing is one more way
    to pick a background rather than a separate mode. The imported card takes the rest of the row,
    so nothing here ever needs to scroll sideways. */
-.e-upload { width: 100%; height: 34px; box-sizing: border-box; background: var(--e-raised);
-  border: none; border-radius: var(--e-r); color: var(--e-mut); font-size: 12px; font-weight: 500;
+.e-upload { width: 100%; height: var(--e-ctl-md); box-sizing: border-box; background: var(--e-raised);
+  border: none; border-radius: var(--e-r); color: var(--e-mut); font-size: var(--e-text-hint-size); font-weight: 500;
   display: flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer;
   box-shadow: var(--e-inset-hi); transition: background-color .14s ease, color .14s ease; }
 .e-upload:hover:not(:disabled) { background: var(--e-raised-hi); color: var(--e-fg); }
 .e-upload:disabled { opacity: .55; cursor: default; }
 .e-bgassetwrap { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .e-bgassetrow { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.e-bgadd { flex: none; width: 64px; height: 36px; padding: 0; border: none;
+.e-bgadd { flex: none; width: calc(64px * var(--e-density)); height: calc(36px * var(--e-density)); padding: 0; border: none;
   border-radius: var(--e-r-sm); background: var(--e-raised); color: var(--e-mut); cursor: pointer;
   display: flex; align-items: center; justify-content: center; box-shadow: var(--e-inset-hi);
   transition: background-color .14s ease, color .14s ease; }
 .e-bgadd:hover:not(:disabled) { background: var(--e-raised-hi); color: var(--e-fg); }
 .e-bgadd:disabled { opacity: .55; cursor: default; }
-.e-bgasset { flex: 1; min-width: 0; height: 36px; box-sizing: border-box; display: flex;
+.e-bgasset { flex: 1; min-width: 0; height: calc(36px * var(--e-density)); box-sizing: border-box; display: flex;
   align-items: center; gap: 4px; padding: 2px 2px 2px 0; border-radius: var(--e-r-sm);
   background: var(--e-raised); transition: background-color .14s ease, box-shadow .14s ease; }
 .e-bgasset:hover { background: var(--e-raised-hi); }
 .e-bgasset.on { box-shadow: inset 0 0 0 2px var(--e-primary); }
-.e-bgasset-pick { flex: 1; min-width: 0; height: 32px; display: flex; align-items: center; gap: 7px;
+.e-bgasset-pick { flex: 1; min-width: 0; height: var(--e-ctl); display: flex; align-items: center; gap: 7px;
   background: none; border: none; padding: 0 0 0 2px; cursor: pointer; text-align: left; color: inherit; }
 .e-bgasset-pick:disabled { cursor: default; }
-.e-bgasset-thumb { flex: none; width: 56px; height: 32px; border-radius: 6px;
+.e-bgasset-thumb { flex: none; width: calc(56px * var(--e-density)); height: var(--e-ctl); border-radius: calc(6px * var(--e-density));
   background: var(--e-bg) center/cover no-repeat; }
 .e-bgasset-text { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.e-bgasset-name { color: var(--e-fg); font-size: 11px; font-weight: 600; line-height: 1.2;
+.e-bgasset-name { color: var(--e-fg); font-size: var(--e-text-micro-size); font-weight: 600; line-height: 1.2;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.e-bgasset-sub { color: var(--e-dim); font-size: 10px; line-height: 1.2;
+.e-bgasset-sub { color: var(--e-dim); font-size: calc(10px * var(--e-density)); line-height: 1.2;
   font-weight: var(--e-text-hint-weight); }
-.e-bgasset-rm { flex: none; align-self: center; width: 24px; height: 24px; border: none; background: none;
+.e-bgasset-rm { flex: none; align-self: center; width: var(--e-ctl-xs); height: var(--e-ctl-xs); border: none; background: none;
   border-radius: var(--e-r-sm); color: var(--e-dim); cursor: pointer; display: flex;
   align-items: center; justify-content: center; transition: color .14s ease, background-color .14s ease; }
 .e-bgasset-rm:hover { color: var(--e-fg); background: var(--e-bg); }
@@ -170,61 +176,92 @@
    drag rules out Motion here (EffectPills.tsx's comment), so the hover lift is a plain CSS
    transition. The two-class selector beats the shared `.e-zblk,.e-fxblk,.e-layblk` rule. */
 .e-zblk.e-libpill, .e-fxblk.e-libpill, .e-layblk.e-libpill, .e-spdblk.e-libpill, .e-camkfpill.e-libpill {
-  position: static; width: 100%; height: auto; box-sizing: border-box; padding: 9px 11px;
+  position: static; width: 100%; height: auto; box-sizing: border-box;
+  padding: calc(9px * var(--e-density)) calc(11px * var(--e-density));
   display: flex; align-items: center; gap: 10px; cursor: grab; text-align: left; border: none;
-  box-shadow: inset 3px 0 0 var(--pill-accent), var(--e-inset-hi);
+  box-shadow: var(--e-inset-hi);
   transition: transform .14s ease, box-shadow .14s ease; }
 .e-zblk.e-libpill:hover, .e-fxblk.e-libpill:hover, .e-layblk.e-libpill:hover, .e-spdblk.e-libpill:hover, .e-camkfpill.e-libpill:hover {
   transform: translateY(-1px);
-  box-shadow: inset 3px 0 0 var(--pill-accent), var(--e-inset-hi), var(--e-shadow-1); }
+  box-shadow: var(--e-inset-hi), var(--e-shadow-1); }
 .e-libgrid { display: flex; flex-direction: column; gap: 6px; }
 .e-libicon { flex: none; color: var(--pill-accent); }
 .e-libtext { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.e-libname { font-size: 12.5px; font-weight: 600; color: var(--e-fg);
+.e-libname { font-size: var(--e-text-body-size); font-weight: 600; color: var(--e-fg);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.e-libhint { font-size: 11px; font-weight: var(--e-text-hint-weight); color: var(--e-dim);
+.e-libhint { font-size: var(--e-text-micro-size); font-weight: var(--e-text-hint-weight); color: var(--e-dim);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* ---- AI Director. `.e-ai-err` and `.e-ai-log` are planes with an accent edge, never tinted
-   bordered boxes; the log is the narration the director streams while it works. ------------- */
+/* ---- AI Director. `.e-ai-err` is a raised plane, never a tinted bordered box. --- */
 /* The panel's one primary action: 36px, full width, flat `--e-ai`. The gradient sheen and the
    drop shadow it used to carry are gone (owner's read: still primary, but less tall and less
    aggressive) - hover is a brightness step, nothing that lifts off the panel. */
-.e-run { width: 100%; height: 36px; border: none; border-radius: var(--e-r);
+.e-run { width: 100%; height: calc(36px * var(--e-density)); border: none; border-radius: var(--e-r);
   background: var(--e-ai);
-  color: var(--e-on-fill); font-size: 12.5px; font-weight: 560; display: flex; align-items: center;
+  color: var(--e-on-fill); font-size: var(--e-text-body-size); font-weight: 560; display: flex; align-items: center;
   justify-content: center; gap: 8px; box-shadow: var(--e-inset-hi);
   transition: filter .14s ease; }
 .e-run:hover:not(:disabled) { filter: brightness(1.1); }
 .e-run:disabled { opacity: .6; cursor: default; box-shadow: none; }
 /* The one sentence under the button, then the three bullets: a quiet list, glyph at text colour,
    no plate behind it - the button is the only thing in this panel that should catch the eye. */
-.e-ai-what { margin: 0; font-size: 11.5px; line-height: var(--e-text-hint-lh); color: var(--e-dim); }
+.e-ai-what { margin: 0; font-size: var(--e-text-small-size); line-height: var(--e-text-hint-lh); color: var(--e-dim); }
 .e-ai-progress { height: 2px; border-radius: 999px; background: var(--e-bg); overflow: hidden; }
 .e-ai-progress-fill { height: 100%; background: var(--e-ai); }
-.e-ai-err { margin: 0; font-size: 11.5px; line-height: var(--e-text-hint-lh); color: var(--e-err-fg);
-  background: var(--e-raised); border-radius: var(--e-r-sm); padding: 9px 11px;
-  box-shadow: inset 3px 0 0 var(--e-primary); }
+.e-ai-err { margin: 0; font-size: var(--e-text-small-size); line-height: var(--e-text-hint-lh); color: var(--e-err-fg);
+  background: var(--e-raised); border-radius: var(--e-r-sm); padding: calc(9px * var(--e-density)) calc(11px * var(--e-density)); }
 .e-ai-err .hint { display: block; margin-top: 4px; color: var(--e-dim); font-weight: var(--e-text-hint-weight); }
-.e-errline { margin: 0; font-size: 11.5px; line-height: var(--e-text-hint-lh); color: var(--e-err-fg); }
+/* Retry sits in the sentence, the same underlined text button the "None found" engine row uses. */
+.e-ai-err button { margin-left: 6px; background: none; border: none; padding: 0; color: inherit;
+  font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
+.e-ai-err button:hover:not(:disabled) { color: var(--e-fg); }
+.e-ai-err button:disabled { opacity: .5; cursor: default; }
+.e-errline { margin: 0; font-size: var(--e-text-small-size); line-height: var(--e-text-hint-lh); color: var(--e-err-fg); }
 .e-errline button { margin-left: 4px; background: none; border: none; padding: 0; color: inherit;
   font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
 .e-errline button:hover { color: var(--e-fg); }
-.e-picker-shell { height: 34px; border-radius: var(--e-r); background: var(--e-raised); border: none; }
+.e-picker-shell { height: var(--e-ctl-md); border-radius: var(--e-r); background: var(--e-raised); border: none; }
 .e-picker-empty { display: flex; align-items: center; justify-content: space-between; padding: 0 11px;
-  box-sizing: border-box; color: var(--e-dim); font-size: 12px; font-weight: 500; cursor: default; }
+  box-sizing: border-box; color: var(--e-dim); font-size: var(--e-text-hint-size); font-weight: 500; cursor: default; }
 .e-picker-empty button { background: none; border: none; padding: 0; color: var(--e-mut); font: inherit;
   font-weight: 600; text-decoration: underline; cursor: pointer; }
 .e-picker-empty button:hover { color: var(--e-fg); }
-.e-ai-log { display: flex; flex-direction: column; gap: 7px; padding: 11px;
-  border-radius: var(--e-r); background: var(--e-raised); }
-.e-ai-log-line { font-size: 11.5px; line-height: var(--e-text-hint-lh); color: var(--e-fg);
-  padding-left: 18px; position: relative; }
-.e-ai-log-line::before { content: "\2192"; position: absolute; left: 2px; top: 0; color: var(--e-ai); }
-.e-ai-log-line.done { color: var(--e-ok); font-weight: 500; padding-left: 0; }
-.e-ai-log-line.done::before { content: none; }
+/* ---- The review sheet (director/review/). Proposed edits, in the panel's own body: a header that
+   names the model and what it cost, one row per edit, and the two actions. Rows group by spacing
+   like every other panel list - one hover plane, no card, no stroke - and the previewed row is
+   marked by the director's own hue on its left edge, the same 3px inset the error row uses. */
+.e-rev-head { display: flex; align-items: baseline; gap: 8px; }
+.e-rev-model { font-size: var(--e-text-body-size); font-weight: 560; color: var(--e-fg);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.e-rev-prov { flex: none; margin-left: auto; font-size: var(--e-text-micro-size); color: var(--e-dim);
+  font-variant-numeric: tabular-nums; }
+.e-rev-sum { margin: 0; font-size: var(--e-text-small-size); line-height: var(--e-text-hint-lh); color: var(--e-dim); }
+.e-rev-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+/* 6px gaps and 4px of padding, not the panel's usual 8/10: a 320px panel has to fit a switch, a
+   glyph, a timestamp, the reason and the eye on one line, and every px saved here is a px the
+   reason gets before it ellipsises. */
+.e-rev-item { display: flex; align-items: center; gap: 6px; min-height: calc(30px * var(--e-density)); padding: 0 4px;
+  border-radius: var(--e-r-sm); color: var(--e-mut);
+  transition: background-color .14s ease, opacity .14s ease; }
+.e-rev-item:hover { background: var(--e-raised); }
+.e-rev-item > svg { flex: none; color: var(--e-dim); }
+/* Skipped is still legible, just clearly out of the run - it can be switched back on. */
+.e-rev-item.off { opacity: .5; }
+.e-rev-item.on { background: var(--e-raised); }
+.e-rev-time { flex: none; font-size: var(--e-text-micro-size); color: var(--e-dim); font-variant-numeric: tabular-nums; }
+/* One line, the whole sentence on hover (`title`): six wrapped reasons would outgrow the panel. */
+.e-rev-why { flex: 1; min-width: 0; font-size: var(--e-text-hint-size); color: var(--e-fg);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.e-rev-eye { flex: none; width: calc(22px * var(--e-density)); height: calc(22px * var(--e-density)); display: flex; align-items: center;
+  justify-content: center; border: none; background: none; padding: 0; cursor: pointer;
+  border-radius: var(--e-r-sm); color: var(--e-dim); transition: color .14s ease, background-color .14s ease; }
+.e-rev-eye:hover:not(:disabled) { color: var(--e-fg); background: var(--e-raised-hi); }
+.e-rev-eye:disabled { opacity: .5; cursor: default; }
+.e-rev-foot { display: flex; align-items: center; gap: 8px; }
+.e-rev-foot .e-rev-apply { flex: 1; }
+.e-rev-foot .e-rev-discard { width: auto; flex: none; }
 .e-sum { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
-.e-sum li { display: flex; align-items: center; gap: var(--e-sp-1); font-size: 12px; color: var(--e-mut); }
+.e-sum li { display: flex; align-items: center; gap: var(--e-sp-1); font-size: var(--e-text-hint-size); color: var(--e-mut); }
 .e-sum svg { flex: none; color: var(--e-dim); }
 /* Engine: a setting, not the headline. One small labelled row at the foot of the panel, behind
    the panel's single allowed full-bleed divider. It is the LAST block in flow rather than pinned
@@ -232,21 +269,21 @@
    instead of being clipped by `.e-panel`'s own scroll box. */
 .e-ai-engine { display: flex; align-items: center; gap: 10px; margin-top: var(--e-sp-3);
   padding-top: var(--e-sp-2); border-top: 1px solid var(--e-divider); }
-.e-ai-engine-l { flex: none; font-size: 11px; font-weight: 450; color: var(--e-dim); }
-.e-ai-engine > div { flex: 1; min-width: 0; max-width: 190px; margin-left: auto; }
-.e-ai-engine .e-picker-btn, .e-ai-engine .e-picker-shell { height: 30px; font-size: 12px; }
+.e-ai-engine-l { flex: none; font-size: var(--e-text-micro-size); font-weight: 450; color: var(--e-dim); }
+.e-ai-engine > div { flex: 1; min-width: 0; max-width: calc(190px * var(--e-density)); margin-left: auto; }
+.e-ai-engine .e-picker-btn, .e-ai-engine .e-picker-shell { height: calc(30px * var(--e-density)); font-size: var(--e-text-hint-size); }
 
 /* ---- Panel-only odds and ends: the shared ghost button on panel metrics (a plane, no stroke, no
    14px slab padding), a wrapping colour row, and two one-line text idioms. -------------------- */
-.e-panel .e-ghostbtn { height: 34px; padding: 0 12px; border: none; background: var(--e-raised);
-  font-size: 12px; font-weight: 500; box-shadow: var(--e-inset-hi);
+.e-panel .e-ghostbtn { height: var(--e-ctl-md); padding: 0 var(--e-sp-2); border: none; background: var(--e-raised);
+  font-size: var(--e-text-hint-size); font-weight: 500; box-shadow: var(--e-inset-hi);
   transition: background-color .14s ease, color .14s ease, transform .14s ease; }
 .e-panel .e-ghostbtn:hover { background: var(--e-raised-hi); color: var(--e-fg); transform: translateY(-1px); }
-.e-colorrow { display: flex; flex-wrap: wrap; gap: 12px; }
+.e-colorrow { display: flex; flex-wrap: wrap; gap: var(--e-sp-2); }
 /* `.e-hintrow`: AudioPanel's "mic earlier / mic later" legend under its offset track.
    `.e-hintline`: a sentence standing in for a control that would do nothing (see BackgroundPanel). */
-.e-hintrow { display: flex; justify-content: space-between; font-size: 11px; color: var(--e-dim); }
-.e-hintline { color: var(--e-dim); font-size: 11.5px; line-height: var(--e-text-hint-lh); margin: 0; }
+.e-hintrow { display: flex; justify-content: space-between; font-size: var(--e-text-micro-size); color: var(--e-dim); }
+.e-hintline { color: var(--e-dim); font-size: var(--e-text-small-size); line-height: var(--e-text-hint-lh); margin: 0; }
 
 /* ---- The collapsible panel slot (ClassicShell) -----------------------------------------------
    The rail is always there; the 320px panel beside it is not. `.e-panel-wrap` is the column that
@@ -280,26 +317,75 @@
    nowhere to float a menu that would not cover the list it belongs to. */
 .e-lay-list { display: flex; flex-direction: column; }
 .e-lay-row { overflow: hidden; }
-.e-lay-rowtop { display: flex; align-items: center; gap: 6px; min-height: 30px; }
-.e-lay-name { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 500; color: var(--e-fg);
+.e-lay-rowtop { display: flex; align-items: center; gap: 6px; min-height: calc(30px * var(--e-density)); }
+.e-lay-name { flex: 1; min-width: 0; font-size: var(--e-text-body-size); font-weight: 500; color: var(--e-fg);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.e-lay-kebab { flex: none; width: 24px; height: 24px; padding: 0; border: none; background: none;
+.e-lay-kebab { flex: none; width: var(--e-ctl-xs); height: var(--e-ctl-xs); padding: 0; border: none; background: none;
   border-radius: var(--e-r-sm); color: var(--e-dim); cursor: pointer; display: flex;
   align-items: center; justify-content: center; transition: color .14s ease, background-color .14s ease; }
 .e-lay-kebab:hover { color: var(--e-fg); background: var(--e-raised); }
-.e-lay-acts { display: flex; gap: 12px; padding-left: 2px; }
+.e-lay-acts { display: flex; gap: var(--e-sp-2); padding-left: 2px; }
 /* The panel's one text-button idiom: no plane, no stroke, underlined on hover. Used for Apply,
    Rename, Delete, Reset this layout and Make default, so every non-primary action reads alike. */
 .e-lay-txt { flex: none; align-self: flex-start; padding: 4px 0; border: none; background: none;
-  color: var(--e-mut); font: inherit; font-size: 11.5px; font-weight: 500; cursor: pointer;
+  color: var(--e-mut); font: inherit; font-size: var(--e-text-small-size); font-weight: 500; cursor: pointer;
   transition: color .14s ease; }
 .e-lay-txt:hover { color: var(--e-fg); text-decoration: underline; }
 .e-lay-reset, .e-lay-default { align-self: flex-start; }
 .e-lay-namewrap { display: flex; flex-direction: column; gap: 6px; padding: 4px 0; }
-.e-lay-input { width: 100%; box-sizing: border-box; height: 30px; padding: 0 9px; border: none;
+.e-lay-input { width: 100%; box-sizing: border-box; height: calc(30px * var(--e-density));
+  padding: 0 calc(9px * var(--e-density)); border: none;
   border-radius: var(--e-r-sm); background: var(--e-raised); color: var(--e-fg); font: inherit;
-  font-size: 12.5px; box-shadow: var(--e-inset-hi); outline: none; }
+  font-size: var(--e-text-body-size); box-shadow: var(--e-inset-hi); outline: none; }
 .e-lay-input:focus-visible { box-shadow: inset 0 0 0 2px var(--e-fg); }
 .e-lay-input[aria-invalid="true"] { box-shadow: inset 0 0 0 2px var(--e-primary); }
-.e-lay-namebtns { display: flex; gap: 12px; }
+.e-lay-namebtns { display: flex; gap: var(--e-sp-2); }
 .e-lay-err { color: var(--e-err-fg); }
+
+/* ---- Captions (panels/captions/). The transcribe card's own progress bar and state line, and the
+   transcript list. The bar is `--e-wave` rather than `--e-ai`: transcription reads the recording's
+   AUDIO, and the wave hue is what every audio surface in the editor already uses. ------------- */
+.e-caprun { background: var(--e-wave); }
+.e-capbar { height: 2px; border-radius: 999px; background: var(--e-bg); overflow: hidden; }
+.e-capbar-fill { height: 100%; background: var(--e-wave); }
+.e-capstate { margin: 0; font-size: var(--e-text-micro-size); color: var(--e-dim);
+  font-variant-numeric: tabular-nums; }
+/* The transcript: rows grouped by spacing like every other panel list - one hover plane, no card,
+   no stroke. It is the only place in the editor where rule 6 (a panel fits without scrolling)
+   cannot hold: a five-minute take is a hundred lines, so the list takes whatever height the panel
+   has left and scrolls INSIDE itself, rather than the old fixed 240px cap that left dead space on
+   a tall window and a stub on a short one. `.e-cappanel` is the flex column that makes "whatever
+   is left" a real number; the floor on `.e-capgrp` is what keeps the list readable when the Look
+   controls above it are all open. */
+.e-cappanel { display: flex; flex-direction: column; }
+.e-capgrp { flex: 1 1 auto; min-height: calc(190px * var(--e-density)); }
+.e-caplist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px;
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+/* 8px of vertical padding, and the text wraps to two lines instead of ellipsising at one: a row
+   that showed six words and a native tooltip made the reader hover 87 times to read a transcript
+   they were looking straight at (owner, 2026-09-15). The time is a small dim mono label, narrow
+   and fixed-width, so the lines below it all start on the same column. */
+.e-caplist-row { display: flex; align-items: baseline; gap: var(--e-sp-2); width: 100%; box-sizing: border-box;
+  padding: calc(8px * var(--e-density)) calc(8px * var(--e-density));
+  border: none; background: none; border-radius: var(--e-r-sm); text-align: left; cursor: pointer;
+  color: var(--e-mut); font: inherit;
+  transition: background-color .14s ease, color .14s ease, box-shadow .14s ease; }
+.e-caplist-row:hover { background: var(--e-raised); color: var(--e-fg); }
+/* Live = the caption the playhead is inside, which is the one the stage is drawing right now.
+   Selected = the one the inspector is editing. They are usually the same row and deliberately
+   read differently: the live one takes the captions lane's own tint at the same 24% the timeline's
+   selected pills use, the selected one takes the raised plane plus the strong line. Both at once
+   is the last rule here, so it keeps the tint AND inherits `.on`'s line - one row, two marks. */
+.e-caplist-row.live { background: color-mix(in srgb, var(--e-wave) 24%, var(--e-raised)); color: var(--e-fg); }
+.e-caplist-row.live .e-captime { color: var(--e-fg); font-weight: 600; }
+.e-caplist-row.on { background: var(--e-raised); color: var(--e-fg);
+  box-shadow: inset 0 0 0 1px var(--e-line-strong); }
+.e-caplist-row.live.on { background: color-mix(in srgb, var(--e-wave) 24%, var(--e-raised)); }
+.e-captime { flex: none; width: calc(36px * var(--e-density)); font-size: var(--e-text-micro-size);
+  color: var(--e-dim); font-variant-numeric: tabular-nums;
+  font-family: "SF Mono", ui-monospace, monospace; }
+.e-captxt { flex: 1; min-width: 0; font-size: var(--e-text-hint-size); line-height: var(--e-text-hint-lh);
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+/* The colour swatch row and its custom-colour well on one line (Text, Highlight, Pill). */
+.e-caprow-colors { display: flex; align-items: center; justify-content: space-between;
+  gap: var(--e-sp-2); flex-wrap: wrap; }

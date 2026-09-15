@@ -33,9 +33,9 @@ Accumulates paused wall-clock time from the exact pause/resume instants and expo
 ### Used by
 
 - `src-tauri/src/session/record/recorder.rs` - `Running` holds one `Arc<PauseTotals>`; `pause_recording` / `resume_recording` stamp it from `r.clock.now_ms()` under the same lock that flips `r.paused`.
-- `src-tauri/src/events/track/tracker.rs` - `MouseTracker`'s hook thread holds a clone; `hook_proc` calls `stamp` on every raw event time before pushing to the collector.
-- `src-tauri/src/actions/keyboard.rs` - `KeyboardTracker`'s poll thread holds a clone; both the hotkey-action and typing stamp sites call `stamp`.
-- `src-tauri/src/events/track/cursortracker.rs` - `CursorTypeTracker`'s poll thread holds a clone; every shape-change sample is stamped through it.
+- `src-tauri/src/platform/windows/input/pointer.rs` - `Win32Pointer`'s hook thread holds a clone; `hook_proc` calls `stamp` on every raw event time before pushing to the collector.
+- `src-tauri/src/platform/windows/input/hotkeys.rs` - `Win32Hotkeys`'s poll thread holds a clone; both the hotkey-action and typing stamp sites call `stamp`.
+- `src-tauri/src/platform/windows/input/cursor.rs` - `Win32CursorShapes`'s poll thread holds a clone; every shape-change sample is stamped through it.
 
 ## PauseTotals::new
 

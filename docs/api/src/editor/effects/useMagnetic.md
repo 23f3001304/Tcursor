@@ -2,9 +2,9 @@
 
 Magnetic pull: a control leans toward a pointer that comes near it and springs back when the pointer leaves.
 
-**The point is that it happens before the hover.** The control acknowledges the *approach*, so arriving on it feels like the pointer was caught rather than merely landed. Hover and press already have their own language in `stage/transportMotion.ts`; this is the beat before both.
+**The point is that it happens before the hover.** The control acknowledges the *approach*, so arriving on it feels like the pointer was caught rather than merely landed. Hover and press already have their own language in `stage/transport/transportMotion.ts`; this is the beat before both.
 
-**Where it may be applied.** Two things today - the transport's Play button (`stage/Transport.tsx`) and the Trim In/Out pills (`stage/TransportTools.tsx`) - and it is exported for the next one. It must **never** go on the rail or inside a scrolling list: a row that leans while the list under it scrolls reads as a rendering bug, and one window listener per row turns a cheap effect into a per-frame cost proportional to the list length.
+**Where it may be applied.** Two things today - the transport's Play button (`stage/transport/Transport.tsx`) and the Trim In/Out pills (`stage/transport/TransportTools.tsx`) - and it is exported for the next one. It must **never** go on the rail or inside a scrolling list: a row that leans while the list under it scrolls reads as a rendering bug, and one window listener per row turns a cheap effect into a per-frame cost proportional to the list length.
 
 ## MAGNET_SPRING
 
@@ -78,6 +78,6 @@ It is **rAF-coalesced**: a move event only records the coordinates and schedules
 
 ### Off
 
-`interface_effects` cleared (via [effectsFlag](effectsFlag.md)), `prefers-reduced-motion` set (via `lib/wave/ui/useReducedMotion`), or `strength === 0`: the effect returns before adding any listener, both values are `set(0)`, and the element renders with an identity transform. The flag is subscribed on mount, so flipping it in Preferences stops the pull on a transport that is already on screen without a reload.
+`interface_effects` cleared (via [effectsFlag](effectsFlag.md)), `prefers-reduced-motion` set (via `shared/wave/ui/useReducedMotion`), or `strength === 0`: the effect returns before adding any listener, both values are `set(0)`, and the element renders with an identity transform. The flag is subscribed on mount, so flipping it in Preferences stops the pull on a transport that is already on screen without a reload.
 
 Reduced motion turns the pull **off entirely** rather than shortening it: the whole effect is motion that the user did not ask for, with no information in it.

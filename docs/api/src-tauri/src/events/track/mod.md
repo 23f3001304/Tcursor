@@ -2,17 +2,9 @@
 
 Submodule overviews for the `track` group.
 
-## tracker
-
-Windows low-level mouse hook running on a dedicated message-loop thread. Translates Win32 `WM_MOUSE*` messages into `MouseEvent` values, timestamps them against the recording clock, and forwards them to an `EventCollector` via a process-global `Mutex`. Key items: `MouseTracker` (RAII handle for the hook thread), `MouseTracker::start` (spawns hook thread, returns immediately), `MouseTracker::stop` (posts `WM_QUIT`, joins thread, returns collected events).
-
 ## cursortracker
 
-Background thread that polls `GetCursorInfo` at 60 Hz, appending an entry to the shape-change log whenever the cursor type changes AND capturing each distinct cursor's real bitmap into the project's cursor layer. Key items: `CursorTypeTracker` (RAII handle with `Arc<AtomicBool>` stop flag), `CursorSamples` (what one take produces: the shape log plus the layer builder), `CursorTypeTracker::start` (spawns polling thread, builds IDC lookup table once), `CursorTypeTracker::stop` (signals the thread, joins it, returns both).
-
-## cursorcapture
-
-The one Win32 seam of the cursor layer (Windows-only): `GetIconInfo` + `GetObjectW` + `GetDIBits` turn a live `HCURSOR` into its actual bitmap and hotspot, freeing both GDI bitmaps on every path. Key item: `capture`. Animated cursors capture their first frame only.
+`CursorSamples` - what one take's cursor polling produces, the shape log plus the captured layer. It stays here because it is the return type of `ports::input::CursorShapePort::stop` and nothing about it is a Windows fact. Batch D deleted `tracker.rs` and the `CursorTypeTracker` alias with it: the recorder holds the three input ports as trait objects, so nothing outside `platform/windows/input/` names an adapter type.
 
 ## cursorlayer
 
@@ -20,7 +12,11 @@ The captured OS-cursor layer - the real cursor bitmaps plus a `(t_ms, id)` timel
 
 ## cursorpixels
 
-Pure conversion of Win32 cursor bitmaps to straight-alpha, top-down RGBA - the mask/BGRA rules split out of `cursorcapture` so they can be unit-tested with no Windows session. Key items: `CapturedCursor`, `color_rgba` (32bpp with real alpha, or the AND-mask fallback for an all-zero alpha channel), `mono_rgba` (the AND/XOR truth table for a NULL-colour cursor).
+Pure conversion of Win32 cursor bitmaps to straight-alpha, top-down RGBA - the mask/BGRA rules split out of the GDI reads (now `platform/windows/input/bitmap.rs`) so they can be unit-tested with no Windows session. Key items: `CapturedCursor`, `color_rgba` (32bpp with real alpha, or the AND-mask fallback for an all-zero alpha channel), `mono_rgba` (the AND/XOR truth table for a NULL-colour cursor).
+
+## steady
+
+The shape-hold filter (`SHAPE_HOLD_MS`, `steady`) both cursor tracks are read through, so a pointer crossing text does not jitter the drawn cursor. See `steady.md`.
 
 ## cursortype
 

@@ -166,7 +166,7 @@ Reads the `project.tcursor` manifest for `folder`.
 
 - `src-tauri/src/lib.rs` - registered in `invoke_handler!`.
 - `src/lib/ipc.ts` (`getProjectManifest`) - the TS wrapper.
-- `src/editor/hooks/useEditorData.ts` - fetched once per `[folder]` into `preprocessed`, to decide whether to skip its own lazy `ensure_*` calls.
+- `src/editor/hooks/doc/useEditorData.ts` - fetched once per `[folder]` into `preprocessed`, to decide whether to skip its own lazy `ensure_*` calls.
 
 ## os_cursor_in_video
 

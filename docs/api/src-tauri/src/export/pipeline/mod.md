@@ -1,6 +1,6 @@
 # src-tauri/src/export/pipeline/mod.rs
 
-The 3-stage export pipeline that overlaps decode, composite, and encode. The screen and webcam decoders each run on their own thread (bodies in `pipeline_decode.rs`), reading frames into pooled buffers and streaming them over bounded channels; the exporter's composite loop pulls from those channels via `ScreenPipe`/`WebcamPipe` while the encoder thread drains the composited frames. The result is that decoding frame N+1 overlaps compositing frame N overlaps encoding frame N-1, so wall time trends from `sum(decode, composite)` toward `max(decode, composite)`.
+The 3-stage export pipeline that overlaps decode, composite, and encode. The screen and webcam decoders each run on their own thread (bodies below: `spawn_screen` and `spawn_webcam`), reading frames into pooled buffers and streaming them over bounded channels; the exporter's composite loop pulls from those channels via `ScreenPipe`/`WebcamPipe` while the encoder thread drains the composited frames. The result is that decoding frame N+1 overlaps compositing frame N overlaps encoding frame N-1, so wall time trends from `sum(decode, composite)` toward `max(decode, composite)`.
 
 The screen decodes 1:1 with output frames (`ScreenPipe::next`): the screen `RawDecoder` is spawned with `-r out_fps` (same as `WebcamPipe`), so ffmpeg itself rate-converts the decode to the export's output rate and output frame k is decoded frame k regardless of whether `out_fps` matches the source capture rate - there is no frame-selection or re-timing step (re-timing against `sync.json` was the old A/V-drift bug, since a fixed-rate re-time has more/fewer frames than the recorded delivered-frame timestamps). Before this, `ScreenPipe::spawn` passed a `0.0` rate (no `-r`, native source rate), which was only correct when `out_fps` happened to equal the capture rate - any other export fps played the decoded video at the wrong speed against real-time audio. The threads only move bytes between stages and never change them. Decode-thread errors are stored in a shared `Arc<Mutex<Option<Error>>>` and surfaced on the main side (via the pipe's `next` calls or `join`), which distinguishes a real decode failure from a clean EOF (channel closed with no stored error).
 
@@ -188,6 +188,36 @@ pub fn join(self) -> Result<()>
 ```
 
 Joins the decode thread and surfaces any stored decode error, dropping the receiver first so an over-running webcam decoder (webcam longer than the output) cannot hang the join. Same pattern as `ScreenPipe::join`.
+
+## spawn_screen
+
+```rust
+pub(crate) fn spawn_screen(mut dec: RawDecoder, pool: BufPool,
+    tx: SyncSender<(Vec<u8>, usize)>, err: Arc<Mutex<Option<Error>>>) -> JoinHandle<()>
+```
+
+The screen decode loop: sends `(buf, idx)` for every decoded captured frame, `idx` counting from 0. Stops, dropping `tx`, on EOF, on a closed channel (the consumer went away, e.g. an export cancelled), or after storing a decode error in `err`. Each spawns a loop over an ffmpeg `RawDecoder` (`ffio_decoder.md`) that reads frames into buffers taken from a `BufPool` (`gpu/pool.md`) and streams them over a bounded channel. A clean EOF just drops the sender; a decode failure is stored in the shared `err` slot first so the consumer can tell the two apart.
+
+### Inputs
+
+- `dec: RawDecoder` - the screen source, already opened at the export's decode size.
+- `pool: BufPool` - pooled frame buffers; `pool.take()` blocks until one is free, which is the back-pressure.
+- `tx: SyncSender<(Vec<u8>, usize)>` - the bounded channel the frame loop (`frame_loop.md`) reads.
+- `err: Arc<Mutex<Option<Error>>>` - written once, on the first decode failure.
+
+## spawn_webcam
+
+```rust
+pub(crate) fn spawn_webcam(mut dec: RawDecoder, pool: BufPool,
+    tx: SyncSender<Vec<u8>>, err: Arc<Mutex<Option<Error>>>) -> JoinHandle<()>
+```
+
+The webcam decode loop: one buffer per output frame (the decoder is opened 1:1 with the output grid, cover-cropped to fixed dimensions that `WebcamPipe` holds rather than repeating on every message). Same stop rules as `spawn_screen`.
+
+### Used by
+
+- `ScreenPipe::spawn` / `WebcamPipe::spawn` in this file.
+- `src-tauri/src/export/pipeline/bg_pipe.rs` - the background/GIF decode pipe reuses `spawn_webcam`.
 
 ## exporter
 

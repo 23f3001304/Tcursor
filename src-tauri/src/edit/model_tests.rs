@@ -1,4 +1,3 @@
-// Tests for edit::model, split into their own file so model.rs stays under the size limit.
 use super::*;
 use std::path::PathBuf;
 
@@ -9,23 +8,57 @@ fn tmp_path(name: &str) -> PathBuf {
 fn sample_doc() -> EditDoc {
     EditDoc {
         version: 1,
-        trim: Trim { in_ms: 100, out_ms: 5000 },
+        trim: Trim {
+            in_ms: 100,
+            out_ms: 5000,
+        },
         clip_ms: 5000,
-        cuts: vec![Cut { id: "c0".into(), start_ms: 500, end_ms: 1000 }],
-        zooms: vec![Zoom { id: "z1".into(), start_ms: 200, end_ms: 800, target: ZoomTarget::Cursor, scale: 2.2, easing: "ease".into(), zoom_in_ms: 350, zoom_out_ms: 450, layer: 0, cam_action: None, smart_typing: false }],
-        speed: vec![Speed { id: "s1".into(), start_ms: 1000, end_ms: 2000, factor: 2.0 }],
-        layout: vec![LayoutSeg { id: "l1".into(), start_ms: 0, end_ms: 5000, layout: "screen".into(), transition_ms: 350, easing: "smooth".into(),
-            transition_out_ms: 0, easing_out: "smooth".into(), arrangement: None }],
+        cuts: vec![Cut {
+            id: "c0".into(),
+            start_ms: 500,
+            end_ms: 1000,
+        }],
+        zooms: vec![Zoom {
+            id: "z1".into(),
+            start_ms: 200,
+            end_ms: 800,
+            target: ZoomTarget::Cursor,
+            scale: 2.2,
+            easing: "ease".into(),
+            zoom_in_ms: 350,
+            zoom_out_ms: 450,
+            layer: 0,
+            cam_action: None,
+            smart_typing: false,
+            easing_out: None,
+        }],
+        speed: vec![Speed {
+            id: "s1".into(),
+            start_ms: 1000,
+            end_ms: 2000,
+            factor: 2.0,
+        }],
+        layout: vec![LayoutSeg {
+            id: "l1".into(),
+            start_ms: 0,
+            end_ms: 5000,
+            layout: "screen".into(),
+            transition_ms: 350,
+            easing: "smooth".into(),
+            transition_out_ms: 0,
+            easing_out: "smooth".into(),
+            arrangement: None,
+        }],
         effects: vec![],
         camera_moves: vec![],
         aspect: crate::export::types::Aspect::default(),
         settings: crate::settings::model::Settings::default(),
+        captions: vec![],
     }
 }
 
 #[test]
 fn zoom_and_effect_region_layer_defaults_to_zero_on_missing_field() {
-    // Simulates loading a pre-existing edit.json saved before `layer` existed.
     let zoom_json = r#"{"id":"z0","start_ms":0,"end_ms":1000,"target":"cursor","scale":2.0,"easing":"smooth","zoom_in_ms":350,"zoom_out_ms":450}"#;
     let zoom: Zoom = serde_json::from_str(zoom_json).unwrap();
     assert_eq!(zoom.layer, 0);
@@ -37,17 +70,28 @@ fn zoom_and_effect_region_layer_defaults_to_zero_on_missing_field() {
 
 #[test]
 fn layout_seg_exit_transition_defaults_to_a_hard_cut_on_missing_fields() {
-    // A v2 layout segment exactly as it was written before exit transitions existed. `0` is the
-    // whole back-compat contract: it is the historical hard cut, so an old doc renders unchanged.
     let json = r#"{"id":"l0","start_ms":0,"end_ms":1000,"layout":"camera","transition_ms":350,"easing":"smooth"}"#;
     let s: LayoutSeg = serde_json::from_str(json).unwrap();
     assert_eq!(s.transition_out_ms, 0);
     assert_eq!(s.easing_out, "smooth");
-    // And a whole doc containing one still loads, with every OTHER field untouched.
-    let doc_json = format!(r#"{{"version":2,"trim":{{"in_ms":0,"out_ms":5000}},"cuts":[],"zooms":[],"speed":[],"layout":[{json}],"settings":{{}}}}"#);
+    let doc_json = format!(
+        r#"{{"version":2,"trim":{{"in_ms":0,"out_ms":5000}},"cuts":[],"zooms":[],"speed":[],"layout":[{json}],"settings":{{}}}}"#
+    );
     let doc: EditDoc = serde_json::from_str(&doc_json).unwrap();
-    assert_eq!(doc.layout[0], LayoutSeg { id: "l0".into(), start_ms: 0, end_ms: 1000, layout: "camera".into(),
-        transition_ms: 350, easing: "smooth".into(), transition_out_ms: 0, easing_out: "smooth".into(), arrangement: None });
+    assert_eq!(
+        doc.layout[0],
+        LayoutSeg {
+            id: "l0".into(),
+            start_ms: 0,
+            end_ms: 1000,
+            layout: "camera".into(),
+            transition_ms: 350,
+            easing: "smooth".into(),
+            transition_out_ms: 0,
+            easing_out: "smooth".into(),
+            arrangement: None
+        }
+    );
 }
 
 #[test]
@@ -89,8 +133,14 @@ fn partial_json_fills_defaults() {
 fn old_json_without_durations_gets_tuned_defaults() {
     let json = r#"{"zooms":[{"id":"z0","start_ms":0,"end_ms":100,"target":"cursor","scale":2.0,"easing":"smooth"}],"effects":[{"id":"e0","kind":"spotlight","start_ms":0,"end_ms":100}]}"#;
     let doc: EditDoc = serde_json::from_str(json).unwrap();
-    assert_eq!((doc.zooms[0].zoom_in_ms, doc.zooms[0].zoom_out_ms), (350, 450));
-    assert_eq!((doc.effects[0].fade_in_ms, doc.effects[0].fade_out_ms), (250, 250));
+    assert_eq!(
+        (doc.zooms[0].zoom_in_ms, doc.zooms[0].zoom_out_ms),
+        (350, 450)
+    );
+    assert_eq!(
+        (doc.effects[0].fade_in_ms, doc.effects[0].fade_out_ms),
+        (250, 250)
+    );
 }
 
 #[test]
@@ -107,7 +157,16 @@ fn zoom_target_fixed_serializes_with_xy() {
 #[test]
 fn camera_move_round_trip_save_load() {
     let mut doc = sample_doc();
-    doc.camera_moves = vec![CameraMove { id: "k1".into(), t_ms: 300, x: 0.5, y: 0.4, size: 0.3, easing: "smooth".into(), shape: "layout".into(), roundness: DEFAULT_CAM_ROUNDNESS }];
+    doc.camera_moves = vec![CameraMove {
+        id: "k1".into(),
+        t_ms: 300,
+        x: 0.5,
+        y: 0.4,
+        size: 0.3,
+        easing: "smooth".into(),
+        shape: "layout".into(),
+        roundness: DEFAULT_CAM_ROUNDNESS,
+    }];
     let p = tmp_path("edit_model_camera_move_round_trip.json");
     doc.save(&p).unwrap();
     let loaded = EditDoc::load(&p).unwrap();
@@ -115,23 +174,27 @@ fn camera_move_round_trip_save_load() {
     assert_eq!(loaded, doc);
 }
 
-/// Back-compat: a zoom saved before `cam_action` existed loads as `None` (inherit the global
-/// default), AND an unset action is omitted from the JSON entirely - so simply re-saving an
-/// untouched doc does not start writing a new key.
 #[test]
 fn zoom_cam_action_defaults_to_none_and_is_omitted_when_unset() {
-    let json = r#"{"id":"z0","start_ms":0,"end_ms":100,"target":"cursor","scale":2.0,"easing":"smooth"}"#;
+    let json =
+        r#"{"id":"z0","start_ms":0,"end_ms":100,"target":"cursor","scale":2.0,"easing":"smooth"}"#;
     let z: Zoom = serde_json::from_str(json).unwrap();
     assert_eq!(z.cam_action, None);
     let out = serde_json::to_string(&z).unwrap();
-    assert!(!out.contains("cam_action"), "unset action must not be written: {}", out);
+    assert!(
+        !out.contains("cam_action"),
+        "unset action must not be written: {}",
+        out
+    );
 }
 
 #[test]
 fn zoom_cam_action_round_trips_when_set() {
     use crate::settings::model::CamZoomAction;
     let mut z: Zoom = serde_json::from_str(
-        r#"{"id":"z0","start_ms":0,"end_ms":100,"target":"cursor","scale":2.0,"easing":"smooth"}"#).unwrap();
+        r#"{"id":"z0","start_ms":0,"end_ms":100,"target":"cursor","scale":2.0,"easing":"smooth"}"#,
+    )
+    .unwrap();
     z.cam_action = Some(CamZoomAction::Shrink { to: 0.4 });
     let back: Zoom = serde_json::from_str(&serde_json::to_string(&z).unwrap()).unwrap();
     assert_eq!(back.cam_action, Some(CamZoomAction::Shrink { to: 0.4 }));
@@ -143,8 +206,6 @@ fn camera_move_missing_field_defaults_to_empty_vec() {
     assert_eq!(doc.camera_moves.len(), 0);
 }
 
-/// Back-compat: an `edit.json` saved before `aspect` existed loads as `Source` - today's
-/// behavior (`Layout::adapt_to_source`) - so an old doc renders identically after this upgrade.
 #[test]
 fn aspect_missing_field_defaults_to_source() {
     use crate::export::types::Aspect;
@@ -162,9 +223,6 @@ fn aspect_round_trips_through_json() {
     assert_eq!(back.aspect, Aspect::Square1x1);
 }
 
-/// Back-compat: the doc-level `Trim::default()` (`{0,0}`, "not yet set") resolves to the WHOLE
-/// clip, matching "out_ms == 0 means no trim" - so a doc that never had `SetTrim` applied exports
-/// unchanged.
 #[test]
 fn default_trim_resolves_to_the_whole_clip() {
     assert_eq!(Trim::default().resolve(12_345), (0, 12_345));
@@ -172,25 +230,32 @@ fn default_trim_resolves_to_the_whole_clip() {
 
 #[test]
 fn trim_resolve_clamps_in_to_out_and_both_to_the_clip() {
-    // out_ms beyond the real duration clamps down; in_ms beyond the resolved out clamps to it,
-    // so a degenerate/inverted range never yields a negative-length span at the call site.
-    assert_eq!(Trim { in_ms: 2_000, out_ms: 999_999 }.resolve(10_000), (2_000, 10_000));
-    assert_eq!(Trim { in_ms: 9_000, out_ms: 5_000 }.resolve(10_000), (5_000, 5_000));
+    assert_eq!(
+        Trim {
+            in_ms: 2_000,
+            out_ms: 999_999
+        }
+        .resolve(10_000),
+        (2_000, 10_000)
+    );
+    assert_eq!(
+        Trim {
+            in_ms: 9_000,
+            out_ms: 5_000
+        }
+        .resolve(10_000),
+        (5_000, 5_000)
+    );
 }
 
-/// Back-compat: an `edit.json` saved before `clip_ms` existed loads as `0` ("not yet known") -
-/// `seed::migrate` backfills it from `true_duration_ms` on the next `load_or_seed`.
 #[test]
 fn clip_ms_missing_field_defaults_to_zero() {
     let doc: EditDoc = serde_json::from_str(r#"{"zooms":[]}"#).unwrap();
     assert_eq!(doc.clip_ms, 0);
 }
 
-// Atomic-save + corrupt-file-preservation tests live in their own file - model_tests.rs was at
-// the 200-line budget.
 #[path = "model_save_tests.rs"]
 mod save_tests;
 
-// Arrangement serde/back-compat tests, likewise in their own file for the same reason.
 #[path = "model_arrangement_tests.rs"]
 mod arrangement_tests;

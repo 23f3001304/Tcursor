@@ -18,7 +18,7 @@ Motion's gesture layer takes pointer capture, which stops `dragstart` from firin
 
 ### Look
 
-Each card carries its lane's own accent as a 3px left edge (`--pill-accent`, the same custom property the timeline's own pills set), because these four ARE the timeline's four pill kinds and should read as the same object family. The panel pass removed their borders: the accent edge is the identity, and a border around it was one more box in a panel that should have none. The rules moved from `editor.css` to `panels/panels.css`, as the combined `.e-zblk.e-libpill` selectors that beat the timeline's own shared rule regardless of source order.
+Each card carries its lane's own accent in its glyph and its 12% tint (`--pill-accent`, the same custom property the timeline's own pills set), because these four ARE the timeline's four pill kinds and should read as the same object family. The panel pass removed their borders, and the 2026-09-15 pass removed the 3px accent bar they and every timeline pill used to carry on the left edge: the owner read it as a cheap card rail, so the colour now lives in the tint and the glyph alone. The rules moved from `editor.css` to `panels/panels.css`, as the combined `.e-zblk.e-libpill` selectors that beat the timeline's own shared rule regardless of source order.
 
 Since the panel pass the group's heading is `.e-sechead` ("Insert timeline elements") rather than a control label, because it heads a group rather than naming one control.
 

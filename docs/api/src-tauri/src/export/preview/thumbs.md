@@ -1,6 +1,6 @@
 # src-tauri/src/export/preview/thumbs.rs
 
-Editor-timeline media: cached ffmpeg helpers for the filmstrip thumbnails, the per-source audio waveform images, and a mixed preview-audio track. All mirror `ensure_proxy` (run once, cache by output existence) and wrap their ffmpeg pass in `win::sys::proc::generate_once` (so the post-record preprocessing pass, `export::preview::preprocess::preprocess_project`, and the editor's own lazy `ensure_*` never transcode the same file twice or storm the CPU with concurrent passes right as the editor opens) run via `ffcmd_bg` (below-normal priority, so the one serialized multi-threaded pass yields to the UI instead of freezing it). The recorder's proxy is silent; these give the editor frames to scrub, waveforms to show, and sound to play.
+Editor-timeline media: cached ffmpeg helpers for the filmstrip thumbnails, the per-source audio waveform images, and a mixed preview-audio track. All mirror `ensure_proxy` (run once, cache by output existence) and wrap their ffmpeg pass in `process::proc::generate_once` (so the post-record preprocessing pass, `export::preview::preprocess::preprocess_project`, and the editor's own lazy `ensure_*` never transcode the same file twice or storm the CPU with concurrent passes right as the editor opens) run via `ffcmd_bg` (below-normal priority, so the one serialized multi-threaded pass yields to the UI instead of freezing it). The recorder's proxy is silent; these give the editor frames to scrub, waveforms to show, and sound to play.
 
 **Off the main thread (Task 41).** All three IPC commands are `async fn`; each wraps a `_blocking` sibling (same body the sync command used to run) in `tauri::async_runtime::spawn_blocking`. Same freeze mechanism `ai::commands` fixed for Task 40: a non-`async` `#[tauri::command] fn` runs INLINE on the thread that received the IPC message (the app's main/UI thread), so a sync version of these would freeze the window for the whole ffmpeg pass - a proxy transcode (`ensure_proxy`, `preview_track.rs`) can run for seconds on a project OPEN. `preprocess::run` calls the `_blocking` functions directly (not the `async` commands) since it already runs off-thread on its own `std::thread::spawn`, outside any `.await` context.
 
@@ -11,7 +11,7 @@ pub(crate) const FILMSTRIP_COUNT: u32 = 9;
 pub(crate) const FILMSTRIP_HEIGHT: u32 = 80;
 ```
 
-The filmstrip the editor actually draws, mirrored from `src/editor/timeline/filmstripPlan.ts` (which DERIVES the pair from the lane's drawn height and the editor window's usual width - see `filmstripPlan.md`). `preprocess::rest` pre-renders with exactly these, so the background pass fills the very `thumbs_9_80` dir the editor then asks for instead of leaving it a second ffmpeg run. A unit test asserts the pair still names that dir; keep the two sides in step.
+The filmstrip the editor actually draws, mirrored from `src/editor/timeline/model/filmstripPlan.ts` (which DERIVES the pair from the lane's drawn height and the editor window's usual width - see `filmstripPlan.md`). `preprocess::rest` pre-renders with exactly these, so the background pass fills the very `thumbs_9_80` dir the editor then asks for instead of leaving it a second ffmpeg run. A unit test asserts the pair still names that dir; keep the two sides in step.
 
 ## FILMSTRIP_HEIGHT
 

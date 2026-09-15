@@ -1,17 +1,25 @@
+use flate2::read::GzDecoder;
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use serde::{Deserialize, Serialize};
 use std::io;
 use std::path::Path;
-use flate2::write::GzEncoder;
-use flate2::read::GzDecoder;
-use flate2::Compression;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum Button { Left, Right, Middle }
+pub enum Button {
+    Left,
+    Right,
+    Middle,
+}
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum EventKind { Move, Down, Up }
+pub enum EventKind {
+    Move,
+    Down,
+    Up,
+}
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct MouseEvent {
@@ -24,7 +32,12 @@ pub struct MouseEvent {
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ScreenInfo { pub w: u32, pub h: u32, pub origin_x: i32, pub origin_y: i32 }
+pub struct ScreenInfo {
+    pub w: u32,
+    pub h: u32,
+    pub origin_x: i32,
+    pub origin_y: i32,
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct EventLog {
@@ -70,10 +83,27 @@ mod tests {
     fn round_trips_through_json() {
         let log = EventLog {
             started_unix_ms: 1000,
-            screen: ScreenInfo { w: 1920, h: 1080, origin_x: 0, origin_y: 0 },
+            screen: ScreenInfo {
+                w: 1920,
+                h: 1080,
+                origin_x: 0,
+                origin_y: 0,
+            },
             events: vec![
-                MouseEvent { t: 0, kind: EventKind::Move, x: 5, y: 6, button: None },
-                MouseEvent { t: 30, kind: EventKind::Down, x: 5, y: 6, button: Some(Button::Left) },
+                MouseEvent {
+                    t: 0,
+                    kind: EventKind::Move,
+                    x: 5,
+                    y: 6,
+                    button: None,
+                },
+                MouseEvent {
+                    t: 30,
+                    kind: EventKind::Down,
+                    x: 5,
+                    y: 6,
+                    button: Some(Button::Left),
+                },
             ],
         };
         let json = serde_json::to_string(&log).unwrap();
@@ -86,16 +116,32 @@ mod tests {
     #[test]
     fn omits_button_for_moves() {
         let json = serde_json::to_string(&MouseEvent {
-            t: 0, kind: EventKind::Move, x: 1, y: 2, button: None,
-        }).unwrap();
+            t: 0,
+            kind: EventKind::Move,
+            x: 1,
+            y: 2,
+            button: None,
+        })
+        .unwrap();
         assert!(!json.contains("button"));
     }
     #[test]
     fn loads_both_compressed_and_uncompressed_event_logs() {
         let log = EventLog {
             started_unix_ms: 1000,
-            screen: ScreenInfo { w: 1920, h: 1080, origin_x: 0, origin_y: 0 },
-            events: vec![MouseEvent { t: 0, kind: EventKind::Move, x: 5, y: 6, button: None }],
+            screen: ScreenInfo {
+                w: 1920,
+                h: 1080,
+                origin_x: 0,
+                origin_y: 0,
+            },
+            events: vec![MouseEvent {
+                t: 0,
+                kind: EventKind::Move,
+                x: 5,
+                y: 6,
+                button: None,
+            }],
         };
         let tmp_dir = std::env::temp_dir();
         let gz_path = tmp_dir.join("test_events_gz.json");

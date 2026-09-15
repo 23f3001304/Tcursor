@@ -77,7 +77,7 @@ Returns `folder/system.wav` - the system audio loopback track.
 pub fn webcam(&self) -> PathBuf
 ```
 
-Returns `folder/webcam.webm` - the webcam video blob written by the frontend via `save_webcam`.
+Returns `folder/webcam.webm` - the webcam video written by the frontend in chunks via `append_webcam`.
 
 ## ProjectPaths::sync
 

@@ -22,7 +22,7 @@ Serialises as lowercase.
 
 - `src-tauri/src/session/record/recorder.rs` - calls `captures_os_cursor()` to set the WGC cursor inclusion flag; checks `== Enhanced` to start the `CursorTypeTracker`
 - `src-tauri/src/settings/store.rs` (`os_cursor_in_video`) - calls `captures_os_cursor()` on the record-time snapshot
-- `src-tauri/src/export/cursor/cursorset.rs` (`prep`) - returns `None` early for any style except `Enhanced`, skipping sprite preparation
+- `src-tauri/src/export/cursor/pack/cursorset.rs` (`prep`) - returns `None` early for any style except `Enhanced`, skipping sprite preparation
 
 ## CursorStyle::captures_os_cursor
 
@@ -74,7 +74,7 @@ Fields:
 - `smoothness: f32` - 0..1 glide amount for the moves between the recording's rests (0 = the recording's own timing and jitter; 1 = one clean eased stroke per move). Default `0.6`. Read by `Cursor` through `smoothness_at` (below) and consumed by `export/cursor/path.rs`, which re-times and de-jitters each move with both ends pinned - so at any value the cursor is exactly where the hand rested and clicked (2026-09-14; it used to be a lagging low-pass alpha). This is the CURSOR glide, distinct from `ZoomSettings::camera_smoothing_ms` (see `model.md`), which smooths the auto-zoom CAMERA path instead.
 - `path_idealize: f32` - 0..1 amount by which the route of each move between rests is straightened toward its chord (0 = off, the raw route). Default `0.0` (off - byte-identical to recordings made before this field existed). *Why off by default:* straightening is a stylistic choice, not a correctness fix, so recordings shouldn't change appearance until a user opts in. Like `smoothness`, it never moves a rest or a click.
 - `motion_blur: f32` - trail strength for the motion blur effect (0 = off, 1 = maximum). Default `0.35`. *Why 0.35:* noticeable but not overwhelming on fast pans; zero would make the sprite look teleporting.
-- `tilt: f32` - 0..1 **motion lean**: how far a fast cursor tips into its own travel, and overshoots once coming back upright when it stops (`export/cursor/tilt.rs`). Scales the 6-degree cap (`tilt::max_deg`); 0 switches the filter off entirely, so an upright cursor costs nothing at all. Default `0.35` (`default_tilt`). *Why present by default, unlike `path_idealize`:* this is the effect the owner asked for and it is what other editors do; *why only a third of the cap:* they asked for "very subtle", and a lean you notice as a lean is already too much. Read by `FrameRenderer::new`/`reload_edit` through `tilt_at`, and mirrored live by `src/editor/stage/cursorTilt.ts`.
+- `tilt: f32` - 0..1 **motion lean**: how far a fast cursor tips into its own travel, and overshoots once coming back upright when it stops (`export/cursor/draw/tilt.rs`). Scales the 6-degree cap (`tilt::max_deg`); 0 switches the filter off entirely, so an upright cursor costs nothing at all. Default `0.35` (`default_tilt`). *Why present by default, unlike `path_idealize`:* this is the effect the owner asked for and it is what other editors do; *why only a third of the cap:* they asked for "very subtle", and a lean you notice as a lean is already too much. Read by `FrameRenderer::new`/`reload_edit` through `tilt_at`, and mirrored live by `src/editor/stage/cursor/cursorTilt.ts`.
 - `click_bounce: bool` - whether the cursor sprite plays a bounce-dip animation on mouse down. Default `true`. *Why on by default:* the bounce makes click detection trivially legible without any visual effect ring.
 - `bounce_intensity: f32` - depth of the bounce dip on a 0..1 scale (0.5 gives approx 0.18 scale-dip, 1.0 gives approx 0.36 dip). Default `0.5`. *Why not 1.0:* a full dip at 1.0 looks cartoonish; 0.5 gives a subtle-but-readable response.
 - `pack: String` - which cursor sprite pack draws the Enhanced cursor. Default `"default"` (the built-in embedded set - byte-identical to every recording made before this field existed). Any other value is an imported pack id (`export/cursor/pack.rs`'s `CursorPackInfo.id`); a pack missing a given kind's PNG falls back to the built-in sprite for just that kind. *Why a plain `String` id rather than an enum:* imported packs are discovered at runtime from the filesystem, so the set of valid values isn't known at compile time.
@@ -82,11 +82,11 @@ Fields:
 ### Used by
 
 - `src-tauri/src/settings/model.rs` (`Settings.cursor`) - persisted in `config.json`
-- `src-tauri/src/export/cursor/cursorset.rs` (`prep`) - reads `style` to gate, and `pack` (via `export::cursor::pack::sprite_sources`) to resolve which sprite bytes to decode, plus `motion_blur`/`click_bounce`/`bounce_intensity` to configure animation
+- `src-tauri/src/export/cursor/pack/cursorset.rs` (`prep`) - reads `style` to gate, and `pack` (via `export::cursor::pack::sprite_sources`) to resolve which sprite bytes to decode, plus `motion_blur`/`click_bounce`/`bounce_intensity` to configure animation
 - `src-tauri/src/export/cursor/cursorpreview.rs` (`cursor_sprites`) - resolves `pack` the same way so the editor preview matches the export
 - `src-tauri/src/session/record/recorder.rs` - reads `style.captures_os_cursor()` and checks `style == Enhanced` to initialize the cursor type tracker
 - `src-tauri/src/export/render/mod.rs` (`FrameRenderer::new`, `FrameRenderer::reload_edit`) - reads `smoothness_at()` to set the owned `Cursor`'s glide and `idealize_at()` (via `Cursor::set_idealize`) to configure path straightening; `reload_edit` live-applies BOTH on an `edit.json` change (`Cursor::set_smoothness`/`set_idealize`) without a full renderer rebuild
-- `src/editor/panels/CursorPanel.tsx` - lists/selects/imports packs, writing the chosen id into `pack`
+- `src/editor/panels/cursor/CursorPanel.tsx` - lists/selects/imports packs, writing the chosen id into `pack`
 
 ## CursorSettings::plain_os
 
@@ -162,5 +162,5 @@ Serialises as lowercase (`"none"` / `"glass"`), mirrored by TS `CursorBackStyle`
 
 ### Used by
 
-- `src-tauri/src/export/fx/fx_lensbuild.rs` - `lenses_at` / `wants_lens`, the only readers.
-- `src/editor/panels/CursorPanel.tsx` and `src/hud/settings/SettingsCursor.tsx` - the two pickers.
+- `src-tauri/src/export/fx/lens/build.rs` - `lenses_at` / `wants_lens`, the only readers.
+- `src/editor/panels/cursor/CursorPanel.tsx` and `src/hud/settings/SettingsCursor.tsx` - the two pickers.

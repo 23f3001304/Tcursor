@@ -18,16 +18,21 @@ export function AudioPanel({
   onChangeSysVol: (v: number) => void;
   onClose: () => void;
 }) {
-  // Mirrors the Rust `Settings::default()` (settings/model.rs): audio_offset_ms 0, both volumes
-  // 1.0 (unity gain, i.e. the sliders' 100%) - the only sane "no adjustment" state for these three.
-  const handleReset = () => { onChangeOffset(0); onChangeMicVol(1); onChangeSysVol(1); };
+  const handleReset = () => {
+    onChangeOffset(0);
+    onChangeMicVol(1);
+    onChangeSysVol(1);
+  };
 
   return (
     <div className="e-panel e-insp">
-      <PanelHeader title="Audio" lede="Levels for the two tracks, and their sync."
-        onReset={handleReset} onClose={onClose} />
+      <PanelHeader
+        title="Audio"
+        lede="Levels for the two tracks, and their sync."
+        onReset={handleReset}
+        onClose={onClose}
+      />
 
-      {/* Levels first - the thing this panel mostly is - then sync, which is a correction. */}
       <div className="e-grp">
         <span className="e-sechead">Volume</span>
         <div className="e-field">
@@ -58,8 +63,6 @@ export function AudioPanel({
 
       <div className="e-grp">
         <span className="e-sechead">Sync</span>
-        {/* The legend sits BELOW the track: `Slider`'s own `label` row always renders immediately
-            above it, so a legend above would come between a label and the control it names. */}
         <div className="e-field">
           <Slider
             min={-300}

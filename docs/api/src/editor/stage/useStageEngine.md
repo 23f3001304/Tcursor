@@ -1,0 +1,44 @@
+# src/editor/stage/useStageEngine.ts
+
+Everything that makes the Stage's preview move, split out of `Stage.tsx`: the live props mirrored into refs, the arrange drag, the cursor sprites, the invalidation effects, media playback, the exact export frame and the one composite loop. The component keeps the markup and the pointer; this hook keeps the engine. It takes the same `StageProps` the component does, plus the four element refs the component created, and returns only what the markup actually needs back.
+
+## StageElements
+
+```ts
+export interface StageElements {
+  screen: RefObject<HTMLVideoElement | null>; webcam: RefObject<HTMLVideoElement | null>;
+  audio: RefObject<HTMLAudioElement | null>; canvas: RefObject<HTMLCanvasElement | null>;
+}
+```
+
+The four DOM refs. They are created by `Stage` (its hooks need them before `StageMedia` mounts - e.g. while `src` is still empty) and passed in, so ownership stays with the component and only the reading moves here.
+
+## useStageEngine
+
+```ts
+export function useStageEngine(p: StageProps, el: StageElements, canvasW: number, canvasH: number): {
+  arrange, arranging, dirtyRef, tOut, mapRef, layoutRef, trackRef, timeRef, playRef, onTimeRef
+}
+```
+
+`canvasW`/`canvasH` come from the component because the markup needs them too (they size the `<canvas>` backing store), and passing them down beats deriving the same pair twice.
+
+**One `sceneDeps` array, two dep lists.** The invalidation effect's `drawDeps` and `useExactFrame`'s `deps` were two near-identical 19-entry literals; they are now `[timeMs, playing, ...sceneDeps]` and `[...sceneDeps, moveMode, bg]` over one shared list. INVARIANT: both must keep a constant length across renders, since each is used directly as a React dependency array.
+
+### Behavior
+
+**Compositing loop.** `useCompositeLoop` (a sibling hook) runs the one `requestAnimationFrame` loop: reads the time (the screen `<video>`'s `currentTime` while playing, else `timeMs` via a ref), keeps the webcam and audio roughly synced to the screen video, shrinks/repositions the webcam PiP for any active zoom via the `zooms`/`zoomSettings` refs (mirrors the export's `step_camera`), builds the cursor input, calls `drawPreview`, and blits the backend FX overlay (spotlight + click ripples) on top - throttled and rendered at reduced resolution (see that file's notes on why). Live props are mirrored into refs by `useSyncRefs` so the single long-lived loop always sees current values without re-subscribing.
+
+**The exact frame (owner ruling 2026-09-14: the export is the reference).** Whenever playback is paused or a scrub has settled, `useExactFrame` asks the Rust renderer for the export's own composited frame at that instant and `useCompositeLoop` draws it over the live composite, so what is looked at while editing IS a frame of the export; playing resumes the live composite. The hook's `deps` are this component's draw deps minus the playhead (plus `moveMode` and `bg`), so an edit retires the held frame and a fresh one follows after `SETTLE_MS`; while a Move or Arrange draft is live (`draft: moveMode || arranging`) no frame is requested, since the file the renderer reads does not know the draft.
+
+**Arrange mode (T34 L3).** While `arrangeSeg` is non-null, `ArrangeOverlay` frames both of that segment's panels over the live composite and `useArrangeDrag` owns the gesture - see `arrange/ArrangeOverlay.md` and `arrange/useArrangeDrag.md`. Two things happen inside `Stage` itself. First, the three ordinary stage interactions stand down: `onCanvasClick` returns early, the reticle is not computed, `CamDragHandle` is not rendered, and the canvas' cursor/title change - the same suspension aim mode already gets, one mode further. Second, the flag is mirrored into `arrangingRef` and handed to the composite loop, which reads the Move-mode draft through `activeCamDraft` (`frameCam.md`): mode exclusivity has a half beyond the pointer, because `frameCamLayout` gives `camDraftRef` precedence over the base layout rect (`drag ?? camMoveAt(...)`), which is exactly where the arrange draft lives - a leftover Move drag would otherwise pin the composited webcam while the arrange frame moved freely. The draft's EFFECT is suppressed, never the draft itself: `Stage` does not write `camDraftRef` here, so an unsaved Move drag is still there when arranging ends (its only discard triggers stay `CameraPanel`'s Add/Update and moving the playhead). `arranging` is in the idle-skip dependency list so a PAUSED loop repaints on both entry and exit. Third, `layoutPresetsRef` is fed the drag's DRAFT-MERGED presets (`arrange.presets`) rather than the raw prop, which is the entire integration with the compositing loop: the draft rides the per-segment resolved-rect channel `layoutAt` already reads, so neither `layoutAt` nor `useCompositeLoop` needed any draft-specific code. The same merged object goes into the idle-skip dependency list and to `CamDragHandle`, so nothing downstream can see a stale rect mid-drag.
+
+**Invalidation effects (extracted, T34 L3).** The background decode, the idle-skip dirty marking, the spotlight-sim gate 2 and the Move-draft clearing all moved verbatim into `useStageInvalidation` (`./useStageInvalidation.ts`) to keep this file under its line budget - the same reason `useReticleDrag` was extracted. The two paragraphs below still describe what they do; `useStageInvalidation.md` is where they now live.
+
+**Spotlight sim reset on a paused edit (M9).** This hook owns `spotSimRef` (created here, not inside `useCompositeLoop`, so it's resettable from both places) and, in a `[effects]`-deps effect, compares `spotlightEffectsKey(effects)` (`spotlightPreview.ts`) against the previous tick's key; a change resets `spotSimRef.current` to `newSpotlightSimState()`. Fixes: retiming/dragging a Spotlight region away from the playhead while paused left the preview dimmed indefinitely - the old driver disappearing via an EDIT (not playback) armed a fade-out `resolveSpotlight` transition that eases in MEDIA time, and a paused `t` never advances, so `sim.alpha` (and the overlay) held forever. `useCompositeLoop`'s own discontinuous-jump reset (its Implementation step 2) is the OTHER half - it catches a seek/scrub, but a paused effects edit never moves `t` at all, so that gate can't see it; this effect is gate 2. Keyed on CONTENT, not the `effects` array reference, mirroring `CamDragHandle`'s `cameraMovesKey` use just below for the identical reason (`applyEditOp` hands back a brand-new array reference on every edit routed through it, not just spotlight ones) - see `spotlightPreview.md`.
+
+**Idle skip (perf).** When paused, the loop composites only when a draw-affecting input changed - a `dirtyRef` set by an effect on the draw inputs (`timeMs`, `playing`, `track`, `layout`, `layoutPresets`, `layoutSegs`, `cameraMoves`, `zooms`, `zoomSettings`, `clicks`, `effects`, `cursor`, `clickfx`, `cursorKinds`, `captions`, `capStyle`, `accent`) and by the screen AND webcam videos' `loadeddata`/`seeked` (the webcam is composited every frame too, so a paused webcam seek must repaint) and the background/sprite `onload`. Otherwise it skips `drawPreview` entirely, so an open-but-idle editor doesn't burn 60fps redrawing the same static frame (this was the "editor lags at all times" bug).
+
+**Throttled clock (perf).** While playing, `onTime` - which sets `timeMs` and re-renders the whole editor tree (Stage + Transport + the heavy Timeline) - fires at ~16fps (a 60ms gate), not every frame. The canvas preview still updates at 60fps because it reads the video's `currentTime` directly, not this throttled state; only the playhead/time-label lag by up to a frame (a spring smooths it). The `drawPreview` call is wrapped so a transient not-yet-decodable frame can't throw out of the loop and permanently freeze the preview (in dev it logs the error rather than swallowing it silently). Because the throttle can gate out the *final* report as `currentTime` plateaus at the end, the screen `<video>`'s `onEnded` reports the exact rounded duration, so playback still auto-stops at the end (`onTime`'s `ms >= dur` check).
+
+**Playback control (`useMediaPlayback`).** A sibling hook now owns starting/stopping the media on `playing` transitions - seeking to the current time *before* calling `.play()`, so a `Play` that also snaps the playhead (e.g. forward to the trim-in point, see `Transport`) reaches the actual `<video>`/`<audio>` elements in the same commit instead of resuming from a stale position - applying `volume`/`muted` to the hidden `<audio>` element, and re-seeking the screen/webcam/audio elements to `timeMs` whenever paused (guarded on `playRef.current`, not the captured `playing`, so a stale closure can't seek the video backward mid-play - the bug that made the playhead "loop" from the middle).

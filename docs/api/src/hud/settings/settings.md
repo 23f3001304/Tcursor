@@ -42,7 +42,7 @@ Aspect ratio of the webcam PiP bubble (Screen/ScreenOnly modes only - big-camera
 
 - `src/hud/settings/settings.ts` - `ModeAppearance.cam_aspect`
 - `src/hud/preferences/appearanceFields.ts` - `ASPECTS` constant
-- `src/editor/panels/CameraPanel.tsx` - renders the Aspect picker
+- `src/editor/panels/camera/CameraPanel.tsx` - renders the Aspect picker
 
 ## CamRing
 
@@ -59,7 +59,7 @@ Optional colored ring/border drawn just inside the webcam panel edge. Mirrors th
 
 - `src/hud/settings/settings.ts` - `ModeAppearance.cam_ring` (`null` = no ring)
 - `src/hud/preferences/appearanceFields.ts` - `DEFAULT_RING` constant
-- `src/editor/panels/CameraRingField.tsx` - renders the ring on/off switch, width slider, and color swatches
+- `src/editor/panels/camera/CameraRingField.tsx` - renders the ring on/off switch, width slider, and color swatches
 
 ## ModeAppearance
 
@@ -97,7 +97,7 @@ All visual layout parameters for one recording mode. All numeric fields are norm
 - `src/hud/settings/settings.ts` - `AppearanceSettings` holds one per mode
 - `src/hud/preferences/appearanceFields.ts` - `DEFAULT_APPEARANCE` typed as `AppearanceSettings`
 - `src/hud/settings/SettingsAppearance.tsx` - reads and mutates per-mode appearance
-- `src/editor/panels/CameraPanel.tsx` - reads and mutates `cam_aspect`/`cam_ring` for the "screen" mode's webcam PiP
+- `src/editor/panels/camera/CameraPanel.tsx` - reads and mutates `cam_aspect`/`cam_ring` for the "screen" mode's webcam PiP
 - `src/hud/components/LayoutPreview.tsx` - renders a thumbnail of the current layout
 
 ## AppearanceSettings
@@ -119,7 +119,7 @@ Holds one `ModeAppearance` for each of the five layout modes. The keys match `Mo
 - `src/hud/settings/settings.ts` - `Settings.appearance`
 - `src/hud/preferences/appearanceFields.ts` - `DEFAULT_APPEARANCE`
 - `src/hud/settings/SettingsAppearance.tsx` - indexed by the active `ModeKey`
-- `src/editor/panels/LayoutsPanel.tsx` - indexed by the picked layout, and snapshotted whole into a `LayoutPreset`
+- `src/editor/panels/layout/LayoutsPanel.tsx` - indexed by the picked layout, and snapshotted whole into a `LayoutPreset`
 
 ## LayoutPreset
 
@@ -129,7 +129,7 @@ export interface LayoutPreset { id: string; name: string; appearance: Appearance
 
 One saved "look" - a name plus a snapshot of **all five** layouts' appearance. Wire form of Rust's `LayoutPreset` (`src-tauri/src/settings/model.rs`).
 
-- `id: string` - opaque and stable (`lp1`, `lp2`, ... - `nextPresetId` in `src/editor/panels/layoutPresets.ts`). Renaming changes `name` only, so a row keeps its identity across a rename.
+- `id: string` - opaque and stable (`lp1`, `lp2`, ... - `nextPresetId` in `src/editor/panels/layout/layoutPresets.ts`). Renaming changes `name` only, so a row keeps its identity across a rename.
 - `name: string` - what the user typed, trimmed. Unique case-insensitively across the list AND the built-in "Default" row (`presetNameError`), and capped at 40 characters so a row never has to ellipsise at 320px.
 - `appearance: AppearanceSettings` - all five layouts at once. A look is deliberately not per-layout: a coherent look is the relationship BETWEEN the layouts a recording cuts among, and applying one is therefore a single write of `settings.appearance`.
 
@@ -138,8 +138,8 @@ Global by design: presets live in the app config, not in a recording's `edit.jso
 ### Used by
 
 - `src/hud/settings/settings.ts` - `Settings.layout_presets`
-- `src/editor/panels/layoutPresets.ts` - `BUILTIN_PRESET` and the four list helpers
-- `src/editor/panels/LayoutPresetList.tsx` - one row per entry
+- `src/editor/panels/layout/layoutPresets.ts` - `BUILTIN_PRESET` and the four list helpers
+- `src/editor/panels/layout/LayoutPresetList.tsx` - one row per entry
 
 ## ThemeMode
 
@@ -158,19 +158,22 @@ Controls the HUD color scheme. `"system"` defers to the OS `prefers-color-scheme
 ## InterfaceSettings
 
 ```ts
-export interface InterfaceSettings { theme: ThemeMode; accent: [number, number, number]; animated_brand: boolean; interface_effects: boolean }
+export interface InterfaceSettings { theme: ThemeMode; accent: [number, number, number]; animated_brand: boolean; interface_effects: boolean; ai_choreography: boolean }
 ```
 
 General UI appearance settings.
 
 - `theme: ThemeMode` - color scheme selection.
 - `accent: [number, number, number]` - RGB triplet (0-255) for the accent color applied as `--accent`. *Why a tuple:* compact JSON representation; formatted to `rgb()` at display time by `applyTheme`.
-- `animated_brand: boolean` (Task 39) - the living-brand feel knob: whether `TcursorMark` (`src/lib/TcursorMark.tsx`) flows/pulses for its recording/exporting/directing states, in the HUD titlebar and the editor's `TopBar`. `false` and the OS `prefers-reduced-motion` both fall the mark back to its static idle rendering (the setting and the OS preference are independent gates - either alone is enough to disable the animation).
+- `animated_brand: boolean` (Task 39) - the living-brand feel knob: whether `TcursorMark` (`src/shared/brand/TcursorMark.tsx`) flows/pulses for its recording/exporting/directing states, in the HUD titlebar and the editor's `TopBar`. `false` and the OS `prefers-reduced-motion` both fall the mark back to its static idle rendering (the setting and the OS preference are independent gates - either alone is enough to disable the animation).
 - `interface_effects: boolean` (micro-interaction pass, 2026-09-14) - the editor's own micro-interactions: the click ripple under every pointerdown in the chrome, and the magnetic pull the Play button and the Trim pills exert on a nearby pointer (`src/editor/effects/`). Mirrors Rust `InterfaceSettings::interface_effects`, which defaults it `true` so a config written before the field existed still loads with the feature on. Off, the ripple overlay unmounts entirely and the magnetic hook adds no listener; `prefers-reduced-motion` is an independent gate, as with `animated_brand`. Nothing here reaches the **export** - the recording's own click effects are `ClickFxSettings`.
+- `ai_choreography: boolean` (M4 T5) - the AI Director's pointer replay after the review sheet's Apply: the editor's fake pointer walks the applied edits (`src/editor/director/useAiRun.ts`). Mirrors Rust `InterfaceSettings::ai_choreography`, which defaults it `false`: the edits are already applied by then, this only performs them. Read doc-scoped (`doc.settings.ui`) and edited in the editor's Interface section (`src/editor/shell/settings/InterfaceSection.tsx`), not the HUD's.
 
 ### Used by
 
 - `src/hud/settings/settings.ts` - `Settings.ui`
+- `src/editor/director/useAiRun.ts` - reads `doc.settings.ui.ai_choreography` after an apply to decide whether the pointer replay runs
+- `src/editor/shell/settings/InterfaceSection.tsx` - the "Replay applied edits with the pointer" switch and `DEFAULT_INTERFACE_RESET`
 - `src/hud/preferences/applyTheme.ts` - consumes `theme`/`accent`
 - `src/hud/settings/SettingsInterface.tsx` - renders theme, accent, the animated-brand switch (Task 39) and the interface-effects switch
 - `src/editor/effects/InterfaceEffects.tsx` - reads `interface_effects` through `getSettings()` on mount and on every window focus
@@ -213,16 +216,16 @@ Cursor rendering and animation parameters. Mirrors the Rust `CursorSettings` (`s
 - `smoothness: number` - 0..1 strength of motion smoothing applied to the raw recorded cursor path (default `0.6`). *Why:* raw OS cursor samples can be jittery; smoothing trades a touch of positional lag for a calmer glide, independent of the stronger reshaping `path_idealize` does below.
 - `path_idealize: number` - 0..1 strength of straightening wandering paths into clean eased strokes between clicks (`0` = raw path, the default; `1` = fully idealized). Mirrors Rust `CursorSettings::path_idealize`; see `Cursor::set_idealize` (`src-tauri/src/export/cursor/mod.rs`) for the anchor-easing mechanism. *Why a separate knob from `smoothness`:* smoothing damps jitter without changing the path's shape, while idealizing reshapes the path itself into deliberate strokes - part of the broader design direction of idealizing UI motion (cursor glide, agentic AI reveals) for a more premium, intentional feel, which needs its own strength dial rather than riding on the jitter-smoothing one.
 - `motion_blur: number` - strength of the motion-blur trail (0 = off).
-- `tilt: number` - 0..1 motion lean (default `0.35`): how far a fast cursor tips into its own travel, and overshoots once coming back upright when it stops. Scales the 6-degree cap; `0` switches the filter off. Mirrors Rust `CursorSettings::tilt` (`src-tauri/src/settings/cursor.rs`); the live preview computes the same angle through `src/editor/stage/cursorTilt.ts`, pinned against Rust's own five instants. *Why a separate knob from `motion_blur`:* the trail says where the cursor has been, the lean says how hard it is being thrown - a user who wants one rarely wants both at full strength.
+- `tilt: number` - 0..1 motion lean (default `0.35`): how far a fast cursor tips into its own travel, and overshoots once coming back upright when it stops. Scales the 6-degree cap; `0` switches the filter off. Mirrors Rust `CursorSettings::tilt` (`src-tauri/src/settings/cursor.rs`); the live preview computes the same angle through `src/editor/stage/cursor/cursorTilt.ts`, pinned against Rust's own five instants. *Why a separate knob from `motion_blur`:* the trail says where the cursor has been, the lean says how hard it is being thrown - a user who wants one rarely wants both at full strength.
 - `click_bounce: boolean` - whether a spring-bounce animation plays on click.
 - `bounce_intensity: number` - magnitude of the bounce when `click_bounce` is true.
-- `pack: string` - selected cursor sprite pack id. `"default"` is the built-in set (byte-identical to before this field existed); any other value is an imported pack's id (`CursorPackInfo.id` from `listCursorPacks`/`importCursorPack` in `src/lib/ipc.ts`).
+- `pack: string` - selected cursor sprite pack id. `"default"` is the built-in set (byte-identical to before this field existed); any other value is an imported pack's id (`CursorPackInfo.id` from `listCursorPacks`/`importCursorPack` in `src/shared/ipc.ts`).
 
 ### Used by
 
 - `src/hud/settings/settings.ts` - `Settings.cursor`
 - `src/hud/settings/SettingsCursor.tsx` - renders style/size/blur/tilt/bounce controls (not `pack`, `smoothness`, or `path_idealize` - those are editor-only, see `CursorPanel`)
-- `src/editor/panels/CursorPanel.tsx` - renders the pack picker + import button, plus the `smoothness`/`path_idealize` sliders, in addition to the same style/size/blur/tilt/bounce controls
+- `src/editor/panels/cursor/CursorPanel.tsx` - renders the pack picker + import button, plus the `smoothness`/`path_idealize` sliders, in addition to the same style/size/blur/tilt/bounce controls
 
 ## ClickFxStyle
 
@@ -278,8 +281,8 @@ What the webcam PiP does while a zoom is active. Wire form of Rust's `CamZoomAct
 ### Used by
 
 - `src/hud/settings/settings.ts` - `ZoomSettings.cam_zoom_default` (the global default).
-- `src/lib/edit.ts` - re-exported for `Zoom.cam_action` (the per-zoom override) and the `set_zoom_cam_action` `EditOp`.
-- `src/editor/stage/camZoomAction.ts` - `resolvedCamDefault`/`resolveCamAction` resolve which action applies at a given time; `applyCamZoomAction`/`camZoomAlpha` turn it into the geometry/alpha the preview draws.
+- `src/shared/edit.ts` - re-exported for `Zoom.cam_action` (the per-zoom override) and the `set_zoom_cam_action` `EditOp`.
+- `src/editor/stage/camera/camZoomAction.ts` - `resolvedCamDefault`/`resolveCamAction` resolve which action applies at a given time; `applyCamZoomAction`/`camZoomAlpha` turn it into the geometry/alpha the preview draws.
 
 ## ZoomSettings
 
@@ -317,8 +320,8 @@ Configuration for the auto-zoom feature.
 
 - `src/hud/settings/settings.ts` - `Settings.zoom`
 - `src/hud/settings/SettingsZoom.tsx` - renders all zoom controls (not `cam_zoom_default` - not yet exposed by any settings UI)
-- `src/lib/ipc.ts` - serialized into Tauri commands
-- `src/editor/stage/camZoomAction.ts` - `resolvedCamDefault` reads `cam_zoom_default` to compute the global webcam-during-zoom behavior
+- `src/shared/ipc.ts` - serialized into Tauri commands
+- `src/editor/stage/camera/camZoomAction.ts` - `resolvedCamDefault` reads `cam_zoom_default` to compute the global webcam-during-zoom behavior
 - `src/editor/shell/settings/ZoomDefaultsSection.tsx` - renders the editor's own copy of the zoom-defaults controls, including `camera_smoothing_ms`
 
 ## ClickFxSettings
@@ -362,7 +365,56 @@ Configuration for click effects and the spotlight overlay.
 - `src/hud/settings/settings.ts` - `Settings.clickfx`
 - `src/hud/settings/SettingsClickFx.tsx` - renders all click-fx and spotlight controls (does not yet expose `spotlight_dim_camera` - only `src/editor/panels/EffectsPanel.tsx` does, as of this field's introduction)
 - `src/editor/panels/EffectsPanel.tsx` - renders the "Dim webcam" toggle bound to `spotlight_dim_camera`
-- `src/editor/hooks/useCompositeLoop.ts` - reads `spotlight_dim_camera` to thread `dimCamera` into `requestFxOverlay`
+- `src/editor/hooks/stage/useCompositeLoop.ts` - reads `spotlight_dim_camera` to thread `dimCamera` into `requestFxOverlay`
+
+## CaptionPos
+
+```ts
+export type CaptionPos = "bottom" | "top";
+```
+
+Where the caption band sits on the output frame - mirrors Rust `settings::captions::CaptionPos`.
+
+### Used by
+
+- `src/hud/settings/settings.ts` - `CaptionStyle.position`
+
+## CaptionSize
+
+```ts
+export type CaptionSize = "s" | "m" | "l";
+```
+
+Caption font-size rung - mirrors Rust `settings::captions::CaptionSize`. Rust's `CaptionSize::height_frac` resolves each rung to a fraction of output height (0.030 / 0.038 / 0.048).
+
+### Used by
+
+- `src/hud/settings/settings.ts` - `CaptionStyle.size`
+
+## CaptionStyle
+
+```ts
+export interface CaptionStyle {
+  enabled: boolean; position: CaptionPos; size: CaptionSize; pill: boolean; highlight: boolean;
+  model: string; language: string;
+}
+```
+
+The caption look plus the two ASR inputs the panel edits alongside it - mirrors Rust `settings::captions::CaptionStyle`. Distinct from `ClickFxSettings.captions`, the OLD hotkey-chord toggle, which keeps its own name and meaning.
+
+- `enabled` - master on/off for the caption overlay.
+- `position: CaptionPos` - bottom or top band.
+- `size: CaptionSize` - font-size rung.
+- `pill` - whether a background pill is drawn behind the text.
+- `highlight` - whether the active word is highlighted as it is spoken (needs word-level timings on the caption).
+- `model` - the whisper model id to transcribe with (e.g. `"base.en"`, `"small.en"`).
+- `language` - ASR language hint (`"en"` or `"auto"` with a multilingual model).
+
+**Not here:** the accent color. The renderer reads `InterfaceSettings.accent`, so there is exactly one accent in the doc.
+
+### Used by
+
+- `src/hud/settings/settings.ts` - `Settings.captions`
 
 ## HotkeySettings
 
@@ -392,13 +444,13 @@ Maps each hotkey action to its key-binding string. Each field is the key combo s
 export type BackgroundKind = "mesh" | "solid" | "gradient" | "image" | "video";
 ```
 
-Which of `BackgroundSettings`' fields the renderer uses - mirrors Rust `settings::background::BackgroundKind`. `"mesh"` (the default) is a bundled wallpaper image, picked by `BackgroundSettings.mesh`; `"solid"`/`"gradient"` are real user-chosen colors; `"image"`/`"video"` render the user's own imported file, named by `BackgroundSettings.asset`. A GIF is a `"video"` - one decode path for both in the export; only the preview tells them apart, and it does that by extension (`stage/gifFrames.ts`).
+Which of `BackgroundSettings`' fields the renderer uses - mirrors Rust `settings::background::BackgroundKind`. `"mesh"` (the default) is a bundled wallpaper image, picked by `BackgroundSettings.mesh`; `"solid"`/`"gradient"` are real user-chosen colors; `"image"`/`"video"` render the user's own imported file, named by `BackgroundSettings.asset`. A GIF is a `"video"` - one decode path for both in the export; only the preview tells them apart, and it does that by extension (`stage/canvas/gifFrames.ts`).
 
 ### Used by
 
 - `src/hud/settings/settings.ts` - `BackgroundSettings.kind`
-- `src/editor/panels/BackgroundPanel.tsx` - the Background Type selector (Wallpapers / Color / Gradient tabs map to `mesh`/`solid`/`gradient`; `image`/`video` come from the asset card at the end of the Wallpapers tab and share that tab)
-- `src/editor/stage/stageBg.ts` - decides whether the preview draws the backend's still PNG or the moving asset itself
+- `src/editor/panels/background/BackgroundPanel.tsx` - the Background Type selector (Wallpapers / Color / Gradient tabs map to `mesh`/`solid`/`gradient`; `image`/`video` come from the asset card at the end of the Wallpapers tab and share that tab)
+- `src/editor/stage/canvas/stageBg.ts` - decides whether the preview draws the backend's still PNG or the moving asset itself
 
 ## BackgroundSettings
 
@@ -425,15 +477,15 @@ The recording's background, behind the screen/webcam panels. Mirrors the Rust `s
 - `gradient_angle_deg: number` - gradient direction in degrees, same convention as CSS `linear-gradient()`.
 - `blur: number` - 0..1 softness applied once to the STATIC background buffer (cheap - rebuilt once per export/preview, not per frame). `0` = off (today's behavior). Because it is a one-off pass it reaches a video background's first frame only, which is why `BackgroundPanel` hides its slider while `kind` is `"video"` instead of showing a control that does nothing.
 - `asset?: string | null` - the user's imported background file, RELATIVE to the project folder (`background/<file>`, forward-slashed), used by `"image"`/`"video"`. Never absolute: a project folder is copyable, and an absolute path would break the moment it was. Kept when the user switches back to a wallpaper, so re-selecting the asset card needs no re-import; only the card's Remove deletes the file and clears this.
-- `dim: number` - 0..0.8 black overlay over whichever background actually has pixels (wallpaper, image or video). Applied exactly once by whichever side owns the pixels: Rust (`background::apply_dim`) for everything the backend rasterises and for each streamed video frame, `stage/stageBg.ts` for the preview's own video/GIF draw.
+- `dim: number` - 0..0.8 black overlay over whichever background actually has pixels (wallpaper, image or video). Applied exactly once by whichever side owns the pixels: Rust (`background::apply_dim`) for everything the backend rasterises and for each streamed video frame, `stage/canvas/stageBg.ts` for the preview's own video/GIF draw.
 - `mesh: string` - which bundled wallpaper `kind: "mesh"` renders (`settings::wallpapers::WALLPAPERS` id). EMPTY is the legacy "Classic" `bg.jpg` and is what every project saved before the wallpaper library loads as, so those keep rendering byte-identically.
 - `gradient_mid?: [number, number, number] | null` - optional middle stop, sitting at the ramp's midpoint. Absent or `null` is the two-stop ramp, unchanged; Rust omits the key entirely when unset.
 
 ### Used by
 
 - `src/hud/settings/settings.ts` - `Settings.background`
-- `src/editor/panels/BackgroundPanel.tsx` - reads and patches every field; its colour swatches (`backgroundPresets.ts`) ship in the same plain-RGB shape so a swatch always renders identically to what gets applied, and its wallpaper/gradient tiles are rendered by the backend itself (`backgroundThumbs`)
-- `src/editor/hooks/useEditorData.ts` - refetches `previewBg` whenever `JSON.stringify(doc?.settings.background)` changes, since a background edit is the only kind of change that alters what the backend's background render returns
+- `src/editor/panels/background/BackgroundPanel.tsx` - reads and patches every field; its colour swatches (`backgroundPresets.ts`) ship in the same plain-RGB shape so a swatch always renders identically to what gets applied, and its wallpaper/gradient tiles are rendered by the backend itself (`backgroundThumbs`)
+- `src/editor/hooks/doc/useEditorData.ts` - refetches `previewBg` whenever `JSON.stringify(doc?.settings.background)` changes, since a background edit is the only kind of change that alters what the backend's background render returns
 
 ## Settings
 
@@ -451,6 +503,8 @@ export interface Settings {
   audio_sys_volume: number;
   ai_model: string;
   layout_presets: LayoutPreset[];
+  captions: CaptionStyle;
+  motion: MotionSettings;
 }
 ```
 
@@ -467,15 +521,38 @@ Top-level interface aggregating all settings groups. Serialized to/from JSON by 
 - `audio_mic_volume` / `audio_sys_volume: number` - per-source playback gain (0..1) for the mixed preview/export audio, set by the editor's Audio panel.
 - `ai_model: string` - the user's chosen Ollama model override for the AI director (`""` = no explicit choice; the backend picks an installed model itself). Set by `AiPanel`'s Engine picker.
 - `layout_presets: LayoutPreset[]` - the user's saved layout looks, newest last. Serde-defaulted on the Rust side, so a config written before presets existed arrives as `[]`. The editor's Layouts panel is the only reader and writer; it read-modify-writes the whole `Settings` so every other field here survives a preset edit.
+- `captions: CaptionStyle` - the caption look plus its ASR inputs. Distinct from `clickfx.captions`, the OLD hotkey-chord toggle, which keeps its own name and meaning.
+
+- `motion: MotionSettings` - the project's motion language. Serde-defaulted on the Rust side, so a config written before it existed arrives as Soft.
 
 **Note on `EditDoc.settings`.** `Settings` is also the shape of a recording's `edit.json` settings block, so `layout_presets` technically rides along in every project file (serialized as `[]` unless a doc was seeded from a config that had looks in it). Nothing reads it from there: the panel always asks `get_settings` for the library, precisely so a look is global and a project carries only the look it was GIVEN, not the library it came from.
 
 ### Used by
 
 - `src/hud/Hud.tsx` - top-level settings state
-- `src/lib/ipc.ts` - `getSettings` and `setSettings` IPC wrappers
-- `src/lib/edit.ts` - passed to the edit pipeline (`EditDoc.settings`)
-- `src/editor/panels/LayoutsPanel.tsx` - reads and writes the whole object for `layout_presets` and the global `appearance` default
+- `src/shared/ipc.ts` - `getSettings` and `setSettings` IPC wrappers
+- `src/shared/edit.ts` - passed to the edit pipeline (`EditDoc.settings`)
+- `src/editor/panels/layout/LayoutsPanel.tsx` - reads and writes the whole object for `layout_presets` and the global `appearance` default
+
+## MotionSettings
+
+```ts
+export interface MotionSettings { preset: string; easing: string; easing_out: string }
+```
+
+The project's ONE motion language (M3) - mirrors Rust `settings::motion::MotionSettings`. Every newly added zoom, layout segment and camera keyframe inherits this curve pair (`edit::ops::motion`), and `{ op: "apply_motion_default" }` stamps it onto the ones already placed.
+
+- `preset: string` - the name the editor showed when the pair was written (`"soft"`, `"snappy"`, `"cinematic"`, `"mechanical"`, `"bouncy"`). Provenance for the UI only; nothing in the render path reads it, and `MotionSection`'s picker derives what to show from the STRINGS via `presetOf`, so a curve dragged off a preset in an inspector honestly reads as Custom.
+- `easing: string` - the ramp INTO a region: a zoom-in, a layout segment's entry fade, a camera move's blend from the previous keyframe.
+- `easing_out: string` - the ramp OUT of one: a zoom-out, a layout segment's exit fade. A camera move has no exit ramp of its own and reads `easing` only.
+
+The default is Soft, and **Soft is the bare word `"smooth"`**, not the equivalent `keys(...)` curve - see `docs/api/src-tauri/src/settings/motion.md` for why (every existing region reads back as Soft, and the shipped camera trajectory stays bit-identical).
+
+### Used by
+
+- `src/hud/settings/settings.ts` (`Settings.motion`)
+- `src/editor/shell/settings/MotionSection.tsx` - the only writer
+- `src/editor/motion/presets.ts` - `presetOf` / `presetPatch` read and produce these two strings
 
 ## CursorBackStyle
 
@@ -486,3 +563,5 @@ export type CursorBackStyle = "none" | "glass";
 The glass shape drawn BEHIND the cursor, whatever pack it comes from - the wire mirror of Rust `settings::cursor::CursorBack`. `"none"` is the original look; `"glass"` adds a refracting disc that morphs by cursor kind (a horizontal pill over text, stretching into a selection bar while the left button is held there).
 
 Independent of the pack's own `material`: a plain pack can have a glass back, and a glass pack can have none. Carried on `CursorSettings.back`, edited by `CursorPanel.tsx` (a `Picker`) and `SettingsCursor.tsx` (a segment), and read by the preview through `DrawCursor.back`.
+
+**`CaptionStyle` grew seven fields on 2026-09-15** (`font_pct`, `text_color`, `highlight_color` or `null` for the interface accent, `pill_color`, `pill_alpha`, `animation`, `animation_ms`) and the `CaptionAnim` union (`none` | `fade` | `rise` | `pop` | `words`), mirroring `settings/captions.rs` field for field; the defaults live in `DEFAULT_CAPTION_STYLE` (`editor/panels/captions/CaptionStyleControls.tsx`) and reproduce the previous look.

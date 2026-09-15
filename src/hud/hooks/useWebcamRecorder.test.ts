@@ -1,10 +1,11 @@
+// @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { webcamStopAction, raceStopOrTimeout, useWebcamRecorder } from "./useWebcamRecorder";
-import { appendWebcam } from "../../lib/ipc";
+import { appendWebcam } from "../../shared/ipc";
 
-vi.mock("../../lib/ipc", () => ({ appendWebcam: vi.fn(() => Promise.resolve()) }));
+vi.mock("../../shared/ipc", () => ({ appendWebcam: vi.fn(() => Promise.resolve()) }));
 
 describe("webcamStopAction", () => {
   it("skips when there is no recorder at all", () => {
@@ -32,7 +33,7 @@ describe("raceStopOrTimeout", () => {
   it('resolves "timeout" when onDone never settles (H1\'s secondary hazard)', async () => {
     vi.useFakeTimers();
     try {
-      const never = new Promise<void>(() => {}); // an onstop that never fires
+      const never = new Promise<void>(() => {});
       const pending = raceStopOrTimeout(never, 4000);
       await vi.advanceTimersByTimeAsync(4000);
       await expect(pending).resolves.toBe("timeout");
@@ -42,38 +43,57 @@ describe("raceStopOrTimeout", () => {
   });
 });
 
-// A mid-take camera switch is a SECOND MediaRecorder writing a SECOND file: the segment index
-// `start` is given must ride along on every chunk, or the new camera's bytes get appended to the
-// first camera's `webcam.webm` and `merge_webcam_segments` has nothing to merge.
 class FakeRecorder {
   static last: FakeRecorder | null = null;
   state: RecordingState = "inactive";
-  ondataavailable: ((e: { data: { size: number; arrayBuffer: () => Promise<ArrayBuffer> } }) => void) | null = null;
+  ondataavailable: ((e: { data: { size: number; arrayBuffer: () => Promise<ArrayBuffer> } }) => void) | null =
+    null;
   onstop: (() => void) | null = null;
-  constructor(public stream: MediaStream) { FakeRecorder.last = this; }
-  start() { this.state = "recording"; }
-  stop() { this.state = "inactive"; this.onstop?.(); }
+  constructor(public stream: MediaStream) {
+    FakeRecorder.last = this;
+  }
+  start() {
+    this.state = "recording";
+  }
+  stop() {
+    this.state = "inactive";
+    this.onstop?.();
+  }
   chunk(bytes: number[]) {
-    this.ondataavailable?.({ data: { size: bytes.length, arrayBuffer: () => Promise.resolve(new Uint8Array(bytes).buffer) } });
+    this.ondataavailable?.({
+      data: { size: bytes.length, arrayBuffer: () => Promise.resolve(new Uint8Array(bytes).buffer) },
+    });
   }
 }
 
 describe("useWebcamRecorder segments", () => {
-  let host: HTMLDivElement; let root: Root; let api: ReturnType<typeof useWebcamRecorder>;
-  const Probe = () => { api = useWebcamRecorder(); return null; };
+  let host: HTMLDivElement;
+  let root: Root;
+  let api: ReturnType<typeof useWebcamRecorder>;
+  const Probe = () => {
+    api = useWebcamRecorder();
+    return null;
+  };
   const stream = { id: "s1" } as MediaStream;
 
   beforeEach(() => {
     vi.stubGlobal("MediaRecorder", FakeRecorder);
-    host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
     act(() => root.render(createElement(Probe)));
   });
-  afterEach(() => { act(() => root.unmount()); host.remove(); vi.clearAllMocks(); });
+  afterEach(() => {
+    act(() => root.unmount());
+    host.remove();
+    vi.clearAllMocks();
+  });
 
-  /** One chunk from the live recorder, then `stop()` - which is what awaits the append chain. */
   const feed = async (bytes: number[]) => {
     FakeRecorder.last!.chunk(bytes);
-    await act(async () => { await api.stop(); });
+    await act(async () => {
+      await api.stop();
+    });
   };
 
   it("streams the take's first segment to the plain webcam file", async () => {

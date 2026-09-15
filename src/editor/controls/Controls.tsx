@@ -1,12 +1,12 @@
 import "./controls.css";
 
-export { Switch } from "./Switch";
-export { Picker } from "./Picker";
-export { Segmented } from "./Segmented";
-export { NumberField } from "./NumberField";
-export { Slider } from "./Slider";
-export { Swatches } from "./Swatches";
-export type { SwatchItem, SwatchVariant } from "./Swatches";
-export { ColorInput, toHex, fromHex } from "./ColorInput";
-export { Disclosure, readDisclosure, writeDisclosure } from "./Disclosure";
-export { CategorySection, defaultOpenIndex, readCategory, writeCategory } from "./CategorySection";
+export { Switch } from "./fields/Switch";
+export { Picker } from "./fields/Picker";
+export { Segmented } from "./fields/Segmented";
+export { NumberField } from "./fields/NumberField";
+export { Slider } from "./fields/Slider";
+export { Swatches } from "./fields/Swatches";
+export type { SwatchItem, SwatchVariant } from "./fields/Swatches";
+export { ColorInput, toHex, fromHex } from "./fields/ColorInput";
+export { Disclosure, readDisclosure, writeDisclosure } from "./surfaces/Disclosure";
+export { CategorySection, defaultOpenIndex, readCategory, writeCategory } from "./surfaces/CategorySection";

@@ -118,7 +118,7 @@ Ordered `[value, label]` pairs for the webcam-PiP aspect-ratio picker. Values ma
 
 ### Used by
 
-- `src/editor/panels/CameraPanel.tsx` - renders the Aspect picker
+- `src/editor/panels/camera/CameraPanel.tsx` - renders the Aspect picker
 
 ## RING_WIDTH_SLIDER
 
@@ -130,7 +130,7 @@ Slider range for the webcam ring/border width - same fraction-of-min-side units 
 
 ### Used by
 
-- `src/editor/panels/CameraRingField.tsx` - drives the ring-width slider bounds
+- `src/editor/panels/camera/CameraRingField.tsx` - drives the ring-width slider bounds
 
 ## DEFAULT_RING
 
@@ -142,7 +142,7 @@ The `CamRing` value written when the ring switch is toggled on (from `null`). *W
 
 ### Used by
 
-- `src/editor/panels/CameraRingField.tsx` - the switch's on-value
+- `src/editor/panels/camera/CameraRingField.tsx` - the switch's on-value
 
 ## pct
 
@@ -175,8 +175,8 @@ Factory defaults for all five modes, shipped as code rather than a config file s
 
 - `src/hud/settings/SettingsAppearance.tsx` - reset-to-defaults button
 - `src/hud/Hud.tsx` - initial settings hydration fallback
-- `src/editor/panels/layoutPresets.ts` - `resetLayout` (one layout back to its default) and `BUILTIN_PRESET` (the Layouts panel's undeletable "Default" row IS this constant)
-- `src/editor/panels/LayoutsPanel.tsx` / `CameraPanel.tsx` - the `?? DEFAULT_APPEARANCE` guard for a doc saved before a field existed
+- `src/editor/panels/layout/layoutPresets.ts` - `resetLayout` (one layout back to its default) and `BUILTIN_PRESET` (the Layouts panel's undeletable "Default" row IS this constant)
+- `src/editor/panels/layout/LayoutsPanel.tsx` / `CameraPanel.tsx` - the `?? DEFAULT_APPEARANCE` guard for a doc saved before a field existed
 
-**`resetCameraAppearance` is gone (2026-09-14).** It reset eight named webcam fields of the `screen` mode only, for the old Camera panel's header Reset - a scope bug from a Task 26 audit, fixed at the time by making the scope an explicit pure function. The Layouts panel resets a WHOLE layout instead, so the generalized `resetLayout(appearance, mode)` in `src/editor/panels/layoutPresets.ts` replaces it (and closes the same class of bug: a reset that writes `DEFAULT_APPEARANCE` wholesale silently resets all five). Its spec (`appearanceFields.test.ts`) went with it; `layoutPresets.test.ts` covers the replacement.
+**`resetCameraAppearance` is gone (2026-09-14).** It reset eight named webcam fields of the `screen` mode only, for the old Camera panel's header Reset - a scope bug from a Task 26 audit, fixed at the time by making the scope an explicit pure function. The Layouts panel resets a WHOLE layout instead, so the generalized `resetLayout(appearance, mode)` in `src/editor/panels/layout/layoutPresets.ts` replaces it (and closes the same class of bug: a reset that writes `DEFAULT_APPEARANCE` wholesale silently resets all five). Its spec (`appearanceFields.test.ts`) went with it; `layoutPresets.test.ts` covers the replacement.
 

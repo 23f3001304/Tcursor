@@ -23,7 +23,7 @@ pub struct Cursor {
 - `path` - the offline rest/move model (`path::PathModel`), built once from the log in `new`. Stateless between calls: a lookup is a binary search by time, so the preview's rewind-and-rescan needs nothing from it.
 - `smooth` - `CursorSettings::smoothness`, 0..1: how glassy the glide between rests is (0 = the recording's own timing). `set_smoothness` updates it live.
 - `ideal` - `CursorSettings::path_idealize`, 0..1: how straight the route between rests is (0 = the raw route). `set_idealize` updates it live.
-- `tilt` - the motion-lean filter (`cursor/tilt.md`), fed the same position this struct hands back so the lean rides the path the cursor is actually drawn on. *Why it lives here and not in the draw:* it is stateful and must advance exactly once per frame, which is a property only the per-frame position lookup has.
+- `tilt` - the motion-lean filter (`cursor/draw/tilt.md`), fed the same position this struct hands back so the lean rides the path the cursor is actually drawn on. *Why it lives here and not in the draw:* it is stateful and must advance exactly once per frame, which is a property only the per-frame position lookup has.
 - `tilt_max` - that filter's cap in degrees (`tilt::max_deg` of `CursorSettings::tilt`); `0.0` means the filter is off and `at` skips it entirely. *Why the derived cap rather than the raw setting:* `at` runs per frame and the clamp/scale belongs at the setter, not in the loop.
 
 ### Used by
@@ -171,38 +171,14 @@ Returns the drawn cursor position in frame-local pixels at event-time `t_ms`.
 
 Submodule (`cursor/path.rs`). The offline rest/move path model the polished cursor is drawn from: rests and clicks are the recording verbatim, moves between them are re-timed (Smoothness) and straightened (Path Idealization) with both ends pinned. Key items: `REST_MS`, `rest_px`, `PathModel`, `PathModel::new`, `PathModel::at` - full per-symbol docs in `cursor/path.md`.
 
-## cursordraw
-
-Submodule (`cursor/cursordraw.rs`). CPU rasterizer for the Enhanced synthetic cursor: sprite placement, click-bounce scale animation, and motion trail blending, clipped to the screen panel. Key items: `CursorSprite`, `decode_sprite`, `bounce_scale`, `draw_cursor`, `draw_cursor_posed`, `apply_enhanced` - full per-symbol docs in `cursor/cursordraw.md`.
-
-## cursorset
-
-Submodule (`cursor/cursorset.rs`). Manages the per-type cursor sprite set: decodes each shape once at prep time, inverts RGB for dark themes, and dispatches per-frame draw calls with panel-proportional sizing. Key items: `SPRITES`, `CursorPrep`, `prep`, `sprite_for`, `posed` (the busy animation's per-frame sprite + transform), `draw`, `frame_placement` (the projection both cursor paths share), `invert_rgb` - full per-symbol docs in `cursor/cursorset.md`.
-
-## busy
-
-Submodule (`cursor/busy.rs`). Pack format v2's animated busy cursor: pure math turning an output-clock timestamp into "which frame, rotated how far, scaled how much". Key items: `BusyAnim` (spin/flip/pulse), `BusySpec` (a pack's declared animation plus its explicit frame count), `BusyPose`, `busy_pose` - full per-symbol docs in `cursor/busy.md`. Mirrored in TS by `src/editor/stage/cursorBusy.ts`.
-
-## tilt
-
-Submodule (`cursor/tilt.rs`). The motion lean: a low-pass on the drawn cursor's velocity feeding a lightly under-damped spring, on a fixed 1 ms substep grid so a 30 fps export matches a 60 fps one. Key items: `REF_W`, `MAX_DEG`, `Tilt`, `Tilt::step`, `target_deg`, `max_deg`, `ref_scale` - full per-symbol docs in `cursor/tilt.md`. Mirrored in TS by `src/editor/stage/cursorTilt.ts`, pinned against the same five instants.
-
-## cursorxform
-
-Submodule (`cursor/cursorxform.rs`). The rotated/scaled blit the animated busy cursor needs: destination-driven inverse mapping with premultiplied bilinear sampling, reached only when `BusyPose::is_identity` is false so every still cursor keeps `cursordraw`'s nearest-neighbour fast path. Key item: `blit_transformed` - full per-symbol docs in `cursor/cursorxform.md`.
-
-## packdirs
-
-Submodule (`cursor/packdirs.rs`). Where cursor packs live: the embedded set, the BUNDLED folders under the app's `assets/cursorpacks` resources, and the user's imports under `cursors_dir()`. Resolves a pack id to a folder (bundled wins) and explains why the exe-relative candidates make `tauri dev` work with no staging step. Key items: `cursors_dir`, `pack_dir`, `resource_candidates`, `bundled_root`, `default_pack_dir` (the embedded pack's own `assets/cursors` folder), `bundled_pack_dir`, `bundled_pack_dirs`, `imported_pack_dirs`, `resolve_pack_dir` - full per-symbol docs in `cursor/packdirs.md`.
-
-## packlist
-
-Submodule (`cursor/packlist.rs`). What packs exist and how the Cursor panel's grid shows them - names, folders, and a kind-to-filename map that already carries the embedded pack's `pointer.png` alias and the busy-is-arrow substitution, so the frontend needs neither rule. Key items: `CursorPackInfo`, `list_packs`, `imported_info`, `pack_files`, `default_filename` - full per-symbol docs in `cursor/packlist.md`.
-
-## captured
-
-Submodule (`cursor/captured.rs`). The REAL OS cursor, composited from the layer the recorder captured (`events::track::cursorlayer`) - what "System" means on any recording made since screen capture went cursor-free. Draws the actual recorded bitmap at the raw recorded point, with none of the Enhanced polish. Key items: `draws_captured` (the single gate that picks captured over synthetic), `CapturedCursors`, `CapturedCursors::load`, `CapturedCursors::sprite_at`, `CapturedCursors::draw` - full per-symbol docs in `cursor/captured.md`.
-
 ## cursorpreview
 
 Submodule (`cursor/cursorpreview.rs`). Editor-preview cursor commands: expose the Capitaine sprite pack + cursor-type track to the frontend so the canvas preview draws the same cursor the export renders. Key items: `cursor_sprites` (now returning a `CursorPackDto` carrying the pack's busy animation), `cursor_kinds`, `cursor_layer` (Tauri commands) - full per-symbol docs in `cursor/cursorpreview.md`.
+
+## draw
+
+Submodule folder (`cursor/draw/mod.rs`). Everything that puts a cursor on a frame: sprite decode and blit, the click bounce and trail, the busy animation's pose and its transformed blit, the glass state cross-fade, the motion lean, and the captured OS bitmap. Module index in `cursor/draw/mod.md`.
+
+## pack
+
+Submodule (`cursor/pack.rs`), head of the `cursor/pack/` folder. Cursor pack resolution - "id to sprite bytes" - over the folder that knows which packs exist, where they live on disk, how one is imported and how a template is written. Full per-symbol docs in `cursor/pack.md`.

@@ -37,7 +37,7 @@ export function SpeedInspector({ speed, dur, onApply, onClose }: {
 
 ### Behavior
 
-**Factor.** `Slider` from `FACTOR_MIN` to `FACTOR_MAX` (0.25 to 8, imported from `lib/remap.ts` so the UI bound and the clock map's clamp are literally the same constants), `step` 0.05, `snapFactor` on change, formatted `2x` / `0.5x`, accented `--e-speed` - the same accent the span's own pill carries on the Time lane, so the two read as one object.
+**Factor.** `Slider` from `FACTOR_MIN` to `FACTOR_MAX` (0.25 to 8, imported from `shared/math/remap.ts` so the UI bound and the clock map's clamp are literally the same constants), `step` 0.05, `snapFactor` on change, formatted `2x` / `0.5x`, accented `--e-speed` - the same accent the span's own pill carries on the Time lane, so the two read as one object.
 
 **The hint does the arithmetic.** "2 s of recording becomes 1 s of export." - the span's clip length over its factor, which is the number a user is actually deciding about. It sits under the Rate slider, next to the control that changes it.
 

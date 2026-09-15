@@ -1,6 +1,6 @@
 # src-tauri/src/events/track/cursorpixels.rs
 
-Pure conversion of Win32 cursor bitmaps into straight-alpha, top-down RGBA. `cursorcapture.rs` does the GDI talking and hands the raw 32bpp DIB rows here; every pixel rule lives in this file so it can be unit-tested without a Windows session, a real cursor, or a device context.
+Pure conversion of Win32 cursor bitmaps into straight-alpha, top-down RGBA. `platform/windows/input/bitmap.rs` does the GDI talking and hands the raw 32bpp DIB rows here; every pixel rule lives in this file so it can be unit-tested without a Windows session, a real cursor, or a device context.
 
 Two shapes of cursor exist and both land here:
 
@@ -21,7 +21,7 @@ One captured OS cursor bitmap, ready to be PNG-encoded into the project's cursor
 
 ### Used by
 
-- `src-tauri/src/events/track/cursorcapture.rs` - produced by `capture`
+- `src-tauri/src/platform/windows/input/bitmap.rs` - produced by `capture`
 - `src-tauri/src/events/track/cursorlayer.rs` - consumed by `CursorLayerBuilder::add`
 
 ## color_rgba

@@ -88,5 +88,5 @@ The cached `Vec<BackgroundThumb>`, cloned. `Err` only if the blocking task itsel
 
 ### Used by
 
-- `src/lib/ipcPreview.ts` (`backgroundThumbs`) - the TypeScript binding.
-- `src/editor/panels/BackgroundPanel.tsx` - fetches once per mount and feeds both the Wallpapers and Gradient grids.
+- `src/shared/ipc.ts` (`backgroundThumbs`) - the TypeScript binding.
+- `src/editor/panels/background/BackgroundPanel.tsx` - fetches once per mount and feeds both the Wallpapers and Gradient grids.

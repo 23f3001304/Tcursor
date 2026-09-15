@@ -1,8 +1,3 @@
-// Run explicitly:
-//   cargo test --test manual_export -- --ignored --nocapture
-// Finds the newest recording under %USERPROFILE%\Videos\TCursor (or the legacy
-// CursorZoom) that has a video.mp4 + events.json, exports it, and verifies
-// final.mp4 is produced.
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -25,7 +20,14 @@ fn exports_latest_recording_to_final_mp4() {
     eprintln!("exporting recording: {name}");
 
     let paths = ProjectPaths::new(&videos, &name);
-    export(&paths, ExportSettings::default(), |p| eprintln!("progress {p}")).expect("export failed");
+    let platform = cursor_zoom_lib::platform::current();
+    export(
+        &paths,
+        ExportSettings::default(),
+        platform.system.as_ref(),
+        |p| eprintln!("progress {p}"),
+    )
+    .expect("export failed");
 
     let final_mp4 = paths.folder.join("final.mp4");
     let meta = std::fs::metadata(&final_mp4).expect("final.mp4 should exist");
@@ -33,15 +35,20 @@ fn exports_latest_recording_to_final_mp4() {
     eprintln!("wrote {} ({} bytes)", final_mp4.display(), meta.len());
 
     let out = Command::new("ffprobe")
-        .args(["-v", "error", "-show_entries", "stream=codec_type,width,height",
-            "-of", "default=nw=1"])
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "stream=codec_type,width,height",
+            "-of",
+            "default=nw=1",
+        ])
         .arg(&final_mp4)
         .output()
         .expect("ffprobe final");
     eprintln!("ffprobe summary:\n{}", String::from_utf8_lossy(&out.stdout));
 }
 
-/// Newest `rec-*` directory that contains both video.mp4 and events.json.
 fn newest_recording(videos: &std::path::Path) -> Option<String> {
     let mut best: Option<(std::time::SystemTime, String)> = None;
     for entry in std::fs::read_dir(videos).ok()?.flatten() {

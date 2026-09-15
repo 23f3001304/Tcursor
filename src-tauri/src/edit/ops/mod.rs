@@ -1,7 +1,10 @@
 pub mod api;
 pub mod arrangement;
+pub mod captions;
 pub mod effects;
+pub mod ids;
 pub mod metrics;
+pub mod motion;
 pub mod region;
 pub mod smart_zoom;
 pub mod timeops;

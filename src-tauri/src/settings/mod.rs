@@ -1,7 +1,11 @@
 pub mod appearance;
 pub mod background;
 pub mod bg_asset;
+pub mod captions;
 pub mod cursor;
+pub mod interface;
 pub mod model;
+pub mod motion;
 pub mod store;
+pub mod theme;
 pub mod wallpapers;

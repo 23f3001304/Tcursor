@@ -1,4 +1,6 @@
-pub struct WavWriter { inner: hound::WavWriter<std::io::BufWriter<std::fs::File>> }
+pub struct WavWriter {
+    inner: hound::WavWriter<std::io::BufWriter<std::fs::File>>,
+}
 
 impl WavWriter {
     pub fn create(path: &str, sample_rate: u32, channels: u16) -> std::io::Result<Self> {
@@ -13,10 +15,14 @@ impl WavWriter {
         Ok(Self { inner })
     }
     pub fn write(&mut self, samples: &[i16]) {
-        for &s in samples { let _ = self.inner.write_sample(s); }
+        for &s in samples {
+            let _ = self.inner.write_sample(s);
+        }
     }
     pub fn finalize(self) -> std::io::Result<()> {
-        self.inner.finalize().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        self.inner
+            .finalize()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
     }
 }
 

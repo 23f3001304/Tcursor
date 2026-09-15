@@ -73,7 +73,7 @@ This is also what decides `Compositor::set_bg_dynamic`, so the "does the backgro
 pub fn apply_dim(buf: &mut [u8], dim: f32)
 ```
 
-Darken a BGRA buffer by `dim` (0..1), which is exactly a black overlay at that alpha: `out = round(src * (1 - dim))`, alpha untouched. `src/editor/stage/stageBg.ts` paints the same formula over the preview's own video draw, so preview and export agree.
+Darken a BGRA buffer by `dim` (0..1), which is exactly a black overlay at that alpha: `out = round(src * (1 - dim))`, alpha untouched. `src/editor/stage/canvas/stageBg.ts` paints the same formula over the preview's own video draw, so preview and export agree.
 
 *Why a multiply rather than a real composite:* a black overlay at alpha `a` IS `src * (1 - a)`, and this way there is no second buffer. `dim == 0` returns immediately without touching a byte, which keeps the default path free - for a video background this runs once per FRAME, not once per build.
 

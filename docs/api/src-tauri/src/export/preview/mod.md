@@ -1,13 +1,13 @@
 # src-tauri/src/export/preview/mod.rs
 
-Single-frame preview engine + the warm renderer cache. Renders one composited output frame at an arbitrary scrub time T from `edit.json`, reusing `FrameRenderer` (render.rs) so the preview is byte-faithful to the export, and exposes the export background as an image. The lightweight metadata commands the editor uses for smooth playback (camera curve, layout, clicks, proxy) live in `preview_track.rs`; both share the `with_warm` cache helper (now in `session.rs`).
+Single-frame preview engine + the warm renderer cache. Renders one composited output frame at an arbitrary scrub time T from `edit.json`, reusing `FrameRenderer` (render.rs) so the preview is byte-faithful to the export, and exposes the export background as an image. It also holds the wire encoders (`png_encode`, `jpeg_encode`, `base64_encode`) that turn a composited frame into a `data:` URL. The lightweight metadata commands the editor uses for smooth playback (camera curve, layout, clicks, proxy) live in `preview_track.rs`; both share the `with_warm` cache helper (in `session.rs`).
 
-**The warm renderer cache moved (sweep-2 Task 1).** `Cached`, `PreviewSession` (with `has_webcam`) and `with_warm` now live in the sibling `session.rs` - see `session.md`. They are re-exported from here (`pub use session::PreviewSession;` / `pub(crate) use session::with_warm;`) so every preview command still imports them from `crate::export::preview`. They moved for the line budget and because the lock-discipline rewrite (build and render outside the cache mutex; `has_webcam` off the mutex entirely) wanted its own unit tests, which live in `session_tests.rs`.
+**The warm renderer cache.** `Cached`, `PreviewSession` (with `has_webcam`), `with_warm` and `with_warm_app` live in the sibling `session.rs` - see `session.md`. `PreviewSession` and `with_warm_app` are re-exported from here so every preview command still imports them from `crate::export::preview`; `with_warm` itself is no longer re-exported, because since Batch D every command goes through `with_warm_app`, which resolves both `PreviewSession` and `Arc<Platform>` from the `AppHandle` the command already has. They live there because the lock-discipline rewrite (build and render outside the cache mutex; `has_webcam` off the mutex entirely) wanted its own unit tests, which live in `session_tests.rs`.
 
 ## render_preview
 
 ```rust
-pub fn render_preview(paths: &ProjectPaths, time_ms: u32) -> Result<Vec<u8>>
+pub fn render_preview(paths: &ProjectPaths, time_ms: u32, system: &dyn SystemPort) -> Result<Vec<u8>>
 ```
 
 Renders one composited frame at `time_ms` (uncached: builds a fresh renderer via `build_renderer`) and returns PNG bytes at the resolved preview size. Not currently called by any Tauri command (`preview_frame`, below, uses the warm cache instead) - kept as the uncached entry point.
@@ -16,6 +16,7 @@ Renders one composited frame at `time_ms` (uncached: builds a fresh renderer via
 
 - `paths: &ProjectPaths` - project folder. *Why:* all asset paths (video, webcam, events, edit.json) are derived from it.
 - `time_ms: u32` - preview scrub position in ms from the start of the recording. *Why:* the caller knows the editor timeline position; the function converts it to an output frame index internally.
+- `system: &dyn SystemPort` - forwarded to `build_renderer` for the capture fps and the desktop's dark preference. Its only caller, `exporter.rs`'s `preview_frame_bench`, builds a `platform::current()` for it.
 
 ### Returns
 
@@ -23,7 +24,7 @@ Renders one composited frame at `time_ms` (uncached: builds a fresh renderer via
 
 ### Implementation
 
-1. `build_renderer(paths)` calls `FrameRenderer::new(paths, Layout::default(), fps, Resolution::Source, Some(PREVIEW_LONG_EDGE))` - the doc's `aspect` is resolved against the true source dims then downscaled to the `PREVIEW_LONG_EDGE` (1280px) budget (`Layout::resolve`), so the preview frame always matches the export's aspect proportionally. `Resolution::Source` is a no-op here (the export resolution setting only applies to the export build).
+1. `build_renderer(paths, system)` calls `FrameRenderer::new(paths, Layout::default(), fps, Resolution::Source, Some(PREVIEW_LONG_EDGE), system)` - the doc's `aspect` is resolved against the true source dims then downscaled to the `PREVIEW_LONG_EDGE` (1280px) budget (`Layout::resolve`), so the preview frame always matches the export's aspect proportionally. `Resolution::Source` is a no-op here (the export resolution setting only applies to the export build).
 2. Compute `k_target = time_ms as u64 * OUT_FPS / 1000`. Fast-forward the camera sim by calling `step_camera` for every `j` in `0..=k_target` at `video_start + j * 1000 / OUT_FPS`, each with `OUT_STEP_MS` as the frame period (the exact 16.667ms, never the rounded timestamp delta - see `render/mod.md`). This must ascend because `CameraSim` and the cursor index only move forward. The last returned `FramePose` is the preview pose. Cost: arithmetic only, no I/O.
 3. Spawn a `RawDecoder` on `paths.video()` seeked to `time_ms` (the screen file's frame 0 is `video_start`, so `time_ms` is the right offset), read one frame into a `screen_bytes`-sized buffer; bail if the read hits EOF (time past end of video).
 4. If `paths.webcam().exists()`, spawn a `RawDecoder` on the webcam seeked to `video_start + time_ms` (export pre-seeks the webcam by `video_start`, so its file-time is shifted) with `cover_scale = Some((webcam_w, webcam_h))` - the same SOURCE-aspect decode box the export uses (`render::meta::webcam_box`; each panel cover-crops it at composite time), so the preview and the export never disagree about the webcam's framing - read one frame; else `webcam = None`.
@@ -51,7 +52,7 @@ Tauri IPC command: renders one preview frame (via the warm cache) and returns a 
 
 **Off the main thread (Task 41 sweep correction).** `async fn` + `spawn_blocking`, same freeze mechanism as `ai::commands` (Task 40) and `thumbs.rs`/`preview_track.rs` (Task 41): `render_frame` calls `RawDecoder::spawn` (screen, and webcam when present) which shells out to `ffmpeg` and blocks on its stdout pipe until the seeked frame decodes - a real blocking subprocess call, not in-process math. An earlier T41 sweep incorrectly grouped this command with `camera_track`/`preview_layout`/`click_track` (`preview_track.rs`) as "pure math/cache reads" and left it sync - those three genuinely are pure math (no decode, see their own docs); this one is not. (Sweep-2 Task 1 has since converted those three too - not because their own bodies decode, but because the `with_warm` cold path underneath every one of them does.) Because `session: tauri::State<'_, PreviewSession>` can't be moved into `spawn_blocking` (its lifetime isn't `'static`), the command instead takes `app: tauri::AppHandle` (`'static`, `Clone`, `Send`) and re-derives the same managed-state handle inside the blocking closure via `app.state::<PreviewSession>()` (`tauri::Manager`).
 
-**Called by `useExactFrame`** (`src/editor/hooks/useExactFrame.ts`, via `ipcPreview.ts`'s `previewFrame`) whenever the stage's playhead rests; it was uncalled from the Task 41 sweep until 2026-09-14 - the editor's M3 preview plays the recording natively via `<video>` (see `Editor.md`) rather than fetching per-frame PNGs, so nothing currently invokes this command. Converted anyway per "dead-or-not, it must not be a landmine" - a future caller (or a re-enabled `render_preview`-style flow) would otherwise silently reintroduce a main-thread freeze.
+**Called by `useExactFrame`** (`src/editor/hooks/stage/useExactFrame.ts`, via `ipcPreview.ts`'s `previewFrame`) whenever the stage's playhead rests; it was uncalled from the Task 41 sweep until 2026-09-14 - the editor's M3 preview plays the recording natively via `<video>` (see `Editor.md`) rather than fetching per-frame PNGs, so nothing currently invokes this command. Converted anyway per "dead-or-not, it must not be a landmine" - a future caller (or a re-enabled `render_preview`-style flow) would otherwise silently reintroduce a main-thread freeze.
 
 ### Inputs (what, and why it is needed)
 
@@ -119,7 +120,37 @@ The preview canvas long-edge budget in pixels. 1280 matches the old hardcoded 16
 ## build_renderer
 
 ```rust
-fn build_renderer(paths: &ProjectPaths) -> Result<(FrameRenderer, RenderMeta)>
+fn build_renderer(paths: &ProjectPaths, system: &dyn SystemPort) -> Result<(FrameRenderer, RenderMeta)>
 ```
 
-Builds a fresh preview renderer downscaled to `PREVIEW_LONG_EDGE`, following the doc's chosen `aspect` exactly via `FrameRenderer::new(paths, Layout::default(), fps, Resolution::Source, Some(PREVIEW_LONG_EDGE))` - the aspect is resolved against the true source dims then scaled to the long-edge budget, so the preview always matches the export's aspect proportionally. `Resolution::Source` is passed (rather than a user-chosen resolution) because the export resolution setting only applies to the export build, not the preview.
+Builds a fresh preview renderer downscaled to `PREVIEW_LONG_EDGE`, following the doc's chosen `aspect` exactly via `FrameRenderer::new(paths, Layout::default(), fps, Resolution::Source, Some(PREVIEW_LONG_EDGE), system)` - the aspect is resolved against the true source dims then scaled to the long-edge budget, so the preview always matches the export's aspect proportionally. `Resolution::Source` is passed (rather than a user-chosen resolution) because the export resolution setting only applies to the export build, not the preview.
+
+`fps` is `system.primary_refresh_hz().min(60)` - the same number `exporter::export` computes for the export build, from the same port, which is what keeps the preview's timeline denominator identical to the export's.
+
+## jpeg_encode
+
+```rust
+pub(crate) fn jpeg_encode(bgra: &[u8], w: u32, h: u32) -> Result<Vec<u8>>
+```
+
+JPEG-encodes a BGRA buffer in process with the `jpeg-encoder` crate (0.7, no transitive dependencies) at `JPEG_QUALITY` = 90, taking BGRA directly so there is no swizzle pass. Until 2026-09-15 this staged the frame to a temp file and spawned ffmpeg (`-f rawvideo -pix_fmt bgra ... -q:v 3 -f mjpeg -`), which the readability doc (section 4.1) measured at about 220 ms of a roughly 350 ms settled-frame call; the in-process encoder removes the temp-file write and the process spawn, and `preview_bg` (which runs at pointer-move rate) gains the same. *Why not `png_encode`:* the stage draws this frame the moment playback pauses or a scrub settles, and a 1280-wide PNG deflate in a debug build costs more than the render itself; the JPEG is a tenth of the bytes over IPC. `u16::try_from` bounds the dimensions at 65535 (the format's own limit); errors on an encoder failure or fewer than four bytes. Test: `tests::a_bgra_buffer_encodes_to_a_jpeg` in the sibling `mod_tests.rs` (no ffmpeg needed any more).
+
+## JPEG_QUALITY
+
+`90` - the encoder's quality, chosen to match what ffmpeg's `-q:v 3` produced for the same frames.
+
+## png_encode
+
+```rust
+pub(crate) fn png_encode(bgra: &[u8], w: u32, h: u32) -> Result<Vec<u8>>
+```
+
+PNG-encodes a BGRA buffer in memory (swizzles to RGBA, then the `png` crate at 8-bit RGBA). Used where the bytes must be exact rather than small: `render_preview` (the `preview_frame_bench` output) and `preview_bg`.
+
+## base64_encode
+
+```rust
+pub(crate) fn base64_encode(input: &[u8]) -> String
+```
+
+Base64 (RFC 4648 alphabet, `=` padding, no line breaks), for the `data:` URLs the preview commands return. Local rather than a dependency: it is ~15 lines and runs once per reply.

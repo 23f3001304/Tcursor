@@ -19,7 +19,7 @@ Which mouse button was pressed or released.
 ### Used by
 
 - `src-tauri/src/events/model.rs` (`MouseEvent`) - optional field on `Down`/`Up` events
-- `src-tauri/src/events/track/tracker.rs` - Windows hook maps `WM_LBUTTONDOWN` etc. to `Button` variants
+- `src-tauri/src/platform/windows/input/pointer.rs` - Windows hook maps `WM_LBUTTONDOWN` etc. to `Button` variants
 - `src-tauri/src/events/collector.rs` - forwarded to `MouseEvent` without inspection
 
 ## EventKind

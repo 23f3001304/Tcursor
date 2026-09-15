@@ -1,10 +1,6 @@
 # src-tauri/src/actions/mod.rs
 
-MODULE OVERVIEW: The `actions` module records every hotkey-driven event that occurs during a recording session. It owns the data model for action kinds and timestamped events, a parser that converts user-configured hotkey strings into armed chord descriptors, and a background polling tracker that detects key presses and typing bursts without installing a kernel hook. The three submodules connect as a pipeline: `model` defines the shared data types, `matcher` parses and matches hotkeys against those types, and `keyboard` runs the poll loop that feeds `ActionEvent` values into `model::ActionLog`. The most important entry points are `matcher::arming_from_settings` (called once at recording start to build the armed table) and `keyboard::KeyboardTracker::start`/`stop` (owns the poll thread for the duration of a session).
-
-## keyboard
-
-Polls Win32 async key state at ~60 Hz on a dedicated background thread to detect hotkey presses and typing bursts without a `WH_KEYBOARD_LL` hook. Key items: `KeyboardTracker` (owns the poll thread and accumulates data), `KeyboardTracker::start` (spawns the thread with an armed chord table), `KeyboardTracker::stop` (joins the thread and returns collected events and typing timestamps).
+MODULE OVERVIEW: The `actions` module owns what a hotkey IS - the data model for action kinds and timestamped events, and the parser that turns user-configured hotkey strings into armed chord descriptors. What a hotkey press is DETECTED by is not here: the poll loop, `key_down` and the `TYPING_VKS` table are Win32 virtual-key facts and live in `platform/windows/input/hotkeys.rs` behind `ports::input::HotkeyPort`. The two submodules connect as a pipeline: `model` defines the shared data types and `matcher` parses and matches hotkeys against them. The entry point is `matcher::arming_from_settings`, called once at recording start to build the armed table the port's `hotkeys` factory is handed.
 
 ## matcher
 

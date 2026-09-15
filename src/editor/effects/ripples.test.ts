@@ -1,10 +1,9 @@
+// @vitest-environment jsdom
 import { describe, it, expect } from "vitest";
 import { RIPPLE_CAP, dropRipple, pushRipple, rippleTone, suppressesRipple, type Ripple } from "./ripples";
 
 const at = (id: number): Ripple => ({ id, x: id, y: id, tone: "rim" });
 
-/** Build a detached tree from HTML and hand back the element matching `sel` - the pointerdown
- *  target the overlay would actually see (usually a glyph inside the button, not the button). */
 function target(html: string, sel: string): Element {
   const host = document.createElement("div");
   host.innerHTML = html;
@@ -20,7 +19,7 @@ describe("ripple cap", () => {
     expect(list.map((r) => r.id)).toEqual([1, 2, 3, 4, 5, 6]);
     list = pushRipple(list, at(7));
     expect(list).toHaveLength(RIPPLE_CAP);
-    expect(list.map((r) => r.id)).toEqual([2, 3, 4, 5, 6, 7]); // oldest first, oldest out
+    expect(list.map((r) => r.id)).toEqual([2, 3, 4, 5, 6, 7]);
   });
 
   it("never grows past the cap however fast the clicks come", () => {
@@ -32,8 +31,6 @@ describe("ripple cap", () => {
   it("drops by id, and returns the same array when the id is already gone", () => {
     const list = [at(1), at(2), at(3)];
     expect(dropRipple(list, 2).map((r) => r.id)).toEqual([1, 3]);
-    // Identity, not just equality: the overlay relies on React bailing out of this setState when
-    // an already-evicted ripple's exit animation completes.
     expect(dropRipple(list, 99)).toBe(list);
   });
 });
@@ -56,13 +53,19 @@ describe("opted-out surfaces", () => {
 
 describe("ripple tint", () => {
   it("tints the play button and Export with the accent", () => {
-    expect(rippleTone(target(`<button class="e-play"><span class="e-play-glyph"></span></button>`, ".e-play-glyph"))).toBe("accent");
+    expect(
+      rippleTone(
+        target(`<button class="e-play"><span class="e-play-glyph"></span></button>`, ".e-play-glyph"),
+      ),
+    ).toBe("accent");
     expect(rippleTone(target(`<button class="e-export"><svg></svg></button>`, "svg"))).toBe("accent");
   });
 
   it("tints an engaged control with the accent, by `.on` or by aria-current", () => {
     expect(rippleTone(target(`<button class="e-tbtn on"><span>In</span></button>`, "span"))).toBe("accent");
-    expect(rippleTone(target(`<button class="e-railbtn" aria-current="true"><svg></svg></button>`, "svg"))).toBe("accent");
+    expect(
+      rippleTone(target(`<button class="e-railbtn" aria-current="true"><svg></svg></button>`, "svg")),
+    ).toBe("accent");
   });
 
   it("leaves every quiet control on the neutral ring", () => {

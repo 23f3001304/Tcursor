@@ -223,5 +223,5 @@ Standard RGB -> HSV -> RGB, with the hue sector arithmetic written out rather th
 ### Used by
 
 - `src-tauri/src/export/fx/fx_uniforms.rs` - `build_fx_u` fills `FxU.color2` with it.
-- `src-tauri/src/export/fx/clickdraw.rs` - `draw_clicks`' `Neon` arm, for the CPU fallback's second tube.
+- `src-tauri/src/export/fx/click/clickdraw.rs` - `draw_clicks`' `Neon` arm, for the CPU fallback's second tube.
 

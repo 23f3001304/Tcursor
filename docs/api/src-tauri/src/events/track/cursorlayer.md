@@ -50,6 +50,8 @@ File existence ONLY: no parse, no entry count. An EMPTY layer still means a clea
 
 ## CursorLayer::load
 
+**Steadied on the way in (2026-09-15).** `track` comes back through `steady(&raw.track, SHAPE_HOLD_MS)` (`steady.md`), exactly as `CursorTrack::load` steadies the type samples, so `id_at` never chases a bitmap that showed for a few ms while the pointer crossed text; `cursors` and the PNGs are untouched.
+
 ```rust
 pub fn load(paths: &ProjectPaths) -> Option<Self>
 ```
@@ -64,7 +66,7 @@ pub fn id_at(&self, t_ms: u32) -> Option<u32>
 
 The cursor id showing at `t_ms` - the last sample with `t <= t_ms`, found by `partition_point`. Mirrors `CursorTrack::type_at`, except that it returns `None` rather than a default before the first sample and on an empty track: there is no universal fallback bitmap the way `Arrow` is a universal fallback shape, so "nothing captured yet" has to mean "draw nothing".
 
-The TypeScript mirror is `idAt` in `src/editor/stage/cursorPreview.ts`.
+The TypeScript mirror is `idAt` in `src/editor/stage/cursor/cursorPreview.ts`.
 
 ## CursorLayerBuilder
 
@@ -82,7 +84,7 @@ Kept separate from `CursorLayer` so the serialized shape never has to carry pixe
 pub fn is_full(&self) -> bool
 ```
 
-True once `MAX_CURSORS` bitmaps are held. The tracker checks this BEFORE calling `cursorcapture::capture`, so past the cap no further GDI work is done at all.
+True once `MAX_CURSORS` bitmaps are held. The tracker checks this BEFORE calling `platform::windows::input::bitmap::capture`, so past the cap no further GDI work is done at all.
 
 ## CursorLayerBuilder::add
 

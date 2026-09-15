@@ -1,5 +1,5 @@
 pub mod pacing;
 pub mod paths;
-pub mod sync;
-pub mod record;
 pub mod project;
+pub mod record;
+pub mod sync;

@@ -1,14 +1,14 @@
 # src/editor/director/choreography.ts
 
-The pure step planner behind the AI director's choreographed reveal - maps one edit op to what the fake pointer (`DirectorPointer.tsx`) should do around it, and paces how long each beat takes. No DOM, no timers, no randomness - fully unit-tested (`choreography.test.ts`).
+The pure step planner behind the AI director's pointer replay - maps one applied edit op to what the fake pointer (`DirectorPointer.tsx`) should do to perform it after the fact, and paces how long each beat takes. No DOM, no timers, no randomness - fully unit-tested (`choreography.test.ts`). The edit has already landed by the time a plan is walked (`useAiRun.ts`'s replay runs after `applyRun`), so a plan is a gesture at the real pill, never an apply.
 
 ## StepKind
 
 ```ts
-export type StepKind = "aim-timeline" | "sweep-lane" | "drag-trim" | "none"
+export type StepKind = "aim-timeline" | "drag-trim" | "none"
 ```
 
-The shape of choreography a step needs: aim at one point on the timeline and (usually) press, sweep across a lane, drag a trim handle, or hold position.
+The three shapes a replay ever walks: aim at one point on a timeline lane and press, aim at a trim handle, or hold position.
 
 ## StepPlan
 
@@ -16,7 +16,7 @@ The shape of choreography a step needs: aim at one point on the timeline and (us
 export interface StepPlan { kind: StepKind; lane: Lane; ms?: number; pressAfterMove: boolean }
 ```
 
-The plan for one op. `ms` (when present) is the PRIMARY aim target - absent for `"sweep-lane"`, which has no single point. `set_trim` can move both trim handles, but `planStep` only sees the op, not the doc's PRIOR trim, so it only plans the "in" leg here (`lane: "trim-in"`); `useDirector.ts`'s `reveal` (which HAS the current doc) decides the "out" leg itself, using the same `timelinePointForMs`, only when `out_ms` actually changed from the doc's current trim.
+The plan for one op. `ms` is the aim target on `lane` (`targets.ts`), present for every kind but `"none"`. A trim aims at the in handle only: after the apply, the handle already sits at `in_ms`, so pressing there is the honest gesture; the out handle has no matching press.
 
 ## planStep
 
@@ -24,12 +24,14 @@ The plan for one op. `ms` (when present) is the PRIMARY aim target - absent for 
 export function planStep(op: EditOp): StepPlan
 ```
 
-Maps one AI-director op to its `StepPlan`:
+Maps one op to its `StepPlan`:
 
 - `add_zoom_full { at_ms }` -> `{ kind: "aim-timeline", lane: "zoom", ms: at_ms, pressAfterMove: true }`.
-- `clear_zooms` -> `{ kind: "sweep-lane", lane: "zoom", pressAfterMove: false }`.
+- `add_effect { start_ms }` -> `{ kind: "aim-timeline", lane: "fx", ms: start_ms, pressAfterMove: true }` (a spotlight proposal).
 - `set_trim { in_ms }` -> `{ kind: "drag-trim", lane: "trim-in", ms: in_ms, pressAfterMove: true }`.
-- anything else -> `{ kind: "none", lane: "zoom", pressAfterMove: false }` (pointer holds position, op applies normally). The only op kinds the planner (`ai_plan`/`ops_from_json` on the Rust side) actually ever emits are the three above; this branch is defensive, not currently reachable from a real plan.
+- anything else -> `{ kind: "none", lane: "zoom", pressAfterMove: false }`: a layout segment, a cut or a speed span has no pill on the timeline the pointer can land on, so the replay skips it and moves on.
+
+`useAiRun` plans each proposal from its FIRST op (`proposal.ops[0]`, the op that creates the region); a proposal's follow-up op (`update_zoom` with the created id) is the same pill and gets no gesture of its own.
 
 ## pace
 

@@ -25,7 +25,7 @@ Scans `actions` for `ZoomHoldStart` / `ZoomHoldEnd` pairs and emits one `ZoomReg
 
 1. Walk `actions` with a `start: Option<u32>` accumulator.
 2. On `ZoomHoldStart`: record `start = Some(a.t)`.
-3. On `ZoomHoldEnd`: if `start` is `Some(s)`, call `cursor_at(events, screen, s)` for the anchor. Push `ZoomRegion { start_ms: s, end_ms: max(a.t, s+1) + cfg.zoom_out_ms, zoom_in_ms: cfg.zoom_in_ms, zoom_out_ms: cfg.zoom_out_ms, target_scale: cfg.target_scale, anchor, easing: cfg.easing }`. *Why `max(a.t, s+1)`:* guarantees `end_ms > start_ms` even for an instantaneous tap, preventing a zero-duration region.*
+3. On `ZoomHoldEnd`: if `start` is `Some(s)`, call `cursor_at(events, screen, s)` for the anchor - the last mouse sample at or before `s`, or screen center if none. `cursor_at` assumes `events` is in ascending capture-time order; it does not re-sort. Push `ZoomRegion { start_ms: s, end_ms: max(a.t, s+1) + cfg.zoom_out_ms, zoom_in_ms: cfg.zoom_in_ms, zoom_out_ms: cfg.zoom_out_ms, target_scale: cfg.target_scale, anchor, easing: cfg.easing, easing_out: cfg.easing }`. (`easing_out` equals `easing` here for the same reason it does in `autozoom`: a generated region has one curve, and only the editor ever splits the two ramps.) *Why `max(a.t, s+1)`:* guarantees `end_ms > start_ms` even for an instantaneous tap, preventing a zero-duration region.*
 4. Clear `start`; continue. Other action kinds are skipped.
 
 ### Behaviors worth knowing

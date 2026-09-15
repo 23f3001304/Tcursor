@@ -1,6 +1,6 @@
 # src/hud/settings/SettingsControls.tsx
 
-Shared primitive UI controls used by every settings panel in the HUD. All four exports are purely presentational - state is always owned by the caller, and each component calls back with a new value rather than mutating anything internally.
+Shared primitive UI controls used by every settings panel in the HUD. The numeric slider moved to `SettingsRange.tsx` (see `SettingsRange.md`) when this file went over its budget; what is left is the three small ones. All three exports are purely presentational - state is always owned by the caller, and each component calls back with a new value rather than mutating anything internally.
 
 ## Field
 
@@ -50,45 +50,6 @@ An iOS-style boolean toggle rendered as `<button role="switch" aria-checked={on}
 ### Notes
 
 Used by every settings panel. Not wrapped in a `Field` - callers typically place it inside a `.sf-row` div with a `.sf-label` span to produce a horizontal label + switch layout.
-
-## Range
-
-```tsx
-export function Range({
-  label,
-  value,
-  min,
-  max,
-  step,
-  onChange,
-  fmt,
-  hint,
-}: {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step: number;
-  onChange: (v: number) => void;
-  fmt: (v: number) => string;
-  hint?: string;
-})
-```
-
-A compact numeric slider. Renders `<label className="rng">` containing a `.rng-head` row (label left, optional hint then formatted value right), then `<input type="range">`.
-
-### Props
-
-- `label: string` - control label; wrapping in `<label>` makes the entire header row a click target for the slider. *Why:* increases the tap area without extra CSS.
-- `value: number` - current numeric value (controlled). *Why controlled:* settings state lives in the parent; the slider must always reflect the persisted value.
-- `min / max / step: number` - slider bounds and increment. *Why per-call-site:* each setting has different units and valid ranges (e.g., 0.04-0.3 for smoothness vs. 600-5000 for hold_ms).
-- `onChange: (v: number) => void` - called with `parseFloat(e.target.value)` on every change event. *Why parseFloat here:* `input.value` is always a string; centralising the conversion keeps callers typed.
-- `fmt: (v: number) => string` - display formatter injected by the caller. *Why injected:* different settings need different formats (percent, raw decimal, seconds) - a built-in enum would be fragile and harder to extend.
-- `hint?: string` - muted text shown between the label and the formatted value. *Why:* some sliders carry contextual notes (e.g., a unit label) without needing a separate `Field` wrapper.
-
-### Notes
-
-Used in `SettingsZoom`, `SettingsClickFx`, `SettingsCursor`, and `SettingsAppearance`. The `fmt` prop is mandatory - every call site supplies a formatter such as `(v) => ${Math.round(v * 100)}%` or `(v) => ${v.toFixed(1)}x`.
 
 ## Advanced
 

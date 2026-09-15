@@ -1,6 +1,3 @@
-// Read-only summary statistics over an `EditDoc` - a separate responsibility from the mutating
-// ops in api.rs (which was at the size budget), and the only thing in `edit::ops` that never
-// touches the doc.
 use crate::edit::model::EditDoc;
 use serde::Serialize;
 
@@ -12,19 +9,20 @@ pub struct Metrics {
     pub cut_count: usize,
 }
 
-/// Summary of what the current plan will export: total duration, the kept span after trim and
-/// cuts, and the region counts. Cuts are intersected with the trim range before subtracting, so a
-/// cut that lies (partly) outside the trim never removes time that was not being exported anyway.
 pub fn metrics(doc: &EditDoc) -> Metrics {
     let duration_ms = doc.trim.out_ms;
     let trim_in = doc.trim.in_ms;
     let trim_out = doc.trim.out_ms;
     let trim_span = trim_out.saturating_sub(trim_in);
-    let cut_sum: u32 = doc.cuts.iter().map(|c| {
-        let s = c.start_ms.max(trim_in);
-        let e = c.end_ms.min(trim_out);
-        e.saturating_sub(s)
-    }).sum();
+    let cut_sum: u32 = doc
+        .cuts
+        .iter()
+        .map(|c| {
+            let s = c.start_ms.max(trim_in);
+            let e = c.end_ms.min(trim_out);
+            e.saturating_sub(s)
+        })
+        .sum();
     Metrics {
         duration_ms,
         kept_ms: trim_span.saturating_sub(cut_sum),
@@ -41,21 +39,53 @@ mod tests {
     #[test]
     fn metrics_kept_ms_subtracts_cuts() {
         let mut doc = EditDoc::default();
-        apply(&mut doc, EditOp::SetTrim { in_ms: 0, out_ms: 10000 });
-        apply(&mut doc, EditOp::AddCut { start_ms: 1000, end_ms: 3000 });
+        apply(
+            &mut doc,
+            EditOp::SetTrim {
+                in_ms: 0,
+                out_ms: 10000,
+            },
+        );
+        apply(
+            &mut doc,
+            EditOp::AddCut {
+                start_ms: 1000,
+                end_ms: 3000,
+            },
+        );
         let m = metrics(&doc);
         assert_eq!((m.duration_ms, m.kept_ms, m.cut_count), (10000, 8000, 1));
     }
 
-    /// A cut lying (partly) outside the trim window must not remove time that was never being
-    /// exported - which is the whole reason each cut is clamped to `[trim_in, trim_out]` first.
     #[test]
     fn a_cut_outside_the_trim_window_does_not_reduce_kept_ms() {
         let mut doc = EditDoc::default();
-        apply(&mut doc, EditOp::SetTrim { in_ms: 2000, out_ms: 6000 });
-        apply(&mut doc, EditOp::AddCut { start_ms: 8000, end_ms: 9000 });   // wholly outside
+        apply(
+            &mut doc,
+            EditOp::SetTrim {
+                in_ms: 2000,
+                out_ms: 6000,
+            },
+        );
+        apply(
+            &mut doc,
+            EditOp::AddCut {
+                start_ms: 8000,
+                end_ms: 9000,
+            },
+        );
         assert_eq!(metrics(&doc).kept_ms, 4000);
-        apply(&mut doc, EditOp::AddCut { start_ms: 1000, end_ms: 3000 });   // half inside
-        assert_eq!(metrics(&doc).kept_ms, 3000, "only the 1000ms inside the trim counts");
+        apply(
+            &mut doc,
+            EditOp::AddCut {
+                start_ms: 1000,
+                end_ms: 3000,
+            },
+        );
+        assert_eq!(
+            metrics(&doc).kept_ms,
+            3000,
+            "only the 1000ms inside the trim counts"
+        );
     }
 }

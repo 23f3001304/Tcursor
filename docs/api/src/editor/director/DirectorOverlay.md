@@ -1,6 +1,6 @@
 # src/editor/director/DirectorOverlay.tsx
 
-Everything the AI director's choreographed reveal renders, bundled into one component so `Editor.tsx` (already at its line budget) only has to mount a single element for the whole feature. Nested inside `.e-stagetoast` (Task 11) rather than at the editor root - the fake pointer and the cancel scrim are both `position:fixed` so where this mounts in the DOM doesn't move them, but the pass's sweeping wave and the Stop pill (`DirectorScrim`) are in flow, so they anchor to the stage's own bottom edge instead of the viewport's (ux audit #17).
+Everything the AI director's pointer replay renders, bundled into one component so `Editor.tsx` (already at its line budget) only has to mount a single element for the whole feature. Nested inside `.e-stagetoast` (Task 11) rather than at the editor root - the fake pointer and the cancel scrim are both `position:fixed` so where this mounts in the DOM doesn't move them, but the pass's sweeping wave and the Stop pill (`DirectorScrim`) are in flow, so they anchor to the stage's own bottom edge instead of the viewport's (ux audit #17).
 
 ## DirectorOverlay
 
@@ -18,7 +18,7 @@ export function DirectorOverlay({ running, planning, model, pointerRef, progress
 ### Props
 
 - `running: boolean` - `Editor`'s `running` state; gates both children.
-- `planning: boolean` / `model?: string` - `Editor`'s `director.planning` and `doc.settings.ai_model || undefined` (Task 40); forwarded to `DirectorScrim` for its planning-phase "Asking `<model>`…" pill copy, and `planning` additionally decides whether the wave is indeterminate.
+- `planning: boolean` / `model?: string` - `useAiRun`'s `planning` and `doc.settings.ai_model || undefined` (Task 40); forwarded to `DirectorScrim` for its thinking-phase "Thinking with `<model>`…" pill copy, and `planning` additionally decides whether the wave is indeterminate.
 - `pointerRef: RefObject<DirectorPointerHandle | null>` - `Editor`'s `director.pointerRef`, forwarded straight to `DirectorPointer`'s `ref`.
 - `progress` / `onCancel` - forwarded to `DirectorScrim`; `progress` also drives the wave's head.
 

@@ -4,14 +4,14 @@ Inspector for the selected timeline zoom block. Every control applies an `update
 `remove_zoom` / `set_zoom_cam_action`) op via `onApply`, which persists the doc and bumps the
 preview, so an edit is visible immediately.
 
-Sections, in DOM order (pinned by `inspectorShape.test.tsx`): **Framing**, **Timing**, **Feel**,
+Sections, in DOM order (pinned by `inspectorShape.test.tsx`): **Framing**, **Timing**, **Motion**,
 **Webcam during zoom**. Delete is in the header, not last (`InspectorShape.md`).
 
 **Why this order (owner, 2026-09-14).** The brief is "Zoom / 5.59s to 9.58s / Scale 2.8x / Target
-Follow cursor or Region / Feel Subtle, Balanced or Punchy" - the header answers when, so the first
+Follow cursor or Region / Motion Snappy, Soft, Cinematic" - the header answers when, so the first
 section is free to answer the thing a zoom is actually for: how close it gets and what it aims at.
-Timing then holds the four numbers that shape the move, Feel is the one-click version of two of
-them, and the webcam override is last because it is the only section that is about a different
+Timing then holds the four numbers that shape the move, Motion is the curve those numbers run on,
+and the webcam override is last because it is the only section that is about a different
 object.
 
 ## TargetMode
@@ -24,83 +24,6 @@ The two target modes the picker offers. `ZoomTarget::Fixed { x, y }` **is** the 
 "Center" button only ever wrote `fixed { 0.5, 0.5 }`, so a doc written by it selects Region with its
 reticle already at frame centre. There is no `Center` variant in the Rust `ZoomTarget` (only `Cursor`
 and `Fixed`) and therefore **no migration** - the change is display-level only.
-
-## targetMode
-
-```ts
-export const targetMode: (t: ZoomTarget) => TargetMode
-```
-
-Reads the stored target back as a mode: `"cursor"` for the cursor-following variant, `"region"` for
-any stored point.
-
-## targetForMode
-
-```ts
-export function targetForMode(mode: TargetMode, current: ZoomTarget): ZoomTarget
-```
-
-The target to write when the user picks `mode`. Switching **to** Region keeps whatever point is
-already stored, so toggling Follow cursor -> Region -> Follow cursor never silently discards an aim
-the user placed on the stage; a zoom that has only ever followed the cursor starts at frame centre
-(`{ fixed: { x: 0.5, y: 0.5 } }`).
-
-## CAM_ACTION_OPTIONS
-
-```tsx
-export const CAM_ACTION_OPTIONS: { label: string; value: CamZoomAction | null }[]
-```
-
-The 4 choices for the "Webcam during zoom" row (Task 26): `Global default` (`value: null`, inherits
-`settings.zoom.cam_zoom_default` - see `resolvedCamDefault` in `stage/camZoomAction.ts`), `Stay`,
-`Shrink` (`{ shrink: { to: 0.62 } }` - `0.62` mirrors the Rust `ZoomSettings::camera_shrink_min`
-default; the `to` fraction itself isn't editable from this control), and `Hide`. Picking one applies
-`{ op: "set_zoom_cam_action", id: zoom.id, action: opt.value }`.
-
-## isCamActionSelected
-
-```ts
-export function isCamActionSelected(current: CamZoomAction | null | undefined, option: CamZoomAction | null): boolean
-```
-
-Whether `option` (one entry of `CAM_ACTION_OPTIONS`) is the one currently in effect for `current`
-(`Zoom.cam_action`). `null`/`undefined` both count as "Global default". Any `{ shrink: {...} }`
-object counts as the `Shrink` option regardless of its `to` value, since `Shrink` is the only
-object-shaped `CamZoomAction` variant and this control never edits `to` directly.
-
-### Used by
-
-- `ZoomInspector` - drives the segmented row's `on` state and `onClick` payload.
-
-## durationOptions
-
-```ts
-export function durationOptions(smart: boolean): SegOption[]
-```
-
-The Timing row's duration switch, as `SegRow` options: **Fixed** (the end stays where you put it) and **Smart typing** (the end follows the typing after the start), whichever is `on`. Picking Smart sends `update_zoom { smart_typing: true }`; the backend refits `end_ms` from `typing.json` then and on every later start move (`ops::smart_zoom`), so nothing here computes a time. Test: `durationOptions (smart typing duration)`.
-
-## zoomScopedSeekMs
-
-```ts
-export function zoomScopedSeekMs(nowMs: number, startMs: number, endMs: number): number | null
-```
-
-Discoverability fix for a gate finding ("none of these settings work" - live debug traced the wiring
-as correct; the Target and "Webcam during zoom" controls simply have no visible effect while the
-playhead sits outside the zoom's own span). `null` while `nowMs` is already inside `[startMs, endMs]`
-(inclusive both ends - the same span `camZoomAction.resolveCamAction` treats as active, so this never
-disagrees with what the preview is actually doing); otherwise the span's midpoint, so seeking there
-puts the just-changed control on screen.
-
-### Behaviors
-
-- `zoomScopedSeekMs (gate finding...)` in `ZoomInspector.test.ts` - no-seek at both inclusive
-  boundaries and mid-span; midpoint (rounded) before/after the span.
-
-### Used by
-
-- `ZoomInspector`'s `seekIntoSpan` - called after every Target/`set_zoom_cam_action` click.
 
 ## ZoomInspector
 
@@ -125,14 +48,13 @@ after the last key of the typing that starts there and refits whenever the start
 
 End is a typed field like the other three (a first draft left it to the pill's right edge alone; the owner-facing rule is that a value you can read is a value you can type).
 
-**Feel** - `FEEL_PRESETS` as a segmented row (`zoomFeel.md`). The section's readout says "Custom"
-only while nothing is lit: with a preset matched the row already names it, and repeating it on the
-heading row would be the same word twice.
-
-Under the row, the whole custom-curve apparatus - `CurveEditor`, which is the named-curve row, the
-drag-the-dots canvas and, for a spring, `SpringControls` - is folded into one quiet `Disclosure`
-labelled "Custom". Curated first, custom second: the row is three clicks that cover the common
-cases, and the panel stays short until someone actually wants to shape a cubic.
+**Motion** (M3, replacing Feel on 2026-09-15) - `MotionField` (`motion/MotionField.md`): the preset row over the graph of
+the zoom's whole motion, scale rising over the in ramp, the hold, the fall over the out ramp, with
+the neighbouring zooms' handoffs as ghosts. A preset writes both ramps' curves; a key drag writes the
+ramp it is on; dragging a ramp's end key retimes `zoom_in_ms` / `zoom_out_ms`, the same fields the
+Timing row edits, so the two agree by construction. The section's readout says "Custom" only while
+no preset is lit (`motionReadout`). The old Feel row bundled a curve with two durations under a
+name; the durations now stay in Timing and the name is honest about the one thing it sets.
 
 **Webcam during zoom** - `CAM_ACTION_OPTIONS` as a segmented row.
 
@@ -159,8 +81,7 @@ otherwise. It is a plane now, not an outlined button, and its active state tints
 - Every Target option and every "Webcam during zoom" option calls `seekIntoSpan()` after applying its
   op, jumping the playhead to the zoom's midpoint if it was outside `[start_ms, end_ms]`.
 
-### Transition curve
+### Motion graph
 
-`CurveEditor` (see `CurveEditor.md`), inside Feel's "Custom" disclosure - the six named curves as a
-segmented row plus one canvas whose handles shape a cubic directly. Rust reconstructs a cubic exactly
-(`easing_from`), so a hand-shaped zoom curve is identical in preview and export.
+`MotionGraph` samples the zoom's curves through the same `ease()` the preview runs, and Rust parses the
+same `keys(...)` string (`export/keys.md`), so a hand-drawn curve is identical in preview and export.

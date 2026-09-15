@@ -1,6 +1,5 @@
 use super::*;
 
-/// A throwaway project folder, unique per test name and process.
 fn tmp(tag: &str) -> ProjectPaths {
     let dir = std::env::temp_dir().join(format!("tcursor-layer-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -9,7 +8,13 @@ fn tmp(tag: &str) -> ProjectPaths {
 }
 
 fn cursor(w: u32, h: u32, hx: u32, hy: u32) -> CapturedCursor {
-    CapturedCursor { w, h, hx, hy, rgba: vec![255u8; (w * h * 4) as usize] }
+    CapturedCursor {
+        w,
+        h,
+        hx,
+        hy,
+        rgba: vec![255u8; (w * h * 4) as usize],
+    }
 }
 
 #[test]
@@ -24,8 +29,17 @@ fn save_then_load_round_trips_the_entries_and_the_track() {
 
     let back = CursorLayer::load(&paths).unwrap();
     assert_eq!(back, b.layer());
-    assert_eq!(back.cursors[1], CursorEntry { id: 1, w: 16, h: 24, hx: 8, hy: 12, file: "1.png".into() });
-    // One real PNG per entry, at the path the entry names.
+    assert_eq!(
+        back.cursors[1],
+        CursorEntry {
+            id: 1,
+            w: 16,
+            h: 24,
+            hx: 8,
+            hy: 12,
+            file: "1.png".into()
+        }
+    );
     for e in &back.cursors {
         let bytes = std::fs::read(paths.cursor_dir().join(&e.file)).unwrap();
         assert_eq!(&bytes[1..4], b"PNG", "{} is not a PNG", e.file);
@@ -35,14 +49,33 @@ fn save_then_load_round_trips_the_entries_and_the_track() {
 
 #[test]
 fn id_at_finds_the_sample_in_force_and_nothing_before_the_first() {
-    let layer = CursorLayer { cursors: vec![], track: vec![(100, 0), (400, 1), (900, 0)] };
-    assert_eq!(layer.id_at(0), None, "before the first sample nothing was captured yet");
+    let layer = CursorLayer {
+        cursors: vec![],
+        track: vec![(100, 0), (400, 1), (900, 0)],
+    };
+    assert_eq!(
+        layer.id_at(0),
+        None,
+        "before the first sample nothing was captured yet"
+    );
     assert_eq!(layer.id_at(99), None);
-    assert_eq!(layer.id_at(100), Some(0), "exactly on a boundary the new sample applies");
+    assert_eq!(
+        layer.id_at(100),
+        Some(0),
+        "exactly on a boundary the new sample applies"
+    );
     assert_eq!(layer.id_at(399), Some(0));
     assert_eq!(layer.id_at(400), Some(1));
-    assert_eq!(layer.id_at(u32::MAX), Some(0), "after the last sample it stays in force");
-    assert_eq!(CursorLayer::default().id_at(0), None, "an empty track has no cursor");
+    assert_eq!(
+        layer.id_at(u32::MAX),
+        Some(0),
+        "after the last sample it stays in force"
+    );
+    assert_eq!(
+        CursorLayer::default().id_at(0),
+        None,
+        "an empty track has no cursor"
+    );
 }
 
 #[test]
@@ -50,10 +83,12 @@ fn a_recording_without_a_layer_reports_no_layer_instead_of_failing() {
     let paths = tmp("absent");
     assert!(!CursorLayer::exists(&paths));
     assert!(CursorLayer::load(&paths).is_none());
-    // Corrupt JSON is the same answer - never an error, never a panic.
     std::fs::create_dir_all(paths.cursor_dir()).unwrap();
     std::fs::write(paths.cursor_layer(), b"{not json").unwrap();
-    assert!(CursorLayer::exists(&paths), "the file is there, so the video was captured clean");
+    assert!(
+        CursorLayer::exists(&paths),
+        "the file is there, so the video was captured clean"
+    );
     assert!(CursorLayer::load(&paths).is_none());
     let _ = std::fs::remove_dir_all(&paths.folder);
 }

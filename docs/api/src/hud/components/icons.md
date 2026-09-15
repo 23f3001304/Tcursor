@@ -62,10 +62,9 @@ Collection of inline SVG icon components used throughout the HUD bar, dropdowns,
 
 18x18 viewport; a single folder-body path (Feather-style outline). *Rendered by:* `IdleCard` on the Open Project button in the card header.
 
-## Gamepad
+## Cpu
 
-18x18 viewport; a game controller body path with D-pad cross lines and two face-button dot strokes. *Rendered by:* `IdleCard` on the Compat (compatibility encoder) toggle.
-
+The compatibility-encoder toggle's icon: a chip with eight pins, since that toggle picks the legacy CPU recording path. Replaced the gamepad (a leftover of the toggle's old "game mode" name) on 2026-09-15.
 ## Pause
 
 18x18 viewport, filled (not stroked): two rounded bars. *Rendered by:* `TakeBar` on the Pause button while the take runs.

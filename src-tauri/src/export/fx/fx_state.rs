@@ -1,44 +1,49 @@
 use crate::actions::model::{ActionEvent, ActionKind};
+use crate::edit::model::EffectRegion;
 use crate::events::model::{MouseEvent, ScreenInfo};
-use crate::export::fx::clickfx::hits_at;
 use crate::export::coordmap::{project, to_frame, to_panel};
+use crate::export::fx::click::clickfx::hits_at;
 use crate::export::scene::Scene;
 use crate::export::types::{Camera, FramePoint};
-use crate::settings::model::{ClickFxSettings, ClickFxStyle, HotkeySettings, SpotlightMode, VideoFxMode};
-use crate::edit::model::EffectRegion;
-// Split out so this file stays under the size limit (`SpotlightSim` re-exported so callers keep
-// using `fx_state::`; `region_alpha` is internal to `SpotlightSim` now - its own tests reach it
-// via `crate::export::fx::spotlight_sim::region_alpha` directly).
-pub use crate::export::fx::spotlight_sim::SpotlightSim;
+use crate::settings::model::{
+    ClickFxSettings, ClickFxStyle, HotkeySettings, SpotlightMode, VideoFxMode,
+};
 
-/// Click lifetime + spotlight fade, ported verbatim from the old fxdraw overlay.
+pub use crate::export::fx::spot::spotlight_sim::SpotlightSim;
+
 const LIFE_MS: u32 = 600;
 const FADE_MS: u32 = 250;
 
-/// One active click effect in OUTPUT pixels (post-zoom).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct FxHit { pub x: f32, pub y: f32, pub progress: f32 }
-
-/// Active spotlight in OUTPUT pixels. `radius_frac`/`feather_frac` are fractions of output
-/// height AS RENDERED - i.e. already pre-scaled by the screen panel's height fraction so the
-/// spotlight tracks the screen the cursor lives on rather than the whole frame (see
-/// `fx_state_at`; the preview mirrors this by `layout.screen[3]`). `dim` is 0..1, `alpha`
-/// scales the whole effect (0..1).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Spot {
-    pub cx: f32, pub cy: f32,
-    pub dim: f32, pub radius_frac: f32, pub feather_frac: f32, pub alpha: f32,
-    pub mode: SpotlightMode, pub tint: [u8; 3], pub t: f32,
-    // Camera PiP exclusion (OUTPUT px): the shader undoes the spotlight dim inside this
-    // rounded rect when `dim_camera` is false (the "don't dim the webcam" option).
-    pub cam_rect: [f32; 4], pub cam_radius: f32, pub dim_camera: bool,
+pub struct FxHit {
+    pub x: f32,
+    pub y: f32,
+    pub progress: f32,
 }
 
-/// Active video FX (full-frame effect triggered by VideoFxHold).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct VideoFx { pub mode: VideoFxMode, pub alpha: f32, pub t: f32 }
+pub struct Spot {
+    pub cx: f32,
+    pub cy: f32,
+    pub dim: f32,
+    pub radius_frac: f32,
+    pub feather_frac: f32,
+    pub alpha: f32,
+    pub mode: SpotlightMode,
+    pub tint: [u8; 3],
+    pub t: f32,
+    pub cam_rect: [f32; 4],
+    pub cam_radius: f32,
+    pub dim_camera: bool,
+}
 
-/// Renderer-agnostic description of the click-FX + spotlight at one output frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct VideoFx {
+    pub mode: VideoFxMode,
+    pub alpha: f32,
+    pub t: f32,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct FxState {
     pub style: ClickFxStyle,
@@ -47,121 +52,170 @@ pub struct FxState {
     pub hits: Vec<FxHit>,
     pub spot: Option<Spot>,
     pub video: Option<VideoFx>,
-    /// The glass cursor material for this frame (`fx_lens`), placed by `fx_lensbuild::lenses_at`
-    /// BEFORE the pass runs because the cursor sprite is blitted after it. `None` for a plain pack
-    /// with no cursor back - which is every recording until someone picks one.
-    pub lens: Option<crate::export::fx::fx_lens::Lenses>,
+    pub lens: Option<crate::export::fx::lens::Lenses>,
 }
 
-/// Build the FX state for one frame. TWO clocks: `region_t` is output time (0 = first video
-/// frame), the clock every `EditDoc` region list lives on; `ev_t` is event time, the clock the raw
-/// mouse/action streams are recorded on. Doc `effects` are sampled at `region_t`, clicks and
-/// hold-driven video FX at `ev_t`. `None` when nothing is active (no spotlight and no live clicks)
-/// so a renderer can skip the frame entirely. `cur` is the cursor point the exporter computed.
-/// `screen` is the recording's `ScreenInfo` (virtual-desktop origin) - `hits_at` returns raw
-/// `WH_MOUSE_LL` desktop coordinates, so each hit is converted through `to_frame` before the
-/// `to_panel` screen-content mapping, same as every other consumer of a raw mouse point.
-/// `has_webcam` is whether `webcam.mp4` exists on disk for this recording - the "keep camera lit"
-/// hole must never apply without it (nor when the camera panel itself isn't visible this frame),
-/// or an un-dimmed empty rectangle appears in ScreenOnly layouts, after Hide, or when there was
-/// never a webcam at all.
 #[allow(clippy::too_many_arguments)]
 pub fn fx_state_at(
-    fx: &ClickFxSettings, events: &[MouseEvent], actions: &[ActionEvent], effects: &[EffectRegion],
-    scene: &Scene, cam: Camera, cur: FramePoint, screen: &ScreenInfo, has_webcam: bool,
-    ow: u32, oh: u32, region_t: u32, ev_t: u32, spot_sim: &mut SpotlightSim,
+    fx: &ClickFxSettings,
+    events: &[MouseEvent],
+    actions: &[ActionEvent],
+    effects: &[EffectRegion],
+    scene: &Scene,
+    cam: Camera,
+    cur: FramePoint,
+    screen: &ScreenInfo,
+    has_webcam: bool,
+    ow: u32,
+    oh: u32,
+    region_t: u32,
+    ev_t: u32,
+    spot_sim: &mut SpotlightSim,
 ) -> Option<FxState> {
     let s_alpha = spot_sim.resolve(effects, region_t, fx.spotlight);
     let spot = if s_alpha > 0.0 {
         let (cx, cy) = project(cur.x as f32, cur.y as f32, cam, ow, oh);
         let (mode, dim, radius, feather) = spot_sim.style(effects, fx);
-        // Size the spotlight relative to the SCREEN PANEL, not the whole output frame: the
-        // radius/feather settings are fractions of the screen height, so pre-multiply by the
-        // panel's height fraction (`screen.h / oh`) - then the downstream `oh * frac` lands in
-        // screen-panel pixels. Without this the spotlight was layout-agnostic (a fixed fraction
-        // of the full frame), so a layout that insets/shrinks the screen left the spotlight
-        // oversized. The preview mirrors this via `layout.screen[3]`.
         let sfrac = (scene.screen.rect.h / oh.max(1) as f32).max(0.0);
         let cr = scene.camera.rect;
-        // "No hole" representation: `dim_camera: true` forces `draw_spot`/the GPU shader to skip
-        // the un-dim entirely (matches today's behavior when the toggle is on), regardless of the
-        // user's actual `spotlight_dim_camera` setting - so a missing/invisible webcam can never
-        // leave an un-dimmed empty rectangle. `cam_rect`/`cam_radius` are zeroed too, belt-and-
-        // suspenders against a future reader that checks the rect instead of the flag.
         let has_hole = has_webcam && scene.camera.alpha > 0.05;
-        Some(Spot { cx, cy, dim, radius_frac: radius * sfrac,
-            feather_frac: feather * sfrac, alpha: s_alpha,
-            // Animation phase (breathing/nebula) follows the clock that DRIVES the effect, so the
-            // TS preview - which passes its output-time `now` as `spotT` - renders the same phase.
-            mode, tint: fx.spotlight_tint, t: region_t as f32 / 1000.0,
-            cam_rect: if has_hole { [cr.x, cr.y, cr.x + cr.w, cr.y + cr.h] } else { [0.0; 4] },
+        Some(Spot {
+            cx,
+            cy,
+            dim,
+            radius_frac: radius * sfrac,
+            feather_frac: feather * sfrac,
+            alpha: s_alpha,
+            mode,
+            tint: fx.spotlight_tint,
+            t: region_t as f32 / 1000.0,
+            cam_rect: if has_hole {
+                [cr.x, cr.y, cr.x + cr.w, cr.y + cr.h]
+            } else {
+                [0.0; 4]
+            },
             cam_radius: if has_hole { scene.camera.radius } else { 0.0 },
-            dim_camera: if has_hole { fx.spotlight_dim_camera } else { true } })
-    } else { None };
+            dim_camera: if has_hole {
+                fx.spotlight_dim_camera
+            } else {
+                true
+            },
+        })
+    } else {
+        None
+    };
 
     let mut hits = Vec::new();
     if !matches!(fx.style, ClickFxStyle::None) {
         for h in hits_at(events, ev_t, LIFE_MS) {
             let p = to_frame(screen, h.sx, h.sy);
-            // Through the scene's OWN source rect (the canvas, or one display switch's fitted
-            // rect), so a click on the switched-to display ripples on the cropped picture.
             let b = to_panel(p, scene.src, scene.screen.rect);
             let (x, y) = project(b.x as f32, b.y as f32, cam, ow, oh);
-            hits.push(FxHit { x, y, progress: h.progress });
+            hits.push(FxHit {
+                x,
+                y,
+                progress: h.progress,
+            });
         }
     }
 
-    // Video FX is a raw hotkey hold, not a doc region: both its alpha and its phase are event-time.
-    let va = crate::export::fx::hold::hold_alpha(actions, ev_t, FADE_MS,
+    let va = crate::export::fx::hold::hold_alpha(
+        actions,
+        ev_t,
+        FADE_MS,
         |k| matches!(k, ActionKind::VideoFxHoldStart),
-        |k| matches!(k, ActionKind::VideoFxHoldEnd));
-    let video = if va > 0.0 { Some(VideoFx { mode: fx.video_fx_mode, alpha: va, t: ev_t as f32 / 1000.0 }) } else { None };
+        |k| matches!(k, ActionKind::VideoFxHoldEnd),
+    );
+    let video = if va > 0.0 {
+        Some(VideoFx {
+            mode: fx.video_fx_mode,
+            alpha: va,
+            t: ev_t as f32 / 1000.0,
+        })
+    } else {
+        None
+    };
 
-    if spot.is_none() && hits.is_empty() && video.is_none() { return None; }
-    Some(FxState { style: fx.style, color: fx.color, intensity: fx.intensity, hits, spot, video, lens: None })
+    if spot.is_none() && hits.is_empty() && video.is_none() {
+        return None;
+    }
+    Some(FxState {
+        style: fx.style,
+        color: fx.color,
+        intensity: fx.intensity,
+        hits,
+        spot,
+        video,
+        lens: None,
+    })
 }
 
-/// Draws an `FxState` onto a composited BGRA frame.
 pub trait FxRenderer: Send {
     fn apply(&self, out: &mut [u8], ow: u32, oh: u32, state: &FxState);
 }
 
-/// Pick the FX renderer: GPU if an adapter is available, else the CPU fallback.
 pub fn select_fx(ow: u32, oh: u32) -> Box<dyn FxRenderer> {
     if crate::export::gpu::gpu_available() {
-        if let Some(g) = crate::export::fx::fx_gpu::GpuFx::new(ow, oh) { return Box::new(g); }
+        if let Some(g) = crate::export::fx::fx_gpu::GpuFx::new(ow, oh) {
+            return Box::new(g);
+        }
     }
     Box::new(crate::export::fx::fxdraw::CpuFx)
 }
 
-/// Per-frame entry the exporter calls: build state, render it (if any), then captions. `region_t`
-/// (output clock) drives the doc's effect regions; `ev_t` (event clock) drives the raw streams -
-/// click ripples, hold-driven video FX and the hotkey captions. `screen`/`has_webcam` are threaded
-/// straight to `fx_state_at` (see its doc) for the click-hit origin conversion and the spotlight
-/// camera-exclusion hole gate, respectively.
-///
-/// `lens` is the glass cursor material `fx_lensbuild::lenses_at` placed for this frame. It rides
-/// the SAME pass because the cursor sprite is blitted right after it, but it is NOT a click effect:
-/// a user who turned click FX off still gets their glass cursor, so a lens alone builds a state of
-/// its own rather than being dropped with the rest. Captions stay gated on `fx.enabled` as before.
 #[allow(clippy::too_many_arguments)]
 pub fn render(
-    r: &dyn FxRenderer, out: &mut [u8], ow: u32, oh: u32, fx: &ClickFxSettings,
-    events: &[MouseEvent], actions: &[ActionEvent], effects: &[EffectRegion], scene: &Scene, cam: Camera, cur: FramePoint, screen: &ScreenInfo, has_webcam: bool,
-    region_t: u32, ev_t: u32, keys: &HotkeySettings, spot_sim: &mut SpotlightSim,
-    lens: Option<crate::export::fx::fx_lens::Lenses>,
+    r: &dyn FxRenderer,
+    out: &mut [u8],
+    ow: u32,
+    oh: u32,
+    fx: &ClickFxSettings,
+    events: &[MouseEvent],
+    actions: &[ActionEvent],
+    effects: &[EffectRegion],
+    scene: &Scene,
+    cam: Camera,
+    cur: FramePoint,
+    screen: &ScreenInfo,
+    has_webcam: bool,
+    region_t: u32,
+    ev_t: u32,
+    keys: &HotkeySettings,
+    spot_sim: &mut SpotlightSim,
+    lens: Option<crate::export::fx::lens::Lenses>,
 ) {
-    let built = fx.enabled.then(|| fx_state_at(fx, events, actions, effects, scene, cam, cur, screen,
-        has_webcam, ow, oh, region_t, ev_t, spot_sim)).flatten();
+    let built = fx
+        .enabled
+        .then(|| {
+            fx_state_at(
+                fx, events, actions, effects, scene, cam, cur, screen, has_webcam, ow, oh,
+                region_t, ev_t, spot_sim,
+            )
+        })
+        .flatten();
     let state = match (built, lens) {
-        (Some(mut s), l) => { s.lens = l; Some(s) }
-        (None, Some(l)) => Some(FxState { style: ClickFxStyle::None, color: fx.color,
-            intensity: fx.intensity, hits: Vec::new(), spot: None, video: None, lens: Some(l) }),
+        (Some(mut s), l) => {
+            s.lens = l;
+            Some(s)
+        }
+        (None, Some(l)) => Some(FxState {
+            style: ClickFxStyle::None,
+            color: fx.color,
+            intensity: fx.intensity,
+            hits: Vec::new(),
+            spot: None,
+            video: None,
+            lens: Some(l),
+        }),
         (None, None) => None,
     };
-    if let Some(state) = state { r.apply(out, ow, oh, &state); }
-    if !fx.enabled { return; }
-    crate::export::fx::caption::overlay(out, ow, oh, actions, keys, ev_t, fx.captions);
+    if let Some(state) = state {
+        r.apply(out, ow, oh, &state);
+    }
+    if !fx.enabled {
+        return;
+    }
+    crate::export::fx::click::hotkeycap::overlay(out, ow, oh, actions, keys, ev_t, fx.captions);
 }
 
 #[cfg(test)]

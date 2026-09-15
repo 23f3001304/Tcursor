@@ -1,6 +1,6 @@
 # src/editor/shell/settings/ZoomDefaultsSection.tsx
 
-`EditorSettingsDialog`'s "Zoom defaults" section - 10 of the 11 fields of `settings.zoom` (`ZoomSettings`; `cam_zoom_default` has no control here), the seeds the auto-zoom generator (`export/camera/autozoom.rs`, via `ZoomSettings::to_zoom_config`) and the AI director's own zoom placement read as their starting point. Editing an already-placed zoom region goes through `ZoomInspector` instead; this section never touches `doc.zooms`.
+`EditorSettingsDialog`'s "Zoom defaults" section - 9 of the 11 fields of `settings.zoom` (`ZoomSettings`; `cam_zoom_default` has never had a control here, and `camera_smoothing_ms`'s slider moved to `MotionSection` in M3 - it is the global post-pass on the camera's PATH, not a seed a new zoom inherits, so it belongs with the project's motion language. The FIELD is still on `ZoomSettings`, which is why `DEFAULT_ZOOM_SETTINGS` below still carries it), the seeds the auto-zoom generator (`export/camera/autozoom.rs`, via `ZoomSettings::to_zoom_config`) and the AI director's own zoom placement read as their starting point. Editing an already-placed zoom region goes through `ZoomInspector` instead; this section never touches `doc.zooms`.
 
 ## ZoomDefaultsSection
 
@@ -21,7 +21,7 @@ export function ZoomDefaultsSection({ value, onChange }: {
 - **Zoom amount** (`target_scale`, `Slider` 1.2-4, step 0.1, "x" suffix).
 - **Hold / Idle release** (`hold_ms`, `NumberField` in seconds, 0.6-5s step 0.1) - label reads "Idle release" when `smart_hold` is on, "Hold" otherwise (mirrors the HUD's `SettingsZoom` label-swap exactly).
 - **Smoothness** (`smoothness`, `Slider` 0.04-0.3, step 0.01) - the export's `follow_damping`.
-- **Camera smoothing** (`camera_smoothing_ms`, `Slider` 0-400, step 10, "Off" at 0 else "{v} ms") - forwarded verbatim to `ZoomConfig::smoothing_ms` (`export/types.md`, `export/camera/smoothing.md`), an independent critically-damped post-pass on the camera path, distinct from the `smoothness` follow-damping spring right above it and from `CursorSettings.smoothness` (the cursor low-pass). Followed by an `e-lede` note: "Smooths the auto-zoom camera's path. Higher is calmer but lags the cursor - 120 ms is a good start."
+- *(moved)* **Camera smoothing** (`camera_smoothing_ms`) now lives in `MotionSection` (M3), where its lag is also shown in milliseconds. It is still forwarded verbatim to `ZoomConfig::smoothing_ms` and is still distinct from the `smoothness` follow-damping spring above and from `CursorSettings.smoothness` (the cursor low-pass).
 - **Clicks to zoom** (`clicks`, 3-way `Picker` - "1"/"2"/"3" - via `clicksToOption`/`clicksFromOption` below).
 - **Shrink camera on zoom** (`camera_shrink`, `Switch`).
 - **Min camera size** (`camera_shrink_min`, `Slider` 0.3-1, step 0.02, "%" - only rendered while `camera_shrink` is on).
@@ -56,7 +56,7 @@ The inverse write: `Number(opt)` - "1"/"2"/"3" go straight back to `1`/`2`/`3`, 
 export const DEFAULT_ZOOM_SETTINGS: ZoomSettings
 ```
 
-Mirrors Rust `ZoomSettings::default()` (`settings/model.rs`) field-for-field, including `cam_zoom_default: null` - the one field this section has no control for, but Reset still has to land it on the real backend default since it replaces the whole object (the same bug class `CursorPanel`'s `DEFAULT_CURSOR_SETTINGS` guards against - see `CursorPanel.md`).
+Mirrors Rust `ZoomSettings::default()` (`settings/model.rs`) field-for-field, including the two fields this section has no control for - `cam_zoom_default: null` (never exposed) and `camera_smoothing_ms: 0` (its slider moved to `MotionSection`) - which Reset still has to land on their real backend defaults since it replaces the whole object (the same bug class `CursorPanel`'s `DEFAULT_CURSOR_SETTINGS` guards against - see `CursorPanel.md`).
 
 ### Used by
 

@@ -30,6 +30,7 @@ Maps `t` in [0, 1] to an eased value in [0, 1]. Input is clamped to [0, 1] befor
    - `Easing::EaseOut`: `t*(2-t)` (quadratic decelerate - slow finish).
    - `Easing::EaseInOut`: `2t^2` for `t<0.5`, else `1-2(1-t)^2` (symmetric). *Why:* user-selectable camera-move transitions need the full accelerate/decelerate/both set; `camera::ease` mirrors these exactly (and so does the TS `ease` for the preview).
    - `Easing::Cubic { x1, y1, x2, y2 }`: delegates to `export::cubic::eval` - the same evaluation `camera::ease` uses, since a custom bezier has only one definition.
+   - `Easing::Keys(k)`: delegates to `export::keys::eval` - likewise one definition shared with `camera::ease`. *Note:* this is the one arm whose result is deliberately NOT confined to `[0, 1]`; a keyframed curve may anticipate below 0 or overshoot past 1, so the "Returns" line above is a statement about the named curves, not about `Keys`.
 
 **Note on which `ease` actually runs.** Nothing in the crate calls this function today: the live paths (`CameraSim`, `LayoutTrack`, `SpotlightSim`) all use `export::camera::ease`, whose `Smooth` is smoothstep and whose `Spring` really overshoots. The two agree on `Linear`, `EaseIn`, `EaseOut`, `EaseInOut` and now `Cubic`; they differ on `Smooth` and `Spring`. The TS preview mirror (`layoutTrack.ts`) mirrors `camera::ease`, i.e. the one that runs.
 

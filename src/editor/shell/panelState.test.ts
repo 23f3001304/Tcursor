@@ -1,9 +1,15 @@
+// @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { TAB_IDS } from "./panelTabs";
+import { TAB_IDS } from "./PanelTabs";
 import { nextTab, readPanelTab, writePanelTab } from "./panelState";
 
-beforeEach(() => { localStorage.clear(); });
-afterEach(() => { vi.restoreAllMocks(); localStorage.clear(); });
+beforeEach(() => {
+  localStorage.clear();
+});
+afterEach(() => {
+  vi.restoreAllMocks();
+  localStorage.clear();
+});
 
 describe("nextTab", () => {
   it("closes the panel when the tab already showing is pressed again", () => {
@@ -36,8 +42,12 @@ describe("panel tab persistence", () => {
   });
 
   it("survives storage that throws outright, opening rather than collapsing", () => {
-    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("blocked"); });
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("blocked"); });
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
     expect(readPanelTab(TAB_IDS)).toBe("ai");
     expect(() => writePanelTab("cursor")).not.toThrow();
   });

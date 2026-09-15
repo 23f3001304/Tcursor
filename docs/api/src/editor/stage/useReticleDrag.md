@@ -35,7 +35,7 @@ export function useReticleDrag(
 `onAimAt` is a full `apply_edit_op` round trip, so it's debounced like `Slider.tsx` debounces
 `onChange`: `liveAim` drives the reticle at full pointer rate while the commit trails by 80ms
 (`AIM_DEBOUNCE_MS`, via `debounce.ts`), flushed on release. `liveAim` clears via the shared
-`shouldClearOverride` (`../hooks/overrideClear.ts`, also used by `Slider.tsx`) once `aimPoint`
+`shouldClearOverride` (`../util/overrideClear.ts`, also used by `Slider.tsx`) once `aimPoint`
 differs from `settledAimRef.current` (its value as of the moment the drag began) - not once it
 lands back on the exact point sent, which could never resolve a commit `aimAt` no-ops on
 (deselecting before the round trip lands) or one `applyOp` swallows the error of. The module-level

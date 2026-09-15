@@ -1,59 +1,113 @@
 import { NumberField } from "../controls/Controls";
-import { CurveEditor } from "./CurveEditor";
-import { CamShapeField } from "../panels/CamShapeField";
+import { CamShapeField } from "../panels/camera/CamShapeField";
+import type { GraphInput } from "../motion/graphModel";
+import { MotionField, motionReadout } from "../motion/MotionField";
+import { KF_BLEND_MS } from "../stage/camera/cameraMoves";
 import { Hint, InspectorHeader, InspectorShell, Section, secOf, secText } from "./InspectorShape";
-import type { CameraMove, EditDoc, EditOp } from "../../lib/edit";
+import type { CameraMove, EditDoc, EditOp } from "../../shared/edit";
 
-/** Inspector for the selected camera-move keyframe (a single-point `t_ms/x/y/size` entry on the
- *  Camera lane, not a region), so its Timing section is one Time field rather than a span.
- *
- *  Uses `NumberField` (the same clamped +/- stepper every other inspector's fields use) rather
- *  than a raw `<input type="number">` - a raw input's `onChange` fires on every keystroke,
- *  including a momentarily-cleared field, and `Number("")` is `0`; that briefly collapsed the PiP
- *  to size 0 mid-edit and could send a negative value the Rust side's u32 deserialization rejected
- *  (silently, via a `catch{}` in `applyOp`). */
-export function CameraMoveInspector({ move, dur, onApply, onClose }: {
-  move: CameraMove; dur: number; onApply: (op: EditOp) => Promise<EditDoc | null>; onClose: () => void;
+export function camGraphInput(move: CameraMove, moves: CameraMove[]): GraphInput {
+  const before = moves.filter((m) => m.t_ms < move.t_ms).sort((a, b) => b.t_ms - a.t_ms)[0];
+  const after = moves.filter((m) => m.t_ms > move.t_ms).sort((a, b) => a.t_ms - b.t_ms)[0];
+  const startMs = before ? before.t_ms : Math.max(0, move.t_ms - KF_BLEND_MS);
+  return {
+    lane: "cam",
+    startMs,
+    endMs: move.t_ms,
+    peak: 1,
+    rampIn: { easing: move.easing, durMs: move.t_ms - startMs },
+    rampOut: null,
+    next: after ? { startMs: move.t_ms, easingIn: after.easing, durMs: after.t_ms - move.t_ms } : null,
+  };
+}
+
+export function CameraMoveInspector({
+  move,
+  moves,
+  dur,
+  onApply,
+  onClose,
+}: {
+  move: CameraMove;
+  moves: CameraMove[];
+  dur: number;
+  onApply: (op: EditOp) => Promise<EditDoc | null>;
+  onClose: () => void;
 }) {
   const upd = (patch: Partial<Omit<Extract<EditOp, { op: "update_camera_move" }>, "op" | "id">>) =>
     void onApply({ op: "update_camera_move", id: move.id, ...patch });
 
   return (
     <InspectorShell kind="cam">
-      <InspectorHeader title="Camera Move" range={`Keyframe at ${secText(move.t_ms)}`}
-        deleteLabel="Delete keyframe" onClose={onClose}
-        onDelete={() => { void onApply({ op: "remove_camera_move", id: move.id }); onClose(); }} />
+      <InspectorHeader
+        title="Camera Move"
+        range={`Keyframe at ${secText(move.t_ms)}`}
+        deleteLabel="Delete keyframe"
+        onClose={onClose}
+        onDelete={() => {
+          void onApply({ op: "remove_camera_move", id: move.id });
+          onClose();
+        }}
+      />
 
       <Section title="Timing">
-        <label className="e-field"><span className="e-fl">Time</span>
-          <NumberField min={0} max={secOf(dur)} step={0.05} value={secOf(move.t_ms)}
-            onChange={(v) => upd({ t_ms: Math.round(v * 1000) })} />
+        <label className="e-field">
+          <span className="e-fl">Time</span>
+          <NumberField
+            min={0}
+            max={secOf(dur)}
+            step={0.05}
+            value={secOf(move.t_ms)}
+            onChange={(v) => upd({ t_ms: Math.round(v * 1000) })}
+          />
         </label>
         <Hint>Drag the diamond on the timeline to retime it.</Hint>
       </Section>
 
       <Section title="Placement">
         <div className="e-field2">
-          <label className="e-field"><span className="e-fl">X</span>
-            <NumberField min={0} max={1} step={0.01} unit="" value={move.x} onChange={(x) => upd({ x })} /></label>
-          <label className="e-field"><span className="e-fl">Y</span>
-            <NumberField min={0} max={1} step={0.01} unit="" value={move.y} onChange={(y) => upd({ y })} /></label>
+          <label className="e-field">
+            <span className="e-fl">X</span>
+            <NumberField min={0} max={1} step={0.01} unit="" value={move.x} onChange={(x) => upd({ x })} />
+          </label>
+          <label className="e-field">
+            <span className="e-fl">Y</span>
+            <NumberField min={0} max={1} step={0.01} unit="" value={move.y} onChange={(y) => upd({ y })} />
+          </label>
         </div>
-        <label className="e-field"><span className="e-fl">Size</span>
-          <NumberField min={0} max={1} step={0.01} unit="" value={move.size} onChange={(size) => upd({ size })} />
+        <label className="e-field">
+          <span className="e-fl">Size</span>
+          <NumberField
+            min={0}
+            max={1}
+            step={0.01}
+            unit=""
+            value={move.size}
+            onChange={(size) => upd({ size })}
+          />
         </label>
         <Hint>Edits preview live.</Hint>
       </Section>
 
-      {/* The keyframe's own shape - the webcam morphs between keyframes' shapes exactly as it
-          moves between their positions. "Layout" keeps whatever the layout underneath uses. */}
       <Section title="Shape">
-        <CamShapeField shape={move.shape} roundness={move.roundness}
-          onShape={(shape) => upd({ shape })} onRoundness={(roundness) => upd({ roundness })} />
+        <CamShapeField
+          shape={move.shape}
+          roundness={move.roundness}
+          onShape={(shape) => upd({ shape })}
+          onRoundness={(roundness) => upd({ roundness })}
+        />
       </Section>
 
-      <Section title="Transition">
-        <CurveEditor value={move.easing} onChange={(easing) => upd({ easing })} />
+      <Section title="Motion" value={motionReadout(move.easing, null)}>
+        <MotionField
+          input={camGraphInput(move, moves)}
+          easing={move.easing}
+          easingOut={null}
+          retimeable={false}
+          onPatch={(p) => {
+            if (p.easing !== undefined) upd({ easing: p.easing });
+          }}
+        />
       </Section>
     </InspectorShell>
   );

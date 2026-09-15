@@ -46,6 +46,7 @@ Private fields include:
 - `captured: Option<CapturedCursors>` - the recording's captured OS-cursor layer, decoded once (`export::cursor::captured`). `Some` means the REAL cursor can be composited, which is what the LIVE `System` style draws instead of the synthetic arrow; `None` is a pre-layer recording. Built in `new` beside `cprep`, for the same reason: it is edit-independent, so a warm preview must not redo it on every doc change.
 - `actions: Vec<ActionEvent>` - action log; used by `fx_state::render` for spotlight/hold/caption.
 - `effects: Vec<crate::edit::model::EffectRegion>` - the doc's effect regions (OUTPUT clock, like every `EditDoc` region list), refreshed by `reload_edit`; read by `fx_state::render` at `pose.out_t` while `actions` beside it is read at `pose.ev_t`.
+- `captions: Vec<crate::edit::captions::Caption>` - the spoken-caption track, also on the OUTPUT clock and also refreshed by `reload_edit`. *Why only the track has a field:* its look and its two ASR inputs live on `settings.captions` (ADDED-4), and `settings` is already here, so a second field would be a second copy of the same thing.
 - `has_webcam: bool` - whether `webcam.mp4` exists on disk, computed ONCE in `new` via `paths.webcam().exists()` (recording is already finished by render time, so this cannot change - `reload_edit` does not recompute it). Gates the spotlight's "keep camera lit" hole (`fx_state::fx_state_at`'s `has_hole` check) so a recording with no webcam, or a frame where the camera panel isn't visible, never draws an un-dimmed empty rectangle.
 - `sw, sh: u32` - screen capture dimensions.
 - `events_ms: u64` - wall-clock offset of event-time 0; `t - events_ms` is the EVENT clock, used for the raw streams (cursor position + sprite, click ripples, hold-driven video FX, captions).
@@ -60,7 +61,8 @@ Private fields include:
 ## FrameRenderer::new
 
 ```rust
-pub fn new(paths: &ProjectPaths, layout: Layout, fps: u32, resolution: Resolution, preview_cap: Option<u32>) -> Result<(Self, RenderMeta)>
+pub fn new(paths: &ProjectPaths, layout: Layout, fps: u32, resolution: Resolution, preview_cap: Option<u32>,
+    system: &dyn SystemPort) -> Result<(Self, RenderMeta)>
 ```
 
 Loads the edit doc and event log, resolves all per-export setup, and returns both the renderer and the metadata the caller needs to spawn decoders. The `edit.json`-derived state (settings, zoom config, layout track, anchored regions, effects) is built via `render_edit::EditState`, shared with `reload_edit` so a warm-preview edit can refresh it in place.
@@ -72,6 +74,7 @@ Loads the edit doc and event log, resolves all per-export setup, and returns bot
 - `fps: u32` - capture frame rate. *Why:* passed to `build_timeline` as a last-resort denominator when `sync.json` is absent and no audio duration is available; matches `exporter::export`'s own `capture_fps` (unrelated to the export's OUTPUT frame rate, which comes from `ExportSettings.fps` / `Fps::resolve_hz`).
 - `resolution: Resolution` (`export::settings::Resolution`) - the user's chosen export SIZE preset (short-edge px), combined with `aspect`'s RATIO in `Layout::resolve`. *Why a separate param from `aspect`:* export-settings resolution and the doc's own aspect ratio are independent choices (see `ExportSettings`). Preview call sites (`preview::build_renderer`, and the `render_edit` tests) always pass `Resolution::Source` (a no-op) since the export resolution setting only applies to the export build.
 - `preview_cap: Option<u32>` - `None` for a full export build (no downscale); `Some(long_edge)` downscales the aspect+resolution-resolved frame to that budget (`Layout::resolve`) for a cheap preview build, scaling `pad_px`/`screen_radius_px` proportionally.
+- `system: &dyn SystemPort` - read exactly once, for `os_prefers_dark`, which `settings::theme::resolve_dark` needs to turn a `ThemeMode::System` into a colour decision. *Why a port and not a `Platform`:* this is the ONE OS fact the render depends on, and taking the single port says so - the render cannot reach for a capture or an input stream by accident. *Why it is a parameter at all:* until Batch D this was `crate::platform::resolve_dark(theme)`, a free function reaching into the registry from inside the renderer's constructor. That made the renderer untestable against a chosen theme and hid a platform dependency in the middle of the export, which is the one tree "export is the reference" says must not drift. The composition roots that supply it are `export::preview::with_warm_app` (from `Arc<Platform>` in app state), `export::pipeline::run::run_export`, and the `#[ignore]`d benches, which build their own bundle.
 
 ### Returns
 
@@ -80,15 +83,6 @@ Loads the edit doc and event log, resolves all per-export setup, and returns bot
 ### Implementation
 
 Follows the same sequence as the original `exporter::export` setup block (lines ~32-107), with the encoder/sink and the `RawDecoder::spawn` calls excluded. `build_timeline` runs BEFORE `EditState::load`, because `EditState` needs `events_ms - video_start` for its recorded-action layout fallback. Peeks `edit::seed::load_or_seed(paths)` once, up front, for `seed.aspect` (resolves `layout` together with the caller's `resolution`) and `seed.trim` (carried into `RenderMeta.trim` unresolved). The webcam decode box is computed here and returned as `RenderMeta.webcam_w`/`webcam_h` so the exporter does not need to repeat it: every layout mode's resolved overlay plus the webcam file's own probed dims go through `meta::webcam_box(&panels, wc_src, 1440)`, which gives ONE box at the SOURCE's aspect that each panel cover-crops at composite time. It replaced a box picked from the largest PANEL (`max_by_key((size_px, width_px))`): with a single panel-shaped box, every layout whose aspect disagreed with the winner was stretched (a square fed to a 16:9 bubble) or squashed (16:9 fed to the square big-cam) by 1.78x for its whole segment, and since the bubble and big-camera families never agree, one of them always lost. `has_webcam = paths.webcam().exists()` is also computed here (a plain filesystem check) and stored on `self` for `composite_at` to pass to `fx_state::render`; it also gates the one extra `probe_dims` subprocess (no webcam file, no probe).
-
-## FrameRenderer::composite_at
-
-```rust
-pub fn composite_at(&mut self, pose: &FramePose, screen: &[u8], prev: Option<&[u8]>,
-                    webcam: Option<(&[u8], u32, u32)>, out: &mut Vec<u8>)
-```
-
-`prev` is the screen frame the caller latched before the mid-take display switch this frame is inside (`FramePose::hold` says which frame to latch, `FramePose::mix` says a switch is in flight), and `None` on every frame outside one - which is every frame of a take that never switched. When both are present the held frame is resampled into the current span's rect and blended under it (`render::screen_mix`) BEFORE the compositor runs, so the cross-dissolve needs no second screen input in either compositor and the exporter and the one-shot preview reach it through one path.
 
 ## spans
 
@@ -113,10 +107,11 @@ Nothing (`()`). On return, `out` holds BGRA pixels (`out_w * out_h * 4` bytes) -
 
 ### Implementation
 
-Three sequential stages (identical to the original exporter loop body, lines ~138-144):
+Four sequential stages (the original exporter loop body, lines ~138-144, plus the caption blit M5 T5 added between the FX pass and the cursor):
 1. `compositor.composite_into(..., out)` - places screen + webcam into `out` with zoom crop and panel rounding.
-2. `fx_state::render(..., &self.cursor.screen(), self.has_webcam, ..., pose.out_t, pose.ev_t, ...)` - applies click rings, spotlight, video FX, and captions directly on `out`. BOTH clocks are passed: the doc's effect regions resolve at `pose.out_t` (`region_t`), while the raw click/hold/caption streams resolve at `pose.ev_t`. `self.cursor.screen()` supplies the capture origin so a click hit's raw desktop coordinates convert to screen-local the same way `Cursor`'s own `clicks`/`at` already do (`FrameRenderer` has no separate `ScreenInfo` field - it reads the one `Cursor` already owns). `self.has_webcam` gates the spotlight's camera-exclusion hole (see `FrameRenderer`'s field list above).
-3. The cursor, on `ev_t` (both cursor tracks are raw event streams, so they stay on the event clock). ONE of two paths runs, never both: `captured::draws_captured(self.settings.cursor.style, self.captured.is_some())` - live style is `System` and this recording has a layer - blits the REAL recorded bitmap via `CapturedCursors::draw`; otherwise `cursorset::draw` (if `cprep.is_some()`) blits the synthetic sprite with motion trail, bounce, and panel clipping. That one ALSO gets `pose.out_t`, the clock pack v2's animated busy cursor runs on - the only cursor input on the output clock rather than the event clock, so the animation is deterministic per rendered frame. That single gate is what confines the plain-OS arrow fallback to recordings with no layer to composite. Both take the same `(cur, cam, screen, inset_w, ev_t)` - the captured one additionally takes `self.sw`, the source width its `content_scale` needs - and project through the shared `cursorset::frame_placement`, so a style switch cannot move the cursor.
+2. `fx_state::render(..., &self.cursor.screen(), self.has_webcam, ..., pose.out_t, pose.ev_t, ...)` - applies click rings, spotlight, video FX, and the HOTKEY chord overlay (`hotkeycap`, not the spoken-caption track) directly on `out`. BOTH clocks are passed: the doc's effect regions resolve at `pose.out_t` (`region_t`), while the raw click/hold/chord streams resolve at `pose.ev_t`. `self.cursor.screen()` supplies the capture origin so a click hit's raw desktop coordinates convert to screen-local the same way `Cursor`'s own `clicks`/`at` already do (`FrameRenderer` has no separate `ScreenInfo` field - it reads the one `Cursor` already owns). `self.has_webcam` gates the spotlight's camera-exclusion hole (see `FrameRenderer`'s field list above).
+3. `captiondraw::overlay(out, ow, oh, &self.captions, &self.settings.captions, self.settings.ui.accent, pose.out_t)` - the spoken captions, on the OUTPUT clock like every doc region list. It sits HERE, after the FX pass and before the cursor, because a caption belongs over the picture and its effects but never over the pointer. It is called directly rather than through `fx_state::render`, which already carries eighteen arguments and a `#[allow(clippy::too_many_arguments)]`. Because every format composites through `composite_at`, GIF export keeps captions with no extra path; `Format::Gif`'s no-audio mux is untouched.
+4. The cursor, on `ev_t` (both cursor tracks are raw event streams, so they stay on the event clock). ONE of two paths runs, never both: `captured::draws_captured(self.settings.cursor.style, self.captured.is_some())` - live style is `System` and this recording has a layer - blits the REAL recorded bitmap via `CapturedCursors::draw`; otherwise `cursorset::draw` (if `cprep.is_some()`) blits the synthetic sprite with motion trail, bounce, and panel clipping. That one ALSO gets `pose.out_t`, the clock pack v2's animated busy cursor runs on - the only cursor input on the output clock rather than the event clock, so the animation is deterministic per rendered frame. That single gate is what confines the plain-OS arrow fallback to recordings with no layer to composite. Both take the same `(cur, cam, screen, inset_w, ev_t)` - the captured one additionally takes `self.sw`, the source width its `content_scale` needs - and project through the shared `cursorset::frame_placement`, so a style switch cannot move the cursor.
 
 The synthetic path also gets `self.cursor.tilt_deg()`, the motion lean the `Cursor` computed on the same frame `step_camera` asked it for a position, and `FrameRenderer::lenses` puts the identical value into `LensFrame.tilt_deg` - so the glass lens placed BEFORE the FX pass and the sprite blitted AFTER it lean by the same angle. The captured path is deliberately left out: that is the cursor that was actually on screen, and it never leaned.
 
@@ -129,3 +124,7 @@ Reconstructs `ZoomRegion` and `SetLayout` action tracks from a persisted `EditDo
 ## step
 
 The per-frame camera step (`reset_camera`, `snap_cursor`, `step_camera` on the two clocks) and `walk_plan`, the one frame-plan walk the exporter, the one-shot preview and `camera_track` share. Moved out of this file at the size cap; see `step.md`.
+
+## composite
+
+The per-frame composite pass (`composite_at`) and its lens build - see `docs/api/src-tauri/src/export/render/composite.md`.

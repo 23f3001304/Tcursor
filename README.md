@@ -1,7 +1,7 @@
 # TCursor
 
 An auto-zoom screen recorder for Windows that turns a raw capture into a polished, intentional-looking
-demo — automatic cursor-follow zooms, a built-in editor, and a local-AI "director" that suggests edits.
+demo - automatic cursor-follow zooms, a built-in editor, and a local-AI "director" that suggests edits.
 
 Built with Tauri v2 (Rust) and React/TypeScript. GPU compositor (wgpu) for export, FFmpeg for
 muxing and proxies.
@@ -17,7 +17,7 @@ Download `TCursorSetup.exe` from the [Releases](../../releases) page and run it.
 
 ## Build from source
 
-Requires Node 20+, Rust (stable), and `src-tauri/resources/ffmpeg.exe` + `ffprobe.exe`.
+Requires Node 20+, Rust (stable), `src-tauri/resources/ffmpeg.exe` + `ffprobe.exe`, and for the on-device captions (whisper.cpp with its Vulkan GPU backend): CMake 3.14+ on PATH, the MSVC C++ workload, an LLVM whose `libclang` bindgen can find (`LIBCLANG_PATH`), and the Vulkan SDK (`winget install KhronosGroup.VulkanSDK`). The Rust crate builds into `C:/tct` (`src-tauri/.cargo/config.toml`) because whisper's shader generator overruns Windows' path limit from a deep checkout. GPU inference works on NVIDIA, AMD and Intel from the same build; an NVIDIA-only CUDA backend is the opt-in cargo feature `asr-cuda` (needs the CUDA toolkit).
 
 ```bash
 npm install
@@ -31,9 +31,13 @@ To produce the branded single-file installer (`setup/dist/TCursorSetup.exe`):
 pwsh ./setup/build.ps1
 ```
 
+## Line budgets
+
+Files are budgeted by kind, not by one flat number (the old 200-line cap was retired on 2026-09-15 once `cargo fmt` replaced the one-line golf it had produced). Rust logic 280 lines, Rust test modules 320, Rust integration tests 280, TypeScript 200, TypeScript tests 220; a declaration-only file (one long enum or table, or the HUD icon set) is exempt. Measured on 2026-09-15 after `cargo fmt` and prettier, each number sits at about the 92nd percentile of its kind. One responsibility per file is the real rule: split by responsibility, never merely to fit a number. `node tools/linecount.mjs` lists every file over its budget (report only). Formatting is `cargo fmt` with the defaults pinned in `src-tauri/rustfmt.toml` and `npm run format` (prettier, print width 110, CRLF; `.prettierrc.json`) for the TypeScript; the docs live in `docs/api` (see below), so sources carry no doc comments.
+
 ## Docs-hover extension (developer IntelliSense)
 
-Function documentation lives in `docs/api/` (mirroring the source tree), not in code — this keeps
+Function documentation lives in `docs/api/` (mirroring the source tree), not in code - this keeps
 files under the project's 200-line budget. A small VS Code extension renders those docs on hover.
 
 ```bash
@@ -55,15 +59,29 @@ longer resolves to a real symbol). More detail in [tools/docs-hover/README.md](t
 
 ## Project layout
 
-- `src/` — React/TS frontend (recorder HUD + editor)
-- `src-tauri/` — Rust backend (capture, export pipeline, GPU compositor, AI)
-- `setup/` — branded installer app ("TCursor Setup") over the silent NSIS installer
-- `docs/api/` — the hover-docs store; `docs/superpowers/specs/` — design specs
-- `tools/docs-hover/` — the VS Code hover extension
+- `src/` - React/TS frontend (recorder HUD + editor)
+- `src-tauri/` - Rust backend (capture, export pipeline, GPU compositor, AI)
+- `setup/` - branded installer app ("TCursor Setup") over the silent NSIS installer
+- `docs/api/` - the hover-docs store; `docs/superpowers/specs/` - design specs
+- `tools/docs-hover/` - the VS Code hover extension
+
+## Manual tests
+
+Five integration tests under `src-tauri/tests/` need real hardware or a real recording, so they are `#[ignore]`d and a normal `cargo test` never runs them. Each one skips with a message when its input is absent rather than failing. Run one from `src-tauri`:
+
+| Test | Needs | Run |
+|---|---|---|
+| `manual_capture` | a display to capture, with the app window on screen over your desktop | `cargo test --test manual_capture -- --ignored --nocapture` |
+| `manual_mic` | a microphone as the default input device | `cargo test --test manual_mic -- --ignored --nocapture` |
+| `manual_system_audio` | something audible playing on the default output device | `cargo test --test manual_system_audio -- --ignored --nocapture` |
+| `manual_mouse` | you, moving and clicking the mouse for a few seconds | `cargo test --test manual_mouse -- --ignored --nocapture` |
+| `manual_export` | the newest recording under `%USERPROFILE%\Videos\TCursor` that has `video.mp4` and `events.json` | `cargo test --test manual_export -- --ignored --nocapture` |
+
+They are the only coverage of capture, the mic, loopback and the mouse hook, which cannot run headless.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). You're free to use, modify, and redistribute it, but the copyright
+MIT - see [LICENSE](LICENSE). You're free to use, modify, and redistribute it, but the copyright
 notice must be kept, so the original author is always credited.
 
 Created by Coehe.

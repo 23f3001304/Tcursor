@@ -1,6 +1,6 @@
 # src-tauri/src/domain/time.rs
 
-Defines the `Timestamp` newtype, the `Clock` trait for injectable time sources, and two implementations: a wall-clock `SystemClock` and a deterministic `FakeClock` for tests. The key architectural property is injectability - every component that stamps frames or audio start times accepts `Arc<dyn Clock>` so tests can advance time without real hardware or `sleep` calls.
+Defines the `Timestamp` newtype, the `Clock` trait for injectable time sources, and its wall-clock implementation `SystemClock`. The key architectural property is injectability - every component that stamps frames or audio start times accepts `Arc<dyn Clock>` so a test can hand in its own `Clock` (the record-path tests do) instead of real hardware or `sleep` calls. The old `FakeClock` here had no consumer outside its own test and was deleted in the cleanup of 2026-09-15.
 
 ## Timestamp
 
@@ -99,49 +99,3 @@ Records `Instant::now()` as the session epoch and returns a new `SystemClock`. S
 ### Returns
 
 `Self` with `start` set to the current instant.
-
-## FakeClock
-
-```rust
-pub struct FakeClock { ms: AtomicU64 }
-```
-
-Deterministic clock for tests. Backed by an `AtomicU64` so it can be shared across threads (`Sync` via the atomic) and advanced from test code while capture callbacks read it.
-
-- `ms: AtomicU64` - *Current time in milliseconds. `SeqCst` ordering on all accesses ensures that a test's `advance` call is visible to any thread reading `now_ms()` immediately after.*
-
-### Used by
-
-Test code throughout `src-tauri/src` that needs injectable time without real hardware.
-
-## FakeClock::new
-
-```rust
-pub fn new(start: u64) -> Self
-```
-
-Creates a `FakeClock` initialized to `start` milliseconds. Starting at a non-zero value is useful for verifying timestamp arithmetic in tests.
-
-### Inputs
-
-- `start: u64` - *Initial clock value in milliseconds. Tests that care about relative durations often start at a convenient round number like 500 or 1000.*
-
-### Returns
-
-`Self` with `ms` initialized to `start`.
-
-## FakeClock::advance
-
-```rust
-pub fn advance(&self, ms: u64)
-```
-
-Atomically adds `ms` to the current time using `fetch_add` with `SeqCst` ordering. Takes `&self` (shared reference) because the mutation is through the `AtomicU64`. After this call, `now_ms()` returns the previous value plus `ms`.
-
-### Inputs
-
-- `ms: u64` - *Milliseconds to add to the current clock value.*
-
-### Behaviors
-
-- `fake_clock_advances` - creates `FakeClock::new(500)`, asserts `now_ms() == 500`, calls `advance(250)`, asserts `now_ms() == 750`.

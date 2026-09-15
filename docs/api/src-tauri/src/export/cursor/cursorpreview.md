@@ -34,16 +34,18 @@ pub material: Option<String>,
 
 The selected pack's `material` (`"glass"`, else `None`), carried to the canvas preview alongside the sprites.
 
-The preview draws a glass pack's sprite at the same reduced alpha the export blits it at, and cross-fades its states the same way, so the LIVE canvas approximates the paused exact frame the backend renders into the same pixels. It cannot refract - see the deliberate differences in `docs/api/src/editor/stage/cursorGlass.md`.
+The preview draws a glass pack's sprite at the same reduced alpha the export blits it at, and cross-fades its states the same way, so the LIVE canvas approximates the paused exact frame the backend renders into the same pixels. It cannot refract - see the deliberate differences in `docs/api/src/editor/stage/cursor/cursorGlass.md`.
 
 ## cursor_sprites
 
 ```rust
 #[tauri::command]
-pub fn cursor_sprites(folder: String) -> Result<CursorPackDto, String>
+pub fn cursor_sprites(folder: String, platform: tauri::State<'_, Arc<Platform>>) -> Result<CursorPackDto, String>
 ```
 
 The recording's selected cursor pack (embedded, bundled, or imported - see `export/cursor/pack.rs`) as PNG data URLs, decoded like the export (crop to alpha, hotspot re-based, RGB-inverted for a dark theme). The preview draws these when the recording's cursor style is Enhanced. Errors only if the Arrow fallback fails to decode.
+
+`platform` supplies the desktop's dark preference for `settings::theme::resolve_dark`, which combined with `pack::theme_inverts` decides whether the sprites are inverted. Injected by Tauri, so the JS call is unchanged; before Batch D it was a free function reaching into the registry from here.
 
 *Not to be confused with the pack GRID's tiles* (`CursorPanel`), which load raw pack PNGs straight off disk through the asset protocol: this command is the one selected pack, decoded to match the export exactly, and it shells out to ffmpeg once per sprite.
 

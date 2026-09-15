@@ -94,7 +94,7 @@ Opens a named or default input device, builds an audio callback that writes samp
 - `wav_path: &str` - Destination WAV file path. *Why:* microphone audio is written independently from system audio so each can be mixed or muted separately at export.*
 - `paused: Arc<AtomicBool>` - Shared pause flag. *Why:* when set the callback drops incoming samples so paused time is excluded from the WAV without stopping and restarting the stream.*
 - `started: Arc<AtomicU64>` - Written exactly once, on the first non-paused callback, with `capture_ms(clock.now_ms(), info)`. *Why:* the recorder reads this atom to know the mic's epoch and compute A/V sync offsets; `0` means "not yet started".*
-- `clock: Arc<dyn Clock>` - Provides `now_ms()` inside the callback. *Why injectable:* tests substitute a `FakeClock` to control timing without real hardware.*
+- `clock: Arc<dyn Clock>` - Provides `now_ms()` inside the callback. *Why injectable:* a test hands in its own `Clock` to control timing without real hardware.*
 - `level: Option<Arc<LevelSlot>>` - Receives each block's RMS for the HUD's live meter. *Why a slot and not a callback that emits:* this runs on a realtime callback thread, which may not block, allocate or emit; `LevelSlot::push` is a single relaxed `fetch_max`, and the owning thread does the emitting. `None` skips the measurement entirely (`default_input`, tests).*
 
 ### Implementation
@@ -129,3 +129,5 @@ Convenience wrapper around `open` using the system default device, no pause (`At
 ### Returns
 
 `anyhow::Result<CpalMicHandle>` - same error surface as `open`.
+
+**Poison tolerance on the driver callback (cleanup batch 3, 2026-09-15).** Both stream callbacks take the writer lock with `.lock().unwrap_or_else(|e| e.into_inner())`, the same shape `asr/commands.rs` uses, rather than `.unwrap()`. A writer thread that panicked while holding the mutex used to poison it, and the next audio block would then panic on the driver's own thread mid-take, which the driver reports as a stream error and the take loses its audio from that point. Continuing to write through a poisoned lock is the right call here: the writer's state is a file handle and a sample count, nothing a half-finished write can corrupt beyond the block that was in flight.

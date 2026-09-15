@@ -1,25 +1,31 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { getSettings, setSettings } from "../../lib/ipc";
+import { getSettings, setSettings } from "../../shared/ipc";
 import type { Settings as S, InterfaceSettings } from "../settings/settings";
 import { Back } from "../components/icons";
 import { SettingsInterface } from "../settings/SettingsInterface";
 import { SettingsAppearance } from "../settings/SettingsAppearance";
 
 type Tab = "interface" | "layout";
-const TABS: { id: Tab; label: string }[] = [{ id: "interface", label: "Interface" }, { id: "layout", label: "Layout" }];
+const TABS: { id: Tab; label: string }[] = [
+  { id: "interface", label: "Interface" },
+  { id: "layout", label: "Layout" },
+];
 
-/** Preferences as a sheet inside the idle card (`IdleCard`'s body, the display picker's own box):
- *  the same two-tab box Settings uses, scrolling inside the card's height. */
-export function Preferences({ onClose, onUiChange }: {
+export function Preferences({
+  onClose,
+  onUiChange,
+}: {
   onClose: () => void;
-  /** Fires on every Interface-tab change (theme, accent, and Task 39's `animated_brand`) with the
-   *  full new `InterfaceSettings` - one callback instead of a growing positional-args list. */
   onUiChange: (ui: InterfaceSettings) => void;
 }) {
   const [draft, setDraft] = useState<S | null>(null);
   const [tab, setTab] = useState<Tab>("interface");
-  useEffect(() => { getSettings().then(setDraft).catch(() => {}); }, []);
+  useEffect(() => {
+    getSettings()
+      .then(setDraft)
+      .catch(() => {});
+  }, []);
 
   function patch(next: S) {
     setDraft(next);
@@ -31,7 +37,9 @@ export function Preferences({ onClose, onUiChange }: {
   return (
     <div className="settings">
       <div className="settings-head" data-tauri-drag-region>
-        <button className="winbtn" title="Back" onClick={onClose}><Back /></button>
+        <button className="winbtn" title="Back" onClick={onClose}>
+          <Back />
+        </button>
         <span className="settings-title">Preferences</span>
       </div>
       <div className="tabs">
@@ -43,9 +51,14 @@ export function Preferences({ onClose, onUiChange }: {
       </div>
       <div className="settings-body">
         <AnimatePresence mode="wait">
-          <motion.div className="tab-panel" key={tab}
-            initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }}
-            transition={{ duration: 0.16, ease: [0.4, 0, 0.2, 1] }}>
+          <motion.div
+            className="tab-panel"
+            key={tab}
+            initial={{ opacity: 0, x: 8 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -8 }}
+            transition={{ duration: 0.16, ease: [0.4, 0, 0.2, 1] }}
+          >
             {tab === "interface" && (
               <SettingsInterface
                 value={draft.ui}
@@ -55,7 +68,12 @@ export function Preferences({ onClose, onUiChange }: {
                 }}
               />
             )}
-            {tab === "layout" && <SettingsAppearance value={draft.appearance} onChange={(appearance) => patch({ ...draft, appearance })} />}
+            {tab === "layout" && (
+              <SettingsAppearance
+                value={draft.appearance}
+                onChange={(appearance) => patch({ ...draft, appearance })}
+              />
+            )}
           </motion.div>
         </AnimatePresence>
       </div>

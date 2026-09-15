@@ -36,6 +36,31 @@ ab_glyph = "0.2"
 ureq = { version = "2", features = ["json"] }
 flate2 = "1.0"
 png = "0.17"
+jpeg-encoder = "0.7"
+# M5 captions. GPU inference through the Vulkan backend (owner ruling 2026-09-15: "why leave
+# acceleration"): one build serves NVIDIA, AMD and Intel and ships nothing extra, since every
+# modern Windows driver carries Vulkan. Building needs the Vulkan SDK (winget KhronosGroup.VulkanSDK;
+# VULKAN_SDK set, glslc on PATH) on top of the prerequisites below. CUDA is the opt-in `asr-cuda`
+# feature at the bottom of this file, for machines with the CUDA toolkit; it is not the default
+# because it needs the toolkit to build and ships hundreds of MB of runtime DLLs. whisper-rs-sys
+# vendors whisper.cpp and drives cmake over it.
+#
+# ENABLED 2026-09-15 (M5 T3), after the one prerequisite below was met. This builds on Windows - a
+# full `cargo build --tests` with whisper-rs enabled finished in 2m 26s - but ONLY when bindgen can
+# find a libclang. Two findings behind that:
+#
+#  1. The plan's `.cargo/config.toml` WHISPER_DONT_GENERATE_BINDINGS=1 shortcut is WRONG here and
+#     that file is deliberately NOT created. The bundled `src/bindings.rs` it makes build.rs copy
+#     was generated on Linux, so its glibc `size_of` assertions (`_IO_FILE` 216, `_G_fpos_t` 16)
+#     are false against MSVC's CRT (208, 12) and the crate fails with three E0080s. The flag also
+#     WINS over a correct LLVM install, so the file would break the working setup too.
+#  2. cmake 4.4.3 + VS 2022 build the vendored whisper.cpp fine (whisper.lib, ggml*.lib produced).
+#     The C++ side was never the problem.
+#
+# To build this crate you need LLVM where libclang sits somewhere clang-sys discovers, or
+# LIBCLANG_PATH pointing at it (this machine sets it in the user cargo config), plus CMake 3.14+
+# and the MSVC C++ workload. Without them the crate fails to build; nothing else here does.
+whisper-rs = { version = "0.16", default-features = false, features = ["vulkan"] }
 
 [dependencies.windows]
 version = "0.58"
@@ -73,3 +98,8 @@ incremental = false
 
 [profile.dev.package."*"]
 opt-level = 3
+
+[features]
+# Opt-in NVIDIA CUDA backend for transcription: needs the CUDA toolkit to build and its runtime
+# DLLs next to the exe at run time. The default build uses Vulkan, which needs neither.
+asr-cuda = ["whisper-rs/cuda"]

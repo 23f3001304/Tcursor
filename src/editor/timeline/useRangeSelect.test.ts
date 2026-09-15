@@ -1,16 +1,33 @@
+// @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { act, createElement, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { rangeOf, useRangeSelect, type Range } from "./useRangeSelect";
 
-// The ruler's Shift+drag, driven the way a browser drives it: a pointerdown the hook either claims
-// or declines, then window pointermove/pointerup. The track is a real element with a stubbed box
-// (jsdom lays nothing out), so the ms the hook reports is the real x-to-ms mapping, not a fixture.
 const DUR = 10_000;
 const track: { current: HTMLDivElement | null } = { current: null };
-const box = (left: number, width: number) => ({ left, width, top: 0, right: left + width, bottom: 0, height: 0, x: left, y: 0, toJSON: () => ({}) }) as DOMRect;
+const box = (left: number, width: number) =>
+  ({
+    left,
+    width,
+    top: 0,
+    right: left + width,
+    bottom: 0,
+    height: 0,
+    x: left,
+    y: 0,
+    toJSON: () => ({}),
+  }) as DOMRect;
 
-let api: { begin: (e: { clientX: number; shiftKey: boolean; preventDefault(): void; stopPropagation(): void }) => boolean; range: Range | null };
+let api: {
+  begin: (e: {
+    clientX: number;
+    shiftKey: boolean;
+    preventDefault(): void;
+    stopPropagation(): void;
+  }) => boolean;
+  range: Range | null;
+};
 let root: Root, container: HTMLDivElement;
 
 function Harness() {
@@ -20,14 +37,21 @@ function Harness() {
   return null;
 }
 
-/** A pointerdown on the ruler; returns whether the range gesture claimed it. */
 const down = (clientX: number, shiftKey: boolean) => {
   let claimed = false;
-  act(() => { claimed = api.begin({ clientX, shiftKey, preventDefault: () => {}, stopPropagation: () => {} }); });
+  act(() => {
+    claimed = api.begin({ clientX, shiftKey, preventDefault: () => {}, stopPropagation: () => {} });
+  });
   return claimed;
 };
-const at = (type: string, clientX: number) => act(() => { window.dispatchEvent(new MouseEvent(type, { clientX, bubbles: true })); });
-const esc = () => act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
+const at = (type: string, clientX: number) =>
+  act(() => {
+    window.dispatchEvent(new MouseEvent(type, { clientX, bubbles: true }));
+  });
+const esc = () =>
+  act(() => {
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+  });
 
 beforeEach(() => {
   (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -37,9 +61,16 @@ beforeEach(() => {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() => { root.render(createElement(Harness)); });
+  act(() => {
+    root.render(createElement(Harness));
+  });
 });
-afterEach(() => { act(() => { root.unmount(); }); container.remove(); });
+afterEach(() => {
+  act(() => {
+    root.unmount();
+  });
+  container.remove();
+});
 
 describe("rangeOf", () => {
   it("orders the pair and clamps it into the clip", () => {
@@ -53,7 +84,7 @@ describe("useRangeSelect", () => {
     expect(down(600, true)).toBe(true);
     at("pointermove", 200);
     at("pointerup", 200);
-    expect(api.range).toEqual([2000, 6000]); // dragged right to left, reported low to high
+    expect(api.range).toEqual([2000, 6000]);
   });
 
   it("a plain drag is declined, so the ruler scrubs and no range appears", () => {

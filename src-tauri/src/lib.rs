@@ -1,21 +1,21 @@
-pub mod ai;
-pub mod domain;
-pub mod capture;
-pub mod encode;
-pub mod audio;
-pub mod session;
-pub mod win;
-pub mod commands;
-pub mod events;
 pub mod actions;
-pub mod export;
-pub mod settings;
+pub mod ai;
+pub mod asr;
+pub mod audio;
+pub mod capture;
+pub mod commands;
+pub mod domain;
 pub mod edit;
+pub mod encode;
+pub mod events;
+pub mod export;
+pub mod platform;
+pub mod ports;
+pub mod process;
+pub mod session;
+pub mod settings;
+pub mod shell;
 
-/// Guards against a second close-triggered stop stacking while `close_guard::finish_and_close` is
-/// already running for an earlier `CloseRequested` (e.g. the OS delivering it again while the
-/// window is on its way down). Process-lifetime static; never reset - the app is quitting either
-/// way once this is set.
 static CLOSING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -26,13 +26,6 @@ pub fn run() {
         .manage(session::record::recorder::Recorder::default())
         .manage(export::preview::PreviewSession::default())
         .on_window_event(|window, event| {
-            // R6: never lose a take to the close button. If a recording is active or its stop is
-            // still finalizing (`Recorder::is_busy`), this is the safety net for the OS close
-            // button / Alt+F4 / a wedged renderer - see `close_guard::finish_and_close`'s doc
-            // comment for why it does not depend on the frontend for correctness. The HUD's own
-            // Close button races this with a JS-side graceful stop first
-            // (`useRecordingFlow.stopForClose`): by the time that resolves and calls
-            // `window.close()`, `is_busy()` is already false and this arm never fires.
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 use tauri::Manager;
                 let recorder = window.state::<session::record::recorder::Recorder>();
@@ -40,7 +33,9 @@ pub fn run() {
                     api.prevent_close();
                     if !CLOSING.swap(true, std::sync::atomic::Ordering::SeqCst) {
                         let app = window.app_handle().clone();
-                        tauri::async_runtime::spawn(session::record::close_guard::finish_and_close(app));
+                        tauri::async_runtime::spawn(
+                            session::record::close_guard::finish_and_close(app),
+                        );
                     }
                 }
             }
@@ -54,7 +49,6 @@ pub fn run() {
             session::record::recorder_stop::stop_recording,
             session::record::switch_mic::switch_mic,
             session::record::switch_display::switch_display,
-            commands::save_webcam,
             commands::append_webcam,
             session::record::webcam_segments::mark_webcam_segment,
             commands::export_project,
@@ -63,8 +57,11 @@ pub fn run() {
             edit::commands::get_edit,
             edit::commands::apply_edit_op,
             edit::commands::save_edit,
-            ai::commands::ai_plan,
+            ai::commands::ai_propose,
             ai::commands::list_ollama_models,
+            asr::commands::whisper_models,
+            asr::commands::download_whisper_model,
+            asr::commands::transcribe_project,
             export::preview::preview_frame,
             export::preview::preview_bg,
             export::preview::bg_thumbs::background_thumbs,
@@ -80,6 +77,7 @@ pub fn run() {
             export::cursor::cursorpreview::cursor_layer,
             export::cursor::pack::list_cursor_packs,
             export::cursor::pack_import::import_cursor_pack,
+            export::cursor::pack_template::create_pack_template,
             settings::bg_asset::import_background_asset,
             settings::bg_asset::background_asset_info,
             settings::bg_asset::remove_background_asset,
@@ -96,43 +94,30 @@ pub fn run() {
         ])
         .setup(|app| {
             use tauri::Manager;
-            // Cold-start file association: if argv[1] is a `.tcursor` path (Windows hands the
-            // associated file to a fresh process on double-click), resolve it once here so the
-            // frontend can route straight to the editor via `get_launch_project`. Warm-launch
-            // (forwarding to an already-running instance) is NOT handled - see `LaunchProject`'s
-            // doc comment.
+            let platform = std::sync::Arc::new(platform::current());
+            app.manage(platform.clone());
             app.manage(session::project::commands::LaunchProject(
                 session::project::commands::launch_project_from_argv(std::env::args()),
             ));
-            // Resolve the bundled ffmpeg/ffprobe from the app exe dir (robust on
-            // installed builds where resource_dir() may not); dev falls back to PATH.
-            // The diagnostic log explains "ffmpeg not available" failures on any PC.
-            let diag = crate::win::sys::proc::init_ffmpeg(app.path().resource_dir().ok());
+            let diag = crate::process::proc::init_ffmpeg(app.path().resource_dir().ok());
             let _ = std::fs::write(std::env::temp_dir().join("tcursor-ffmpeg.log"), diag);
-            // Probe the encoder off-thread now so the first recording's ffmpeg sink
-            // is fast — audio capture must not start behind a slow first ffmpeg launch.
             std::thread::spawn(crate::encode::ffmpeg_encoder::prewarm);
-            // The background picker's 53 thumbnails: loaded from the cache dir, or rendered once
-            // and cached, before the editor can ask for them (see `bg_thumbs::prewarm`).
             std::thread::spawn(crate::export::preview::bg_thumbs::prewarm);
             if let Some(win) = app.get_webview_window("main") {
-                #[cfg(windows)]
-                {
-                    // Hides the HUD from screen capture/recordings. Set false temporarily
-                    // if you need to screenshot the HUD during design work.
-                    const CAPTURE_EXCLUDE: bool = true;
-                    if CAPTURE_EXCLUDE {
-                        if let Ok(hwnd) = win.hwnd() {
-                            let ok = win::sys::capture_exclusion::set_capture_exclusion(hwnd.0 as isize, true);
-                            if ok {
-                                println!("capture exclusion applied");
-                            } else {
-                                eprintln!("WARNING: capture exclusion FAILED — HUD may appear in recordings");
-                            }
+                const CAPTURE_EXCLUDE: bool = true;
+                if CAPTURE_EXCLUDE {
+                    if let Some(h) = crate::shell::window::handle(&win) {
+                        let ok = platform.system.exclude_from_capture(h, true);
+                        if ok {
+                            println!("capture exclusion applied");
+                        } else {
+                            eprintln!(
+                                "WARNING: capture exclusion FAILED - HUD may appear in recordings"
+                            );
                         }
-                    } else {
-                        println!("capture exclusion DISABLED (dev) — HUD is screenshottable");
                     }
+                } else {
+                    println!("capture exclusion DISABLED (dev) - HUD is screenshottable");
                 }
             }
             Ok(())

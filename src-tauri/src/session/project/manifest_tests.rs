@@ -1,4 +1,3 @@
-// Split from manifest.rs per repo convention (#[path] sibling test module).
 use super::*;
 
 fn temp_path(name: &str) -> std::path::PathBuf {
@@ -41,9 +40,6 @@ fn load_errs_when_the_file_is_not_valid_json() {
 
 #[test]
 fn load_or_default_falls_back_to_an_unknown_source_manifest_when_missing() {
-    // Simulates an existing recording made before this feature: no project.tcursor on disk at
-    // all. Resolution must still succeed (back-compat), with source dims that clearly read as
-    // "unknown" rather than a fabricated real resolution.
     let path = temp_path("missing_for_fallback.tcursor");
     let _ = std::fs::remove_file(&path);
 

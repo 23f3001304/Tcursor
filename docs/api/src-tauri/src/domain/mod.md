@@ -1,15 +1,9 @@
 # src-tauri/src/domain/mod.rs
 
-MODULE OVERVIEW: The `domain` module defines the foundational value types shared across the recording, capture, and export layers: time representations, typed identifiers, and capture target descriptors. All three submodules are pure data with no I/O or threading of their own; they exist to establish type-level distinctions that prevent silent bugs (wrong coordinate space, raw u64 compared against a timestamp, etc.). The module's most pervasive contribution is `time`, whose `Clock` trait and `Timestamp` newtype are threaded through `capture`, `audio`, `session`, and `export` to provide injectable, testable time without coupling any layer to wall-clock hardware.
+MODULE OVERVIEW: The `domain` module holds the one foundational value type shared across the recording, capture and export layers: `time`, whose `Clock` trait and `Timestamp` newtype are threaded through `capture`, `audio`, `session` and `export` to provide injectable time without coupling any layer to wall-clock hardware. Pure data, no I/O or threading of its own.
+
+**What left (cleanup batch 1, 2026-09-15).** `ids` (`FrameIndex`, `ScreenCoord`, `CanvasCoord`) and `capture_source` (`CaptureSource`) had zero consumers across `src-tauri/src`, `src-tauri/tests` and `build.rs`; both files, their tests and their docs pages were deleted. `FakeClock` went with them for the same reason (see `time.md`).
 
 ## time
 
-Defines `Timestamp` (session-relative millisecond newtype), the `Clock` trait for injectable time sources, `SystemClock` (wall-clock implementation), and `FakeClock` (atomic test double). Key items: `Clock` trait (`now_ms`), `SystemClock::new` (captures the session epoch at construction), `FakeClock::advance` (atomically increments time for test control), `Timestamp::ZERO` (sentinel for "not yet set").
-
-## ids
-
-Defines typed wrappers for frame counters and coordinate spaces so the compiler rejects accidental mixing of screen-space and canvas-space coordinates at compile time. Key items: `FrameIndex` (monotonic frame counter with `next`), `ScreenCoord` (signed integer screen-space pixel position), `CanvasCoord` (float canvas-space position).
-
-## capture_source
-
-Defines `CaptureSource`, a `Copy`-able domain enum identifying what screen region or target a recording session should capture. Key items: `CaptureSource` enum (`Display(u32)`, `Window(u64)`, `Region { x, y, w, h }`).
+Defines `Timestamp` (session-relative millisecond newtype), the `Clock` trait for injectable time sources, and `SystemClock` (the wall-clock implementation). Key items: `Clock` trait (`now_ms`), `SystemClock::new` (captures the session epoch at construction), `Timestamp::ZERO` (sentinel for "not yet set").

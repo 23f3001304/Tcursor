@@ -1,6 +1,6 @@
 # src/editor/director/DirectorPointer.tsx
 
-The AI director's fake cursor: a violet-ringed (`--e-ai`) arrow that visibly performs each edit instead of applying it invisibly. The CALLER mounts/unmounts it (`{running && <DirectorPointer .../>}` inside an `AnimatePresence` - see `DirectorOverlay.tsx`) so it fades in/out with the run itself.
+The AI director's fake cursor: a violet-ringed (`--e-ai`) arrow that performs each applied edit after the fact (`useAiRun.ts`'s replay, on by the `ui.ai_choreography` setting). The CALLER mounts/unmounts it (`{running && <DirectorPointer .../>}` inside an `AnimatePresence` - see `DirectorOverlay.tsx`) so it fades in/out with the run itself.
 
 ## DirectorPointerHandle
 
@@ -8,15 +8,15 @@ The AI director's fake cursor: a violet-ringed (`--e-ai`) arrow that visibly per
 export interface DirectorPointerHandle {
   moveTo(x: number, y: number): Promise<void>;
   press(): Promise<void>;
-  sweep(fromX: number, toX: number, y: number): Promise<void>;
 }
 ```
 
-The imperative surface `useDirector.ts`'s `reveal` loop drives.
+The imperative surface `useAiRun.ts`'s replay loop drives.
 
 - `moveTo(x, y)` - glides to `(x, y)` via the spring `x`/`y` motion values (`.set`, stiffness 170 / damping 26). Resolves once both are within 2px of the target (a `MotionValue.on("change", ...)` listener), or after `pace(distance).travelCapMs` - whichever comes first, so a long-distance move (or one that overshoots and never quite settles) can never stall the reveal.
 - `press()` - a ~180ms "click": sets `pressed` true for 90ms (the ring pulses 18px/20% alpha -> 10px/60% alpha, the glyph dips to 0.92 scale) then false for another 90ms (both animate back), resolving after both halves.
-- `sweep(fromX, toX, y)` - jumps instantly (`.jump`, no spring) to `(fromX, y)`, then runs a plain 320ms tween (`animate(x, toX, {type: "tween", ...})`, NOT spring-driven) across to `toX` - used for `clear_zooms`, which has no single point to aim at.
+
+The lane sweep the one-shot reveal used for `clear_zooms` is gone with that flow (M4 T5): the replay only ever aims at a pill and presses.
 
 ## DirectorPointer
 
@@ -35,4 +35,4 @@ Renders the fake cursor and exposes `DirectorPointerHandle` on `ref` (React 19 r
 ### Notes
 
 - `x`/`y` are stable `useSpring` instances for the component's lifetime (React re-mounts a fresh pair each time the caller mounts `DirectorPointer`, since it's conditionally rendered).
-- No `AbortController` - every handle method is a small, self-contained `Promise`; cancellation is handled one level up, by `useDirector.ts`'s `cancelRef` simply not starting the next step.
+- No `AbortController` - every handle method is a small, self-contained `Promise`; cancellation is handled one level up, by `useAiRun.ts`'s `cancelRef` simply not starting the next step.

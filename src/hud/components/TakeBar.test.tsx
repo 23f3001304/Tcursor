@@ -1,20 +1,48 @@
+// @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { TakeBar } from "./TakeBar";
 
-// jsdom has no matchMedia; the wave's reduced-motion hook and Motion both ask for it.
-vi.stubGlobal("matchMedia", () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }));
+vi.stubGlobal("matchMedia", () => ({
+  matches: false,
+  addEventListener() {},
+  removeEventListener() {},
+  addListener() {},
+  removeListener() {},
+}));
 
 const base: Parameters<typeof TakeBar>[0] = {
-  paused: false, saving: false, savePct: 0, elapsed: 12_000, err: null, micOn: true, sysOn: false, live: true,
-  read: () => ({ mic: 0, sys: 0 }), camRef: () => {}, camOn: false, camLive: false,
-  toggle: vi.fn(), togglePause: vi.fn(), sources: false, onSources: vi.fn(),
+  paused: false,
+  saving: false,
+  savePct: 0,
+  elapsed: 12_000,
+  err: null,
+  micOn: true,
+  sysOn: false,
+  live: true,
+  read: () => ({ mic: 0, sys: 0 }),
+  camRef: () => {},
+  camOn: false,
+  camLive: false,
+  toggle: vi.fn(),
+  togglePause: vi.fn(),
+  sources: false,
+  onSources: vi.fn(),
 };
 
-let host: HTMLDivElement; let root: Root;
-beforeEach(() => { host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host); });
-afterEach(() => { act(() => root.unmount()); host.remove(); vi.clearAllMocks(); });
+let host: HTMLDivElement;
+let root: Root;
+beforeEach(() => {
+  host = document.createElement("div");
+  document.body.appendChild(host);
+  root = createRoot(host);
+});
+afterEach(() => {
+  act(() => root.unmount());
+  host.remove();
+  vi.clearAllMocks();
+});
 const render = (p: Partial<typeof base>) => act(() => root.render(<TakeBar {...base} {...p} />));
 const button = (label: string) => host.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
 
@@ -29,8 +57,6 @@ describe("TakeBar", () => {
     expect(host.querySelector(".take-slot svg")).not.toBeNull();
   });
 
-  // Mid-take source switching (2026-09-14): the one affordance the pill grew, left of Pause, and
-  // it says whether the sheet under the pill is open.
   it("Sources sits left of Pause and reports whether its sheet is open", () => {
     render({});
     const order = [...host.querySelectorAll("button")].map((b) => b.getAttribute("aria-label"));

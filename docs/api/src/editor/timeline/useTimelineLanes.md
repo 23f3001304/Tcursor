@@ -1,0 +1,61 @@
+# src/editor/timeline/useTimelineLanes.tsx
+
+Which lanes the timeline shows, and what each one renders. Split out of `Timeline.tsx`, which keeps the scrub/drop surface, the ruler, the gutter and the overlays that are drawn across the whole stack; this hook owns the other half - the per-lane region memos, the four `useLaneDrag` commits, and the ordered `TimelineLane[]` the component maps over twice (once for the label gutter, once for the rows).
+
+## TimelineLane
+
+```ts
+export interface TimelineLane {
+  key: string;
+  label: string;
+  heightPx: number;
+  active: boolean;
+  body: React.ReactNode;
+}
+```
+
+One visible lane: the key both columns hang their `e-lane-${key}` class off, the gutter label, the height that label slot has to match, whether this lane owns the current selection, and the rows themselves.
+
+## useTimelineLanes
+
+```tsx
+export function useTimelineLanes(p: {
+  doc: EditDoc; dur: number; sel: string | null; onSel: (id: string | null) => void;
+  onApply: (op: EditOp) => Promise<EditDoc | null>;
+  track: RefObject<HTMLDivElement | null>;
+  waves: { system: string; mic: string }; wavesReady: boolean;
+  hasWebcam: boolean; layoutPresets: LayoutPresets | null;
+}): TimelineLane[]
+```
+
+### Behavior
+
+**Lane label gutter (Task 36, restructured in a follow-up fix - see "Why a sibling gutter, not a nested label" below).** A `lanes` array (`{key, label, heightPx, active, body}`) is built ONCE per render - one entry per visible lane (zoom/FX/layout only when they have rows; Camera always; Audio when loading or at least one source exists) - and mapped TWICE: once into `.e-lanegutter`'s label rows, once into `.e-tracks`' row bodies. Building it once and mapping it twice (rather than two separately-conditioned blocks) means the two columns can never drift out of sync with each other - the same array index always means the same lane in both places. Each gutter slot's `heightPx` is computed via the shared `laneHeight(rows, rowH, gap)` helper, so a lane's label slot is always exactly as tall as that lane's real rendered content, computed from the same row-count variables rather than duplicated as a second source of truth. `ROW_H`/`AUDIO_ROW_H`/`GAP` are **not constants** - they are `useDensity()`'s `row`/`audioRow`/`gap` (32/22/6 at full size, 28/20/5 on a short window; `density.md`), the same three numbers `timeline.css` draws `.e-zoomrow`/`.e-audiorow` and the lane gaps with, as `--e-row-h`/`--e-audio-h`/`--e-row-gap`. One function feeds both, so a laptop cannot leave the two columns out of step. The same `ROW_H` is also the `rowHeightPx` handed to all four `useLaneDrag` calls, which is what keeps a vertical pill drag snapping one lane row per row of actual travel. The gutter is `--e-gutter-w` wide (72, or 60 on a narrow window) and left-aligned (dots in one column), which is what `.e-timeline`'s left padding - that width plus two 8px steps - exists to hold.
+
+**Time lane (time remap T7).** `<TimeLane doc dur sel onSel onApply track />` is pushed FIRST into `lanes` - nearest the filmstrip, because cuts and speed spans are the clip's own structure rather than a decoration laid over it - and only when `doc.cuts.length || doc.speed.length`, so an untouched recording does not carry an empty row. One row, height `ROW_H`, gutter label "Time", `active: isSel(doc.speed)`. See `TimeLane.md`.
+
+**Zoom / FX / Layout lanes.** `layoutRegions(doc.zooms | doc.effects | doc.layout.filter(non-screen))` assigns each region a `layer` (greedy interval-partitioning), and each lane renders one row per layer via the shared `<RegionRows>` (`./lanes/RegionRows.tsx`, Task 36 - extracted so the three near-identical ~25-line pill blocks aren't triplicated) so overlapping regions stack on separate rows instead of colliding in the same lane. Each pill is a `motion.div` carrying `data-region-id` (nothing looks a pill up by it today: the AI director's replay aims by time on the lane (`src/editor/director/targets.ts`'s `timelinePointForMs`), not by id; layout pills carry the attribute too but nothing queries it), positioned `left: (s/dur)*100%`, `width: max(2.5%, ((e-s)/dur)*100%)` where `s/e` come from the live `useRegionDrag` draft while dragging (layer-aware: `useRegionDrag` only clamps a drag against same-layer neighbours, so cross-layer overlap during a drag is allowed). Body = move; the two `.e-zh` handles = retime. Selected pills get `.sel`. `RegionRows` takes each lane's icon+label as a `renderLabel` render-prop (zoom: `IconZoomIn` + `{scale}x`; FX: `IconBulb` + static "Spotlight"; layout (T34 L4, `LayoutLane.tsx`): a small `LayoutThumb` schematic of the segment's own RESOLVED panels, plus either "Custom" for a segment carrying its own `arrangement` or `prettyLayout(layout)` for one still bound to a plain preset) and, for layout only, an `extraStyle` callback for the `--fin`/`--fout` fade-ramp vars above. Selecting a layout pill opens `LayoutInspector`; FX opens `EffectInspector`.
+
+**Layout-pill fade ramps.** Each layout pill sets two CSS custom properties inline, `--fin` and `--fout`, from `transitionRampPct` of its own `transition_ms`/`transition_out_ms` against its span (passed to `RegionRows` as its `extraStyle` callback). `.e-layblk`'s `::before`/`::after` render those as static gradients at the pill's two ends, so the pill reads as long as its fades actually are. Static CSS, no Motion - nothing here animates. A hard cut is `0%` wide and therefore invisible, so a pill with no transitions looks exactly as it always has.
+
+**Tiny pills (Task 36).** `.e-zblk`/`.e-fxblk`/`.e-layblk` set `container-type: inline-size` and `min-width: 18px` (timeline.css) - below a `34px` resolved width, a `@container` query hides `.e-zlabel` entirely (rather than letting it clip mid-glyph) while the pill itself stays at its `18px` floor, so a very short region is still visible and its full hit target (body drag + both edge handles) stays usable. The layout lane's own thumbnail (T34 L4) hides FIRST, at an earlier and WIDER `48px` breakpoint (`.e-layblk .e-laythumb`'s own `@container` rule) - a narrowing layout pill loses its little schematic well before it loses the preset name entirely, following the same "graceful, not all-or-nothing" idea one step further.
+
+**Captions lane (M5 T4).** `useCaptionLaneRegions(doc.captions)` (`CaptionLane.tsx`) rows the doc's caption track, and the lane is pushed between FX and Layout - a caption is a decoration over the picture like a spotlight, but one retimed far more often than a layout segment, so it reads better above Layout than below it. `renderLabel` is `captionLabel` (the line shortened to `PILL_CHARS` without cutting a word, and nothing else - the CC badge it used to open with read as a text caret once a pill hit its width floor, see `CaptionLane.md`), and it is the one lane that passes `titleOf` (`captionTitle`), so a pill too narrow for a label still says what was said there; the commit is `update_caption`, which carries no `layer` - the row a caption sits in is stacking only, never a priority. The drop handler gains NO caption case on purpose: a caption comes from transcribing or from splitting an existing one, never from dragging a blank pill onto the lane, because an empty caption has no text and no word timings and would render as nothing. The pill is styled by `.e-caprow`/`.e-capblk` (`timeline.css`), which take `--e-wave` - the hue every audio surface in the editor already wears (the transcribe bar, the waveform tracks, the Caption inspector). It was `--e-ai` until the 2026-09-15 caption pass: a caption is what the recording SAID, so the speech track reads as part of the audio family rather than as a second machine-authored lane beside AI, and the transcript list can light its live row in the same hue its pill wears. No new token either way.
+
+**Camera lane.** `<CameraLane>` renders `doc.camera_moves` as diamond keyframes in its own row, below the region lanes. The `onDrop` handler's `type === "cammove"` branch (dropped from the Camera Move pill) applies `add_camera_move` at the drop time with a centered default (`x:0.5, y:0.5, size:0.25`).
+
+**Audio tracks.** `<AudioTrack src={waves.system} kind="system" loading={!wavesReady} />` and the `mic` counterpart, below the editable lanes, inside the shared "Audio" lane entry. `audioRows` (used for that lane's gutter height) mirrors `AudioTrack`'s own render-or-null rule: `!wavesReady` means both sources render as shimmers (2 rows), otherwise one row per source that actually has a `src`.
+
+**Active-lane label (Task D2).** Each lane entry's `active` field is `isSel(regions)` - `sel != null && regions.some((r) => r.id === sel)` - run against that lane's own `zooms`/`fx`/`captions`/`layouts`/`doc.camera_moves` array (the Audio lane is never selectable, so it's always `false`). `.e-lanelabel` renders with an `.on` modifier when `active`, which takes it from 80%-`--e-fg` to full `--e-fg` and rings its accent dot (timeline.css) - so whichever lane owns the current selection reads clearly against the others.
+
+**One helper for the four region lanes.** Zoom, FX, Captions and Layout differ only in their key, label, row/pill classes and label render-prop, so they go through one local `regionLane(...)` that pushes nothing when the lane has no rows. The Time, Camera and Audio lanes each render a component of their own and stay written out.
+
+### Render hygiene
+
+`RegionRows`, `Filmstrip`, `AudioTrack` and `CameraLane` are all `React.memo`'d, and memo only skips a re-render when EVERY prop is reference-equal to last time, so the values this hook hands them are stabilized:
+
+- `zooms`/`fx` (the `layoutRegions`-assigned arrays passed to `RegionRows`/`useRegionDrag`) are `useMemo`'d on the underlying `doc.zooms`/`doc.effects` arrays, instead of being a fresh array on every render regardless of whether the doc changed. `layouts` is `useLayoutLaneRegions(doc.layout, layoutPresets)` (T34 L4, `LayoutLane.tsx`) - the same idea, with a second inner `useMemo` keyed on `layoutPresets` so attaching each segment's resolved panels doesn't itself become a fresh-array-every-render source.
+- The four `onCommit` closures passed through `useLaneDrag` (`update_zoom`/`update_effect`/`update_caption`/`update_layout_seg`) are `useCallback`'d (deps `[onApply]`) instead of fresh inline arrows every render - `useRegionDrag`'s own listener-attach effect depends on `onCommit`'s identity being stable (see `useRegionDrag.md`).
+- `zoomLabel`/`fxLabel` (this file) and `layoutLabel`/`layoutExtraStyle` (T34 L4, hoisted out to `LayoutLane.tsx` alongside the `useLayoutLaneRegions` memo that feeds them) are all MODULE-scope, not declared inline in the component body - they're pure and close over nothing per-render (`layoutLabel` reads its thumbnail off the region object itself, not a closure over `layoutPresets` - see `LayoutLane.md`), so a fresh inline arrow every render would have been a fresh prop every render, defeating `RegionRows`' memo even when the underlying region data hadn't changed.
+
+`regionLane` itself is declared in the hook body and closes over `dur`/`sel`, but it only ever CALLS `lanes.push` - it is never passed to a memoized child, so its identity does not matter.

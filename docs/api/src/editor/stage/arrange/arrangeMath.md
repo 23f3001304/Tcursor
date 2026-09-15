@@ -42,7 +42,7 @@ The snap lines, as fractions of the output frame - the same set on both axes: th
 export const VISIBLE_ALPHA = 0.004;
 ```
 
-Alpha at or below which a resolved panel counts as hidden - the same threshold `toPreviewLayout` (`../../timeline/layoutTrack.ts`) uses to decide whether to draw the cam at all. Read by the overlay (which frames only visible panels), the inspector (its show/hide switches) and `setArrangementOp`.
+Alpha at or below which a resolved panel counts as hidden - the same threshold `toPreviewLayout` (`../../timeline/model/layoutTrack.ts`) uses to decide whether to draw the cam at all. Read by the overlay (which frames only visible panels), the inspector (its show/hide switches) and `setArrangementOp`.
 
 ## poseOfRect
 

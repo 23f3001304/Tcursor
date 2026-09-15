@@ -75,7 +75,7 @@ The virtual camera state at one frame.
 ```rust
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Easing { Smooth, Linear, Spring { stiffness: f32, damping: f32, mass: f32 }, EaseIn, EaseOut,
-    EaseInOut, Cubic { x1: f32, y1: f32, x2: f32, y2: f32 } }
+    EaseInOut, Cubic { x1: f32, y1: f32, x2: f32, y2: f32 }, Keys(Keys) }
 ```
 
 Selects the interpolation curve for zoom, layout cross-fade, and camera-move animations.
@@ -87,6 +87,11 @@ Selects the interpolation curve for zoom, layout cross-fade, and camera-move ani
 - `EaseOut` - quadratic decelerate (`t*(2-t)`): fast start, slow finish.
 - `EaseInOut` - quadratic symmetric (`2t^2` up to 0.5, then `1-2(1-t)^2`): slow-fast-slow.
 - `Cubic { x1, y1, x2, y2 }` - a user-drawn CSS-semantics cubic bezier through P0=(0,0), P1=(x1,y1), P2=(x2,y2), P3=(1,1); see `export/cubic.md`. Unlike `Spring`, it carries its WHOLE shape, so it survives the round trip through the wire string `cubic(x1,y1,x2,y2)` exactly - it is the only variant `easing_from` can fully reconstruct without falling back to the config's curve. `x1`/`x2` are guaranteed in `[0,1]` by the parser (keeps `x(t)` monotonic); `y1`/`y2` may overshoot.
+- `Keys(Keys)` - a curve the motion editor DREW: 2 to 8 keyframes, each with two tangent handles and a per-segment mode (bezier, hold or linear), carried on the wire as `keys(...)` and evaluated by `export::keys::eval`; see `export/keys.md`. Like `Cubic` it carries its whole shape, so it round-trips the wire exactly. Unlike every other variant it can express a plateau mid-ramp and a value that leaves `[0,1]` at a chosen instant, which is what the M3 presets (Snappy, Cinematic, Mechanical) are built out of. The payload is a fixed-size `[Key; 8]` plus a live count, specifically so `Easing` stays `Copy` and `ZoomRegion` keeps its shape - at the cost of making `Easing` a few hundred bytes wide, which is fine because it is copied once per region per frame, never per pixel.
+
+### Where `Key`, `KeyMode` and `Keys` live
+
+In `export/keys.rs`, next to the parser and evaluator that define their clamping rules, and re-exported here (`pub use crate::export::keys::{Key, KeyMode, Keys};`) so every `export::types::` path keeps resolving. *Why not here:* `types.rs` is at its size budget, and the three types are meaningless without the normalisation `parse_keys` applies to them. Their full documentation is `export/keys.md`.
 
 ### Used by
 
@@ -109,7 +114,7 @@ What the bare wire word `"spring"` means - the parameters a `Zoom`/`LayoutSeg` t
 ### Used by
 
 - `src-tauri/src/export/render/fromedit.rs` - `easing_from` returns this for the bare wire-name `"spring"`; a `spring(...)` string carries its own parameters instead (see `render/fromedit.md`).
-- `src/lib/spring.ts` - `SPRING_DEFAULT` mirrors it, so the preview and the curve cards resolve the bare word to the same oscillator.
+- `src/shared/math/spring.ts` - `SPRING_DEFAULT` mirrors it, so the preview and the curve cards resolve the bare word to the same oscillator.
 
 ## ZoomConfig
 
@@ -135,7 +140,7 @@ All tuneable parameters for click-zoom behavior. Populated from user settings; k
 - `follow_damping: f32` - per-frame exponential step size for `CameraSim` (0=instant, higher=slower follow). Default: 0.10.
 - `dead_zone_px: u32` - cursor must exceed this distance from center before the camera follows (hold phase). Default: 60. *Note: unread. `CameraSim::step` has no dead band any more (a `follow_cursor` region aims at the cursor every step, an anchored one at its anchor); the field is kept for the settings file's shape.*
 - `easing: Easing` - curve for zoom transitions. Default: `Easing::Smooth`.
-- `smoothing_ms: u32` - settle time, in ms, of the opt-in critically damped post-pass `CameraSim::step` applies to its own output (`camera/smoothing.md`). **Default: 0 = off, and off is bit-identical to the camera before the filter existed** (`jank_filter_tests::smoothing_off_is_bit_identical` pins a fingerprint of all 721 samples of the probe scene). Set from the user-facing settings field `ZoomSettings::camera_smoothing_ms` via `to_zoom_config` (see `settings/model.md`) - a field distinct from `smoothness`, which already means the CURSOR glide (`CursorSettings::smoothness`), and from `follow_damping`, the hold-phase chase rate. Useful values measured on the probe scene: 120ms cuts the worst spike by 72% for ~33ms of lag, 250ms by 86% for ~83ms.
+- `smoothing_ms: u32` - settle time, in ms, of the opt-in critically damped post-pass `CameraSim::step` applies to its own output (`camera/smoothing.md`). **Default: 0 = off, and off is bit-identical to the camera before the filter existed** (`jank_probe_tests::filter::smoothing_off_is_bit_identical` pins a fingerprint of all 721 samples of the probe scene). Set from the user-facing settings field `ZoomSettings::camera_smoothing_ms` via `to_zoom_config` (see `settings/model.md`) - a field distinct from `smoothness`, which already means the CURSOR glide (`CursorSettings::smoothness`), and from `follow_damping`, the hold-phase chase rate. Useful values measured on the probe scene: 120ms cuts the worst spike by 72% for ~33ms of lag, 250ms by 86% for ~83ms.
 
 ### Used by
 
@@ -151,6 +156,7 @@ All tuneable parameters for click-zoom behavior. Populated from user settings; k
 pub struct ZoomRegion {
     pub start_ms: u32, pub end_ms: u32, pub zoom_in_ms: u32, pub zoom_out_ms: u32,
     pub target_scale: f32, pub anchor: FramePoint, pub easing: Easing,
+    pub easing_out: Easing,
     pub layer: u32,
     pub cam_action: Option<CamZoomAction>,
     pub follow_cursor: bool,
@@ -165,7 +171,8 @@ A single resolved zoom event, baked from either auto-generated click detection o
 - `zoom_out_ms: u32` - ease-out duration; the zoom-out phase begins at `end_ms - zoom_out_ms`.
 - `target_scale: f32` - peak zoom multiplier during the hold phase.
 - `anchor: FramePoint` - the screen-local pixel that stays centered during zoom-in. *Why:* the anchor is the first click of the trigger cluster (see `autozoom::generate`); anchoring on the first click, not the last, keeps intent stable. Read only when `follow_cursor` is `false`.
-- `easing: Easing` - interpolation curve for this specific region.
+- `easing: Easing` - the ZOOM-IN ramp's curve for this specific region.
+- `easing_out: Easing` - the ZOOM-OUT ramp's curve (M3). `CameraSim::step` reads this, and only this, for the ramp back to scale 1 (`export/camera/mod.rs`, the `t_ms >= zout_start` branch); everything else about the region still reads `easing`. *Why a second field rather than a flag:* the two ramps are independent curves in the motion editor's model, and `Easing` is `Copy`, so carrying both costs nothing and keeps every consumer's shape. `regions_from_doc` resolves it from the doc's optional `Zoom::easing_out`, falling back to the ZOOM'S OWN `easing` when absent - never to `cfg.easing` - so a doc written before the field existed renders its out ramp exactly as it always did. Every generated region (`autozoom`, `manual`) sets it equal to `easing`: a split is only ever authored in the editor.
 - `layer: u32` - priority when this region overlaps another; higher wins in `CameraSim::step`.
 - `cam_action: Option<CamZoomAction>` - per-zoom webcam-on-zoom override carried from `Zoom.cam_action`; `None` inherits the global default. *Why it rides on the region:* `FrameRenderer::step_camera` only has the resolved regions at frame time, so the action must travel with the region it belongs to. `CameraSim` ignores it entirely - it is read only by the camera-panel compositing.
 - `follow_cursor: bool` - the zoom-in ramp aims at the LIVE cursor every step instead of the stored `anchor`. *Why:* a `ZoomTarget::Cursor` zoom (every user- or AI-added zoom) has no meaningful stored point - `fromedit::anchor_for` writes screen centre - so easing toward `anchor` zoomed into the middle of the frame and only THEN panned to the cursor once the hold phase took over: a visible two-stage move. It also decouples the aim from the region's timing, so dragging a pill along the timeline re-aims at whatever the cursor is doing at the new time instead of a now-stale point. `false` for `autozoom`/`manual` regions, whose anchor is a real press point the cursor was sitting on.
@@ -318,65 +325,3 @@ Resolves the final `out_w`/`out_h` for one `FrameRenderer` build: applies `apply
 - `resolve_scales_pad_and_radius_with_the_preview_cap` - a `Wide16x9` + `Resolution::Source` build capped at 1280 yields 1280x720 with `pad_px` scaled by the same 2/3 factor.
 - See `src-tauri/src/export/settings.rs`'s `Layout::rescale_to_resolution` for the `Resolution` short-edge convention and its own tests.
 
-## OverlayShape
-
-```rust
-#[derive(Clone, Copy, Debug)]
-pub enum OverlayShape { Circle, Rounded { frac: f32 }, Rect }
-```
-
-Shape of the webcam/camera overlay panel.
-
-- `Circle` - radius = `min(w, h) / 2`. Default.
-- `Rounded { frac: f32 }` - corner radius = `frac * min(w, h)`. *Why a fraction:* stays proportionate as `size_px` changes.
-- `Rect` - no rounding (radius = 0).
-
-### Used by
-
-- `src-tauri/src/export/scene/mod.rs` - `panel_radius` dispatches on this to compute the camera panel radius.
-
-## OverlayPos
-
-```rust
-#[derive(Clone, Copy, Debug)]
-pub enum OverlayPos { BottomLeft, BottomRight, TopLeft, TopRight, Custom { x: u32, y: u32 } }
-```
-
-Anchor corner for the webcam overlay relative to the output canvas.
-
-- `BottomLeft` - default: margins from the bottom-left corner.
-- `BottomRight, TopLeft, TopRight` - other corners, each applying the same `margin_x_px` / `margin_y_px`.
-- `Custom { x, y }` - absolute pixel coordinates ignoring margins.
-
-### Used by
-
-- `src-tauri/src/export/scene/mod.rs` - `bubble_rect` maps this to a concrete `RectF`.
-
-## OverlayLayout
-
-```rust
-#[derive(Clone, Copy, Debug)]
-pub struct OverlayLayout {
-    pub shape: OverlayShape, pub pos: OverlayPos,
-    pub size_px: u32, pub width_px: u32,
-    pub margin_x_px: u32, pub margin_y_px: u32, pub enabled: bool,
-    pub ring_px: u32, pub ring_color: [u8; 3],
-}
-```
-
-All overlay (webcam) layout parameters.
-
-- `shape: OverlayShape` - overlay mask shape. Default: `Circle`.
-- `pos: OverlayPos` - corner placement. Default: `BottomLeft`.
-- `size_px: u32` - camera panel HEIGHT in output pixels. Default: 420.
-- `width_px: u32` - camera panel WIDTH in output pixels. Default: 420 (== `size_px`; only diverges when `ModeAppearance.cam_aspect` is `Wide`, giving `round(size_px * 16/9)`). *Why a separate field, not derived at draw time:* the width:height ratio is a per-mode setting (`CamAspect`), so it is resolved once here alongside every other pixel value, the same as `size_px`.
-- `margin_x_px: u32` - horizontal inset from the canvas edge. Default: 80.
-- `margin_y_px: u32` - vertical inset from the canvas edge. Default: 80.
-- `enabled: bool` - whether the overlay is drawn at all. Default: `true`. *Why kept here:* a disabled overlay still contributes its rect for cross-dissolve transitions; the `alpha` in the resolved `Panel` drops to 0 instead.
-- `ring_px: u32` - width in output pixels of an optional colored ring/border drawn just inside the panel edge. Default: `0` (no ring). *Why px, not fraction:* resolved once here from `ModeAppearance.cam_ring`'s fraction-of-min-side, same pattern as every other geometry field.
-- `ring_color: [u8; 3]` - RGB 0..255 of the ring. Default: `[0, 0, 0]` (unused when `ring_px == 0`).
-
-### Used by
-
-- `src-tauri/src/export/scene/mod.rs` - `resolve` passes `&OverlayLayout` to `bubble_rect` and `panel_radius`, and copies `ring_px`/`ring_color` onto the resolved camera `Panel`.
-- `src-tauri/src/settings/appearance.rs` - `overlay_for` constructs this from user settings.

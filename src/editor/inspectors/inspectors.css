@@ -18,6 +18,8 @@
 .e-insp-cam { --insp-accent: var(--e-cam); }
 .e-insp-speed { --insp-accent: var(--e-speed); }
 .e-insp-cut { --insp-accent: var(--e-mut); }
+/* Captions take the wave hue, the editor's one audio colour - a caption is what the audio said. */
+.e-insp-caption { --insp-accent: var(--e-wave); }
 
 /* ---- Header ---------------------------------------------------------------------------------
    Row one is the identity: the lane dot, the name, then two ghost icons. Row two is the span, in
@@ -33,13 +35,13 @@
 .e-insp .e-ihead h2 { margin: 0; font-size: var(--e-text-title-size); font-weight: var(--e-text-title-weight);
   letter-spacing: -0.015em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .e-ihead-sp { flex: 1; min-width: var(--e-sp-1); }
-.e-ihicon { width: 28px; height: 28px; flex: none; padding: 0; border: none; border-radius: var(--e-r-sm);
+.e-ihicon { width: var(--e-ctl-sm); height: var(--e-ctl-sm); flex: none; padding: 0; border: none; border-radius: var(--e-r-sm);
   background: transparent; color: var(--e-dim); display: flex; align-items: center; justify-content: center;
   transition: background-color .14s ease, color .14s ease; }
 .e-ihicon:hover { background: var(--e-raised); color: var(--e-fg); }
 .e-ihicon.del:hover { background: color-mix(in srgb, var(--e-primary) 12%, transparent);
   color: color-mix(in srgb, var(--e-primary) 72%, var(--e-fg)); }
-.e-ihead-range { margin: 6px 0 0 16px; font-size: var(--e-text-value-size);
+.e-ihead-range { margin: 6px 0 0 var(--e-sp-3); font-size: var(--e-text-value-size);
   font-weight: var(--e-text-value-weight); color: var(--e-mut); font-variant-numeric: tabular-nums;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
@@ -51,9 +53,9 @@
 .e-ihead + .e-isec { margin-top: 0; }
 .e-isec-head { display: flex; align-items: baseline; justify-content: space-between;
   gap: var(--e-sp-1); margin-bottom: var(--e-sp-2); }
-.e-isec-head h3 { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: .07em;
+.e-isec-head h3 { margin: 0; font-size: var(--e-text-micro-size); font-weight: 600; letter-spacing: .07em;
   text-transform: uppercase; color: var(--e-dim); white-space: nowrap; }
-.e-isec-val { min-width: 0; font-size: 11px; font-weight: 560; color: var(--e-mut);
+.e-isec-val { min-width: 0; font-size: var(--e-text-micro-size); font-weight: 560; color: var(--e-mut);
   font-variant-numeric: tabular-nums; text-align: right;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .e-isec > .e-field:last-child, .e-isec > .e-field2:last-child { margin-bottom: 0; }
@@ -65,11 +67,11 @@
    The one number a section is really about, set big enough to be read from the stage: the section
    below it is a row of equals, this is the thing the panel is for. The unit is a smaller, dimmer
    suffix so the digits alone carry the weight. */
-.e-ihero { display: flex; align-items: baseline; gap: var(--e-sp-1); margin-bottom: 10px; }
-.e-ihero-v { font-size: 30px; font-weight: 600; line-height: 1; letter-spacing: -0.03em;
+.e-ihero { display: flex; align-items: baseline; gap: var(--e-sp-1); margin-bottom: calc(10px * var(--e-density)); }
+.e-ihero-v { font-size: calc(30px * var(--e-density)); font-weight: 600; line-height: 1; letter-spacing: -0.03em;
   color: var(--e-fg); font-variant-numeric: tabular-nums; }
-.e-ihero-v i { font-style: normal; font-size: 17px; font-weight: 560; color: var(--e-mut); margin-left: 1px; }
-.e-ihero-l { font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
+.e-ihero-v i { font-style: normal; font-size: calc(17px * var(--e-density)); font-weight: 560; color: var(--e-mut); margin-left: 1px; }
+.e-ihero-l { font-size: var(--e-text-micro-size); font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
   color: var(--e-dim); }
 .e-iaim { margin-top: var(--e-sp-2); margin-bottom: 0; }
 
@@ -84,13 +86,13 @@
    squeezed a two-minute recording's "125.30s" until `overflow: hidden` clipped the digits. */
 .e-ivals { display: grid; overflow: hidden;
   border-radius: var(--e-r); background: var(--e-raised); box-shadow: var(--e-inset-hi); }
-.e-ival { min-width: 0; padding: 9px 10px 10px; display: flex; flex-direction: column; gap: 5px; }
-.e-ival-l { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+.e-ival { min-width: 0; padding: calc(9px * var(--e-density)) calc(10px * var(--e-density)) calc(10px * var(--e-density)); display: flex; flex-direction: column; gap: 5px; }
+.e-ival-l { font-size: var(--e-text-micro-size); font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
   color: var(--e-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .e-ival-row { display: flex; align-items: center; gap: 4px; }
-.e-ival-v { flex: 1; min-width: 0; text-align: right; font-size: 14px; font-weight: 600;
+.e-ival-v { flex: 1; min-width: 0; text-align: right; font-size: var(--e-text-title-size); font-weight: 600;
   letter-spacing: -0.02em; color: var(--e-fg); font-variant-numeric: tabular-nums; }
-.e-ival-v i { font-style: normal; font-size: 11px; font-weight: 500; color: var(--e-mut); margin-left: 1px; }
+.e-ival-v i { font-style: normal; font-size: var(--e-text-micro-size); font-weight: 500; color: var(--e-mut); margin-left: 1px; }
 .e-ival-steps { display: flex; flex-direction: column; flex: none; }
 .e-ival-steps button { width: 16px; height: 12px; padding: 0; border: none; background: none;
   color: var(--e-dim); display: flex; align-items: center; justify-content: center;
@@ -105,7 +107,8 @@
    --e-raised is already #ffffff, so "one step up" there has to be a step toward black. */
 .e-preseg { display: flex; flex-wrap: wrap; gap: 5px; }
 .e-preseg-b { position: relative; flex: 1 1 auto; min-width: 0; box-sizing: border-box;
-  padding: 8px 10px 11px; border: none; border-radius: var(--e-r-sm);
+  padding: var(--e-sp-1) calc(10px * var(--e-density)) calc(11px * var(--e-density));
+  border: none; border-radius: var(--e-r-sm);
   background: var(--e-raised); color: var(--e-mut); box-shadow: var(--e-inset-hi); cursor: pointer;
   font-size: var(--e-text-body-size); font-weight: var(--e-text-body-weight);
   transition: background-color .14s ease, color .14s ease; }
@@ -121,12 +124,13 @@
 /* Layout presets: the same planes, each holding a literal mini-canvas of that preset's own
    resolved panels (LayoutThumb, the schematic the timeline pill draws) instead of a word alone. */
 .e-preseg.thumbs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.e-preseg.thumbs .e-preseg-b { display: flex; flex-direction: column; align-items: center; gap: 8px;
-  padding: 10px 6px 13px; }
+.e-preseg.thumbs .e-preseg-b { display: flex; flex-direction: column; align-items: center; gap: var(--e-sp-1);
+  padding: calc(10px * var(--e-density)) calc(6px * var(--e-density)) calc(13px * var(--e-density)); }
 .e-preseg-thumb { display: block; flex: none; }
 
 /* Aim on stage: a plane, not an outlined button; `on` tints it with the inspector's accent. */
-.e-aimbtn { margin-top: var(--e-sp-1); min-height: 38px; padding: 10px 12px; width: 100%; box-sizing: border-box;
+.e-aimbtn { margin-top: var(--e-sp-1); min-height: var(--e-ctl-lg);
+  padding: calc(10px * var(--e-density)) var(--e-sp-2); width: 100%; box-sizing: border-box;
   display: flex; align-items: center; justify-content: center; gap: 6px;
   border: none; border-radius: var(--e-r-sm); background: var(--e-raised); color: var(--e-mut);
   font-size: var(--e-text-body-size); font-weight: var(--e-text-body-weight);
@@ -138,20 +142,20 @@
 
 /* The two shared raised buttons an inspector still uses, restated as planes so no stroked box
    survives inside the column. Scoped to .e-insp: the panels keep editor.css's outlined version. */
-.e-insp .e-ghostbtn { padding: 10px; border: none; border-radius: var(--e-r-sm);
+.e-insp .e-ghostbtn { padding: calc(10px * var(--e-density)); border: none; border-radius: var(--e-r-sm);
   background: var(--e-raised); box-shadow: var(--e-inset-hi); }
 .e-insp .e-ghostbtn:hover { color: var(--e-fg); transform: none;
   background: color-mix(in srgb, var(--e-step) 3%, var(--e-raised)); box-shadow: var(--e-inset-hi); }
 .e-insp .e-chip { border: none; background: var(--e-raised); box-shadow: var(--e-inset-hi); }
 .e-insp .e-chip:hover { background: color-mix(in srgb, var(--e-step) 3%, var(--e-raised)); }
-.e-insp-reset { margin-top: 10px; }
+.e-insp-reset { margin-top: calc(10px * var(--e-density)); }
 
 /* Transition curve: the named-curve row above ONE canvas. The canvas is a plane one step lighter
    with no border; `preserveAspectRatio="none"` stretches the 100x160 curve box across the panel,
    so every stroke is non-scaling (uniform px width) and the two handles are HTML dots laid over
    it rather than circles inside it, which the stretch would squash into ellipses. */
 .e-curve-row { margin-bottom: 0; }
-.e-curve-box { position: relative; margin-top: var(--e-sp-1); height: 96px;
+.e-curve-box { position: relative; margin-top: var(--e-sp-1); height: calc(96px * var(--e-density));
   border-radius: var(--e-r); background: var(--e-raised); box-shadow: var(--e-inset-hi);
   touch-action: none; }
 .e-curve-svg { display: block; width: 100%; height: 100%; }
@@ -166,3 +170,22 @@
   0 0 0 5px color-mix(in srgb, var(--insp-accent, var(--e-fg)) 40%, transparent); }
 .e-curve-h.grab { cursor: grabbing; }
 .e-curve-box + .e-field2 { margin-top: var(--e-sp-2); }
+
+/* Caption editing: the text a caption says, and the word boundaries it can be split at.
+   The textarea is the panel's own input plane (`.e-lay-input`'s paint, two lines tall and
+   resizable downward only), because a caption is the one region whose content IS text. */
+.e-captext { width: 100%; box-sizing: border-box; min-height: calc(52px * var(--e-density));
+  padding: calc(8px * var(--e-density)) calc(9px * var(--e-density)); border: none;
+  border-radius: var(--e-r-sm); background: var(--e-raised); color: var(--e-fg); font: inherit;
+  font-size: var(--e-text-body-size); line-height: var(--e-text-hint-lh); box-shadow: var(--e-inset-hi);
+  outline: none; resize: vertical; }
+.e-captext:focus-visible { box-shadow: inset 0 0 0 2px var(--e-fg); }
+/* One chip per word the second half could start with. They wrap, because a caption is up to 42
+   characters per line and the column is 360px at most. */
+.e-capwords { display: flex; flex-wrap: wrap; gap: 5px; }
+.e-capword { padding: calc(4px * var(--e-density)) calc(8px * var(--e-density)); border: none;
+  border-radius: var(--e-r-sm); background: var(--e-raised); box-shadow: var(--e-inset-hi);
+  color: var(--e-mut); font: inherit; font-size: var(--e-text-hint-size); font-weight: 500;
+  cursor: pointer; transition: background-color .14s ease, color .14s ease; }
+.e-capword:hover { color: var(--e-fg);
+  background: color-mix(in srgb, var(--insp-accent, var(--e-fg)) 18%, var(--e-raised)); }

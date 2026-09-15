@@ -2,7 +2,7 @@
 
 Tauri IPC command handlers that bridge the frontend editor to the `edit` layer. Three commands cover the full read-mutate-save lifecycle; the frontend never touches `edit.json` directly.
 
-**Locking (H3, bug-sweep-2 Task 7).** All three commands, and `edit::seed_lock::load_or_seed`'s own internal seed/migrate/lift write, serialize through the ONE shared per-folder lock `edit::lock::doc_lock` - see `docs/api/src-tauri/src/edit/lock.md` for why a shared lock is needed at all, the round-2 fix that moved locking INTO `load_or_seed` itself (round 1 only covered these three commands, leaving `load_or_seed`'s ~8 other callers across `ai`/`export` unlocked), and the lock-ordering analysis vs. `export::preview::session::WarmSlot`. This file no longer defines its own `doc_lock` - it was moved to `edit::lock` so `edit::seed_lock` could share it too.
+**Locking (H3, bug-sweep-2 Task 7).** All three commands, and `edit::seed::load_or_seed`'s own internal seed/migrate/lift write, serialize through the ONE shared per-folder lock `edit::lock::doc_lock` - see `docs/api/src-tauri/src/edit/lock.md` for why a shared lock is needed at all, the round-2 fix that moved locking INTO `load_or_seed` itself (round 1 only covered these three commands, leaving `load_or_seed`'s ~8 other callers across `ai`/`export` unlocked), and the lock-ordering analysis vs. `export::preview::session::WarmSlot`. This file no longer defines its own `doc_lock` - it was moved to `edit::lock` so `edit::seed` could share it too.
 
 **What the lock does NOT fix:** it only orders the Rust-side I/O; it cannot make a STALE payload fresh. The specific failure it closes off is Rust-level interleaving (e.g. two writers both reading before either writes, which could otherwise discard BOTH pending changes instead of just one). Whether the frontend hands `save_edit` an up-to-date doc in the first place is a TS-side concern - `useEditHistory.swap`'s undo/redo already gets this right by reading `docRef.current` at execution time (inside the shared `enqueue` promise queue) rather than a value closed over when the callback was created; `useDocSettings.write` not yet routing through that same queue is a separate, tracked gap on the TS side.
 
@@ -57,9 +57,9 @@ Applies one `EditOp` to the project's `EditDoc`, persists the result, and return
 
 1. Construct `ProjectPaths`.
 2. Read `edit.json` UNLOCKED (`EditDoc::load`) purely to decide what `derive_seed_inputs` needs to precompute - this snapshot is never used as the actual mutation base.
-3. `edit::seed_lock::derive_seed_inputs(&p, &unlocked)` - precompute any ffprobe-backed inputs `load_or_seed_locked` might need, still unlocked (see `seed_lock.md`).
+3. `edit::seed::derive_seed_inputs(&p, &unlocked)` - precompute any ffprobe-backed inputs `load_or_seed_locked` might need, still unlocked (see `seed.md`).
 4. Acquire `edit::lock::doc_lock` for the folder, held for the rest of this function - so nothing else can land between this call's load and save.
-5. `edit::seed_lock::load_or_seed_locked(&p, precomputed_default, shift, true_dur)` - re-reads `edit.json` FRESH under the lock (authoritative - not the step-2 snapshot) and applies any still-needed seed/migrate/lift write.
+5. `edit::seed::load_or_seed_locked(&p, precomputed_default, shift, true_dur)` - re-reads `edit.json` FRESH under the lock (authoritative - not the step-2 snapshot) and applies any still-needed seed/migrate/lift write.
 6. Apply `op` via `edit::api::apply` (a clone; the op is inspected once more in the next step).
 7. For an `UpdateZoom` whose `start_ms` is `Some` or whose `smart_typing` is `Some(true)`, `ops::smart_zoom::refit` rewrites that zoom's `end_ms` from the recording's typing (see `smart_zoom.md`); every other op leaves every zoom exactly as it set it.
 8. Save the mutated doc to `paths.edit()`.

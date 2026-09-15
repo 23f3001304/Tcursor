@@ -18,7 +18,7 @@ What clicking rail tab `clicked` should leave showing. Pressing the tab that is 
 export function readPanelTab(valid: readonly Tab[]): Tab | null
 ```
 
-The panel the editor last had open, or `null` for "it was collapsed". `valid` is `TAB_IDS` (`panelTabs.tsx`) - passed in rather than imported so this file has no reason to know the tab list.
+The panel the editor last had open, or `null` for "it was collapsed". `valid` is `TAB_IDS` (`PanelTabs.tsx`) - passed in rather than imported so this file has no reason to know the tab list.
 
 The empty string is the ONE stored value meaning collapsed, which is why it is written rather than the key being removed: a missing key has to mean "never used this editor", and that must open, not collapse. Every other failure reads as `"ai"` too - storage that throws outright (a webview with site data blocked), a value from a build whose tab no longer exists. **A user is never handed a collapsed editor they did not ask for.**
 

@@ -8,7 +8,7 @@ Pose-based panel arrangements (T34): the two-way bridge between an `edit::model:
 const SHOWN_ALPHA: f32 = 0.004;
 ```
 
-The alpha above which a resolved panel counts as visible, so `pose_of_panel` maps a hidden one to `None`. Matches the preview's own draw threshold (`toPreviewLayout` in `src/editor/timeline/layoutTrack.ts`) so both sides agree on "not shown"; a preset-resolved panel is only ever exactly `0.0` or `1.0` anyway, and this only matters if a mid-cross-fade scene is ever fed in.
+The alpha above which a resolved panel counts as visible, so `pose_of_panel` maps a hidden one to `None`. Matches the preview's own draw threshold (`toPreviewLayout` in `src/editor/timeline/model/layoutTrack.ts`) so both sides agree on "not shown"; a preset-resolved panel is only ever exactly `0.0` or `1.0` anyway, and this only matters if a mid-cross-fade scene is ever fed in.
 
 ## pose_of_panel
 

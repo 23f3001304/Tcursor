@@ -4,7 +4,7 @@ The VIDEO/GIF background's decode stream: a third ffmpeg process beside the scre
 
 The whole design is **no timestamp math**. ffmpeg is told to loop the asset forever and emit it at the export's own frame rate, already scaled and cropped to cover the output size; the exporter then reads it strictly sequentially, so output frame `i` shows stream frame `i`. Nothing computes a presentation time, nothing seeks, and a re-run produces the same file byte for byte.
 
-`WebcamPipe` (`pipeline/mod.rs`) is the template - one frame per output frame, no superseding - and `pipeline_decode::spawn_webcam` is reused as the thread body for exactly that reason.
+`WebcamPipe` (`pipeline/mod.rs`) is the template - one frame per output frame, no superseding - and `pipeline::spawn_webcam` is reused as the thread body for exactly that reason.
 
 ## bg_decode_args
 
@@ -80,7 +80,7 @@ One frame's bytes, for the tests - the only caller that wants them rather than t
 - `a_two_frame_clip_loops_so_frame_three_is_frame_one` - a 2-frame red/blue clip read three times gives back frame 1 again, at the cover-scaled output size. Needs a real ffmpeg (builds its fixture with `-f lavfi`, the way `ffmpeg_encoder`'s hardware probe builds its own); skipped, not failed, without one.
 - `dim_is_applied_to_every_streamed_frame` - the same source frame opened at `dim 0.5` equals the undimmed one put through `apply_dim(0.5)`. Same ffmpeg guard.
 
-The other half of "a video background actually reaches the screen" - that the GPU re-uploads it every frame instead of trusting a sampled content key - is `gpu_compositor_tex::should_upload`, tested beside that key.
+The other half of "a video background actually reaches the screen" - that the GPU re-uploads it every frame instead of trusting a sampled content key - is `gpu_compositor::should_upload`, tested beside that key.
 
 ### Used by
 

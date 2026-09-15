@@ -2,9 +2,9 @@
 
 GPU-backed FX renderer that uploads a composited BGRA frame to wgpu, runs the FX shader (spotlight, click effects, video FX) in a full-screen triangle pass, and reads the result back into the caller's buffer.
 
-**The shader is TWO files compiled as one module.** `build_pipeline` builds the WGSL source as `concat!(include_str!("fx.wgsl"), <newline>, include_str!("fx_clicks.wgsl"))`: `fx.wgsl` holds the uniform struct `FxU`, the bindings, the `FX_*`/`SP_*`/`VF_*` ids, the vertex stage, the noise/nebula helpers, the shockwave UV warp + chromatic dispersion (which must happen before the texture sample) and the spotlight/video-FX blending; `fx_clicks.wgsl` holds the shared click timing (`fx_ease`, `fx_alpha`), the small coverage helpers and one function, `clicks(base, px, oh, style, n) -> vec3<f32>`, which `fs_main` calls last. *Why split:* both halves are inside the repo's 200-line-per-file budget this way, and the click styles - the half that changes - are readable on their own. *Why this order is safe:* WGSL resolves module-scope declarations out of order, so `fs_main` calling `clicks()` (and the shockwave block calling `fx_ease`) from the half appended after it is legal; the GPU tests below compile the real module, so a violation fails the suite rather than shipping.
+**The shader is TWO files compiled as one module.** `fx_gpu_pipeline::build_pipeline` (its own file since the split) builds the WGSL source as `concat!(include_str!("fx.wgsl"), <newline>, include_str!("fx_clicks.wgsl"))`: `fx.wgsl` holds the uniform struct `FxU`, the bindings, the `FX_*`/`SP_*`/`VF_*` ids, the vertex stage, the noise/nebula helpers, the shockwave UV warp + chromatic dispersion (which must happen before the texture sample) and the spotlight/video-FX blending; `fx_clicks.wgsl` holds the shared click timing (`fx_ease`, `fx_alpha`), the small coverage helpers and one function, `clicks(base, px, oh, style, n) -> vec3<f32>`, which `fs_main` calls last. *Why split:* the click styles are the half that changes, and they are readable on their own once the frame-wide effects are not interleaved with them. *Why this order is safe:* WGSL resolves module-scope declarations out of order, so `fs_main` calling `clicks()` (and the shockwave block calling `fx_ease`) from the half appended after it is legal; the GPU tests below compile the real module, so a violation fails the suite rather than shipping.
 
-Selected automatically by `select_fx` when a wgpu adapter is available; falls through to `CpuFx` otherwise - and falls back to it per frame if a readback ever fails (see `GpuFx::apply`). Its tests live in the sibling `fx_gpu_tests.rs` to keep this file under the 200-line budget.
+Selected automatically by `select_fx` when a wgpu adapter is available; falls through to `CpuFx` otherwise - and falls back to it per frame if a readback ever fails (see `GpuFx::apply`). Its tests live in the sibling `fx_gpu_tests.rs`, the house convention for every module here.
 
 ## GpuFx
 
@@ -39,7 +39,7 @@ mask: Mutex<Option<(u64, wgpu::TextureView)>>,
 blank: wgpu::TextureView,
 ```
 
-The cursor lens mask (`fx_lens::LensMask`), uploaded once per (pack, kind) and kept until a different one is asked for, plus the 1x1 opaque texture bound when no lens is live (the bind group layout always needs a binding at 3).
+The cursor lens mask (`lens::LensMask`), uploaded once per (pack, kind) and kept until a different one is asked for, plus the 1x1 opaque texture bound when no lens is live (the bind group layout always needs a binding at 3).
 
 *Why one entry is enough:* a frame draws ONE cursor. A settled cursor re-uses the upload forever; a state change re-uploads about 16 KB per frame for the ten frames the morph lasts, because `morph_mask`'s key carries the step.
 
@@ -142,11 +142,3 @@ These tests skip on a machine with no wgpu adapter (`GpuFx::new` returns `None`)
 ### Behaviors worth knowing
 
 - `spotlight_dims_corner_more_than_center` - with a centered spotlight at `(32, 32)` on a 64x64 frame, the corner pixel is darker than the center pixel, confirming the GPU path is active and the readback is correctly unpadded. Test is skipped with `return` when no adapter is available.
-
-## r8_texture
-
-```rust
-fn r8_texture(device: &wgpu::Device, queue: &wgpu::Queue, w: u32, h: u32, a: &[u8]) -> wgpu::TextureView
-```
-
-Upload `a` as a single-channel `R8Unorm` texture and return its view. `queue.write_texture`, not a buffer copy, so an arbitrary sprite width needs no 256-byte row padding - the masks are content-cropped and almost never a multiple of 256.

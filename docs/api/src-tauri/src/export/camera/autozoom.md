@@ -23,7 +23,7 @@ Scans the click timeline and emits one `ZoomRegion` per detected activity burst.
 - `clicks_to_trigger` - clicks (within `merge_window_ms`) required to START a zoom. *Why:* lets the user demand a quick double-click to trigger, avoiding a zoom on every stray click. `max(1)` guards a 0 setting.
 - `merge_window_ms` - the window those trigger-clicks must fall inside. *Why:* separates a deliberate rapid multi-click from two unrelated clicks.
 - `idle_release_ms` - the largest gap between consecutive activities that still counts as "still active". *Why:* defines when the user has gone idle so the zoom releases after a quiet stretch instead of staying glued.
-- `zoom_in_ms` / `zoom_out_ms` / `target_scale` / `easing` - copied verbatim onto each region. *Why:* a region is self-describing for the renderer, so no second lookup is needed downstream.
+- `zoom_in_ms` / `zoom_out_ms` / `target_scale` / `easing` - copied verbatim onto each region. A generated region's `easing_out` (M3) is set to the SAME `cfg.easing`: a split between the in and out ramps is only ever authored in the editor, never produced by the heuristic. *Why:* a region is self-describing for the renderer, so no second lookup is needed downstream.
 
 ### Returns
 

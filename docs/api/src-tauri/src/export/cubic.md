@@ -1,6 +1,6 @@
 # src-tauri/src/export/cubic.rs
 
-Custom easing curves as CSS-semantics cubic beziers, and the `cubic(x1,y1,x2,y2)` string they travel as. **This module is the source of truth** - `src/lib/cubicBezier.ts` mirrors it for the live preview and is pinned to the same probe values by tests on both sides.
+Custom easing curves as CSS-semantics cubic beziers, and the `cubic(x1,y1,x2,y2)` string they travel as. **This module is the source of truth** - `src/shared/math/cubicBezier.ts` mirrors it for the live preview and is pinned to the same probe values by tests on both sides.
 
 **Why a string, not a schema change.** `Zoom.easing`, `LayoutSeg.easing` and `CameraMove.easing` are all `String` fields holding a wire-name. A custom curve is just another wire-name, so nothing about the doc schema changes and a doc written before custom curves existed parses byte-identically. It also means `Easing::Cubic` is the ONE variant `easing_from` can reconstruct exactly - the string carries the whole shape, unlike `Spring`, whose stiffness/damping cannot fit.
 

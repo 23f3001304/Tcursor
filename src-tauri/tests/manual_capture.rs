@@ -1,11 +1,10 @@
-// Run explicitly: cargo test --test manual_capture -- --ignored --nocapture
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use cursor_zoom_lib::capture::frame_source::FrameSource;
-use cursor_zoom_lib::capture::windows_capture::WgcFrameSource;
 use cursor_zoom_lib::domain::time::{Clock, SystemClock};
 use cursor_zoom_lib::encode::ffmpeg_encoder::FfmpegFrameSink;
 use cursor_zoom_lib::encode::frame_sink::FrameSink;
+use cursor_zoom_lib::platform::windows::capture::legacy::wgc_source::WgcFrameSource;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 #[test]
 #[ignore]

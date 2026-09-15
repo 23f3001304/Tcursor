@@ -39,7 +39,7 @@ The clip's in/out points in milliseconds, measured from the raw recording start.
 - `src-tauri/src/edit/ops/api.rs` - `SetTrim` variant replaces both fields; `metrics` reads `in_ms`/`out_ms`
 - `src-tauri/src/export/render/fromedit.rs` - clip bounds supplied to the compositor
 - `src-tauri/src/export/pipeline/exporter.rs` - `export()` calls `Trim::resolve` to gate the frame loop
-- `src-tauri/src/export/preview/preview_track.rs` - the frontend's playhead clamp reads the same resolved range via `resolveTrim` (`src/lib/edit.ts`)
+- `src-tauri/src/export/preview/preview_track.rs` - the frontend's playhead clamp reads the same resolved range via `resolveTrim` (`src/shared/edit.ts`)
 
 ## Trim::resolve
 
@@ -47,7 +47,7 @@ The clip's in/out points in milliseconds, measured from the raw recording start.
 pub fn resolve(&self, total_dur_ms: u32) -> (u32, u32)
 ```
 
-The effective `[in_ms, out_ms)` export/preview range against a clip of `total_dur_ms`. `out_ms == 0` (the doc-level default, "not yet set") means "no trim / whole clip"; both bounds are clamped into `[0, total_dur_ms]` and `in_ms` never exceeds the resolved `out_ms`, so a degenerate/inverted range safely collapses to zero-length instead of underflowing at the call site. The ONE function export (`exporter::export`) and preview both read the trim through, so they always agree on the effective range - mirrored on the TS side by `resolveTrim` (`src/lib/edit.ts`).
+The effective `[in_ms, out_ms)` export/preview range against a clip of `total_dur_ms`. `out_ms == 0` (the doc-level default, "not yet set") means "no trim / whole clip"; both bounds are clamped into `[0, total_dur_ms]` and `in_ms` never exceeds the resolved `out_ms`, so a degenerate/inverted range safely collapses to zero-length instead of underflowing at the call site. The ONE function export (`exporter::export`) and preview both read the trim through, so they always agree on the effective range - mirrored on the TS side by `resolveTrim` (`src/shared/edit.ts`).
 
 ### Behaviors
 
@@ -102,6 +102,7 @@ pub struct Zoom {
     pub layer: u32,
     pub cam_action: Option<CamZoomAction>,
     pub smart_typing: bool,
+    pub easing_out: Option<String>,
 }
 ```
 
@@ -112,7 +113,8 @@ One zoom event in the timeline.
 - `end_ms` - *frame time at which the zoom-out completes.*
 - `target` - *where the camera should point; see `ZoomTarget`.*
 - `scale` - *peak zoom multiplier (e.g. `2.0` = 2x). Passed directly to the compositor.*
-- `easing` - *named easing curve (`"smooth"`, `"linear"`, `"spring"`); looked up by the compositor at render time.*
+- `easing` - *the ZOOM-IN ramp's curve: one of the six named ones (`"smooth"`, `"linear"`, `"spring"`, `"ease_in"`, `"ease_out"`, `"ease_in_out"`) or a parameterised `cubic(...)` / `spring(...)` / `keys(...)` string. Parsed by `easing_from` (`export::render::fromedit`) at render time, canonicalised by `valid_easing` on the way in.*
+- `easing_out` - *the ZOOM-OUT ramp's curve (M3). `None` - what every doc written before this field existed loads as, and what `skip_serializing_if` keeps out of a re-saved old doc - means "the same curve as `easing`", which is exactly today's behaviour, so every existing doc reads and renders unchanged. `regions_from_doc` resolves the fallback against the zoom's OWN `easing` (never the config's tuned default), and `CameraSim`'s zoom-out ramp is the one consumer (`export/camera/mod.rs`). Written only when the two ramps genuinely differ: `ops::motion::set_zoom_easing_out` collapses a value equal to `easing` back to `None`, so the doc has exactly one spelling of "both ramps are the same". `LayoutSeg` has carried the same split as `easing`/`easing_out` since exit transitions landed; `CameraMove` keeps its single `easing`, since a keyframe has no exit ramp of its own.*
 - `layer` - *priority when this zoom overlaps another in time (higher wins) and the timeline row it renders on. Auto-assigned by `auto_layer` on creation, user-overridable via `UpdateZoom`.*
 - `cam_action` - *per-zoom webcam-on-zoom override. `None` inherits `ZoomSettings::resolved_cam_action`. Serialized only when set (`skip_serializing_if`), so re-saving a doc written before this field existed does not start emitting a new key.*
 - `smart_typing` - *smart typing duration (owner, 2026-09-14): the end follows the typing after the start. `edit::commands::apply_edit_op` refits `end_ms` through `ops::smart_zoom::refit` whenever this is switched on or the start moves, so the doc always carries a concrete `end_ms` and the timeline, the preview and the export need no new path. `#[serde(default)]`: docs written before it read `false`.*
@@ -161,7 +163,7 @@ Where one panel sits on the output frame, resolution-independently. Deliberately
 - `src-tauri/src/edit/model.rs` - the two fields of `Arrangement`
 - `src-tauri/src/edit/ops/arrangement.rs` - `clamp_pose`; the `SetArrangement` payload
 - `src-tauri/src/export/scene/arrangement.rs` - `resolve_arrangement` turns a pose into a `Panel`; `pose_of_panel` derives one back out
-- `src/lib/edit.ts` - `PanelPose` TS mirror
+- `src/shared/edit.ts` - `PanelPose` TS mirror
 
 ## Arrangement
 
@@ -183,7 +185,7 @@ At least one panel is always `Some`: `edit::ops::arrangement::apply_arrangement`
 - `src-tauri/src/export/scene/arrangement.rs` - `resolve_arrangement` / `arrangement_of_preset`
 - `src-tauri/src/export/scene/layout.rs` - `LayoutTrack::from_segs` resolves it in place of the preset
 - `src-tauri/src/export/preview/preview_layouts.rs` - each `LayoutPresetDto` carries the preset's own arrangement, so the editor can convert a preset with one op
-- `src/lib/edit.ts` - `Arrangement` TS mirror
+- `src/shared/edit.ts` - `Arrangement` TS mirror
 
 ## LayoutSeg
 
@@ -217,36 +219,6 @@ A time span that uses a named screen layout (e.g. `"screen"`, `"camera"`, `"pres
 - `src-tauri/src/edit/seed.rs` - `layout_from_actions` builds the initial list from the `SetLayout` action track
 - `src-tauri/src/export/render/fromedit.rs` - segment list drives per-frame layout selection in the compositor
 
-## CameraMove
-
-```rust
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct CameraMove {
-    pub id: String, pub t_ms: u32, pub x: f32, pub y: f32, pub size: f32,
-    #[serde(default = "default_cam_easing")] pub easing: String,
-    #[serde(default = "default_cam_shape")] pub shape: String,
-    #[serde(default = "default_cam_roundness")] pub roundness: f32,
-}
-```
-
-One keyframe of the webcam PiP's position + size + shape track (`EditDoc.camera_moves`). An empty track is the default and is a no-op at render time - a doc with no `camera_moves` composites byte-identically to today.
-
-- `id` - *stable string key (e.g. `"k0"`, `"k3"`) used to target a specific keyframe for update/removal without relying on list position.*
-- `t_ms` - *the frame time this keyframe is pinned to.*
-- `x` / `y` - *the PiP's center, as a fraction (`0.0`-`1.0`) of the output frame.*
-- `size` - *the PiP's size, as a fraction of the output frame; the interpolator (`CameraMoveTrack`) derives the other dimension from the mode's aspect.*
-- `easing` - *named easing curve (`"linear"`, `"smooth"`, `"spring"`) for the ramp into this keyframe; defaults to `"smooth"` when absent from JSON, matching `Zoom`/`LayoutSeg`'s back-compat pattern.*
-- `shape` - *the keyframe's own webcam shape: `"layout"` (inherit the layout's - the serde default, so every keyframe written before shapes existed on 2026-09-14 reads unchanged), `"circle"`, `"rounded"` or `"rect"`. `CameraMoveTrack` folds it into the pose as a corner fraction and morphs it between keyframes like the rect.*
-- `roundness` - *the `"rounded"` corner radius as a fraction of the panel's short side, `0.0`-`0.5`; ignored by the other shapes. Defaults to `DEFAULT_CAM_ROUNDNESS`.*
-
-## DEFAULT_CAM_ROUNDNESS
-
-```rust
-pub const DEFAULT_CAM_ROUNDNESS: f32 = 0.12;
-```
-
-The corner radius a keyframe gets when switched to `"rounded"` before its slider is touched - visibly rounded at bubble sizes without reading as a pill. Also `roundness`'s serde default, and what `EditOp::AddCameraMove` fills in when the op carries none.
-
 ## EditDoc
 
 ```rust
@@ -264,6 +236,7 @@ pub struct EditDoc {
     #[serde(default)] pub camera_moves: Vec<CameraMove>,
     pub aspect: crate::export::types::Aspect,
     pub settings: crate::settings::model::Settings,
+    #[serde(default)] pub captions: Vec<Caption>,
 }
 ```
 
@@ -282,6 +255,7 @@ Root of `edit.json`. Carries the complete editor state for one recording project
 - `camera_moves` - *ordered list of webcam PiP keyframes; `#[serde(default)]` so a pre-existing `edit.json` with no `camera_moves` loads as an empty `Vec`, which the exporter/preview treat as "no override" (byte-identical to today).*
 - `aspect` - *output frame aspect ratio; `#[serde(default)]` so a pre-existing `edit.json` with no `aspect` loads as `Aspect::Source` - today's behavior exactly. See `export::types::Aspect`.*
 - `settings` - *snapshot of the user's `Settings` at the time the doc was seeded; preserves the zoom config and theme for a re-render even if the user later changes settings.*
+- `captions` - *the spoken-caption track (see `edit::captions::Caption`), OUTPUT-clock like every other region list here. `#[serde(default)]` so a doc written before captions existed loads with an empty track.*
 
 ### Used by
 
@@ -297,7 +271,7 @@ Root of `edit.json`. Carries the complete editor state for one recording project
 pub fn save(&self, path: &std::path::Path) -> std::io::Result<()>
 ```
 
-Serializes the doc to pretty-printed JSON and writes it atomically to `path`: the bytes go to a temp sibling (`crate::win::sys::proc::tmp_sibling`) first, then `std::fs::rename` moves it into place. A crash or power loss mid-write leaves the old `edit.json` untouched (the rename either fully happens or not at all) instead of a half-written, truncated file - the failure mode `EditDoc::load` used to see as silent corruption.
+Serializes the doc to pretty-printed JSON and writes it atomically to `path`: the bytes go to a temp sibling (`crate::process::proc::tmp_sibling`) first, then `std::fs::rename` moves it into place. A crash or power loss mid-write leaves the old `edit.json` untouched (the rename either fully happens or not at all) instead of a half-written, truncated file - the failure mode `EditDoc::load` used to see as silent corruption.
 
 ### Inputs
 
@@ -328,7 +302,7 @@ Cuts saved before they had ids get `c{n}` ones, `n` counting up from the highest
 pub fn load(path: &std::path::Path) -> Option<EditDoc>
 ```
 
-Reads and deserializes `edit.json` at `path`. A missing file and a corrupt (unparseable) file both return `None`, so the caller's reseed path (`load_or_seed`) runs either way - but they are NOT treated the same on disk: a read failure (no file) is left alone, while a parse failure delegates to `win::sys::proc::preserve_corrupt(path, &e)`, which renames the bad file aside to `<path>.corrupt` (overwriting any older `.corrupt` from a previous crash) and `eprintln!`s the parse error, so a reseed never silently destroys the user's actual edit - the original bytes survive on disk for recovery. (`settings::store::load_from` shares this same helper for `config.json`, bug-sweep-2 M3.)
+Reads and deserializes `edit.json` at `path`. A missing file and a corrupt (unparseable) file both return `None`, so the caller's reseed path (`load_or_seed`) runs either way - but they are NOT treated the same on disk: a read failure (no file) is left alone, while a parse failure delegates to `process::proc::preserve_corrupt(path, &e)`, which renames the bad file aside to `<path>.corrupt` (overwriting any older `.corrupt` from a previous crash) and `eprintln!`s the parse error, so a reseed never silently destroys the user's actual edit - the original bytes survive on disk for recovery. (`settings::store::load_from` shares this same helper for `config.json`, bug-sweep-2 M3.)
 
 ### Inputs
 
@@ -349,28 +323,3 @@ Reads and deserializes `edit.json` at `path`. A missing file and a corrupt (unpa
 - `load_on_truncated_json_returns_none_and_preserves_original_bytes` - a parse failure returns `None` and the original bytes end up unmodified at `<path>.corrupt`.
 - `load_on_truncated_json_overwrites_an_older_corrupt_file` - a stale `.corrupt` sibling from an earlier crash does not block preserving the new one.
 
-## EffectKind
-
-```rust
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum EffectKind { Spotlight }
-```
-
-The kind of an editable effect region. Serializes lowercase (`"spotlight"`) to match the TS `EffectKind`. The set grows over phases (video FX, captions later).
-
-## EffectRegion
-
-```rust
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct EffectRegion {
-    pub id: String, pub kind: EffectKind, pub start_ms: u32, pub end_ms: u32,
-    pub fade_in_ms: u32, pub fade_out_ms: u32,
-    pub mode: Option<crate::settings::model::SpotlightMode>,
-    pub dim: Option<f32>,
-    pub radius: Option<f32>,
-    pub feather: Option<f32>,
-}
-```
-
-An editable effect region on the timeline (v1: Spotlight). `EditDoc.effects` is a `Vec<EffectRegion>` with `#[serde(default)]` for back-compat (a pre-existing `edit.json` without `effects` loads). Params default from settings for now; at export, `fx_state::spotlight_region_alpha` fades a Spotlight region in/out over its span and unions it with the settings + hotkey-hold spotlight.

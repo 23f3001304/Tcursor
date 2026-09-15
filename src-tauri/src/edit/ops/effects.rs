@@ -1,63 +1,104 @@
-// Effect-region edit ops (add/update/remove), split out of api.rs so each file stays focused.
-// v1 handles Spotlight regions; the kind set grows in later phases. `api::apply` delegates the
-// effect ops here.
-use crate::edit::ops::api::EditOp;
 use crate::edit::model::{EditDoc, EffectKind, EffectRegion};
+use crate::edit::ops::api::EditOp;
 use crate::edit::ops::region::{auto_layer, clamp_order, dur_bound};
 
 fn next_effect_id(doc: &EditDoc) -> String {
-    let n = doc.effects.iter()
+    let n = doc
+        .effects
+        .iter()
         .filter_map(|e| e.id.strip_prefix('e').and_then(|s| s.parse::<u32>().ok()))
-        .max().map(|m| m + 1).unwrap_or(doc.effects.len() as u32);
+        .max()
+        .map(|m| m + 1)
+        .unwrap_or(doc.effects.len() as u32);
     format!("e{}", n)
 }
 
-/// Convert an always-on `clickfx.spotlight` toggle into one full-span, editable Spotlight region so
-/// the editor timeline can trim or remove it - the region then drives both preview and export
-/// (`fx_state` maxes the toggle with the region alpha, and the toggle is set off here). No-op if the
-/// toggle is already off or a Spotlight region already exists. Returns whether the doc changed; the
-/// seed calls this on BOTH fresh and older docs so an always-on spotlight is always editable.
-///
-/// The span is `[0, dur_bound(doc)]` - the same clip_ms-first fallback chain every other
-/// region-placing op uses - NOT `trim.out_ms`. `trim.out_ms` is a mutable trim point (0 is its
-/// normal "no trim / whole clip" sentinel, not "clip is zero-length"), so bounding the lift by it
-/// either collapses the lifted region to a stale trim once the clip is later widened back out, or -
-/// on the very common `out_ms == 0` "no trim" doc - skips the lift entirely, leaving the toggle
-/// permanently on with no editable region at all. Only a truly unseeded doc (`dur_bound` returns
-/// `u32::MAX`, i.e. neither `clip_ms` nor `trim.out_ms` is known yet) still skips the lift, since a
-/// `[0, u32::MAX]` region would be meaningless.
 pub fn lift_always_on_spotlight(doc: &mut EditDoc) -> bool {
     let dur = dur_bound(doc);
-    if !doc.settings.clickfx.spotlight || dur == u32::MAX
-        || doc.effects.iter().any(|e| matches!(e.kind, EffectKind::Spotlight)) {
+    if !doc.settings.clickfx.spotlight
+        || dur == u32::MAX
+        || doc
+            .effects
+            .iter()
+            .any(|e| matches!(e.kind, EffectKind::Spotlight))
+    {
         return false;
     }
     let id = next_effect_id(doc);
-    doc.effects.push(EffectRegion { id, kind: EffectKind::Spotlight, start_ms: 0, end_ms: dur, fade_in_ms: 250, fade_out_ms: 250, mode: None, dim: None, radius: None, feather: None, layer: 0 });
+    doc.effects.push(EffectRegion {
+        id,
+        kind: EffectKind::Spotlight,
+        start_ms: 0,
+        end_ms: dur,
+        fade_in_ms: 250,
+        fade_out_ms: 250,
+        mode: None,
+        dim: None,
+        radius: None,
+        feather: None,
+        layer: 0,
+    });
     doc.settings.clickfx.spotlight = false;
     true
 }
 
-/// Apply an effect-region op. No-op for non-effect ops (the match arm in `api::apply` only
-/// routes the three effect variants here).
 pub fn apply_effect(doc: &mut EditDoc, op: EditOp) {
     match op {
-        EditOp::AddEffect { kind, start_ms, end_ms } => {
+        EditOp::AddEffect {
+            kind,
+            start_ms,
+            end_ms,
+        } => {
             let id = next_effect_id(doc);
             let dur = dur_bound(doc);
             let (start_ms, end_ms) = (start_ms.min(dur), end_ms.min(dur));
-            let existing: Vec<(u32, u32, u32)> = doc.effects.iter().map(|e| (e.start_ms, e.end_ms, e.layer)).collect();
+            let existing: Vec<(u32, u32, u32)> = doc
+                .effects
+                .iter()
+                .map(|e| (e.start_ms, e.end_ms, e.layer))
+                .collect();
             let layer = auto_layer(&existing, start_ms, end_ms);
-            doc.effects.push(EffectRegion { id, kind, start_ms, end_ms, fade_in_ms: 250, fade_out_ms: 250, mode: None, dim: None, radius: None, feather: None, layer });
+            doc.effects.push(EffectRegion {
+                id,
+                kind,
+                start_ms,
+                end_ms,
+                fade_in_ms: 250,
+                fade_out_ms: 250,
+                mode: None,
+                dim: None,
+                radius: None,
+                feather: None,
+                layer,
+            });
         }
-        EditOp::UpdateEffect { id, start_ms, end_ms, fade_in_ms, fade_out_ms, mode, dim, radius, feather, layer } => {
+        EditOp::UpdateEffect {
+            id,
+            start_ms,
+            end_ms,
+            fade_in_ms,
+            fade_out_ms,
+            mode,
+            dim,
+            radius,
+            feather,
+            layer,
+        } => {
             let dur = dur_bound(doc);
             if let Some(e) = doc.effects.iter_mut().find(|e| e.id == id) {
-                if let Some(v) = start_ms { e.start_ms = v.min(dur); }
-                if let Some(v) = end_ms { e.end_ms = v.min(dur); }
+                if let Some(v) = start_ms {
+                    e.start_ms = v.min(dur);
+                }
+                if let Some(v) = end_ms {
+                    e.end_ms = v.min(dur);
+                }
                 clamp_order(&mut e.start_ms, &mut e.end_ms, start_ms.is_some());
-                if let Some(v) = fade_in_ms { e.fade_in_ms = v; }
-                if let Some(v) = fade_out_ms { e.fade_out_ms = v; }
+                if let Some(v) = fade_in_ms {
+                    e.fade_in_ms = v;
+                }
+                if let Some(v) = fade_out_ms {
+                    e.fade_out_ms = v;
+                }
                 if let Some(s) = mode {
                     e.mode = match s.as_str() {
                         "global" | "default" | "none" => None,
@@ -70,10 +111,18 @@ pub fn apply_effect(doc: &mut EditDoc, op: EditOp) {
                         _ => e.mode,
                     };
                 }
-                if let Some(v) = dim { e.dim = if v < 0.0 { None } else { Some(v) }; }
-                if let Some(v) = radius { e.radius = if v < 0.0 { None } else { Some(v) }; }
-                if let Some(v) = feather { e.feather = if v < 0.0 { None } else { Some(v) }; }
-                if let Some(v) = layer { e.layer = v; }
+                if let Some(v) = dim {
+                    e.dim = if v < 0.0 { None } else { Some(v) };
+                }
+                if let Some(v) = radius {
+                    e.radius = if v < 0.0 { None } else { Some(v) };
+                }
+                if let Some(v) = feather {
+                    e.feather = if v < 0.0 { None } else { Some(v) };
+                }
+                if let Some(v) = layer {
+                    e.layer = v;
+                }
             }
         }
         EditOp::RemoveEffect { id } => doc.effects.retain(|e| e.id != id),

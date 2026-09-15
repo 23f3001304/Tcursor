@@ -26,7 +26,7 @@ One resolved webcam-PiP position+size at a frame time.
 pub const KF_BLEND_MS: u32 = 350;
 ```
 
-The handoff length in milliseconds on EACH side of the keyframe span, between the live layout-resolved pose and the track. A module constant, deliberately **not** a setting: it is the semantic width of "entering/leaving the keyframes' authority", not a look knob, and the TS preview mirror (`KF_BLEND_MS` in `src/editor/stage/cameraMoves.ts`) must stay numerically equal or the preview and the export disagree frame-for-frame.
+The handoff length in milliseconds on EACH side of the keyframe span, between the live layout-resolved pose and the track. A module constant, deliberately **not** a setting: it is the semantic width of "entering/leaving the keyframes' authority", not a look knob, and the TS preview mirror (`KF_BLEND_MS` in `src/editor/stage/camera/cameraMoves.ts`) must stay numerically equal or the preview and the export disagree frame-for-frame.
 
 ## CameraMoveTrack
 
@@ -72,7 +72,7 @@ The `(entry, exit)` output-time window the track OWNS: `(first.t_ms - KF_BLEND_M
 ### Used by
 
 - `CameraMoveTrack::sample` itself (its first check).
-- `src/editor/timeline/CameraLane.tsx` draws the same window as its translucent span bar, but computes it TS-side (padding its own drag-adjusted keyframe times by `KF_BLEND_MS`) rather than round-tripping through IPC - so the bar tracks a diamond mid-drag, before anything is committed. The TS `camKfRange` is NOT this function's counterpart: it returns the UNPADDED `[first, last]` keyframe range.
+- `src/editor/timeline/lanes/CameraLane.tsx` draws the same window as its translucent span bar, but computes it TS-side (padding its own drag-adjusted keyframe times by `KF_BLEND_MS`) rather than round-tripping through IPC - so the bar tracks a diamond mid-drag, before anything is committed. The TS `camKfRange` is NOT this function's counterpart: it returns the UNPADDED `[first, last]` keyframe range.
 
 ## CameraMoveTrack::sample
 

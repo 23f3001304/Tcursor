@@ -55,13 +55,13 @@ The frame-size guard `push` delegates to. A dimension mismatch would misalign ev
 pub fn prewarm()
 ```
 
-Forces the hardware encoder probe to run on the calling thread so the result is cached before the first recording. Also confirms the ffmpeg binary launches, and appends a one-line diagnostic to `%TEMP%/tcursor-ffmpeg.log` with `encoder=<name> ffmpeg_runs=<Ok/Err>`. If the log file cannot be opened, the diagnostic is silently skipped. Subsequent calls are free because `OnceLock::get_or_init` returns the cached value immediately.
+Forces the hardware encoder probe to run on the calling thread so the result is cached before the first recording. Also confirms the ffmpeg binary launches, and appends a one-line diagnostic to `%TEMP%/tcursor-ffmpeg.log` with `encoder=<name> ffmpeg_runs=<Ok/Err>`. Capped since the cleanup of 2026-09-15: once the file is past 64 KB it is truncated before the line is written, so the one line per launch (plus the startup line `lib.rs` writes) can never grow it without bound. If the log file cannot be opened, the diagnostic is silently skipped. Subsequent calls are free because `OnceLock::get_or_init` returns the cached value immediately.
 
 ### Implementation
 
 1. Call `h264_encoder()`, which runs `probe_encoder` for each candidate in order. *Why on a background thread (as the caller in `lib.rs` does):* the first ffmpeg launch takes ~100 ms while the OS scans the bundled binary; running it at startup hides that latency behind app boot so the first recording's `FfmpegFrameSink::new` is fast and audio capture is not delayed.*
 2. Run `ffmpeg -version` via `ffcmd`. *Why separately:* `probe_encoder` uses `ffmpeg -f lavfi ...` which may succeed or fail silently if the binary is blocked by AV software; `-version` is a simpler liveness check.*
-3. Append diagnostic to `%TEMP%/tcursor-ffmpeg.log`.
+3. Append the diagnostic to `%TEMP%/tcursor-ffmpeg.log` (truncating first when the file is past 64 KB).
 
 ### Returns
 

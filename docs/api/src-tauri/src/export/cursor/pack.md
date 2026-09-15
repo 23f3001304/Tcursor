@@ -131,7 +131,7 @@ One row per entry in `cursorset::SPRITES`, in the same order. For `pack_id == "d
 
 ### Used by
 
-- `src-tauri/src/export/cursor/cursorset.rs` (`prep`) - resolves export sprite bytes
+- `src-tauri/src/export/cursor/pack/cursorset.rs` (`prep`) - resolves export sprite bytes
 - `src-tauri/src/export/cursor/cursorpreview.rs` (`cursor_sprites`) - resolves preview sprite bytes
 
 ### Behaviors
@@ -155,10 +155,10 @@ The OS shows "busy" as the plain arrow plus a spinner it draws itself; this app'
 ## sprite_sources_from_dir
 
 ```rust
-fn sprite_sources_from_dir(dir: &Path) -> Vec<(CursorType, Vec<u8>, (f32, f32))>
+pub(crate) fn sprite_sources_from_dir(dir: &Path) -> Vec<(CursorType, Vec<u8>, (f32, f32))>
 ```
 
-Pure core of `sprite_sources`: resolve every built-in kind against a specific pack folder. Not `pub` - taking `dir` directly (rather than resolving it internally from a pack id via the real `cursors_dir()`) is what makes this unit-testable against a temp folder instead of the real app-data directory.
+Pure core of `sprite_sources`: resolve every built-in kind against a specific pack folder. `pub(crate)` (not exported past this crate) - taking `dir` directly, rather than resolving it internally from a pack id via the real `cursors_dir()`, is what makes this unit-testable against a temp folder instead of the real app-data directory. `pack_template.rs`'s own test reuses it for the same reason: it is the real loader, run against the just-written template folder.
 
 ### Inputs
 
@@ -237,4 +237,24 @@ Whether `pack_id`'s sprites are lenses rather than pictures (`material: "glass"`
 
 ### Used by
 
-- `src-tauri/src/export/cursor/cursorset.rs` - `prep`, once per renderer build, to set `CursorPrep::glass` and decide whether to build the lens masks at all.
+- `src-tauri/src/export/cursor/pack/cursorset.rs` - `prep`, once per renderer build, to set `CursorPrep::glass` and decide whether to build the lens masks at all.
+
+## cursorset
+
+Submodule (`cursor/pack/cursorset.rs`). Manages the per-type cursor sprite set: decodes each shape once at prep time, inverts RGB for dark themes, and dispatches per-frame draw calls with panel-proportional sizing. Key items: `SPRITES`, `CursorPrep`, `prep`, `sprite_for`, `posed` (the busy animation's per-frame sprite + transform), `draw`, `frame_placement` (the projection both cursor paths share), `invert_rgb` - full per-symbol docs in `cursor/pack/cursorset.md`.
+
+## pack_import
+
+Submodule (`cursor/pack/pack_import.rs`). Import a user-chosen folder as a new cursor pack: validates it holds at least one recognized sprite, copies the recognized files under `packdirs::cursors_dir()`, and hands back the `CursorPackInfo` the panel can select at once. Key item: `import_cursor_pack` (Tauri command) - full per-symbol docs in `cursor/pack/pack_import.md`.
+
+## pack_template
+
+Submodule (`cursor/pack/pack_template.rs`). M8(c) "Create pack template": writes a fresh, complete pack folder (nine sprites seeded from the bundled Clean pack, a v2 `pack.json` with a declared busy animation, `hotspots.json`, `README.txt`) so a pack author has a real working folder to start from. Key item: `create_pack_template` (Tauri command) - full per-symbol docs in `cursor/pack/pack_template.md`.
+
+## packdirs
+
+Submodule (`cursor/pack/packdirs.rs`). Where cursor packs live: the embedded set, the BUNDLED folders under the app's `assets/cursorpacks` resources, and the user's imports under `cursors_dir()`. Resolves a pack id to a folder (bundled wins) and explains why the exe-relative candidates make `tauri dev` work with no staging step. Key items: `cursors_dir`, `pack_dir`, `resource_candidates`, `bundled_root`, `default_pack_dir` (the embedded pack's own `assets/cursors` folder), `bundled_pack_dir`, `bundled_pack_dirs`, `imported_pack_dirs`, `resolve_pack_dir` - full per-symbol docs in `cursor/pack/packdirs.md`.
+
+## packlist
+
+Submodule (`cursor/pack/packlist.rs`). What packs exist and how the Cursor panel's grid shows them - names, folders, and a kind-to-filename map that already carries the embedded pack's `pointer.png` alias and the busy-is-arrow substitution, so the frontend needs neither rule. Key items: `CursorPackInfo`, `list_packs`, `imported_info`, `pack_files`, `default_filename` - full per-symbol docs in `cursor/pack/packlist.md`.

@@ -6,9 +6,9 @@ Thread-spawning helpers and input-persistence logic factored out of `recorder.rs
 
 ```rust
 pub fn save_inputs(
-    mouse: Option<MouseTracker>,
-    keyboard: Option<KeyboardTracker>,
-    cursor: Option<CursorTypeTracker>,
+    mouse: Box<dyn PointerPort>,
+    keyboard: Box<dyn HotkeyPort>,
+    cursor: Box<dyn CursorShapePort>,
     events_path: &Path,
     actions_path: &Path,
     typing_path: &Path,
@@ -23,9 +23,11 @@ Stops each active input tracker and writes its data to disk. Called synchronousl
 
 ### Inputs
 
-- `mouse: Option<MouseTracker>` - `Some` when a mouse tracker was started; `None` skips this track. *Why Option:* mouse tracking may be absent in test or minimal builds.
-- `keyboard: Option<KeyboardTracker>` - `Some` when a keyboard tracker was started. *Why Option:* stops and splits into `(actions, typing)` in one call; either or both tracks may be absent.
-- `cursor: Option<CursorTypeTracker>` - the cursor tracker. `Some` on EVERY take now, whatever the style: capture is always cursor-free, so the shape track AND the captured OS-cursor layer both have to be sampled live for any style to be selectable later. (Still an `Option` because a spawn failure, or a minimal/test build, can legitimately have no tracker.)
+- `mouse: Box<dyn PointerPort>` - the take's pointer stream, consumed here. *Why by value:* `PointerPort::stop` takes `self: Box<Self>` - stopping a stream ends it, and the type says so.
+- `keyboard: Box<dyn HotkeyPort>` - the hotkey stream; its one `stop` returns `(actions, typing)` together.
+- `cursor: Box<dyn CursorShapePort>` - the cursor-shape stream. Present on EVERY take, whatever the style: capture is always cursor-free, so the shape track AND the captured OS-cursor layer both have to be sampled live for any style to be selectable later.
+
+*Why none of the three is an `Option` any more.* They were, from when the cursor tracker was conditional on the style; all three have been unconditional since, so Batch D took the wrapper off rather than keep three branches that could not be taken. A platform that cannot supply one of the streams returns one that produces nothing - three separate ports exist precisely so that is possible one at a time - and an empty track writes an empty log, which is also what a take with no mouse movement writes.
 - `events_path: &Path` - destination for `events.json`. *Why Path not String:* the serialization helpers in `EventLog` take `&Path`; avoids re-allocation.
 - `actions_path / typing_path / cursor_path: &Path` - destinations for `actions.json`, `typing.json`, `cursor.json` respectively.
 - `paths: &ProjectPaths` - used ONLY for the captured cursor layer, whose several files (`cursor/layer.json` plus one PNG per shape) are not worth threading through as separate path arguments. Built by `recorder_stop` from `Running::folder`.
@@ -38,9 +40,11 @@ Stops each active input tracker and writes its data to disk. Called synchronousl
 
 ### Implementation
 
-1. If `mouse` is `Some`: call `tracker.stop()` to drain the event queue, construct `EventLog { started_unix_ms, screen, events }`, call `log.save(events_path)`. Log any error to stderr and continue.
-2. If `keyboard` is `Some`: call `kb.stop()` which returns `(actions, typing)`. Save `ActionLog { actions }` to `actions_path` and `TypingLog { ms: typing }` to `typing_path`. Use `.ok()` on the typing save since typing data is best-effort. *Why stop returns both:* the keyboard tracker collects both action events and raw keystroke timestamps on one hook; a single stop call drains both queues atomically.
-3. If `cursor` is `Some`: call `c.stop()` to get `(samples, layer)`. Save `CursorTrack { samples }` to `cursor_path`, then `layer.save(paths)` for the captured OS-cursor layer. Both log to stderr and continue - best-effort like every other input log, and a project with no layer still opens, it just falls back to the plain arrow for System exactly like a pre-layer recording.
+1. `PointerPort::stop(mouse)` drains the event queue; construct `EventLog { started_unix_ms, screen, events }` and call `log.save(events_path)`. Log any error to stderr and continue.
+2. `HotkeyPort::stop(keyboard)` returns `(actions, typing)`. Save `ActionLog { actions }` to `actions_path` and `TypingLog { ms: typing }` to `typing_path`. Use `.ok()` on the typing save since typing data is best-effort. *Why one stop returns both:* the hotkey stream collects action events and raw keystroke timestamps on one poll; a single stop drains both queues atomically.
+3. `CursorShapePort::stop(cursor)` returns `(samples, layer)`. Save `CursorTrack { samples }` to `cursor_path`, then `layer.save(paths)` for the captured OS-cursor layer. Both log to stderr and continue - best-effort like every other input log, and a project with no layer still opens, it just falls back to the plain arrow for System exactly like a pre-layer recording.
+
+*Why the stops are written trait-qualified* (`PointerPort::stop(mouse)` rather than `mouse.stop()`): both resolve, but this function is where three different `stop`s meet, and naming the trait says which contract each one is - in particular that none of them returns a `Result`. That is deliberate: a raw unwrap here would turn "stopped collecting events" into a panicked Stop and lose the whole take's inputs.
 
 ## save_session_files
 
@@ -113,7 +117,7 @@ Spawns a dedicated thread that owns and drives a `CpalMic` handle. Returns `None
 
 ```rust
 pub fn spawn_system_thread(
-    enabled: bool,
+    loopback: Option<(cpal::Device, cpal::SupportedStreamConfig)>,
     system_path: String,
     stop: Arc<AtomicBool>,
     paused: Arc<AtomicBool>,
@@ -124,11 +128,11 @@ pub fn spawn_system_thread(
 ) -> Option<JoinHandle<()>>
 ```
 
-Spawns a dedicated thread that owns and drives a `SystemAudio` loopback handle. Returns `None` immediately if `enabled` is false.
+Spawns a dedicated thread that owns and drives a `SystemAudio` loopback handle. Whether system audio is on at all is the caller's question - `start_take` only calls this when `TakeSpec::system_audio` is set.
 
 ### Inputs
 
-- `enabled: bool` - whether system-audio capture is active. *Why bool not Option:* unlike mic, there is no device selection; it is simply on or off.
+- `loopback: Option<(cpal::Device, cpal::SupportedStreamConfig)>` - the device to open as an input stream, from `SystemAudioPort::loopback_device`. *Why handed in rather than opened here:* the WASAPI trick of opening the default OUTPUT device as an input is the one genuinely non-portable thing about system audio, so it belongs to the platform adapter; everything below - the WAV writer, the level meter, the pause gate - is shared. *Why `Option` rather than refusing to spawn:* `None` is "this platform cannot capture system audio", and the user still asked for it, so the thread starts, `SystemAudio::loopback` reports `"no default output device"`, and the HUD gets the same `record-warning` it has always got. Dropping the thread silently would drop the warning with it.
 - `system_path: String` - destination for `system.wav`. *Why String:* moved into the closure.
 - `stop: Arc<AtomicBool>` - shared shutdown flag, same semantics as in `spawn_mic_thread`.
 - `paused: Arc<AtomicBool>` - pause flag passed to `SystemAudio::loopback` so loopback samples are gated during pause.
@@ -139,15 +143,14 @@ Spawns a dedicated thread that owns and drives a `SystemAudio` loopback handle. 
 
 ### Returns
 
-`Some(JoinHandle<()>)` on successful thread spawn; `None` if `enabled` is false or spawn fails.
+`Some(JoinHandle<()>)` on successful thread spawn; `None` if the spawn fails.
 
 ### Implementation
 
-1. `if !enabled { return None; }`.
-2. Spawn thread named `"system-audio"`.
-3. Inside the thread: create a `LevelSlot` and call `SystemAudio::loopback(&system_path, paused, started, clock, Some(slot))`, moving `started`/`clock` in directly - `loopback` itself stamps `started` at the first non-empty callback packet. On success, store the handle. On failure, delete any header-only `system.wav`, fire `warn`, and store `None`. *Why store `None` on error:* same as mic - non-fatal; recording continues without system audio.
-4. Run `poll_until_stopped` with the slot and (only if loopback opened) `level`.
-5. Call `handle.stop()` to flush and close the wav file. *Why `SystemAudioHandle` is `!Send`:* cpal streams contain platform handles that must be released on the same thread they were created on; owning the handle in the thread that opened it satisfies this invariant.
+1. Spawn thread named `"system-audio"`.
+2. Inside the thread: create a `LevelSlot` and call `SystemAudio::loopback(loopback, &system_path, paused, started, clock, Some(slot))`, moving `started`/`clock` in directly - `loopback` itself stamps `started` at the first non-empty callback packet. On success, store the handle. On failure, delete any header-only `system.wav`, fire `warn`, and store `None`. *Why store `None` on error:* same as mic - non-fatal; recording continues without system audio.
+3. Run `poll_until_stopped` with the slot and (only if loopback opened) `level`.
+4. Call `handle.stop()` to flush and close the wav file. *Why `SystemAudioHandle` is `!Send`:* cpal streams contain platform handles that must be released on the same thread they were created on; owning the handle in the thread that opened it satisfies this invariant.
 
 ## audio_warning
 

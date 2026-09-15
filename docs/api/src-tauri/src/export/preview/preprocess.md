@@ -12,7 +12,7 @@ Both call the `_blocking` variants directly rather than the `#[tauri::command] a
 pub const DEFAULT_PROXY_HEIGHT: u32 = 720;
 ```
 
-Proxy height generated during preprocessing - matches `Editor.tsx`'s initial `quality` state and the frontend's `DEFAULT_PROXY_HEIGHT` (`src/lib/ipc.ts`), so a freshly preprocessed project's default quality is always the one already sitting on disk.
+Proxy height generated during preprocessing - matches `Editor.tsx`'s initial `quality` state and the frontend's `DEFAULT_PROXY_HEIGHT` (`src/shared/ipc.ts`), so a freshly preprocessed project's default quality is always the one already sitting on disk.
 
 ## preprocess_project
 
@@ -41,7 +41,7 @@ Nothing directly. Emits `preprocess-progress` (`u32`, 0..100 - the proxy transco
 ### Used by
 
 - `src-tauri/src/lib.rs` - registered in `invoke_handler!`.
-- `src/lib/ipc.ts` (`preprocessProject`) - the TS wrapper.
+- `src/shared/ipc.ts` (`preprocessProject`) - the TS wrapper.
 - `src/hud/hooks/useRecordingFlow.ts` - called right after `stopRecording`/`webcam.stop()` resolve, awaited (via `preprocess-done`) before `onEdit` opens the editor; `savePct` is the take pill's progress line.
 
 ## essential

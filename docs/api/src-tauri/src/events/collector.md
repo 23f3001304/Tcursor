@@ -22,7 +22,7 @@ Stateful buffer that applies deduplication as events arrive.
 
 ### Used by
 
-- `src-tauri/src/events/track/tracker.rs` - `MouseTracker` owns a `Sink` that wraps one `EventCollector`; the hook proc calls `push` on every OS mouse event
+- `src-tauri/src/platform/windows/input/pointer.rs` - `Win32Pointer` owns a `Sink` that wraps one `EventCollector`; the hook proc calls `push` on every OS mouse event
 
 ## EventCollector::new
 

@@ -1,0 +1,12 @@
+# Windows path limit: whisper.cpp's Vulkan shader generator builds under
+# <target>/debug/build/whisper-rs-sys-<hash>/out/build/ggml/src/ggml-vulkan/vulkan-shaders-gen-prefix/...
+# which passes CMake's 250-character object-path limit from the repo's default target dir.
+# A short target dir keeps the whole Vulkan build under it. Nothing else belongs in this file:
+# never add WHISPER_DONT_GENERATE_BINDINGS here (see Cargo.toml).
+[build]
+target-dir = "C:/tct"
+
+# Fallback for shells opened before the SDK installer added the system variable; a real
+# VULKAN_SDK in the environment wins (force = false).
+[env]
+VULKAN_SDK = { value = "C:/VulkanSDK/1.4.357.0", force = false }

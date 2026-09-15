@@ -5,7 +5,7 @@ Top-level export orchestrator and the **composite stage** of the 3-stage decode 
 ## export
 
 ```rust
-pub fn export(paths: &ProjectPaths, settings: ExportSettings, on_progress: impl Fn(u8)) -> Result<Vec<String>>
+pub fn export(paths: &ProjectPaths, settings: ExportSettings, system: &dyn SystemPort, on_progress: impl Fn(u8)) -> Result<Vec<String>>
 ```
 
 **Since the time remap** the loop no longer iterates recording frames between trim bounds: it takes the renderer's `TimeMap::frame_plan` (the recording frame every output frame shows; exactly `k_in ..= k_last` for a trim-only doc, skips for cuts and fast spans, repeats for slow motion) and hands the walk to `frame_loop::run` (`frame_loop.md`), which rides `FrameRenderer::walk_plan` so the camera steps once per OUTPUT frame while the decoders advance sequentially through the recording. An empty plan (everything cut) is refused with a message before the encoder is spawned. Progress, encoder timestamps and the mux length count output frames; the audio shift uses `plan[0]` where it used `k_in`, the same frame-floored trim-in, and the mux receives the kept segments (`audio_segments::audio_segs`) so the audio is cut and re-timed to match the frames.
@@ -16,6 +16,7 @@ Renders the recording at `paths` into `paths.folder/final.<ext>` (`<ext>` from `
 
 - `paths: &ProjectPaths` - project folder root; all asset paths are derived from it (`events.json`, `actions.json`, `video.raw`, optional `webcam.raw`, mic/system audio, `sync.json`, `edit.json`, `cursor.json`). *Why a single struct:* avoids threading individual file paths through every subsystem call.
 - `settings: ExportSettings` (`export::settings::ExportSettings`) - the user's chosen resolution, fps, quality (CRF), and container format. *Why one struct:* every downstream consumer (`Layout`, the encode loop, `FfmpegFrameSink`, `audio_mux::mux`) needs a different slice of it, so passing the whole struct once avoids re-deriving values. `ExportSettings::default()` reproduces today's export exactly (Source resolution, 60fps, CRF 24, MP4/H.264) - see the back-compat tests in `settings.rs`/`ffmpeg_args.rs`.
+- `system: &dyn SystemPort` - the desktop facts the export build needs: `primary_refresh_hz` for `capture_fps` (step 1) and, through `FrameRenderer::new`, `os_prefers_dark`. *Why a parameter since Batch D:* both used to be free-function calls into a `#[cfg]`-gated platform module from inside the export, which is a hidden OS dependency in the one tree that is the reference for everything else. `run_export` resolves `Arc<Platform>` from app state and passes the port down; the `#[ignore]`d `export_bench` builds its own.
 - `on_progress: impl Fn(u8)` - callback receiving 0..=100 each time the percentage advances. *Why a callback:* the Tauri layer (in `run.rs`) wires this to `app.emit("export-progress", p)`; keeping it external lets the export logic stay testable without a live app handle.
 
 ### Returns
@@ -26,8 +27,8 @@ On error the raw `anyhow::Error` propagates (including any decode-thread error s
 
 ### Implementation
 
-1. Compute `capture_fps = primary_refresh_hz().min(60)` - the same display-refresh-derived value the old unconditional `fps` parameter used, now serving two roles: `FrameRenderer::new`'s capture-rate fallback (unchanged meaning, `build_timeline`'s last-resort denominator) and `settings.fps.resolve_hz(capture_fps)`'s own fallback for `Fps::Source` (so `Source` reproduces the old formula exactly without a second display query). `out_fps = settings.fps.resolve_hz(capture_fps)` is the export's actual output frame rate (`F30`/`F60` are fixed regardless of the display; `F60` is the default).
-2. Call `FrameRenderer::new(paths, Layout::default(), capture_fps, settings.resolution, None)` to get `(renderer, meta)` (`None` = no preview downscale - a full export build). The renderer owns the event log, settings, compositor, FX renderer, camera sim, cursor state, and background. `meta` carries everything needed to drive the loop (`screen_bytes`, `webcam_w`/`webcam_h`, `video_start`, `video_end`, `tl`, `out_w`, `out_h`, `audio_offset_ms`, `trim`, `mic_volume`, `sys_volume`).
+1. Compute `capture_fps = system.primary_refresh_hz().min(60)` - the same display-refresh-derived value the old unconditional `fps` parameter used, now serving two roles: `FrameRenderer::new`'s capture-rate fallback (unchanged meaning, `build_timeline`'s last-resort denominator) and `settings.fps.resolve_hz(capture_fps)`'s own fallback for `Fps::Source` (so `Source` reproduces the old formula exactly without a second display query). `out_fps = settings.fps.resolve_hz(capture_fps)` is the export's actual output frame rate (`F30`/`F60` are fixed regardless of the display; `F60` is the default).
+2. Call `FrameRenderer::new(paths, Layout::default(), capture_fps, settings.resolution, None, system)` to get `(renderer, meta)` (`None` = no preview downscale - a full export build). The renderer owns the event log, settings, compositor, FX renderer, camera sim, cursor state, and background. `meta` carries everything needed to drive the loop (`screen_bytes`, `webcam_w`/`webcam_h`, `video_start`, `video_end`, `tl`, `out_w`, `out_h`, `audio_offset_ms`, `trim`, `mic_volume`, `sys_volume`).
 3. Open a `FfmpegFrameSink` writing to `tmp_export.<ext>` (`<ext>` from `settings.format`) via `new_medium(tmp_str, out_w, out_h, out_fps as f64, settings.format, settings.quality_crf)`. Build an `out_pool` (`BufPool`, `depth` output buffers) and spawn an encoder thread draining a `sync_channel(4)`; after pushing each `Frame` the encoder recycles its ~33 MB `bgra` buffer back into `out_pool`.
 4. Start the decode threads: `ScreenPipe::spawn(..., out_fps)` (screen video) and, if `paths.webcam()` exists, `WebcamPipe::spawn(..., out_fps)` (webcam) - both decode at the resolved output rate, so either stream stays 1:1 with output frames even when `out_fps` differs from the capture rate. Spawn errors surface here. There is deliberately NO black zero-frame fallback buffer any more (it used to be an all-black nv12 frame, Y=16/U=V=128): it turned an unreadable `video.mp4` into a full-length black export that reported success.
 4b. If the doc's background is a VIDEO/GIF asset that really exists (`scene::background::video_source`), open a third decode stream, `BgPipe::open(..., r.background().dim_clamped(), depth, out_fps)`. Failing to open it is logged and then ignored: the still first frame `FrameRenderer` already built stays as the whole background, which is a worse-looking export but still an export.
@@ -45,5 +46,41 @@ On error the raw `anyhow::Error` propagates (including any decode-thread error s
 - The trim-to-frame-index conversion is the pure `pipeline::trim_frame_bounds`, unit-tested independently (including the back-compat guard that an untrimmed clip reproduces the old bound exactly).
 - Buffers are recycled through three `BufPool`s (screen decode, webcam decode, output), so the steady state allocates no new frame buffers; `BufPool::take` allocates a fresh one only under transient exhaustion rather than blocking.
 - The encoder thread panic is surfaced as `Err("encoder thread panicked")` via `join().map_err(...)??`; a decode thread panic likewise via each pipe's `join`.
-- The manual `export_bench` (`#[ignore]`d, needs `TCURSOR_REC`) moved to the sibling `exporter_bench.rs` when this file reached its line budget, and the progress/timing reporting to `exporter_report.rs` (`tick_progress`, `log_timing`) for the same reason. Run the bench with `cargo test export_bench -- --ignored --nocapture`.
+- The manual benches (`preview_frame_bench` and `export_bench`, both `#[ignore]`d and needing `TCURSOR_REC`) live in this file's own `#[cfg(test)] mod bench`; the progress/timing reporting lives in `exporter_report.rs` (`tick_progress`, `log_timing`). Run a bench with `cargo test export_bench -- --ignored --nocapture`.
 - Default `ExportSettings` reproduces today's export: `capture_fps`/`out_fps` collapse to the exact old formula, `settings.resolution == Source` is a no-op in `Layout::resolve`, `settings.quality_crf == 24` matches the old hardcoded CRF for `libx264`/`h264_nvenc`, and `settings.format == Mp4` takes the unchanged H.264 path. See `export::settings` and `encode::ffmpeg_args` for the guard tests.
+
+## preview_frame_bench
+
+```rust
+#[test]
+#[ignore]
+fn preview_frame_bench()
+```
+
+One composited frame of a real recording to `%TEMP%/tcursor-preview-frame.png`, through the editor's own `render_preview` (the GPU compositor; no video encoder is involved). `TCURSOR_REC` names the folder, `TCURSOR_MS` the instant (default 1500):
+
+```
+TCURSOR_REC=C:\path\to\a\recording TCURSOR_MS=2500 cargo test preview_frame_bench -- --ignored --nocapture
+```
+
+Made for 2026-09-14's odd-sized capture, whose export slid and sheared: a look at one frame says whether a decode is sound without occupying the machine's hardware encoder for a full export (which, run while the owner was recording, had already cost one take its video).
+
+## export_bench
+
+```rust
+#[test]
+#[ignore]
+fn export_bench()
+```
+
+Runs a FULL export of a real recording folder and prints how long it took. `#[ignore]`d because it needs a recording that only exists on a developer's machine and takes minutes:
+
+```
+TCURSOR_REC=C:\path\to\a\recording cargo test export_bench -- --ignored --nocapture
+```
+
+Reads the folder from `TCURSOR_REC` (panics with that instruction if unset), builds a `ProjectPaths` from it, and calls `export` with `ExportSettings::default()` and a no-op progress callback. The per-stage breakdown it is usually paired with is the one `export` writes to `%TEMP%/tcursor-export-timing.txt`.
+
+### Used by
+
+Nothing in the build - both benches are opt-in measuring tools, not regression tests.

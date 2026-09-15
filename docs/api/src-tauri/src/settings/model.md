@@ -22,7 +22,7 @@ Variants:
 
 - `src-tauri/src/export/scene/mod.rs` (`apply_cam_zoom_action`) - the single place the action is turned into a `Panel`
 - `src-tauri/src/edit/model.rs` (`Zoom.cam_action`) - the per-zoom override
-- `src/editor/stage/camZoomAction.ts` - the TS preview mirror
+- `src/editor/stage/camera/camZoomAction.ts` - the TS preview mirror
 
 ## ZoomSettings
 
@@ -136,7 +136,7 @@ Serialises as lowercase. Each variant maps to a float shader ID in `export::fx_u
 
 ### Used by
 
-- `src-tauri/src/export/fx/clickdraw.rs` - selects which draw path to run per frame
+- `src-tauri/src/export/fx/click/clickdraw.rs` - selects which draw path to run per frame
 - `src-tauri/src/export/fx/fx_uniforms.rs` (`style_id`) - converts to a float uniform for the GPU shader
 - `src-tauri/src/settings/model.rs` (`ClickFxSettings.style`) - stored in the per-recording settings block
 
@@ -228,7 +228,7 @@ Fields:
 ### Used by
 
 - `src-tauri/src/settings/model.rs` (`Settings.clickfx`) - persisted in `config.json`
-- `src-tauri/src/export/fx/clickdraw.rs` - reads `style` and `color` to select and paint click effects per frame
+- `src-tauri/src/export/fx/click/clickdraw.rs` - reads `style` and `color` to select and paint click effects per frame
 - `src-tauri/src/export/fx/fx_uniforms.rs` - converts all fx settings to GPU shader uniforms
 - `src-tauri/src/export/fx/fxdraw.rs` - constructs `FxState` from `ClickFxSettings` fields for rendering tests
 - `src-tauri/src/export/fx/fx_state.rs` (`fx_state_at`) - reads `spotlight_dim_camera` to set `Spot::dim_camera`
@@ -266,61 +266,6 @@ Fields:
 - `src-tauri/src/actions/matcher.rs` (`arming_from_settings`) - converts hotkey strings to `Arm` structs for the `ActionMatcher`
 - `src-tauri/src/export/fx/caption.rs` (`caption_at`) - reads hotkey strings to build action label text for caption overlays
 
-## ThemeMode
-
-```rust
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum ThemeMode { Light, Dark, System }
-```
-
-UI color theme selection.
-
-- `Light` - light theme regardless of OS setting. Default (via `InterfaceSettings`). *Why default:* most tutorial recordings are made on light-themed desktops; light default avoids an unexpected dark HUD on first launch.
-- `Dark` - dark theme regardless of OS setting.
-- `System` - defers to the OS dark-mode preference via `win::theme::os_prefers_dark`.
-
-Serialises as lowercase.
-
-### Used by
-
-- `src-tauri/src/win/theme.rs` (`resolve_dark`) - maps `System` to an OS registry query; used to decide whether to invert cursor sprites and apply dark-theme coloring
-- `src-tauri/src/export/pipeline/exporter.rs` - calls `resolve_dark(settings.ui.theme)` to determine sprite inversion during export
-
-## InterfaceSettings
-
-```rust
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-#[serde(default)]
-pub struct InterfaceSettings {
-    pub theme: ThemeMode,
-    pub accent: [u8; 3],
-    pub animated_brand: bool,
-    #[serde(default = "default_true")]
-    pub interface_effects: bool,
-}
-```
-
-UI theming configuration.
-
-Fields:
-
-- `theme: ThemeMode` - which color theme to apply to the HUD. Default `ThemeMode::Light`.
-- `accent: [u8; 3]` - RGB accent color used for interactive elements throughout the UI. Default `[239, 68, 68]` (red). *Why red:* vivid, on-brand default that reads well against both light and dark backgrounds.
-- `animated_brand: bool` (Task 39) - the "living brand" feel knob: whether `TcursorMark` (`src/lib/TcursorMark.tsx`) flows/pulses for its recording/exporting/directing states at all, in the HUD titlebar and the editor's `TopBar`. Default `true`. *Why a settings field rather than always-on:* the fake-polish rule is every feel knob is a setting a user can turn off; `prefers-reduced-motion` disables the animation independently of this flag (accessibility isn't optional), but a user without that OS preference can still opt out here. Doesn't affect the dynamic Windows icon/taskbar progress (`win::sys::brand_icon`) - that's OS chrome, not an in-page animation, and stays purely state-driven.
-
-- `interface_effects: bool` (micro-interaction pass, 2026-09-14) - the second feel knob, for the editor's **own** interface: the click ripple that blooms under every pointerdown in the chrome, and the magnetic pull the transport's Play button and Trim pills exert on a nearby pointer. Default `true`. Off unmounts the ripple overlay entirely (zero listeners, not a listener that early-returns) and turns the magnetic hook into a no-op - see `src/editor/effects/`. Like `animated_brand`, `prefers-reduced-motion` softens these regardless of the flag (the ripple stops growing, the pull stops entirely) and this flag is the opt-out for a user with no OS-level preference. It never touches the **export**: these are TCursor's own chrome, not the recording's click effects, which are `ClickFxSettings`.
-
-  *Why the explicit `#[serde(default = "default_true")]`* when the container already carries `#[serde(default)]`: belt-and-suspenders, the same pattern `Settings::audio_mic_volume` uses. It is what makes a `config.json` written before this field existed load `true` rather than `bool::default()` - which would silently ship the feature turned off to every existing install. `model_tests.rs::interface_effects_defaults_on_and_round_trips` pins all three halves (the default is on, field-less JSON loads on, an explicit `false` survives a full `Settings` round-trip).
-
-### Used by
-
-- `src-tauri/src/settings/model.rs` (`Settings.ui`) - persisted in `config.json`
-- `src-tauri/src/export/pipeline/exporter.rs` - reads `ui.theme` to resolve dark mode for cursor sprite inversion
-- `src/editor/Editor.tsx` - reads `doc.settings.ui.animated_brand` (the per-recording snapshot) to gate `TopBar`'s `brandState`
-- `src/hud/Hud.tsx` - reads the global `ui.animated_brand` (via `getSettings`/`Preferences`) to gate the titlebar mark's `state`
-- `src/editor/effects/InterfaceEffects.tsx` - reads the global `ui.interface_effects` (via `getSettings`, on mount and on every window focus) and publishes it to the rest of the effects folder
-
 ## LayoutPreset
 
 ```rust
@@ -346,7 +291,7 @@ The backend only stores and returns these - nothing in the render path reads the
 
 - `src-tauri/src/settings/model.rs` (`Settings::layout_presets`) - persisted in `config.json`
 - `src/hud/settings/settings.ts` (`LayoutPreset`) - the TypeScript mirror
-- `src/editor/panels/LayoutsPanel.tsx` / `layoutPresets.ts` - the only reader and writer
+- `src/editor/panels/layout/LayoutsPanel.tsx` / `layoutPresets.ts` - the only reader and writer
 
 ## Settings
 
@@ -366,6 +311,8 @@ pub struct Settings {
     pub audio_sys_volume: f32,
     pub ai_model: String,
     #[serde(default)] pub layout_presets: Vec<LayoutPreset>,
+    pub captions: CaptionStyle,
+    #[serde(default)] pub motion: MotionSettings,
 }
 ```
 
@@ -383,7 +330,9 @@ Fields:
 - `background: BackgroundSettings` - background style (mesh/solid/gradient + blur). Default `BackgroundSettings::default()` (`Mesh`, today's bundled image, byte-identical to before this field existed). See `settings::background`.
 - `audio_mic_volume: f32`, `audio_sys_volume: f32` - linear gain multipliers applied to each track at mux (0 = muted, 1 = unchanged, up to 1.5). Default `1.0` for both. *Why an explicit field-level `#[serde(default = "default_volume")]` in addition to the manual `impl Default` above:* belt-and-suspenders matching `spotlight_dim_camera`'s pattern, so a config saved without this key loads full volume under either code path.
 - `ai_model: String` - Ollama model name for the AI director. Default `""` (empty = let the backend pick its own default, `"llama3.2"`), so configs saved before this field existed behave identically.
+- `motion: MotionSettings` - the project's ONE motion language (M3): the curve pair every newly added zoom, layout segment and camera keyframe inherits, and what `EditOp::ApplyMotionDefault` stamps onto the ones already placed. Lives in the sibling `settings/motion.rs` (see `motion.md`) rather than here, both for this file's line budget and because the default has a real story behind it. Default Soft, which is the bare word `"smooth"` - exactly what the add ops used to hardcode - so a config written before this field existed behaves identically and every existing region reads back as Soft rather than Custom.
 - `layout_presets: Vec<LayoutPreset>` - the user's saved layout looks, newest last. Default empty. *Why an explicit field-level `#[serde(default)]` on top of the container's:* same belt-and-suspenders as the two volumes - a `config.json` written before this field existed must load with an empty list under either code path rather than failing the whole `Settings` parse and silently resetting every other setting. `layout_presets_round_trip_and_default_empty` (`model_tests.rs`) pins both halves: `{}` loads empty, and a saved look survives a write/read cycle with all five layouts intact.
+- `captions: CaptionStyle` - the caption look plus its ASR inputs (`settings::captions::CaptionStyle`). Distinct from `clickfx.captions`, the OLD hotkey-chord toggle, which keeps its name and meaning unchanged.
 
 ### Used by
 
@@ -391,5 +340,5 @@ Fields:
 - `src-tauri/src/commands.rs` (`get_settings`, `set_settings`) - surfaced over IPC so the frontend can read and write settings
 - `src-tauri/src/session/record/recorder.rs` - loaded at recording start via `store::load()` to snapshot all settings for the session
 - `src-tauri/src/export/pipeline/exporter.rs` - received from the IPC call and drives every export subsystem
-- `src-tauri/src/ai/commands.rs` (`ai_plan`) - receives `ai_model` (via the frontend passing `doc.settings.ai_model || undefined`)
+- `src-tauri/src/ai/commands.rs` (`ai_propose`) - receives `ai_model` (via the frontend passing `doc.settings.ai_model || undefined`)
 - `src-tauri/src/export/pipeline/audio_mux.rs` (`mux`) - receives `audio_mic_volume`/`audio_sys_volume` via `RenderMeta`

@@ -1,0 +1,14 @@
+# src/editor/hooks/doc/usePreviewBg.ts
+
+The editor stage's background: the rendered preview background plus the imported asset a moving background draws. Split out of `useEditorData.ts` - it is the one fetch in that hook with a debounce, a sequence guard and a StrictMode hazard of its own, and it owns them here instead of diluting the list around it.
+
+## usePreviewBg
+
+```ts
+export function usePreviewBg(folder: string, doc: EditDoc | null): StageBg
+```
+
+**Background (`[folder, JSON.stringify(doc?.settings.background)]`).** The hook returns `bg: StageBg`, not a bare URL: `previewBg`'s data URL for the static background, plus the imported asset's `asset://` URL, kind and dim for a moving one (built by `bgAssetUrl`, which returns `""` unless the ACTIVE kind draws the asset - the path is deliberately remembered while a wallpaper shows, and loading it then would leave a hidden `<video>` decoding a background nobody sees). `previewBg` -> `bgUrl` refetches only when the doc's own `background` settings change - the only kind of edit that can actually alter what `preview_bg` returns. **Debounced (render hygiene pass, `PREVIEW_BG_DEBOUNCE_MS = 80`, trailing):** a background-panel slider drag changes this dependency at up to the `Slider` component's own commit rate (itself now debounced - see `Slider.md`), and `preview_bg` re-encodes/base64s the full preview background on every call - not something to redo dozens of times a second. The actual `previewBg(folder)` call is wrapped in a LAZILY-INITIALIZED `debounce(...)` singleton (`fetchBgRef` - `if (!fetchBgRef.current) fetchBgRef.current = debounce(...)`, NOT `useRef(debounce(...))`, which still calls `debounce(...)` fresh every render just to discard the result - a closure allocated once per frame during playback for nothing) so a burst of dependency changes collapses into ONE fetch instead of one per change. Because this fetch can now outlive any single effect run (the debounce defers it), the usual per-effect `live` cleanup-token guard (see the note below) can't gate it by itself - `bgSeqRef`/`bgLiveRef` reproduce the same "discard a stale response" guarantee across debounce windows: `bgSeqRef` is bumped every time the debounced function actually FIRES, and a resolved response is only applied if no newer fire has happened since.
+
+
+`bgLiveRef` is reset `true` at the TOP of its own effect (`useEffect(() => { bgLiveRef.current = true; return () => { bgLiveRef.current = false; ... }; }, [])`), not just once via `useRef(true)`'s initial value (fix round 1) - React 19 StrictMode (`main.tsx`) double-invokes effects in dev (mount -> cleanup -> mount, all on the same fiber), so without this reset the dev-only cleanup pass permanently flips `bgLiveRef` false and every `previewBg` response is discarded for the rest of the session - `bgUrl` never leaves `""` in a dev build, only ever manifesting outside StrictMode (i.e. production).

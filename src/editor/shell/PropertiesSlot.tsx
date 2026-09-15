@@ -5,11 +5,20 @@ import { LayoutInspector } from "../inspectors/LayoutInspector";
 import { CameraMoveInspector } from "../inspectors/CameraMoveInspector";
 import { CutInspector } from "../inspectors/CutInspector";
 import { SpeedInspector } from "../inspectors/SpeedInspector";
-import type { CameraMove, Cut, EditDoc, EffectRegion, LayoutSeg, Speed, Zoom } from "../../lib/edit";
+import { CaptionInspector } from "../inspectors/CaptionInspector";
+import type {
+  CameraMove,
+  Caption,
+  Cut,
+  EditDoc,
+  EffectRegion,
+  LayoutSeg,
+  Speed,
+  Zoom,
+} from "../../shared/edit";
 import type { SlotProps } from "./slotProps";
 import "../inspectors/inspectors.css";
 
-/** The one content-swap tween (design/premium-pass D6): the same beat `EditorPanels` swaps tabs on. */
 const SWAP_TWEEN = { type: "tween" as const, duration: 0.16, ease: [0.4, 0, 0.2, 1] as const };
 
 export type SelectedClip =
@@ -18,12 +27,9 @@ export type SelectedClip =
   | { kind: "layout"; layout: LayoutSeg }
   | { kind: "cam"; move: CameraMove }
   | { kind: "cut"; cut: Cut }
-  | { kind: "speed"; speed: Speed };
+  | { kind: "speed"; speed: Speed }
+  | { kind: "caption"; caption: Caption };
 
-/** Which clip `sel` names, or `null` for "nothing is selected" - the one place the selection-to-
- *  inspector ladder lives. `ClassicShell` asks it whether the sidebar exists at all and this file
- *  asks it what to render inside, so the collapsed column and the empty inspector can never
- *  disagree. A stale id matching nothing reads as no selection, which collapses the column. */
 export function selectedClip(doc: EditDoc, sel: string | null): SelectedClip | null {
   if (!sel) return null;
   const zoom = doc.zooms.find((z) => z.id === sel);
@@ -38,13 +44,11 @@ export function selectedClip(doc: EditDoc, sel: string | null): SelectedClip | n
   if (cut) return { kind: "cut", cut };
   const speed = doc.speed.find((s) => s.id === sel);
   if (speed) return { kind: "speed", speed };
+  const caption = doc.captions?.find((c) => c.id === sel);
+  if (caption) return { kind: "caption", caption };
   return null;
 }
 
-/** The selected clip's inspector, routed by `selectedClip`. It renders nothing with nothing
- *  selected: the sidebar around it is unmounted in that state (`ClassicShell`), so there is no
- *  empty panel to fill - deselecting collapses the column instead of leaving a blank one. Moving
- *  between two selected clips still swaps on the app's content tween. */
 export function PropertiesSlot({ p }: { p: SlotProps }) {
   const still = useReducedMotion();
   const { doc } = p;
@@ -53,22 +57,71 @@ export function PropertiesSlot({ p }: { p: SlotProps }) {
   return (
     <AnimatePresence mode="popLayout" initial={false}>
       {hit && (
-        <motion.div key={p.sel} className="e-panel-slot"
-          initial={still ? false : { opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
-          exit={still ? { opacity: 0 } : { opacity: 0, x: -8 }} transition={still ? { duration: 0 } : SWAP_TWEEN}>
+        <motion.div
+          key={p.sel}
+          className="e-panel-slot"
+          initial={still ? false : { opacity: 0, x: -8 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={still ? { opacity: 0 } : { opacity: 0, x: -8 }}
+          transition={still ? { duration: 0 } : SWAP_TWEEN}
+        >
           {hit.kind === "zoom" ? (
-            <ZoomInspector zoom={hit.zoom} dur={p.dur} onApply={p.applyOp} onClose={close} aimMode={p.aimMode}
-              moveMode={p.moveMode} onAimMode={p.setAimOn} timeMsRef={p.timeMsRef} onSeek={p.onSeek} />
+            <ZoomInspector
+              zoom={hit.zoom}
+              zooms={doc.zooms}
+              dur={p.dur}
+              onApply={p.applyOp}
+              onClose={close}
+              aimMode={p.aimMode}
+              moveMode={p.moveMode}
+              onAimMode={p.setAimOn}
+              timeMsRef={p.timeMsRef}
+              onSeek={p.onSeek}
+            />
           ) : hit.kind === "fx" ? (
-            <EffectInspector effect={hit.effect} dur={p.dur} settings={doc.settings} onApply={p.applyOp} onClose={close}
-              onDimCamera={(v) => p.saveDocSettings({ ...doc.settings, clickfx: { ...doc.settings.clickfx, spotlight_dim_camera: v } })} />
+            <EffectInspector
+              effect={hit.effect}
+              dur={p.dur}
+              settings={doc.settings}
+              onApply={p.applyOp}
+              onClose={close}
+              onDimCamera={(v) =>
+                p.saveDocSettings({
+                  ...doc.settings,
+                  clickfx: { ...doc.settings.clickfx, spotlight_dim_camera: v },
+                })
+              }
+            />
           ) : hit.kind === "layout" ? (
-            <LayoutInspector seg={hit.layout} dur={p.dur} onApply={p.applyOp} onClose={close} presets={p.layoutPresets}
-              arrangeOn={p.arrangeOn} onArrange={p.onArrange} />
+            <LayoutInspector
+              seg={hit.layout}
+              segs={doc.layout}
+              dur={p.dur}
+              onApply={p.applyOp}
+              onClose={close}
+              presets={p.layoutPresets}
+              arrangeOn={p.arrangeOn}
+              onArrange={p.onArrange}
+            />
           ) : hit.kind === "cam" ? (
-            <CameraMoveInspector move={hit.move} dur={p.dur} onApply={p.applyOp} onClose={close} />
+            <CameraMoveInspector
+              move={hit.move}
+              moves={doc.camera_moves}
+              dur={p.dur}
+              onApply={p.applyOp}
+              onClose={close}
+            />
           ) : hit.kind === "cut" ? (
             <CutInspector cut={hit.cut} dur={p.dur} onApply={p.applyOp} onClose={close} />
+          ) : hit.kind === "caption" ? (
+            <CaptionInspector
+              caption={hit.caption}
+              captions={doc.captions}
+              dur={p.dur}
+              timeMs={p.timeMs}
+              onApply={p.applyOp}
+              onClose={close}
+            />
           ) : (
             <SpeedInspector speed={hit.speed} dur={p.dur} onApply={p.applyOp} onClose={close} />
           )}

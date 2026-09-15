@@ -1,6 +1,6 @@
 # src-tauri/src/export/fx/fx_state.rs
 
-Renderer-agnostic data model and builder for per-frame click FX, spotlight, and video FX state. Provides `fx_state_at` to compute what is visually active at one frame, the `FxRenderer` trait shared by both GPU and CPU backends, the `select_fx` factory, and the `render` entry point the exporter calls once per output frame. The stateful spotlight region resolver (`region_alpha`, `SpotlightSim`) lives in the sibling `spotlight_sim.rs` (split out to stay under the size limit; see `docs/api/src-tauri/src/export/fx/spotlight_sim.md`) and is re-exported here as `fx_state::SpotlightSim`.
+Renderer-agnostic data model and builder for per-frame click FX, spotlight, and video FX state. Provides `fx_state_at` to compute what is visually active at one frame, the `FxRenderer` trait shared by both GPU and CPU backends, the `select_fx` factory, and the `render` entry point the exporter calls once per output frame. The stateful spotlight region resolver (`region_alpha`, `SpotlightSim`) is the one piece of that state which remembers the previous frame, so it lives with the rest of the spotlight in `spot/spotlight_sim.rs` (see `docs/api/src-tauri/src/export/fx/spot/spotlight_sim.md`) and is re-exported here as `fx_state::SpotlightSim`.
 
 Everything here takes TWO times, never one: `region_t` (output clock - `EditDoc` effect regions) and `ev_t` (event clock - the raw mouse/action streams). They are named apart in every signature so a caller cannot silently pass the wrong base; on a real recording they differ by around 800 ms.
 
@@ -38,7 +38,7 @@ One active click effect in output pixels (post-zoom). Produced by `fx_state_at` 
 
 - `src-tauri/src/export/fx/fx_uniforms.rs` - `build_fx_u` packs each `FxHit` into `FxU.hits`.
 - `src-tauri/src/export/fx/fxdraw.rs` - `CpuFx::apply` iterates hits for software rendering.
-- `src-tauri/src/export/fx/clickdraw.rs` - reads hits for software click-ring drawing.
+- `src-tauri/src/export/fx/click/clickdraw.rs` - reads hits for software click-ring drawing.
 
 ## Spot
 
@@ -73,7 +73,7 @@ Active spotlight state in output pixels. Size fields are fractions of output hei
 - `src-tauri/src/export/fx/fx_uniforms.rs` - `build_fx_u` packs `Spot` fields into `FxU.b/c/d/tint/cam`.
 - `src-tauri/src/export/fx/fxdraw.rs` - `CpuFx::apply` applies the spotlight on the software path.
 - `src-tauri/src/export/fx/fx_gpu.rs` - read indirectly via `FxState.spot` in `GpuFx::apply`.
-- `src-tauri/src/export/fx/spotdraw.rs` - `draw_spot` reads `cam_rect`/`cam_radius`/`dim_camera` to undo the dim inside the camera rect on the CPU path.
+- `src-tauri/src/export/fx/spot/spotdraw.rs` - `draw_spot` reads `cam_rect`/`cam_radius`/`dim_camera` to undo the dim inside the camera rect on the CPU path.
 - `src-tauri/src/export/preview/preview_fx.rs` - `preview_fx_overlay` builds a `Spot` with `cam_rect`/`cam_radius`/`dim_camera` from frontend-resolved IPC params, so the editor preview matches the export exactly.
 
 ## VideoFx
@@ -131,14 +131,14 @@ Complete renderer-agnostic description of all active FX at one output frame. Bui
 ### FxState::lens
 
 ```rust
-pub lens: Option<crate::export::fx::fx_lens::Lenses>,
+pub lens: Option<crate::export::fx::lens::Lenses>,
 ```
 
-The **glass cursor material** for this frame - the refracting lens under a `material: "glass"` pack's sprite and/or the pack-independent cursor back. `None` for a plain pack with no back, which is every recording until someone picks one. See `docs/api/src-tauri/src/export/fx/fx_lens.md`.
+The **glass cursor material** for this frame - the refracting lens under a `material: "glass"` pack's sprite and/or the pack-independent cursor back. `None` for a plain pack with no back, which is every recording until someone picks one. See `docs/api/src-tauri/src/export/fx/lens/mod.md`.
 
 *Why it rides the FX pass at all.* It has to refract, which means re-sampling the composited frame - and this is the one pass that has the frame uploaded as a texture. It is not a click effect, though: `fx_state_at` never sets it (it returns `lens: None`), `render` attaches it afterwards, and a user who turned click FX off still gets their glass cursor.
 
-*Why it is placed before the pass rather than during it.* The sprite it belongs to is blitted AFTER this pass by `cursorset::draw`, so the box is computed one step earlier by `fx_lensbuild::lenses_at` and handed in. Both sides then read the same box (`cursormorph::sprite_box`), which is what stops the glass drifting off the cursor.
+*Why it is placed before the pass rather than during it.* The sprite it belongs to is blitted AFTER this pass by `cursorset::draw`, so the box is computed one step earlier by `lens::build::lenses_at` and handed in. Both sides then read the same box (`cursormorph::sprite_box`), which is what stops the glass drifting off the cursor.
 
 ## fx_state_at
 
@@ -197,7 +197,7 @@ Builds the FX state for one frame. Returns `None` when nothing is active so the 
 - `spotlight_hole_disabled_without_a_real_webcam` - `has_webcam: false` (even with `camera.alpha: 1.0` and the user's `spotlight_dim_camera: false`) forces `Spot.dim_camera == true`.
 - `spotlight_hole_disabled_when_the_camera_panel_is_invisible` - `has_webcam: true` but `scene.camera.alpha <= 0.05` (the default disabled panel) also forces `dim_camera == true`.
 - `spotlight_hole_enabled_with_a_real_visible_webcam` - `has_webcam: true` AND `camera.alpha: 1.0` lets `dim_camera` follow the user's actual `spotlight_dim_camera` setting.
-- `SpotlightSim` region resolution (`spotlight_uses_per_region_fades`, `highest_layer_region_wins_style_not_first_match`, `spotlight_handoff_eases_alpha_instead_of_jump_maxing`) now lives in `spotlight_sim.rs`'s own test module - see `docs/api/src-tauri/src/export/fx/spotlight_sim.md`.
+- `SpotlightSim` region resolution (`spotlight_uses_per_region_fades`, `highest_layer_region_wins_style_not_first_match`, `spotlight_handoff_eases_alpha_instead_of_jump_maxing`) now lives in `spotlight_sim.rs`'s own test module - see `docs/api/src-tauri/src/export/fx/spot/spotlight_sim.md`.
 
 ## FxRenderer
 

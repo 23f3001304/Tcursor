@@ -1,38 +1,31 @@
 import type { Dispatch, RefObject, SetStateAction } from "react";
-import type { TimeMap } from "../../lib/remap";
+import type { TimeMap } from "../../shared/math/remap";
 import type { Range } from "../timeline/useRangeSelect";
-import type { Aspect, EditDoc, EditOp, LayoutSeg } from "../../lib/edit";
-import type { CamSample, ClickSample, CursorKindSample, CursorLayerDto, CursorPackDto, LayoutPresets, PreviewLayout } from "../../lib/ipc";
-import type { CamPose } from "../stage/cameraMoves";
-import type { StageBg } from "../stage/stageBg";
+import type { Aspect, EditDoc, EditOp, LayoutSeg } from "../../shared/edit";
+import type {
+  CamSample,
+  ClickSample,
+  CursorKindSample,
+  CursorLayerDto,
+  CursorPackDto,
+  LayoutPresets,
+  PreviewLayout,
+} from "../../shared/ipc";
+import type { CamPose } from "../stage/camera/cameraMoves";
+import type { StageBg } from "../stage/canvas/stageBg";
 import type { DirectorPointerHandle } from "../director/DirectorPointer";
-import type { ToastMsg } from "./Toast";
-import type { Tab } from "./panelTabs";
+import type { AiRun } from "../../shared/aiRun";
+import type { ToastMsg } from "./dialogs/Toast";
+import type { Tab } from "./PanelTabs";
 
-/** Everything the four editor types need, in one bundle. `Editor.tsx` owns all of it and hands it
- *  to `ClassicShell` as a single object; `ClassicShell` is what spreads it back out into the props
- *  `Stage` / `Transport` / `Timeline` / `EditorPanels` / the inspectors already take. Field names
- *  match `Editor.tsx`'s own locals so the hand-off stays a shorthand object literal rather than
- *  seventy re-typed attributes.
- *
- *  Anything derivable from `doc` (aspect, zooms, layout segments, cursor/clickfx settings, the AI
- *  model name) is deliberately NOT a field - the slots read it off `doc` instead. */
 export interface SlotProps {
   folder: string;
   doc: EditDoc;
-  /** Selection is UI state, independent of which editor an area shows: it only ever changes what a
-   *  `properties` area renders. */
   sel: string | null;
   setSel: Dispatch<SetStateAction<string | null>>;
-  /** The timeline's own selection handler (`useArrangeMode`), not a bare `setSel`. */
   onSel: (id: string | null) => void;
-  /** Which panel the rail is showing, or `null` for "the column is collapsed" - a real resting
-   *  state since the panel slot became collapsible (the rail stays either way). */
   tab: Tab | null;
   setTab: Dispatch<SetStateAction<Tab | null>>;
-  /** What a rail click means: the clicked tab, or `null` when it was already the open one (see
-   *  `nextTab` in `panelState.ts`). Built by `ClassicShell`, so the rail and the panels cannot
-   *  disagree about whether a second press on the active tab closes. */
   onTab: (t: Tab) => void;
   dur: number;
   timeMs: number;
@@ -60,11 +53,8 @@ export interface SlotProps {
   webcamSrc: string;
   audioUrl: string;
   bg: StageBg;
-  /** The clip-to-output clock map and the doc's regions on the output clock (`useTimeMap`): the
-   *  stage evaluates `outDoc`; the timeline keeps `doc`, whose pills sit on clip time. */
-  map: TimeMap; outDoc: EditDoc;
-  /** The ruler's Shift+drag selection, in clip ms: the timeline draws it, the transport's Cut and
-   *  Speed act on it. `null` is "no range", which is what both of those fall back from. */
+  map: TimeMap;
+  outDoc: EditDoc;
   range: Range | null;
   setRange: Dispatch<SetStateAction<Range | null>>;
   track: CamSample[];
@@ -89,6 +79,7 @@ export interface SlotProps {
   aimAt: (x: number, y: number) => void;
   applyOp: (op: EditOp) => Promise<EditDoc | null>;
   saveDocSettings: (s: EditDoc["settings"]) => void;
+  reloadDoc: () => void;
   retryMedia: () => void;
   addZoom: () => void;
   addSpotlight: () => void;
@@ -96,9 +87,17 @@ export interface SlotProps {
   onRun: () => void;
   onAutoModel: (v: string) => void;
   aiError: string | null;
-  aiLog: string[];
   aiProgress: { step: number; total: number } | null;
   aiPlanning: boolean;
+  aiRun: AiRun | null;
+  aiSkipped: ReadonlySet<string>;
+  aiApplying: boolean;
+  aiPreviewId: string | null;
+  onToggleItem: (id: string) => void;
+  onPreviewItem: (id: string) => void;
+  onApplyRun: () => void;
+  onDiscardRun: () => void;
+  stageOutline: [number, number, number, number] | null;
   pointerRef: RefObject<DirectorPointerHandle | null>;
   onCancelRun: () => void;
   toast: ToastMsg | null;
@@ -106,15 +105,9 @@ export interface SlotProps {
   onTrimIn: () => void;
   onTrimOut: () => void;
   onResetTrim: () => void;
-  /** Remove silences (`useSilences`): scan the audio, apply the quiet stretches as one `add_cuts`. */
   onDetectSilences: () => void;
 }
 
-/** What `Editor.tsx` passes down: the same bundle minus `onTab`, which the shell derives (it also
- *  drops the selection), plus the one flag only the shell needs. */
 export type ShellProps = Omit<SlotProps, "onTab"> & {
-  /** True while any dialog, overlay or the AI director's scrim owns the screen. The editors don't
-   *  see it (it isn't part of `SlotProps`); the shell's own keyboard - `Ctrl+Space` to maximize -
-   *  goes inert behind it, exactly like every shortcut in `keymap.ts` does. */
   modalOpen: boolean;
 };

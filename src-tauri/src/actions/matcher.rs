@@ -1,31 +1,37 @@
 use crate::actions::model::{ActionEvent, ActionKind, LayoutId};
 use crate::settings::model::HotkeySettings;
 
-/// Live modifier state at a key event. Compared for exact equality against a chord.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub struct Mods { pub ctrl: bool, pub alt: bool, pub shift: bool }
+pub struct Mods {
+    pub ctrl: bool,
+    pub alt: bool,
+    pub shift: bool,
+}
 
-/// A parsed hotkey: modifier set + a single main virtual-key code.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct KeyChord { pub mods: Mods, pub vk: u32 }
+pub struct KeyChord {
+    pub mods: Mods,
+    pub vk: u32,
+}
 
 impl KeyChord {
-    /// Parse "Ctrl+Alt+Z" / "ctrl+alt+1" (case-insensitive, '+'-separated).
-    /// Returns None unless exactly one main key (A-Z or 0-9) is present and every
-    /// token is recognized.
     pub fn parse(s: &str) -> Option<KeyChord> {
         let mut mods = Mods::default();
         let mut vk: Option<u32> = None;
         for raw in s.split('+') {
             let tok = raw.trim();
-            if tok.is_empty() { return None; }
+            if tok.is_empty() {
+                return None;
+            }
             match tok.to_ascii_lowercase().as_str() {
                 "ctrl" | "control" => mods.ctrl = true,
                 "alt" => mods.alt = true,
                 "shift" => mods.shift = true,
                 _ => {
                     let v = main_key_vk(tok)?;
-                    if vk.is_some() { return None; } // a second main key
+                    if vk.is_some() {
+                        return None;
+                    }
                     vk = Some(v);
                 }
             }
@@ -38,35 +44,55 @@ impl KeyChord {
     }
 }
 
-/// VK code for a single-character A-Z (0x41-0x5A) or 0-9 (0x30-0x39) token.
-/// For these ranges the Win32 virtual-key equals the ASCII uppercase byte.
 fn main_key_vk(tok: &str) -> Option<u32> {
     let mut chars = tok.chars();
     let c = chars.next()?;
-    if chars.next().is_some() { return None; } // exactly one char
+    if chars.next().is_some() {
+        return None;
+    }
     let u = c.to_ascii_uppercase();
-    if u.is_ascii_uppercase() || u.is_ascii_digit() { Some(u as u32) } else { None }
+    if u.is_ascii_uppercase() || u.is_ascii_digit() {
+        Some(u as u32)
+    } else {
+        None
+    }
 }
 
-/// One armed chord and the action(s) it emits on press / release.
-pub struct Arm { pub chord: KeyChord, pub on_down: ActionKind, pub on_up: Option<ActionKind> }
+pub struct Arm {
+    pub chord: KeyChord,
+    pub on_down: ActionKind,
+    pub on_up: Option<ActionKind>,
+}
 
-/// Matches live key events against the armed chords. Holds a "currently held" set
-/// (arm indices) to suppress auto-repeat on press and to pair a release with its
-/// press by main key even after the modifiers were let go first.
-pub struct ActionMatcher { arms: Vec<Arm>, held: Vec<usize> }
+pub struct ActionMatcher {
+    arms: Vec<Arm>,
+    held: Vec<usize>,
+}
 
 impl ActionMatcher {
-    pub fn new(arms: Vec<Arm>) -> Self { Self { arms, held: Vec::new() } }
+    pub fn new(arms: Vec<Arm>) -> Self {
+        Self {
+            arms,
+            held: Vec::new(),
+        }
+    }
 
     pub fn on_key(&mut self, down: bool, vk: u32, mods: Mods, t: u32) -> Option<ActionEvent> {
         if down {
             let i = self.arms.iter().position(|a| a.chord.matches(vk, mods))?;
-            if self.held.contains(&i) { return None; } // auto-repeat
+            if self.held.contains(&i) {
+                return None;
+            }
             self.held.push(i);
-            Some(ActionEvent { t, kind: self.arms[i].on_down })
+            Some(ActionEvent {
+                t,
+                kind: self.arms[i].on_down,
+            })
         } else {
-            let pos = self.held.iter().position(|&i| self.arms[i].chord.vk == vk)?;
+            let pos = self
+                .held
+                .iter()
+                .position(|&i| self.arms[i].chord.vk == vk)?;
             let i = self.held.remove(pos);
             self.arms[i].on_up.map(|kind| ActionEvent { t, kind })
         }
@@ -74,31 +100,81 @@ impl ActionMatcher {
 }
 
 fn push_arm(arms: &mut Vec<Arm>, s: &str, on_down: ActionKind, on_up: Option<ActionKind>) {
-    if let Some(chord) = KeyChord::parse(s) { arms.push(Arm { chord, on_down, on_up }); }
+    if let Some(chord) = KeyChord::parse(s) {
+        arms.push(Arm {
+            chord,
+            on_down,
+            on_up,
+        });
+    }
 }
 
-/// Build the armed-chord table from the configured hotkeys. Unparseable chords are
-/// skipped (the recording still runs; that action is simply unbound).
 pub fn arming_from_settings(h: &HotkeySettings) -> Vec<Arm> {
     let mut arms = Vec::new();
-    push_arm(&mut arms, &h.zoom_hold, ActionKind::ZoomHoldStart, Some(ActionKind::ZoomHoldEnd));
-    push_arm(&mut arms, &h.spotlight_hold, ActionKind::SpotlightHoldStart, Some(ActionKind::SpotlightHoldEnd));
-    push_arm(&mut arms, &h.video_fx_hold, ActionKind::VideoFxHoldStart, Some(ActionKind::VideoFxHoldEnd));
-    push_arm(&mut arms, &h.layout_screen, ActionKind::SetLayout(LayoutId::Screen), None);
-    push_arm(&mut arms, &h.layout_camera, ActionKind::SetLayout(LayoutId::Camera), None);
-    push_arm(&mut arms, &h.layout_presenter, ActionKind::SetLayout(LayoutId::Presenter), None);
-    push_arm(&mut arms, &h.layout_screen_only, ActionKind::SetLayout(LayoutId::ScreenOnly), None);
-    push_arm(&mut arms, &h.layout_camera_only, ActionKind::SetLayout(LayoutId::CameraOnly), None);
+    push_arm(
+        &mut arms,
+        &h.zoom_hold,
+        ActionKind::ZoomHoldStart,
+        Some(ActionKind::ZoomHoldEnd),
+    );
+    push_arm(
+        &mut arms,
+        &h.spotlight_hold,
+        ActionKind::SpotlightHoldStart,
+        Some(ActionKind::SpotlightHoldEnd),
+    );
+    push_arm(
+        &mut arms,
+        &h.video_fx_hold,
+        ActionKind::VideoFxHoldStart,
+        Some(ActionKind::VideoFxHoldEnd),
+    );
+    push_arm(
+        &mut arms,
+        &h.layout_screen,
+        ActionKind::SetLayout(LayoutId::Screen),
+        None,
+    );
+    push_arm(
+        &mut arms,
+        &h.layout_camera,
+        ActionKind::SetLayout(LayoutId::Camera),
+        None,
+    );
+    push_arm(
+        &mut arms,
+        &h.layout_presenter,
+        ActionKind::SetLayout(LayoutId::Presenter),
+        None,
+    );
+    push_arm(
+        &mut arms,
+        &h.layout_screen_only,
+        ActionKind::SetLayout(LayoutId::ScreenOnly),
+        None,
+    );
+    push_arm(
+        &mut arms,
+        &h.layout_camera_only,
+        ActionKind::SetLayout(LayoutId::CameraOnly),
+        None,
+    );
     arms
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::actions::model::{ActionKind, LayoutId};
     use crate::settings::model::HotkeySettings;
-    use super::*;
 
-    fn ca() -> Mods { Mods { ctrl: true, alt: true, shift: false } }
+    fn ca() -> Mods {
+        Mods {
+            ctrl: true,
+            alt: true,
+            shift: false,
+        }
+    }
 
     #[test]
     fn parses_letter_and_digit_case_insensitive() {
@@ -112,9 +188,9 @@ mod tests {
 
     #[test]
     fn rejects_chords_without_a_single_main_key() {
-        assert!(KeyChord::parse("Ctrl+Alt").is_none()); // modifiers only
-        assert!(KeyChord::parse("Ctrl+Foo").is_none()); // unknown token
-        assert!(KeyChord::parse("Ctrl+A+B").is_none()); // two main keys
+        assert!(KeyChord::parse("Ctrl+Alt").is_none());
+        assert!(KeyChord::parse("Ctrl+Foo").is_none());
+        assert!(KeyChord::parse("Ctrl+A+B").is_none());
         assert!(KeyChord::parse("").is_none());
     }
 
@@ -122,29 +198,37 @@ mod tests {
     fn matches_requires_exact_modifiers() {
         let z = KeyChord::parse("Ctrl+Alt+Z").unwrap();
         assert!(z.matches('Z' as u32, ca()));
-        assert!(!z.matches('Z' as u32, Mods { ctrl: true, alt: false, shift: false }));
+        assert!(!z.matches(
+            'Z' as u32,
+            Mods {
+                ctrl: true,
+                alt: false,
+                shift: false
+            }
+        ));
         assert!(!z.matches('X' as u32, ca()));
     }
 
     #[test]
     fn layout_emits_once_and_suppresses_autorepeat() {
         let mut m = ActionMatcher::new(arming_from_settings(&HotkeySettings::default()));
-        let vk1 = '1' as u32; // default layout_screen = Ctrl+Alt+1
+        let vk1 = '1' as u32;
         let e = m.on_key(true, vk1, ca(), 10).unwrap();
         assert_eq!(e.kind, ActionKind::SetLayout(LayoutId::Screen));
-        assert!(m.on_key(true, vk1, ca(), 20).is_none()); // auto-repeat down: suppressed
-        assert!(m.on_key(false, vk1, ca(), 30).is_none()); // layout has no on_up
+        assert!(m.on_key(true, vk1, ca(), 20).is_none());
+        assert!(m.on_key(false, vk1, ca(), 30).is_none());
     }
 
     #[test]
     fn zoom_hold_pairs_start_then_end_even_if_mods_released_first() {
         let mut m = ActionMatcher::new(arming_from_settings(&HotkeySettings::default()));
-        let vkz = 'Z' as u32; // default zoom_hold = Ctrl+Alt+Z
-        assert_eq!(m.on_key(true, vkz, ca(), 0).unwrap().kind, ActionKind::ZoomHoldStart);
-        // release Z after the user already let go of Ctrl/Alt - still pairs by vk
+        let vkz = 'Z' as u32;
+        assert_eq!(
+            m.on_key(true, vkz, ca(), 0).unwrap().kind,
+            ActionKind::ZoomHoldStart
+        );
         let end = m.on_key(false, vkz, Mods::default(), 500).unwrap();
         assert_eq!(end.kind, ActionKind::ZoomHoldEnd);
-        // a second release with nothing held is a no-op
         assert!(m.on_key(false, vkz, Mods::default(), 600).is_none());
     }
 
@@ -157,19 +241,22 @@ mod tests {
     #[test]
     fn spotlight_hold_pairs_start_then_end_even_if_mods_released_first() {
         let mut m = ActionMatcher::new(arming_from_settings(&HotkeySettings::default()));
-        let vks = 'S' as u32; // default spotlight_hold = Ctrl+Alt+S
-        assert_eq!(m.on_key(true, vks, ca(), 0).unwrap().kind, ActionKind::SpotlightHoldStart);
-        // release S after the user already let go of Ctrl/Alt - still pairs by vk
+        let vks = 'S' as u32;
+        assert_eq!(
+            m.on_key(true, vks, ca(), 0).unwrap().kind,
+            ActionKind::SpotlightHoldStart
+        );
         let end = m.on_key(false, vks, Mods::default(), 500).unwrap();
         assert_eq!(end.kind, ActionKind::SpotlightHoldEnd);
-        // a second release with nothing held is a no-op
         assert!(m.on_key(false, vks, Mods::default(), 600).is_none());
     }
 
     #[test]
     fn arming_includes_spotlight_hold_arm() {
         let arms = arming_from_settings(&HotkeySettings::default());
-        let arm = arms.iter().find(|a| a.on_down == ActionKind::SpotlightHoldStart)
+        let arm = arms
+            .iter()
+            .find(|a| a.on_down == ActionKind::SpotlightHoldStart)
             .expect("spotlight hold arm must be present");
         assert_eq!(arm.chord.vk, 'S' as u32);
         assert!(arm.chord.mods.ctrl && arm.chord.mods.alt);

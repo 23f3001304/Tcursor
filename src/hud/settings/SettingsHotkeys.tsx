@@ -12,8 +12,6 @@ const ROWS: { key: keyof HotkeySettings; label: string }[] = [
   { key: "layout_camera_only", label: "Layout: Camera only" },
 ];
 
-/** Build a chord string ("Ctrl+Alt+Z") from a keydown, or null if only modifiers
- *  are held. Mirrors the Rust KeyChord format (Ctrl/Alt/Shift + one A-Z/0-9 key). */
 export function chordFromEvent(e: KeyboardEvent): string | null {
   const k = e.key.toUpperCase();
   if (k === "CONTROL" || k === "ALT" || k === "SHIFT" || k === "META") return null;
@@ -26,22 +24,32 @@ export function chordFromEvent(e: KeyboardEvent): string | null {
   return parts.join("+");
 }
 
-/** The chord strings that are bound to more than one action. */
 export function conflicts(h: HotkeySettings): Set<string> {
   const seen = new Map<string, number>();
-  for (const { key } of ROWS) { const c = h[key]; seen.set(c, (seen.get(c) ?? 0) + 1); }
+  for (const { key } of ROWS) {
+    const c = h[key];
+    seen.set(c, (seen.get(c) ?? 0) + 1);
+  }
   return new Set([...seen].filter(([, n]) => n > 1).map(([c]) => c));
 }
 
-export function SettingsHotkeys({ value, onChange }: { value: HotkeySettings; onChange: (v: HotkeySettings) => void }) {
+export function SettingsHotkeys({
+  value,
+  onChange,
+}: {
+  value: HotkeySettings;
+  onChange: (v: HotkeySettings) => void;
+}) {
   const [capturing, setCapturing] = useState<keyof HotkeySettings | null>(null);
   const dup = conflicts(value);
 
   function capture(key: keyof HotkeySettings, e: React.KeyboardEvent) {
     e.preventDefault();
     const chord = chordFromEvent(e.nativeEvent);
-    if (chord) { onChange({ ...value, [key]: chord }); setCapturing(null); }
-    else if (e.key === "Escape") setCapturing(null);
+    if (chord) {
+      onChange({ ...value, [key]: chord });
+      setCapturing(null);
+    } else if (e.key === "Escape") setCapturing(null);
   }
 
   return (

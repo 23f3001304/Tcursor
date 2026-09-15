@@ -38,7 +38,7 @@ The nine standard OS cursor shapes tracked during recording. Corresponds to the 
 
 ### Used by
 
-- `src-tauri/src/events/track/cursortracker.rs` - the polling loop classifies the live cursor handle to a `CursorType` and appends changes
+- `src-tauri/src/platform/windows/input/cursor.rs` - the polling loop classifies the live cursor handle to a `CursorType` and appends changes
 - `src-tauri/src/events/track/cursortype.rs` (`CursorTrack`) - stored as `(u32, CursorType)` pairs in the timeline
 - `src-tauri/src/export/cursor/cursorset.rs` - selects the sprite to draw per frame based on `CursorType`
 - `src-tauri/src/ai/commands.rs` / `src-tauri/src/ai/backend/timeline.rs` - the AI director reads cursor shapes to annotate the activity timeline
@@ -84,6 +84,8 @@ Serializes `CursorTrack` to compact JSON and writes it to `path`.
 - `round_trip_save_load` - a three-entry track serializes and deserializes without data loss.
 
 ## CursorTrack::load
+
+**Steadied on the way in (2026-09-15).** The samples come back through `steady(&raw.samples, SHAPE_HOLD_MS)` (`steady.md`): a shape that did not stay on screen for 100 ms is dropped, so the arrow/I-beam flicker of a pointer crossing text never reaches `type_at`, the export or the preview. The file on disk is untouched and keeps every flip.
 
 ```rust
 pub fn load(path: &Path) -> Self

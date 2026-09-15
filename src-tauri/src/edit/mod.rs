@@ -1,8 +1,10 @@
-pub mod model;
-mod migrate;
-mod lock;
-pub mod seed;
-mod seed_lock;
+pub mod cammove;
+pub mod captions;
 pub mod commands;
+pub mod effect;
+mod lock;
+mod migrate;
+pub mod model;
 pub mod ops;
 pub mod remap_doc;
+pub mod seed;

@@ -1,6 +1,6 @@
 # src/editor/shell/PropertiesSlot.tsx
 
-The `properties` editor type: the six inspectors, routed by `p.sel`.
+The `properties` editor type: the seven inspectors, routed by `p.sel`.
 
 ## SelectedClip
 
@@ -11,7 +11,8 @@ export type SelectedClip =
   | { kind: "layout"; layout: LayoutSeg }
   | { kind: "cam"; move: CameraMove }
   | { kind: "cut"; cut: Cut }
-  | { kind: "speed"; speed: Speed };
+  | { kind: "speed"; speed: Speed }
+  | { kind: "caption"; caption: Caption };
 ```
 
 What one selection resolves to: the lane it belongs to, plus the clip itself, already typed. The
@@ -25,7 +26,7 @@ export function selectedClip(doc: EditDoc, sel: string | null): SelectedClip | n
 ```
 
 The selection-to-inspector ladder, as a pure function: zoom / effect / layout segment / camera move
-/ cut / speed span, in that order, by id (the last two from the time remap, T7). `null` for no
+/ cut / speed span / caption, in that order, by id (cut and speed from the time remap, T7; caption from M5, read through `doc.captions?` because a doc fetched before Rust's serde default has been through it may carry no key at all). `null` for no
 selection, for an empty string, and for a **stale** id that matches nothing - so deleting the
 selected clip reads as "nothing is selected" rather than as "an inspector that failed to load".
 

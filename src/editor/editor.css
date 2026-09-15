@@ -2,7 +2,7 @@
 
    === THE TWO PALETTE BLOCKS ==================================================================
    Every colour the editor paints (this sheet plus stage/, timeline/, panels/, controls/,
-   inspectors/ and src/lib/wave.css) comes from an `--e-*` token declared TWICE below: once on
+   inspectors/ and src/shared/wave.css) comes from an `--e-*` token declared TWICE below: once on
    plain `.editor` (the dark palette, and the default - an editor that never sees a theme
    attribute renders byte-for-byte as it always has) and once under `:root[data-theme="light"]`,
    which `src/hud/preferences/applyTheme.ts` stamps on the document root from the Preferences
@@ -15,9 +15,9 @@
    The two blocks MUST declare the same token names: `themeTokens.test.ts` fails if a token is
    ever added to one and not the other, and `themeTokens.test.ts` also fails on a raw hex colour
    anywhere in the editor's stylesheets outside these two blocks. Tokens that carry no colour
-   (the type scale, the spacing grid, the radii) and the legacy aliases (which are nothing but
-   `var()` onto a token above) are theme-independent, so they live in their own `.editor` block
-   further down rather than being duplicated here.
+   (the density ladder, the type scale, the control heights, the spacing grid, the radii) and the
+   legacy aliases (which are nothing but `var()` onto a token above) are theme-independent, so they
+   live in their own `.editor` block further down rather than being duplicated here.
    ============================================================================================ */
 .editor {
   /* === Elevation system (design/premium-pass Task D1) ===================================
@@ -205,20 +205,61 @@
    and the type/spacing/radius rungs are geometry. Kept out of the palette blocks above so those
    two stay a strict mirror of each other. */
 .editor {
-  /* Type scale - five rungs, nothing else: panel title / body+controls / overline section
-     label / tabular value readout / hint+lede. Every font-size+weight pair in this sheet maps
-     onto one of these; components with a bespoke type treatment (Transport's hero time readout,
-     the timeline's lane/pill labels) are owned by their own later design pass, not this sweep. */
-  --e-text-title-size: 14px;  --e-text-title-weight: 600;
-  --e-text-body-size: 12.5px; --e-text-body-weight: 450;
-  --e-text-label-size: 10.5px; --e-text-label-weight: 600; --e-text-label-ls: .08em;
-  --e-text-value-size: 12.5px; --e-text-value-weight: 560;
-  --e-text-hint-size: 12px;   --e-text-hint-weight: 400;  --e-text-hint-lh: 1.45;
+  /* === Density (laptop pass, 2026-09-15) ======================================================
+     ONE unitless multiplier that every type, spacing, radius and control-height rung below is a
+     `calc()` of, so they step down TOGETHER rather than one sheet at a time. `shell/density.ts`
+     computes it from the viewport (1 at the 1440x900 window the design was tuned at, which is
+     also the largest window `App.openEditor` ever opens, down to a 0.86 floor) and `Editor.tsx`
+     writes it - with the stepped sizes under it - as an inline custom property on `.editor`. The
+     values declared here are the full-size defaults, so the sheet renders correctly with no
+     JavaScript at all (a cold first paint, a test that mounts a panel on its own).
+
+     What deliberately does NOT scale: 1px hairlines and dividers, icon `size` props, the 1.5px
+     strokes on the stage overlays drawn over the video, and the two controls whose geometry is
+     mirrored by pointer math in TypeScript - `.e-slider-*` (Slider.tsx's `THUMB`) and `.sw`
+     (Switch.tsx's inline thumb `left`). Scaling either of those would desync the maths. */
+  --e-density: 1;
+  /* The stepped sizes, in px rather than as a multiple of the scale: a column width is a design
+     decision at each step, not a proportion. `density.ts` is the source of truth for all of them
+     and `ClassicShell`/`Timeline` read the same function, so Motion's width springs and the lane
+     gutter's inline row heights can never disagree with the stylesheet. */
+  --e-rail-w: 56px; --e-rail-btn: 42px;
+  --e-panel-w: 320px; --e-side-w: 360px;
+  --e-gutter-w: 72px;
+  --e-film-h: 80px; --e-row-h: 32px; --e-audio-h: 22px; --e-row-gap: 6px; --e-tracks-h: 230px;
+
+  /* Type scale - five rungs plus the two micro rungs the panels and the timeline had been
+     spelling as literals: panel title / body+controls / overline section label / tabular value
+     readout / hint+lede, then `small` (the panel lede, log lines, text buttons) and `micro` (row
+     labels, lane names, pill labels, chips). Every font-size in the editor's sheets maps onto one
+     of these; a handful of genuinely bespoke sizes (Transport's time readout, the inspector's
+     hero number) stay where they are written but are `calc()`d off the same scale. */
+  --e-text-title-size: calc(14px * var(--e-density));  --e-text-title-weight: 600;
+  --e-text-body-size: calc(12.5px * var(--e-density)); --e-text-body-weight: 450;
+  --e-text-label-size: calc(10.5px * var(--e-density)); --e-text-label-weight: 600; --e-text-label-ls: .08em;
+  --e-text-value-size: calc(12.5px * var(--e-density)); --e-text-value-weight: 560;
+  --e-text-hint-size: calc(12px * var(--e-density));   --e-text-hint-weight: 400;  --e-text-hint-lh: 1.45;
+  --e-text-small-size: calc(11.5px * var(--e-density));
+  --e-text-micro-size: calc(11px * var(--e-density));
+
+  /* Control heights - the five rungs the sheets had been writing as 24/28/32/34/38: the readout
+     and switch floor, chips and icon buttons, the bar's tools, a field or picker, the hero Play
+     button. A row that is not a control (a list row's `min-height`) keeps its own `calc()`.
+     `--e-ctl-xs` is the ONE rung that does NOT scale: it is controls.css's rule 4, the 24px floor
+     for anything you can click, drag or type into, and a hit target is the last thing a smaller
+     screen should take away. `--e-ctl-sm` is clamped to it for the same reason - at the 0.86 floor
+     28px lands on 24.08, so the clamp is a guarantee rather than a change. */
+  --e-ctl-xs: 24px;
+  --e-ctl-sm: max(var(--e-ctl-xs), calc(28px * var(--e-density)));
+  --e-ctl: calc(32px * var(--e-density));
+  --e-ctl-md: calc(34px * var(--e-density));
+  --e-ctl-lg: calc(38px * var(--e-density));
 
   /* Spacing grid - 16 panel padding, 12 between fields, 8 label->control, 20 between sections.
      Applied at the panel-SHELL level by this task; the per-row audit inside each panel/inspector
      is a later task's job (it touches component files this sweep intentionally leaves alone). */
-  --e-sp-1: 8px; --e-sp-2: 12px; --e-sp-3: 16px; --e-sp-4: 20px;
+  --e-sp-1: calc(8px * var(--e-density)); --e-sp-2: calc(12px * var(--e-density));
+  --e-sp-3: calc(16px * var(--e-density)); --e-sp-4: calc(20px * var(--e-density));
 
   /* --- Legacy tokens: kept defined (editor.css itself and several controls' inline styles still
      reference them by name) but MAPPED onto the system above instead of left as a second parallel
@@ -239,15 +280,14 @@
   --e-shadow-raise: var(--e-shadow-1);
   --e-shadow-pop: var(--e-shadow-2);
   --e-lift: var(--e-inset-hi);
-  --e-r-sm: 8px; --e-r: 10px; --e-r-lg: 14px; --e-r-xl: 18px;
-  /* The properties sidebar's resting width. A token because it is not actually one number: the
-     editor body spends 56px on the rail, 320 on the panel slot, 30 on its gaps and 20 on its own
-     padding before the stage gets anything, so at the 880px minimum window a flat 360 left the
-     preview 94px wide - and every stage-anchored pill (the toast, the arrange hint, the director's
-     Stop) then had nothing to fit into. Stepping the sidebar down on a narrow window hands the
-     stage back most of that. The left panel slot deliberately keeps its 320 at every size: the
-     panels are designed against that width, and narrowing them would only move the truncation. */
-  --e-side-w: 360px;
+  --e-r-sm: calc(8px * var(--e-density)); --e-r: calc(10px * var(--e-density));
+  --e-r-lg: calc(14px * var(--e-density)); --e-r-xl: calc(18px * var(--e-density));
+  /* (`--e-side-w` and `--e-panel-w` are declared with the rest of the stepped sizes at the top of
+     this block. Both used to be fixed: the sidebar stepped down at two viewport widths via media
+     queries here, and the panel column was a flat 320 at every size on the argument that the
+     panels are designed against that width. The density ladder keeps that argument honest rather
+     than contradicting it - at the `tight` step the column is 288px AND the type is at 0.86, so
+     the panel holds MORE design-px of content than a 320px column at full scale, not less.) */
   position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column;
   background: var(--e-bg); color: var(--e-fg);
   font-family: "Inter Variable", -apple-system, "Segoe UI", system-ui, sans-serif;
@@ -288,22 +328,25 @@
   filter: drop-shadow(0 0 6px color-mix(in srgb, var(--e-primary) 38%, transparent));
 }
 
-.e-bar { height: 52px; flex: none; display: flex; align-items: center; gap: 11px;
-  padding: 0 14px; border-bottom: 1px solid var(--e-border2); }
-.e-brand { display: flex; align-items: center; gap: 9px;
+.e-bar { height: calc(52px * var(--e-density)); flex: none; display: flex; align-items: center;
+  gap: calc(11px * var(--e-density)); padding: 0 calc(14px * var(--e-density));
+  border-bottom: 1px solid var(--e-border2); }
+.e-brand { display: flex; align-items: center; gap: calc(9px * var(--e-density));
   font-size: var(--e-text-title-size); font-weight: var(--e-text-title-weight); }
 /* Decorative brand icon, not an interactive control - border doctrine: flat elements get no
    border, separation comes from the raised-plane fill alone. */
-.e-mark { width: 20px; height: 20px; box-sizing: border-box; border-radius: 6px; background: var(--e-soft);
+.e-mark { width: calc(20px * var(--e-density)); height: calc(20px * var(--e-density));
+  box-sizing: border-box; border-radius: calc(6px * var(--e-density)); background: var(--e-soft);
   display: flex; align-items: center; justify-content: center; color: var(--e-fg-max); }
 .e-proj { color: var(--e-dim); font-size: var(--e-text-hint-size); font-weight: var(--e-text-hint-weight); }
 .e-sp { flex: 1; }
-.e-gst { width: 32px; height: 32px; border: none; background: transparent; color: var(--e-mut);
+.e-gst { width: var(--e-ctl); height: var(--e-ctl); border: none; background: transparent; color: var(--e-mut);
   border-radius: var(--e-r-sm); display: flex; align-items: center; justify-content: center;
   transition: background .14s ease, color .14s ease; }
 .e-gst:hover { background: var(--e-soft); color: var(--e-fg); }
 .e-gst:disabled { opacity: .35; cursor: default; }
-.e-export { position: relative; overflow: hidden; height: 33px; padding: 0 15px; border: none; border-radius: 9px;
+.e-export { position: relative; overflow: hidden; height: calc(33px * var(--e-density));
+  padding: 0 calc(15px * var(--e-density)); border: none; border-radius: calc(9px * var(--e-density));
   background: var(--e-primary); color: var(--e-on-fill); letter-spacing: -0.01em;
   font-size: var(--e-text-value-size); font-weight: var(--e-text-value-weight);
   display: flex; align-items: center; gap: 6px;
@@ -318,16 +361,17 @@
 .e-export-bar { position: absolute; left: 0; bottom: 0; height: 2px;
   background: color-mix(in srgb, var(--e-on-fill) 40%, transparent); }
 .e-bar > *:not(button) { pointer-events: none; } /* empty bar area drags the window; buttons stay clickable */
-.e-bardiv { width: 1px; height: 20px; background: var(--e-border); margin: 0 3px; flex: none; }
+.e-bardiv { width: 1px; height: calc(20px * var(--e-density)); background: var(--e-border); margin: 0 3px; flex: none; }
 .e-gst.close:hover { background: var(--e-primary); color: var(--e-on-fill); }
 
 /* Animated panel slot: owns the fixed width so the inner panel just fills it. popLayout pulls the
    exiting panel out of flow, so the slot must not shrink underneath it. Surface plane, no border
    (border doctrine) - separation from the canvas is the surface step + resting shadow only. */
-.e-body { flex: 1; display: flex; min-height: 0; padding: 10px; gap: 10px; }
+.e-body { flex: 1; display: flex; min-height: 0;
+  padding: calc(10px * var(--e-density)); gap: calc(10px * var(--e-density)); }
 /* The rail's own rules (.e-rail, .e-ric*) moved to stage/stage.css with the stage and transport
    rules the same pass restyled - see that file's header. */
-.e-panel-slot { width: 320px; flex: none; display: flex; min-height: 0; border-radius: var(--e-r-lg);
+.e-panel-slot { width: var(--e-panel-w); flex: none; display: flex; min-height: 0; border-radius: var(--e-r-lg);
   overflow: hidden; box-shadow: var(--e-inset-hi), var(--e-shadow-1); }
 .e-panel-slot > .e-panel, .e-panel-slot > .e-insp { width: 100%; flex: 1; min-height: 0; }
 /* Properties sidebar: the selected clip's inspector, on the right of the stage and NEVER in place of
@@ -346,19 +390,18 @@
   border-radius: var(--e-r-lg); background: var(--e-surface); box-shadow: var(--e-inset-hi), var(--e-shadow-1); }
 .e-props-frost { width: var(--e-side-w); flex: none; display: flex; min-height: 0; }
 .e-props-frost > .e-panel-slot { width: 100%; }
-/* Two steps, sized off the body's own arithmetic: at 1180px the stage still clears 380px with a
-   320px sidebar, and at 1020px a 288px one keeps it just over 300. Below that the window is at its
-   880px floor and the stage settles at about 170px rather than the 94 a flat 360 left it. */
-@media (max-width: 1180px) { .editor { --e-side-w: 320px; } }
-@media (max-width: 1020px) { .editor { --e-side-w: 288px; } }
-.e-panel { width: 320px; flex: none; overflow-y: auto;
+/* The two media queries that used to step `--e-side-w` (1180 -> 320px, 1020 -> 288px) are gone:
+   `density.ts` owns that ladder now and steps it EARLIER (1420 -> 320, 1400 -> 288, 1100 -> 240),
+   because on a laptop the sidebar is competing with a 1246px-wide editor window, not a 1440px one.
+   It also has to be JS: `ClassicShell` springs the column's width to the same number. */
+.e-panel { width: var(--e-panel-w); flex: none; overflow-y: auto;
   padding: var(--e-sp-3); background: var(--e-surface); }
 .e-panel h2 { font-size: var(--e-text-title-size); font-weight: var(--e-text-title-weight); margin: 0 0 6px; }
 .e-lede { font-size: var(--e-text-hint-size); font-weight: var(--e-text-hint-weight); color: var(--e-dim);
   line-height: var(--e-text-hint-lh); margin: 0 0 var(--e-sp-4); }
 /* Reusable panel primitives (consumed by the property-panel wave). */
-.e-switchrow { display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  min-height: 32px; font-size: var(--e-text-body-size); font-weight: var(--e-text-body-weight); color: var(--e-fg); }
+.e-switchrow { display: flex; align-items: center; justify-content: space-between; gap: var(--e-sp-2);
+  min-height: var(--e-ctl); font-size: var(--e-text-body-size); font-weight: var(--e-text-body-weight); color: var(--e-fg); }
 /* Sparing full-bleed divider between panel sections (border doctrine) + the 20px section rhythm. */
 .e-sec { border-top: 1px solid var(--e-border2); margin-top: var(--e-sp-4); padding-top: var(--e-sp-3); }
 /* The insert-element library's own rules (.e-libpill and friends) moved to panels/panels.css. */
@@ -367,7 +410,7 @@
    above can read one shared variable name for all four insert-palette cards' icon color. */
 .e-camkfpill { --pill-accent: var(--e-cam); border-radius: 7px; border: 1px solid var(--e-line);
   background: color-mix(in srgb, var(--e-cam) 12%, var(--e-raised));
-  box-shadow: inset 3px 0 0 var(--e-cam), var(--e-inset-hi), var(--e-shadow-1); }
+  box-shadow: var(--e-inset-hi), var(--e-shadow-1); }
 /* The AI Director panel's own rules (.e-run, .e-ai-*, .e-sum, .e-picker-shell/-empty, .e-errline)
    moved to panels/panels.css. */
 
@@ -452,6 +495,14 @@
   box-shadow: 0 0 0 1px rgba(0,0,0,.45), 0 0 0 4px color-mix(in srgb, var(--e-zoom) 22%, transparent),
     0 0 14px rgba(0,0,0,.45); }
 .e-zreticle.drag { cursor: grabbing; }
+/* AI review outline (StageOutline.tsx): the region a proposal named, while it is being previewed.
+   Same basis as the reticle above - percentages of .e-stage, projected through the live crop - and
+   the same inertness, because it marks something rather than offering anything. The dim is one
+   huge spread shadow rather than four elements, clipped by .e-stage's own overflow; it is a
+   literal black in both themes for the reason the modal scrim below is (dimming is a shadow, not
+   a colour), while the edge itself is --e-ai, the director's own hue. */
+.e-outline { position: absolute; z-index: 9; pointer-events: none; border: 1px solid var(--e-ai);
+  border-radius: 3px; box-shadow: 0 0 0 9999px rgba(0,0,0,.22); }
 /* "Aim on stage" lives with the rest of the inspector surface, in inspectors/inspectors.css. */
 
 /* Undo/redo feedback pill - bottom-center of the stage (see Toast.tsx). Editor.tsx wraps Stage in
@@ -487,7 +538,7 @@
   background: rgba(0,0,0,.5); }
 /* Flat dialog card, not itself an interactive control - border doctrine: surface plane, no border,
    the popover-depth shadow alone signals it floats above everything. */
-.e-modal { width: 340px; max-width: calc(100vw - 40px); padding: var(--e-sp-3); background: var(--e-card);
+.e-modal { width: calc(340px * var(--e-density)); max-width: calc(100vw - 40px); padding: var(--e-sp-3); background: var(--e-card);
   border-radius: var(--e-r-lg); box-shadow: var(--e-shadow-pop); }
 .e-modal-title { margin: 0 0 8px; font-size: var(--e-text-title-size); font-weight: var(--e-text-title-weight); color: var(--e-fg); }
 .e-modal-body { margin: 0 0 16px; font-size: var(--e-text-body-size); font-weight: var(--e-text-body-weight);
@@ -499,7 +550,7 @@
    ("Export again", "Show in folder", "Done"), which is within a few px of a 400px dialog's inner
    width - one longer label and the last button would have been pushed off the card's edge. */
 .e-modal-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
-.e-modal-btn { height: 34px; padding: 0 14px; border-radius: var(--e-r-sm); border: 1px solid var(--e-border);
+.e-modal-btn { height: var(--e-ctl-md); padding: 0 calc(14px * var(--e-density)); border-radius: var(--e-r-sm); border: 1px solid var(--e-border);
   background: var(--e-soft); color: var(--e-fg); font-size: var(--e-text-body-size); font-weight: var(--e-text-body-weight); cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   transition: background .12s ease, border-color .12s ease; }
@@ -509,7 +560,7 @@
 .e-modal-btn.primary.danger:hover { background: var(--e-dangerh); border-color: var(--e-dangerh); }
 
 /* Export dialog (ExportDialog + ExportProgress) - reuses the modal scrim/card/actions above. */
-.e-export-modal { width: 400px; }
+.e-export-modal { width: calc(400px * var(--e-density)); }
 .e-export-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
 .e-export-head .e-modal-title { margin: 0; }
 .e-export-row { margin-bottom: 14px; }
@@ -527,13 +578,13 @@
    instead, and `SweepWave`'s checkmark takes --e-ok from `wave.css`. */
 .e-export-icon.error { color: var(--e-primary); }
 .e-export-outcome-title { margin: 6px 0 0; font-size: var(--e-text-title-size); font-weight: var(--e-text-title-weight); }
-.e-export-outcome-body { margin: 0 0 12px; font-size: var(--e-text-hint-size); color: var(--e-mut); max-width: 320px; word-break: break-word; }
+.e-export-outcome-body { margin: 0 0 12px; font-size: var(--e-text-hint-size); color: var(--e-mut); max-width: calc(320px * var(--e-density)); word-break: break-word; }
 .e-export-outcome .e-modal-actions { margin-top: 10px; width: 100%; }
 
 /* Project settings dialog (EditorSettingsDialog) - reuses the modal scrim/card + .e-export-head
    above; taller than the other modals (three sections + shortcuts row + recording note), so it
    scrolls internally instead of overflowing the viewport on a short window. */
-.e-settings-modal { width: 420px; max-height: min(78vh, 640px); overflow-y: auto; }
+.e-settings-modal { width: calc(420px * var(--e-density)); max-height: min(78vh, 640px); overflow-y: auto; }
 /* Same custom scrollbar as `.e-picker-menu` (below) - `.e-modal`'s background is `--e-card` too,
    so the thumb's inset border reuses that value. Was unstyled (native scrollbar) until this pass. */
 .e-settings-modal::-webkit-scrollbar { width: 11px; }
@@ -543,7 +594,7 @@
 .e-settings-modal:hover::-webkit-scrollbar-thumb { background: var(--e-mut); background-clip: padding-box; }
 
 /* Shortcuts overlay (ShortcutsOverlay) - reuses the modal scrim/card above. */
-.e-shortcuts-modal { width: 300px; }
+.e-shortcuts-modal { width: calc(300px * var(--e-density)); }
 .e-shortcuts-group { margin: 14px 0 0; font-size: var(--e-text-label-size); font-weight: var(--e-text-label-weight);
   letter-spacing: var(--e-text-label-ls); text-transform: uppercase; color: var(--e-dim); }
 .e-shortcuts-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -551,7 +602,7 @@
    300px dialog - "Choose a range on the ruler" is already most of one - grew out of a fixed 32px
    row and overlapped its neighbours. The key never shrinks or wraps; the description is what gives. */
 .e-shortcuts-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  min-height: 32px; padding: 2px; }
+  min-height: var(--e-ctl); padding: 2px; }
 .e-shortcuts-label { min-width: 0; font-size: var(--e-text-body-size); font-weight: var(--e-text-body-weight); color: var(--e-mut); }
 .e-shortcuts-key { flex: none; font: inherit; font-size: var(--e-text-label-size); font-weight: var(--e-text-label-weight);
   letter-spacing: 0.01em; color: var(--e-fg); white-space: nowrap;
@@ -576,7 +627,7 @@
 .e-insp { display: flex; flex-direction: column; }
 /* PanelHeader's own rules (.e-phead*, .e-hicons) moved to panels/panels.css in the panel pass.
    `.e-hicon` itself stays here: the settings dialog's sections use it too. */
-.e-hicon { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+.e-hicon { width: var(--e-ctl-sm); height: var(--e-ctl-sm); display: flex; align-items: center; justify-content: center;
   border: none; background: transparent; color: var(--e-dim); border-radius: var(--e-r-sm); cursor: pointer;
   transition: background .14s ease, color .14s ease; }
 .e-hicon:hover { background: var(--e-soft); color: var(--e-fg); }
@@ -589,7 +640,7 @@
 .e-secrow { display: flex; align-items: center; justify-content: space-between; gap: var(--e-sp-1); margin-bottom: 4px; }
 /* Full-width neutral secondary action (e.g. "Reset Defaults") - never red. Raised interactive
    control: hairline border + inset top-light per the border doctrine. */
-.e-ghostbtn { width: 100%; box-sizing: border-box; padding: 14px; border: 1px solid var(--e-border); border-radius: var(--e-r);
+.e-ghostbtn { width: 100%; box-sizing: border-box; padding: calc(14px * var(--e-density)); border: 1px solid var(--e-border); border-radius: var(--e-r);
   background: var(--e-soft);
   color: var(--e-mut); font-size: var(--e-text-body-size); font-weight: var(--e-text-body-weight);
   display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; box-shadow: var(--e-lift);
@@ -611,7 +662,7 @@
    AudioPanel's `.e-hintrow` moved to panels/panels.css and the inspector captions to
    inspectors/inspectors.css with the rest of their rules. */
 .e-seg { display: flex; gap: 4px; background: var(--e-soft); border-radius: var(--e-r-sm); padding: 3px; }
-.e-seg button { flex: 1; height: 30px; border: none; background: transparent; color: var(--e-mut);
+.e-seg button { flex: 1; height: calc(30px * var(--e-density)); border: none; background: transparent; color: var(--e-mut);
   border-radius: var(--e-r-sm); font-size: var(--e-text-body-size); font-weight: var(--e-text-body-weight); transition: background .14s ease, color .14s ease; }
 .e-seg button.on { background: var(--e-card);
   color: var(--e-fg); box-shadow: var(--e-inset-hi), var(--e-shadow-1); }

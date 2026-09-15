@@ -8,11 +8,15 @@ The one bundle of editor state that travels from `Editor.tsx` down to whichever 
 
 **Range selection (T7).** `range: [number, number] | null` and `setRange`, a plain `useState` pair in `Editor.tsx`. It is in the bundle for the same reason `sel` is: two different areas need it and neither owns it. The TIMELINE edits it (the ruler's Shift+drag, `timeline/useRangeSelect.ts`) and draws it (`RangeOverlay`); the TRANSPORT acts on it (`TransportTools`' Cut and Speed) and clears it afterwards. In clip ms, like every other time in the bundle except the transport's own readout.
 
+**The AI review sheet (M4 T4).** Nine fields: `aiRun` (the proposed run, `null` for "there is nothing to review"), `aiSkipped` (the ids turned OFF - so the empty set means "apply everything", the state every run starts in), `aiApplying`, `aiPreviewId`, the four handlers `onToggleItem` / `onPreviewItem` / `onApplyRun` / `onDiscardRun`, and `stageOutline`. Eight of the nine go to the AI panel, because the sheet lives in that panel's own body; `stageOutline` is the single exception and goes to `Stage`, because the outlined region is the only thing the sheet draws outside itself. All of it comes from `useAiRun` (M4 T5), as do `running` (thinking, applying or replaying), `aiError`, `aiPlanning` (the propose fetch is in flight), `aiProgress` (the pointer replay's position, `null` outside it), `pointerRef` and `onCancelRun`, which feed `DirectorOverlay`. The one-shot flow's narration log is gone with that flow.
+
 ```ts
-export interface SlotProps { /* ~70 fields - see the source */ }
+export interface SlotProps { /* ~80 fields - see the source */ }
 ```
 
 Everything the four editor types need between them: the doc, the selection, the panel tab, the playhead and transport state, the preview data `useEditorData` fetched, the callbacks `useEditorCallbacks` / `useTimelineActions` / `useTrimActions` built, and the AI director's live state.
+
+**`reloadDoc` (M5 T6).** Re-read `edit.json` because the BACKEND wrote it, recording the pre-write doc so the write is one undo step. Every other edit in the app goes out through `applyOp` and comes back as the new doc in the same round trip, so nothing needed this before; transcription is the exception, because `asr::commands::transcribe_project` applies `EditOp::SetCaptions` itself under `edit::lock::doc_lock` and emits `asr-done` rather than shipping a caption array back over IPC (ADDED-8). `Editor.tsx` builds it and queues it through the same `enqueue` chain `applyOp` uses, so a refetch can never land on top of an edit whose own `setDoc` has not resolved yet.
 
 **The panel tab is nullable (2026-09-14).** `tab: Tab | null` and `setTab: Dispatch<SetStateAction<Tab | null>>`, where `null` means the panel column is collapsed - a real resting state, not an error one (`panelState.md`). `onTab` is unchanged in shape but changed in meaning: it is no longer "show this tab" but "the user pressed this tab", and `ClassicShell` resolves that through `nextTab` so a second press on the open tab closes.
 

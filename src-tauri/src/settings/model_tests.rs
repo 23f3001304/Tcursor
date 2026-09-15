@@ -4,11 +4,6 @@ use crate::settings::cursor::{CursorSettings, CursorStyle};
 #[test]
 fn defaults_match_tuned_zoom_and_round_trip() {
     let s = Settings::default();
-    // R1 (bug-sweep-2 UX ruling): the always-on-spotlight toggle defaults OFF at record-time
-    // defaults - a project seeded with a fresh config must never play entirely dimmed out of the
-    // box. `edit::seed::build_default` snapshots exactly this default into every new recording's
-    // settings; a persisted config.json that a user has explicitly turned it on for keeps that
-    // choice (this is a record-TIME default, not a migration).
     assert!(!s.clickfx.spotlight);
     assert!(s.zoom.enabled);
     assert_eq!(s.zoom.target_scale, 2.2);
@@ -20,7 +15,7 @@ fn defaults_match_tuned_zoom_and_round_trip() {
     assert_eq!(cfg.target_scale, 2.2);
     assert_eq!(cfg.idle_release_ms, 2200);
     assert_eq!(cfg.follow_damping, 0.10);
-    assert_eq!(cfg.zoom_in_ms, 350); // untouched ZoomConfig default
+    assert_eq!(cfg.zoom_in_ms, 350);
     assert_eq!(s.zoom.clicks, 1);
     assert_eq!(cfg.clicks_to_trigger, 1);
     let json = serde_json::to_string(&s).unwrap();
@@ -30,66 +25,72 @@ fn defaults_match_tuned_zoom_and_round_trip() {
 #[test]
 fn partial_json_fills_defaults() {
     let back: Settings = serde_json::from_str("{\"zoom\":{\"enabled\":false}}").unwrap_or_default();
-    // missing fields fall back to defaults
     assert!(!back.zoom.enabled);
     assert_eq!(back.zoom.target_scale, 2.2);
     assert_eq!(back.clickfx.enabled, ClickFxSettings::default().enabled);
-    // old JSON without spotlight_dim/radius/feather loads with defaults
     assert_eq!(back.clickfx.spotlight_dim, 0.60);
     assert_eq!(back.clickfx.spotlight_radius, 0.13);
     assert_eq!(back.clickfx.spotlight_feather, 0.10);
     assert_eq!(back.clickfx.spotlight_mode, SpotlightMode::Classic);
     assert_eq!(back.clickfx.spotlight_tint, [130, 90, 255]);
-    // old JSON without spotlight_dim_camera loads with default true (today's dim-everything look)
     assert!(back.clickfx.spotlight_dim_camera);
-    // old JSON without camera_shrink/camera_shrink_min loads with defaults
     assert!(back.zoom.camera_shrink);
     assert_eq!(back.zoom.camera_shrink_min, 0.62);
-    // old JSON without smart_hold loads with default
     assert!(back.zoom.smart_hold);
-    // old JSON without appearance loads the per-mode defaults
-    assert_eq!(back.appearance, crate::settings::appearance::AppearanceSettings::default());
-    // old JSON without cursor loads the System default (cursor stays baked-in)
-    assert_eq!(back.cursor, crate::settings::cursor::CursorSettings::default());
+    assert_eq!(
+        back.appearance,
+        crate::settings::appearance::AppearanceSettings::default()
+    );
+    assert_eq!(
+        back.cursor,
+        crate::settings::cursor::CursorSettings::default()
+    );
     assert_eq!(back.cursor.style, CursorStyle::System);
-    assert_eq!(back.cursor.pack, "default"); // old JSON without cursor.pack loads the built-in id
+    assert_eq!(back.cursor.pack, "default");
     assert_eq!(CursorSettings::default().bounce_intensity, 0.5);
     assert!(CursorStyle::System.captures_os_cursor());
     assert!(!CursorStyle::Enhanced.captures_os_cursor());
     assert!(!CursorStyle::Hidden.captures_os_cursor());
-    // old JSON without ui loads the Light theme + red accent defaults
-    assert_eq!(back.ui, crate::settings::model::InterfaceSettings::default());
+    assert_eq!(
+        back.ui,
+        crate::settings::model::InterfaceSettings::default()
+    );
     assert_eq!(back.ui.theme, ThemeMode::Light);
     assert_eq!(back.ui.accent, [239, 68, 68]);
-    // old JSON without ui.interface_effects loads it ON, so the editor's ripples and the
-    // transport's magnetic pull ship enabled to an install that predates the field.
     assert!(back.ui.interface_effects);
-    // old JSON without background loads the Mesh default (today's bg.jpg, byte-identical)
-    assert_eq!(back.background, crate::settings::background::BackgroundSettings::default());
-    assert_eq!(back.background.kind, crate::settings::background::BackgroundKind::Mesh);
-    // old JSON without the new audio/AI fields loads full volume + no forced model
+    assert_eq!(
+        back.background,
+        crate::settings::background::BackgroundSettings::default()
+    );
+    assert_eq!(
+        back.background.kind,
+        crate::settings::background::BackgroundKind::Mesh
+    );
     assert_eq!(back.audio_mic_volume, 1.0);
     assert_eq!(back.audio_sys_volume, 1.0);
     assert_eq!(back.ai_model, "");
-    // old JSON without camera_smoothing_ms loads 0 (smoothing off, bit-identical export)
     assert_eq!(back.zoom.camera_smoothing_ms, 0);
-    // a config written before saved layout looks existed loads with an EMPTY list, not an error
     assert!(back.layout_presets.is_empty());
 }
 
 #[test]
 fn layout_presets_round_trip_and_default_empty() {
-    // (a) a config with no `layout_presets` key at all loads empty - the migration case.
     let back: Settings = serde_json::from_str("{}").unwrap();
     assert!(back.layout_presets.is_empty());
     assert!(Settings::default().layout_presets.is_empty());
 
-    // (b) a saved look survives a write/read cycle with every one of the five layouts intact.
     let mut look = crate::settings::appearance::AppearanceSettings::default();
     look.presenter.pad = 0.075;
-    look.screen.cam_ring = Some(crate::settings::appearance::CamRing { width: 0.04, color: [1, 2, 3] });
+    look.screen.cam_ring = Some(crate::settings::appearance::CamRing {
+        width: 0.04,
+        color: [1, 2, 3],
+    });
     let mut s = Settings::default();
-    s.layout_presets = vec![LayoutPreset { id: "p1".into(), name: "Bold".into(), appearance: look.clone() }];
+    s.layout_presets = vec![LayoutPreset {
+        id: "p1".into(),
+        name: "Bold".into(),
+        appearance: look.clone(),
+    }];
     let json = serde_json::to_string(&s).unwrap();
     let back: Settings = serde_json::from_str(&json).unwrap();
     assert_eq!(back, s);
@@ -100,15 +101,10 @@ fn layout_presets_round_trip_and_default_empty() {
 
 #[test]
 fn interface_effects_defaults_on_and_round_trips() {
-    // (a) the default is ON - the feature ships enabled.
     assert!(InterfaceSettings::default().interface_effects);
-    // (b) an InterfaceSettings whose JSON predates the field still loads ON, which is the whole
-    //     point of the `#[serde(default = "default_true")]`: `bool::default()` would be `false`.
     let ui: InterfaceSettings = serde_json::from_str("{\"theme\":\"dark\"}").unwrap();
     assert_eq!(ui.theme, ThemeMode::Dark);
     assert!(ui.interface_effects);
-    // (c) an explicit `false` survives a full Settings round-trip - a user who turns it off keeps
-    //     it off across a restart (the field is not swallowed by the container default).
     let mut s = Settings::default();
     s.ui.interface_effects = false;
     let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
@@ -118,12 +114,25 @@ fn interface_effects_defaults_on_and_round_trips() {
 
 #[test]
 fn camera_smoothing_ms_round_trips_into_zoom_config() {
-    // (a) a JSON ZoomSettings missing the field deserializes with 0.
     let z: ZoomSettings = serde_json::from_str("{}").unwrap();
     assert_eq!(z.camera_smoothing_ms, 0);
     assert_eq!(z.to_zoom_config().smoothing_ms, 0);
 
-    // (b) an explicit value carries through to_zoom_config unchanged.
-    let z = ZoomSettings { camera_smoothing_ms: 120, ..ZoomSettings::default() };
+    let z = ZoomSettings {
+        camera_smoothing_ms: 120,
+        ..ZoomSettings::default()
+    };
     assert_eq!(z.to_zoom_config().smoothing_ms, 120);
+}
+
+#[test]
+fn the_pointer_replay_is_off_until_the_user_asks_for_it() {
+    assert!(!InterfaceSettings::default().ai_choreography);
+}
+
+#[test]
+fn a_config_written_before_this_setting_existed_loads_with_it_off() {
+    let s: InterfaceSettings =
+        serde_json::from_str(r#"{"theme":"dark","accent":[1,2,3],"animated_brand":true}"#).unwrap();
+    assert!(!s.ai_choreography);
 }

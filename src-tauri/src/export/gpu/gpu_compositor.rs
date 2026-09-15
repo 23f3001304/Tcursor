@@ -1,26 +1,24 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
 use crate::export::gpu::compositor::Compositor;
+use crate::export::gpu::gpu_uniforms::{build_uniforms, Uniforms};
 use crate::export::gpu::Gpu;
-use crate::export::gpu::gpu_uniforms::build_uniforms;
 use crate::export::scene::Scene;
 use crate::export::types::{Camera, Layout};
-
-#[path = "gpu_compositor_tex.rs"]
-mod gpu_compositor_tex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use wgpu::util::DeviceExt;
 
 struct CompositorResources {
     sw: u32,
     sh: u32,
     ww: u32,
     wh: u32,
-    screen_y_tex: wgpu::Texture,   // nv12 Y plane (R8, sw x sh)
-    screen_uv_tex: wgpu::Texture,  // nv12 interleaved UV (Rg8, sw/2 x sh/2)
+    screen_y_tex: wgpu::Texture,
+    screen_uv_tex: wgpu::Texture,
     webcam_tex: wgpu::Texture,
     bg_tex: wgpu::Texture,
     ubuf: wgpu::Buffer,
     bind: wgpu::BindGroup,
-    bg_key: Option<u64>, // content key of the uploaded background (None = nothing uploaded yet)
+    bg_key: Option<u64>,
 }
 
 pub struct GpuCompositor {
@@ -28,38 +26,40 @@ pub struct GpuCompositor {
     out_w: u32,
     out_h: u32,
     res: Mutex<Option<CompositorResources>>,
-    /// Does `bg` change every frame (a video/GIF background)? See `set_bg_dynamic`.
     bg_dynamic: AtomicBool,
 }
 
 impl GpuCompositor {
     pub fn new(out_w: u32, out_h: u32) -> Option<GpuCompositor> {
-        Some(GpuCompositor { gpu: Gpu::new(out_w, out_h)?, out_w, out_h,
-            res: Mutex::new(None), bg_dynamic: AtomicBool::new(false) })
+        Some(GpuCompositor {
+            gpu: Gpu::new(out_w, out_h)?,
+            out_w,
+            out_h,
+            res: Mutex::new(None),
+            bg_dynamic: AtomicBool::new(false),
+        })
     }
 }
 
 impl Compositor for GpuCompositor {
     fn composite_into(
         &self,
-        screen: &[u8], sw: u32, sh: u32,
+        screen: &[u8],
+        sw: u32,
+        sh: u32,
         webcam: Option<(&[u8], u32, u32)>,
-        cam: Camera, bg: &[u8],
+        cam: Camera,
+        bg: &[u8],
         layout: &Layout,
         scene: &Scene,
         out: &mut Vec<u8>,
     ) {
         let (ow, oh) = (self.out_w, self.out_h);
-        // No raw-copy fast-path here: `screen` is nv12, so it always needs the shader's color
-        // convert (a raw passthrough would emit nv12 bytes as bgra). The GPU pass is cheap anyway.
         let g = &self.gpu;
         let (wc_data, ww, wh) = webcam.unwrap_or((&[0u8; 4], 1, 1));
         let u = build_uniforms(scene, cam, layout, webcam.map(|(_, w, h)| (w, h)), (sw, sh));
-        // Hashed BEFORE the lock: it is a strided read over the whole ~8 MB background (~0.1-0.3 ms,
-        // cache-miss bound), and nothing about it needs the cached resources. Skipped entirely for a
-        // dynamic (video) background, which re-uploads either way - so the hash would be pure cost.
         let dynamic = self.bg_dynamic.load(Ordering::Relaxed);
-        let key = (!dynamic).then(|| gpu_compositor_tex::bg_key(bg));
+        let key = (!dynamic).then(|| bg_key(bg));
 
         let mut lock = self.res.lock().unwrap();
         let rebuild = match lock.as_ref() {
@@ -68,21 +68,15 @@ impl Compositor for GpuCompositor {
         };
 
         if rebuild {
-            *lock = Some(gpu_compositor_tex::build_resources(g, sw, sh, ww, wh, ow, oh, &u));
+            *lock = Some(build_resources(g, sw, sh, ww, wh, ow, oh, &u));
         }
 
         let r = lock.as_mut().unwrap();
-        // Upload the nv12 screen: Y plane (R8, full res) then interleaved UV (Rg8, half res).
         let y_size = (sw * sh) as usize;
         g.update_tex_bpp(&r.screen_y_tex, &screen[..y_size], sw, sh, 1);
         g.update_tex_bpp(&r.screen_uv_tex, &screen[y_size..], sw / 2, sh / 2, 2);
         g.update_tex(&r.webcam_tex, wc_data, ww, wh);
-        // Re-upload whenever the background's CONTENT changed, not just its dimensions: an edit
-        // (colour/blur/kind) rebuilds `bg` at the same size, and a dimension-only check threw
-        // every rebuilt buffer away, so the warm preview kept showing the old background. A VIDEO
-        // background changes every frame and cannot be decided by the sampled key at all - see
-        // `gpu_compositor_tex::should_upload`.
-        if gpu_compositor_tex::should_upload(r.bg_key != key, dynamic) {
+        if should_upload(r.bg_key != key, dynamic) {
             g.update_tex(&r.bg_tex, bg, ow, oh);
             r.bg_key = key;
         }
@@ -110,8 +104,10 @@ impl Compositor for GpuCompositor {
         }
         enc.copy_texture_to_buffer(
             wgpu::ImageCopyTexture {
-                texture: &g.out_tex, mip_level: 0,
-                origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All,
+                texture: &g.out_tex,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
             },
             wgpu::ImageCopyBuffer {
                 buffer: &g.readback,
@@ -121,7 +117,11 @@ impl Compositor for GpuCompositor {
                     rows_per_image: Some(oh),
                 },
             },
-            wgpu::Extent3d { width: ow, height: oh, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width: ow,
+                height: oh,
+                depth_or_array_layers: 1,
+            },
         );
         g.queue.submit(Some(enc.finish()));
 
@@ -135,9 +135,6 @@ impl Compositor for GpuCompositor {
         {
             let data = slice.get_mapped_range();
             if padded == unpadded {
-                // No row padding (true whenever `ow*4` is 256-aligned, i.e. every standard output
-                // width) - one contiguous copy instead of `oh` bounds-checked row copies, which is
-                // a real per-frame saving in debug where each row slice is bounds-checked.
                 out.extend_from_slice(&data[..unpadded * oh as usize]);
             } else {
                 out.resize(unpadded * oh as usize, 0);
@@ -150,9 +147,99 @@ impl Compositor for GpuCompositor {
         g.readback.unmap();
     }
 
-    /// Latch whether the background moves. Relaxed ordering: it is set from the render thread
-    /// before the frames it applies to, and read by the same thread that composites them.
-    fn set_bg_dynamic(&self, dynamic: bool) { self.bg_dynamic.store(dynamic, Ordering::Relaxed); }
+    fn set_bg_dynamic(&self, dynamic: bool) {
+        self.bg_dynamic.store(dynamic, Ordering::Relaxed);
+    }
+}
+
+fn bg_key(bg: &[u8]) -> u64 {
+    const FNV: u64 = 0x100000001b3;
+    let mut h = (0xcbf29ce484222325u64 ^ bg.len() as u64).wrapping_mul(FNV);
+    let words = bg.len() / 4;
+    for i in (0..words).step_by((words / 4096).max(1)) {
+        let w = u32::from_le_bytes([bg[i * 4], bg[i * 4 + 1], bg[i * 4 + 2], bg[i * 4 + 3]]);
+        h = (h ^ w as u64).wrapping_mul(FNV);
+    }
+    h
+}
+
+fn should_upload(key_changed: bool, dynamic: bool) -> bool {
+    key_changed || dynamic
+}
+
+fn build_resources(
+    g: &Gpu,
+    sw: u32,
+    sh: u32,
+    ww: u32,
+    wh: u32,
+    ow: u32,
+    oh: u32,
+    u: &Uniforms,
+) -> CompositorResources {
+    let screen_y_tex = g.create_tex_fmt("screen_y", sw, sh, wgpu::TextureFormat::R8Unorm);
+    let screen_uv_tex = g.create_tex_fmt(
+        "screen_uv",
+        (sw / 2).max(1),
+        (sh / 2).max(1),
+        wgpu::TextureFormat::Rg8Unorm,
+    );
+    let webcam_tex = g.create_tex("webcam", ww, wh);
+    let bg_tex = g.create_tex("bg", ow, oh);
+    let ubuf = g
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("uniforms"),
+            contents: bytemuck::bytes_of(u),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+    let yv = screen_y_tex.create_view(&Default::default());
+    let uvv = screen_uv_tex.create_view(&Default::default());
+    let bv = bg_tex.create_view(&Default::default());
+    let wv = webcam_tex.create_view(&Default::default());
+    let bind = g.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("bind"),
+        layout: &g.bind_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&bv),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(&yv),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::TextureView(&uvv),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::TextureView(&wv),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::Sampler(&g.sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: ubuf.as_entire_binding(),
+            },
+        ],
+    });
+    CompositorResources {
+        sw,
+        sh,
+        ww,
+        wh,
+        screen_y_tex,
+        screen_uv_tex,
+        webcam_tex,
+        bg_tex,
+        ubuf,
+        bind,
+        bg_key: None,
+    }
 }
 
 #[cfg(test)]

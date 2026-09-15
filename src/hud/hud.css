@@ -21,7 +21,7 @@
   --e-inset-hi: inset 0 1px 0 rgba(255, 255, 255, 0.6);
   --e-fg: var(--fg); --e-dim: var(--muted);
 
-  /* The recording voice wave's ramp (src/lib/wave/ui/VoiceWave.tsx) - the only colour in the HUD
+  /* The recording voice wave's ramp (src/shared/wave/ui/VoiceWave.tsx) - the only colour in the HUD
      that is not the app accent, because the meter is the one element that reports rather than
      acts, and an accent-red wave beside the accent-red Stop button reads as a second button.
      Declared here rather than in wave.css so the two themes can carry different pairs. */
@@ -74,7 +74,12 @@ body { display: flex; align-items: flex-start; justify-content: center; overflow
   color: var(--fg); -webkit-user-select: none;
   font-family: "Inter Variable", -apple-system, "Segoe UI", system-ui, sans-serif;
   letter-spacing: -0.011em;
-  box-shadow: var(--e-inset-hi), var(--e-shadow-2);
+  /* Inset highlight only, no outer drop shadow: the HUD lives in a transparent window cut to the
+     card's own width plus 10px underneath, so a 40px blur (--e-shadow-2) had nowhere to fall and
+     was clipped into a hard-edged dim band under the card - the "artifact" the owner saw on the
+     desktop (2026-09-15). A floating card in a tight transparent window reads best with a
+     hairline and no shadow, the way Screen Studio's does. */
+  box-shadow: var(--e-inset-hi);
   animation: hud-in 0.36s cubic-bezier(0.22, 1, 0.36, 1) both;
   /* The bar's corners round into the pill's (and back) over the state swap, StateSwap.tsx. */
   transition: border-radius 0.26s cubic-bezier(0.22, 1, 0.36, 1);
@@ -179,19 +184,20 @@ body { display: flex; align-items: flex-start; justify-content: center; overflow
 .camoff { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--surface); color: var(--muted); }
 .camtoggle.wide .camoff svg { width: 28px; height: 28px; }
 
-/* Toggle row (cam/mic/sys/compat): one raised plane with four equal labelled segments, 1px
-   internal separators (border-doctrine: the GROUP gets the border/shadow, not each button). */
+/* Toggle row (cam/mic/sys/compat): one raised plane with four equal icon-only segments, 1px
+   internal separators (border-doctrine: the GROUP gets the border/shadow, not each button). The
+   name lives in the tooltip and the accessible label; an icon beside its own word read as noise. */
 .tog-row {
   display: flex; align-items: stretch; height: 42px; border-radius: 12px; background: var(--e-raised);
   border: 1px solid var(--e-line); box-shadow: var(--e-inset-hi); overflow: hidden; box-sizing: border-box;
 }
 .tog {
   flex: 1; border: none; border-left: 1px solid var(--e-line); cursor: pointer; padding: 0;
-  background: transparent; color: var(--e-dim); display: flex; align-items: center; justify-content: center; gap: 6px;
-  font: inherit; font-size: 12px; font-weight: 600; min-width: 0; transition: background 0.12s ease, color 0.12s ease;
+  background: transparent; color: var(--e-dim); display: flex; align-items: center; justify-content: center;
+  min-width: 0; transition: background 0.12s ease, color 0.12s ease;
 }
 .tog:first-child { border-left: none; }
-.tog svg { width: 16px; height: 16px; flex: none; }
+.tog svg { width: 18px; height: 18px; flex: none; }
 .tog:hover { background: var(--hover); color: var(--fg); }
 /* ON = a subtle accent-tinted fill + accent icon and label; OFF stays --e-dim on the plane. */
 .tog.on { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }

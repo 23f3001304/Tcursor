@@ -1,0 +1,79 @@
+import { type CSSProperties } from "react";
+import { IconPlus, IconMinus } from "@tabler/icons-react";
+
+export function NumberField({
+  value,
+  min = 0,
+  max,
+  step = 0.1,
+  unit = "s",
+  onChange,
+}: {
+  value: number;
+  min?: number;
+  max?: number;
+  step?: number;
+  unit?: string;
+  onChange: (v: number) => void;
+}) {
+  const increment = () => {
+    const nv = +(value + step).toFixed(2);
+    if (max === undefined || nv <= max) onChange(nv);
+  };
+  const decrement = () => {
+    const nv = +(value - step).toFixed(2);
+    if (nv >= min) onChange(nv);
+  };
+  const btn: CSSProperties = {
+    width: 26,
+    height: 26,
+    borderRadius: "var(--e-r-sm)",
+    border: "none",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    color: "var(--e-fg)",
+    flex: "none",
+  };
+  return (
+    <div className="e-numfield">
+      <button
+        type="button"
+        className="e-numstep"
+        onClick={decrement}
+        disabled={value <= min}
+        style={btn}
+        title={`Less (${step}${unit})`}
+        aria-label={`Less (${step}${unit})`}
+      >
+        <IconMinus size={13} />
+      </button>
+      <span
+        style={{
+          flex: 1,
+          minWidth: 0,
+          textAlign: "center",
+          color: "var(--e-fg)",
+          fontSize: 13,
+          fontWeight: 600,
+          fontVariantNumeric: "tabular-nums",
+          userSelect: "none",
+        }}
+      >
+        {value}
+        {unit && <span style={{ color: "var(--e-mut)", fontWeight: 500, marginLeft: 2 }}>{unit}</span>}
+      </span>
+      <button
+        type="button"
+        className="e-numstep"
+        onClick={increment}
+        disabled={max !== undefined && value >= max}
+        style={btn}
+        title={`More (${step}${unit})`}
+        aria-label={`More (${step}${unit})`}
+      >
+        <IconPlus size={13} />
+      </button>
+    </div>
+  );
+}

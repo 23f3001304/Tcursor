@@ -54,7 +54,7 @@ Runs `work` on the cached entry.
 
 ### Lock ordering vs. `edit::lock::doc_lock` (bug-sweep-2 Task 7 round 2)
 
-`reuse` and `build` (below) both call `edit::seed::load_or_seed`, which internally takes `edit::lock::doc_lock` for the span of any `edit.json` write it makes - so this establishes `gate -> doc_lock` ordering (never `cell -> doc_lock`, since `cell` is never held while `reuse`/`make`/`work` run - see above). The reverse (`doc_lock -> gate`) never occurs: nothing reachable from inside `doc_lock`'s critical section (`edit::seed`, `edit::seed_lock`, `edit::migrate`, `edit::ops::effects`) ever touches `WarmSlot`, `PreviewSession`, or `win::sys::proc::generate_once`'s lock. See `docs/api/src-tauri/src/edit/lock.md` for the full analysis.
+`reuse` and `build` (below) both call `edit::seed::load_or_seed`, which internally takes `edit::lock::doc_lock` for the span of any `edit.json` write it makes - so this establishes `gate -> doc_lock` ordering (never `cell -> doc_lock`, since `cell` is never held while `reuse`/`make`/`work` run - see above). The reverse (`doc_lock -> gate`) never occurs: nothing reachable from inside `doc_lock`'s critical section (`edit::seed`, `edit::migrate`, `edit::ops::effects`) ever touches `WarmSlot`, `PreviewSession`, or `process::proc::generate_once`'s lock. See `docs/api/src-tauri/src/edit/lock.md` for the full analysis.
 
 ### Panic behaviour (and why every lock recovers rather than unwraps)
 
@@ -121,7 +121,7 @@ Refreshes a cached entry so it can serve `folder` at `mtime`, or returns `None` 
 ## build
 
 ```rust
-fn build(folder: &str, mtime: Option<SystemTime>, paths: &ProjectPaths) -> Result<Cached, String>
+fn build(folder: &str, mtime: Option<SystemTime>, paths: &ProjectPaths, system: &dyn SystemPort) -> Result<Cached, String>
 ```
 
 Builds a cold entry: reads the doc's `aspect` (so the entry is keyed by what it was actually built for) and calls `mod.rs`'s `build_renderer`, i.e. `FrameRenderer::new` - the expensive path (event-log decode, ffprobe/ffmpeg subprocesses, wgpu pipelines, cursor-pack prep). Runs as `WarmSlot::with`'s `make`, so no cache lock is held while it does any of that.
@@ -129,7 +129,7 @@ Builds a cold entry: reads the doc's `aspect` (so the entry is keyed by what it 
 ## with_warm
 
 ```rust
-pub(crate) fn with_warm<T>(session: &PreviewSession, folder: &str,
+pub(crate) fn with_warm<T>(session: &PreviewSession, system: &dyn SystemPort, folder: &str,
     f: impl FnOnce(&mut Cached, &ProjectPaths) -> Result<T, String>) -> Result<T, String>
 ```
 
@@ -140,3 +140,20 @@ Every caller is an `async` command running under `tauri::async_runtime::spawn_bl
 ### Implementation
 
 Resolves `paths` and stamps `edit.json`'s `mtime`, then hands three closures to `session.slot.with`: `reuse`, `build`, and a wrapper around `f` that first stores `renderer.has_webcam()` into the session's atomic (keeping `has_webcam`'s lock-free snapshot current on every warm-renderer touch).
+
+`system` is threaded through to `build` only: the warm path never touches it, because a cached renderer has already read the two desktop facts it needs. It is a `&dyn SystemPort` rather than a `Platform` so this cache declares the one capability the renderer build depends on.
+
+## with_warm_app
+
+```rust
+pub(crate) fn with_warm_app<T>(app: &tauri::AppHandle, folder: &str,
+    f: impl FnOnce(&mut Cached, &ProjectPaths) -> Result<T, String>) -> Result<T, String>
+```
+
+`with_warm` for a Tauri command: resolves `PreviewSession` and `Arc<Platform>` off the `AppHandle` and forwards `platform.system.as_ref()`.
+
+*Why it exists.* Every one of the eight preview commands already did `app.state::<PreviewSession>()` itself, and Batch D would have made each of them resolve a second managed state and reach a field off it - the same four lines, eight times, each an opportunity to hand the wrong port down. One helper is also the only place that has to change if the bundle's shape does. The port-shaped `with_warm` stays for anything that is not a command.
+
+### Used by
+
+`preview_frame`, `preview_bg` (`mod.rs`), `camera_track`, `preview_layout`, `click_track` (`preview_track.rs`), `preview_layouts`, `cursor_kinds` (`cursorpreview.rs`), `detect_silences` (`pipeline/silence.rs`). Where those docs say "inside `with_warm`", this is what they go through.

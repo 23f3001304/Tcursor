@@ -1,6 +1,6 @@
 # src-tauri/src/export/spring.rs
 
-A real damped harmonic oscillator behind `Easing::Spring`, plus its wire form `spring(stiffness,damping[,mass])`. Mirrored in TS by `src/lib/spring.ts` (`lib/spring.md`); the export is the source of truth and the preview follows it.
+A real damped harmonic oscillator behind `Easing::Spring`, plus its wire form `spring(stiffness,damping[,mass])`. Mirrored in TS by `src/shared/math/spring.ts` (`shared/math/spring.md`); the export is the source of truth and the preview follows it.
 
 **What this replaced.** `camera::ease` used to match `Easing::Spring { .. }` and evaluate a fixed ease-out-back curve (`k = 1.70158`), ignoring both fields - so the wire word "spring" meant one hard-coded shape and the stiffness/damping that `SPRING_DEFAULT` carried were decoration. The CurveEditor's Spring card drew a hand-authored cubic that was not that curve either. Now the fields are the physics, the wire carries them, and the card samples the same function the export evaluates.
 
@@ -22,7 +22,7 @@ Settle time is "the slowest decaying mode has fallen to `1e-3`" - `LN_EPS / sigm
 pub const PREFIX: &str = "spring(";
 ```
 
-The wire prefix, mirrored by `SPRING_PREFIX` in `src/lib/spring.ts`.
+The wire prefix, mirrored by `SPRING_PREFIX` in `src/shared/math/spring.ts`.
 
 ## STIFFNESS
 
@@ -152,5 +152,5 @@ The canonical wire string: fixed 3-decimal fields and always all three, so a val
 - `critical_and_overdamped_are_monotone` (unit test): 2000 samples never go backwards.
 - `the_shape_depends_on_the_damping_ratio_alone` (unit test): `spring(170,26)` == `spring(680,52)` at every sampled `p`.
 - `params_are_clamped_and_zero_damping_still_settles` (unit test): damping 0 produces a finite curve that rings past 1.5 rather than a NaN or an infinite window.
-- `wire_form_round_trips_and_defaults_mass` (unit test) and `parity_table_matches_the_ts_mirror` (unit test): the second is the contract with `src/lib/spring.test.ts` - the same 9 values per parameter set, to 1e-4, on both sides.
+- `wire_form_round_trips_and_defaults_mass` (unit test) and `parity_table_matches_the_ts_mirror` (unit test): the second is the contract with `src/shared/math/spring.test.ts` - the same 9 values per parameter set, to 1e-4, on both sides.
 - `fromedit_spring_tests.rs`: the wire end to end - `easing_from("spring")` reaching `camera::ease`, a parameterised spring overshooting further than a near-critical one, and a real `LayoutTrack` transition extrapolating past its destination scene by an amount that tracks the damping ratio.

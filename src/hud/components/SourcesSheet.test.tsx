@@ -1,25 +1,56 @@
+// @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { SourcesSheet } from "./SourcesSheet";
 
-// jsdom has no matchMedia; Motion asks for it.
-vi.stubGlobal("matchMedia", () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }));
+vi.stubGlobal("matchMedia", () => ({
+  matches: false,
+  addEventListener() {},
+  removeEventListener() {},
+  addListener() {},
+  removeListener() {},
+}));
 
 const base: Parameters<typeof SourcesSheet>[0] = {
-  targets: [{ id: "d1", label: "Built-in (2560x1600, Primary)" }, { id: "d2", label: "DELL U2720Q (3840x2160)" }],
-  displayId: "d1", onTarget: vi.fn(),
-  cameras: [{ id: "c1", label: "FaceTime HD" }, { id: "c2", label: "Link 2C" }], camId: "c1", onCam: vi.fn(),
-  mics: [{ id: "m1", label: "Built-in" }, { id: "m2", label: "Yeti" }], micId: "m1", onMic: vi.fn(),
-  menu: null, onMenu: vi.fn(), sheet: false, onSheet: vi.fn(),
+  targets: [
+    { id: "d1", label: "Built-in (2560x1600, Primary)" },
+    { id: "d2", label: "DELL U2720Q (3840x2160)" },
+  ],
+  displayId: "d1",
+  onTarget: vi.fn(),
+  cameras: [
+    { id: "c1", label: "FaceTime HD" },
+    { id: "c2", label: "Link 2C" },
+  ],
+  camId: "c1",
+  onCam: vi.fn(),
+  mics: [
+    { id: "m1", label: "Built-in" },
+    { id: "m2", label: "Yeti" },
+  ],
+  micId: "m1",
+  onMic: vi.fn(),
+  menu: null,
+  onMenu: vi.fn(),
+  sheet: false,
+  onSheet: vi.fn(),
 };
 
-let host: HTMLDivElement; let root: Root;
-beforeEach(() => { host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host); });
-afterEach(() => { act(() => root.unmount()); host.remove(); vi.clearAllMocks(); });
+let host: HTMLDivElement;
+let root: Root;
+beforeEach(() => {
+  host = document.createElement("div");
+  document.body.appendChild(host);
+  root = createRoot(host);
+});
+afterEach(() => {
+  act(() => root.unmount());
+  host.remove();
+  vi.clearAllMocks();
+});
 const render = (p: Partial<typeof base> = {}) => act(() => root.render(<SourcesSheet {...base} {...p} />));
-// `.dd-label` is the row's own value line (a menu ITEM is `.dd-item-label`), so this is exactly
-// what the three rows are showing as selected.
+
 const labels = () => [...host.querySelectorAll(".dd-label")].map((e) => e.textContent);
 
 describe("SourcesSheet", () => {

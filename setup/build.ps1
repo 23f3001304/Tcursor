@@ -12,7 +12,11 @@ Push-Location $root
 try { npm run tauri build } finally { Pop-Location }
 
 Write-Host "[2/3] Staging NSIS payload..." -ForegroundColor Cyan
-$nsis = Get-ChildItem "$root\src-tauri\target\release\bundle\nsis\TCursor_*_x64-setup.exe" -ErrorAction SilentlyContinue |
+# The main crate's target dir is not the default: src-tauri\.cargo\config.toml moves it to a short
+# path so whisper.cpp's Vulkan shader build stays under the Windows path limit. Ask cargo.
+Push-Location "$root\src-tauri"
+try { $target = (cargo metadata --format-version 1 --no-deps | ConvertFrom-Json).target_directory } finally { Pop-Location }
+$nsis = Get-ChildItem "$target\release\bundle\nsis\TCursor_*_x64-setup.exe" -ErrorAction SilentlyContinue |
   Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if (-not $nsis) { throw "NSIS installer not found - did step 1 succeed?" }
 New-Item -ItemType Directory -Force -Path "$setup\src-tauri\assets" | Out-Null
@@ -22,7 +26,7 @@ Write-Host ("    payload: {0} ({1:N1} MB)" -f $nsis.Name, ($nsis.Length / 1MB))
 # The Setup window measures the install by polling the destination folder, so it needs to know how
 # many bytes to expect. build.rs reads that from the bundler's own ESTIMATEDSIZE in the generated
 # NSIS script; this is the documented fallback for a tree where that staging folder was pruned.
-$nsi = "$root\src-tauri\target\release\nsis\x64\installer.nsi"
+$nsi = "$target\release\nsis\x64\installer.nsi"
 if (Test-Path $nsi) {
   $kb = (Select-String -Path $nsi -Pattern '^\s*!define ESTIMATEDSIZE "(\d+)"').Matches[0].Groups[1].Value
   $env:TCURSOR_INSTALL_BYTES = [string]([int64]$kb * 1024)

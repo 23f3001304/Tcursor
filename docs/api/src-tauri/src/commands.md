@@ -6,17 +6,22 @@ Miscellaneous Tauri commands that do not belong to a specific subsystem. Covers 
 
 ```rust
 #[derive(Serialize)]
-pub struct DisplayInfo { pub id: u32, pub label: String }
+pub struct DisplayInfo {
+    pub id: String,
+    pub label: String,
+    pub kind: String,
+}
 ```
 
-Serializable descriptor for one display, returned by `list_displays`.
+Serializable descriptor for one capture target, returned by `list_displays`.
 
-- `id: u32` - numeric display identifier. *Why u32:* sufficient for current use; only the primary display (id 0) is returned today.
+- `id: String` - the target's wire id, the string form of `ports::capture::TargetId` (`display:N` or `window:0x...`), which `start_recording`, `get_target_bounds` and `switch_display` parse back through `TargetId::from_arg`; an unparseable id resolves to the primary display, so the HUD can never pick a target the recorder cannot open.
 - `label: String` - human-readable name shown in the frontend device picker. For a display the size and primary flag ride on the end as `(WxH, Primary)`, `(Primary)` or `(WxH)`; the HUD's `parseTarget` splits them back out (the map in `TargetSheet` draws each monitor to scale from the size).
+- `kind: String` - `"display"` or `"window"`, the `TargetKind` the picker groups by.
 
 ### Used by
 
-- `src-tauri/src/commands.rs` - constructed and returned by `list_displays`.
+- `src-tauri/src/commands.rs` - constructed and returned by `list_displays`, from the Windows capture adapter's enumeration (`platform/windows/capture/target.md`).
 
 ## AudioInfo
 
@@ -38,22 +43,26 @@ Serializable descriptor for one audio input device, returned by `list_audio_inpu
 
 ```rust
 #[tauri::command]
-pub fn list_displays() -> Vec<DisplayInfo>
+pub fn list_displays(platform: tauri::State<'_, Arc<Platform>>) -> Vec<DisplayInfo>
 ```
 
-Returns the list of available display captures.
+Everything the user can record, as the frontend's target picker wants it: every monitor, then every ordinary application window.
 
 ### Inputs
 
-None.
+- `platform: tauri::State<'_, Arc<Platform>>` - the adapter bundle, injected by Tauri, so the JS call is unchanged.
 
 ### Returns
 
-A `Vec<DisplayInfo>` always containing one entry: `{ id: 0, label: "Primary Display" }`. *Why hardcoded:* TCursor currently captures the primary display only; multi-monitor support would expand this list.
+A `Vec<DisplayInfo>` whose `id` is a `ports::capture::TargetId` rendered back to a string (`display:N`, `window:0x<hex>`) and whose `kind` is `"display"` or `"window"`. Never empty on Windows: when no monitor enumerates at all, a single synthetic `display:0` "Primary Display" entry stands in so the picker has something to show, and the windows are appended after it either way.
 
 ### Implementation
 
-Returns a literal `vec![DisplayInfo { id: 0, label: "Primary Display".into() }]`. No OS query is performed.
+`platform.capture.list_targets()`, mapped down from `CaptureTarget` to `DisplayInfo`. The enumeration itself - `Monitor::enumerate` for the displays, `EnumWindows` + `GetWindowLongW` + `GetWindowTextW` for the windows, and the filter that drops tool windows, untitled windows, `Program Manager`, `Settings`, `TCursor` itself and the `MSCTFIME` IME host - lives in `platform/windows/capture/target.rs`, behind the adapter. It used to live here, with the `Monitor::enumerate` call UNGATED, which is one of the two reasons this file did not compile off Windows (`docs/cross-platform-architecture.md`, section 2.4).
+
+There is no `#[cfg]` left in this command and no non-Windows fallback list: Batch D deleted both. `Platform` is whatever `platform::current()` built, so the answer comes from an adapter on every target, and a target with no adapter never gets this far.
+
+*Why the command and not `Win32Capture::list_targets` owns the `DisplayInfo` conversion:* the port speaks `CaptureTarget`, the frontend speaks `DisplayInfo`, and the conversion belongs at the Tauri boundary. Before Batch C1 it ran the other way - the adapter re-parsed the id string the command had just formatted - which is exactly the round trip a typed `TargetId` is meant to delete.
 
 ## list_audio_inputs
 
@@ -78,29 +87,6 @@ A `Vec<AudioInfo>` of all cpal input devices on the default host, or an empty ve
 2. Call `host.input_devices()`. On error, return `unwrap_or_default()` (empty vec). *Why not propagate the error:* a missing cpal host is non-fatal; the frontend falls back to showing no mic options.
 3. For each device, call `d.name().ok()?` - silently skip devices with unparseable names. Construct `AudioInfo { id: name.clone(), label: name }`.
 
-## save_webcam
-
-```rust
-#[tauri::command]
-pub fn save_webcam(folder: String, bytes: Vec<u8>) -> Result<(), String>
-```
-
-Writes a raw webcam blob (webm) sent from the frontend to disk.
-
-### Inputs
-
-- `folder: String` - project folder path, as returned by `stop_recording`. *Why String not Path:* Tauri commands serialize all arguments from JSON; `String` is the natural wire type.
-- `bytes: Vec<u8>` - the raw `.webm` bytes captured by the browser MediaRecorder API. *Why Vec<u8>:* the frontend sends the blob as a byte array over the Tauri IPC bridge; no encoding conversion is needed.
-
-### Returns
-
-`Ok(())` on success. `Err(String)` with the `io::Error` message on write failure.
-
-### Implementation
-
-1. Construct `path = Path::new(&folder).join("webcam.webm")`. *Why a fixed filename:* matches `ProjectPaths::webcam()`, so the exporter can locate the file via `ProjectPaths` without re-querying the frontend.
-2. Call `std::fs::write(path, bytes)`. Map error to `String`.
-
 ## append_webcam
 
 ```rust
@@ -108,7 +94,7 @@ Writes a raw webcam blob (webm) sent from the frontend to disk.
 pub fn append_webcam(folder: String, bytes: Vec<u8>, segment: Option<u32>) -> Result<(), String>
 ```
 
-Appends one `MediaRecorder` chunk to this take's webcam file DURING recording, so Stop has almost nothing left to write instead of one O(clip-length) blob. This is what the HUD actually uses; `save_webcam` above is the unused one-shot entry point.
+Appends one `MediaRecorder` chunk to this take's webcam file DURING recording, so Stop has almost nothing left to write instead of one O(clip-length) blob. This is what the HUD uses; the one-shot `save_webcam` it superseded (a registered command with a wrapper and no caller) was removed in the cleanup of 2026-09-15.
 
 ### Inputs
 
@@ -195,7 +181,7 @@ Persists a new settings value.
 
 ```rust
 #[tauri::command]
-pub fn set_capturable(app: tauri::AppHandle, capturable: bool) -> bool
+pub fn set_capturable(app: tauri::AppHandle, capturable: bool, platform: tauri::State<'_, Arc<Platform>>) -> bool
 ```
 
 Toggles whether the app window appears in screen capture / screenshots.
@@ -204,12 +190,13 @@ Toggles whether the app window appears in screen capture / screenshots.
 
 - `app: tauri::AppHandle` - injected by Tauri; used to resolve the `"main"` webview window so the affinity is set on the exact `HWND` the startup exclusion used. *Why the app handle, not the calling window:* guarantees no window-handle mismatch with the startup exclusion.
 - `capturable: bool` - true to make the window visible to capture (the editor), false to hide it (the HUD). *Why:* the HUD is capture-excluded so it never shows in recordings; the editor opts back in so it can be screenshotted.
+- `platform: tauri::State<'_, Arc<Platform>>` - the adapter bundle; `platform.system` is what sets the affinity and reads it back. Injected, so the JS call is unchanged.
 
 ### Returns
 
-`bool` - the result of `set_capture_exclusion` (true on success), or `false` if the window/`HWND` is unavailable or on non-Windows.
+`bool` - whether the window NOW HAS the requested affinity, read back by the adapter rather than assumed, or `false` if the window or its handle is unavailable and on any platform with no such facility.
 
 ### Implementation
 
-1. (Windows) `app.get_webview_window("main")` -> `win.hwnd()` -> `win::capture_exclusion::set_capture_exclusion(hwnd, !capturable)` (capturable inverts exclude).
-2. (non-Windows) discard the args and return `false`.
+1. `app.get_webview_window("main")` -> `shell::window::handle(&win)` -> `platform.system.exclude_from_capture(handle, !capturable)` (capturable inverts exclude).
+2. `None` at either step returns `false`. There is no `#[cfg]` left in this command: Batch C3 pushed the handle resolution down into `shell::window::handle`, taking the window as a parameter so Studio's launcher window can use the same path, and Batch D replaced the transitional `platform::exclude_from_capture` free function with the port.

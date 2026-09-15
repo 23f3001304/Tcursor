@@ -12,7 +12,7 @@ pub struct AudioLevel { pub source: &'static str, pub rms: f32 }
 One live reading, emitted to the frontend as `audio-level` roughly every 50ms per open source.
 
 - `source` - `"mic"` or `"system"`, which capture produced it.
-- `rms` - 0..1. The raw measurement, never a display value: the HUD does its own dB mapping (`src/lib/wave/math/level.ts`), so the two sides can be tuned independently and neither has to guess what the other assumed.
+- `rms` - 0..1. The raw measurement, never a display value: the HUD does its own dB mapping (`src/shared/wave/math/level.ts`), so the two sides can be tuned independently and neither has to guess what the other assumed.
 
 ## block_rms_f32
 

@@ -1,9 +1,16 @@
+// @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { IdleCard } from "./IdleCard";
 
-vi.stubGlobal("matchMedia", () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }));
+vi.stubGlobal("matchMedia", () => ({
+  matches: false,
+  addEventListener() {},
+  removeEventListener() {},
+  addListener() {},
+  removeListener() {},
+}));
 
 const targets = [
   { id: "display:0", label: "Display 1: \\\\.\\DISPLAY1 (2560x1440, Primary)", kind: "display" },
@@ -11,18 +18,48 @@ const targets = [
   { id: "window:0x1", label: "App: Notepad", kind: "window" },
 ];
 const base: Parameters<typeof IdleCard>[0] = {
-  banner: null, exporting: false, pct: 0,
-  onOpenProject: vi.fn(), onPreferences: vi.fn(), onSettings: vi.fn(), onMinimize: vi.fn(), onClose: vi.fn(),
-  camRef: () => {}, camLive: false, cameras: [{ id: "c1", label: "Insta360" }], camId: "c1", onCam: vi.fn(),
-  targets, displayId: "display:0", onTarget: vi.fn(),
-  mics: [{ id: "m1", label: "Yeti X" }], micId: "m1", onMic: vi.fn(),
-  menu: null, onMenu: vi.fn(), sheet: false, onSheet: vi.fn(), panel: null, panelBody: null,
-  toggles: { camOn: true, micOn: true, sysOn: false, gameMode: false }, onToggle: vi.fn(), onRecord: vi.fn(),
+  banner: null,
+  exporting: false,
+  pct: 0,
+  onOpenProject: vi.fn(),
+  onPreferences: vi.fn(),
+  onSettings: vi.fn(),
+  onMinimize: vi.fn(),
+  onClose: vi.fn(),
+  camRef: () => {},
+  camLive: false,
+  cameras: [{ id: "c1", label: "Insta360" }],
+  camId: "c1",
+  onCam: vi.fn(),
+  targets,
+  displayId: "display:0",
+  onTarget: vi.fn(),
+  mics: [{ id: "m1", label: "Yeti X" }],
+  micId: "m1",
+  onMic: vi.fn(),
+  menu: null,
+  onMenu: vi.fn(),
+  sheet: false,
+  onSheet: vi.fn(),
+  panel: null,
+  panelBody: null,
+  toggles: { camOn: true, micOn: true, sysOn: false, gameMode: false },
+  onToggle: vi.fn(),
+  onRecord: vi.fn(),
 };
 
-let host: HTMLDivElement; let root: Root;
-beforeEach(() => { host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host); });
-afterEach(() => { act(() => root.unmount()); host.remove(); vi.clearAllMocks(); });
+let host: HTMLDivElement;
+let root: Root;
+beforeEach(() => {
+  host = document.createElement("div");
+  document.body.appendChild(host);
+  root = createRoot(host);
+});
+afterEach(() => {
+  act(() => root.unmount());
+  host.remove();
+  vi.clearAllMocks();
+});
 const render = (p: Partial<typeof base>) => act(() => root.render(<IdleCard {...base} {...p} />));
 const byTitle = (t: string) => host.querySelector<HTMLButtonElement>(`button[title="${t}"]`);
 
@@ -55,8 +92,6 @@ describe("IdleCard", () => {
     expect(base.onSheet).toHaveBeenLastCalledWith(false);
   });
 
-  // Settings/Preferences are a body state now, not a second window: the card, its header and the
-  // window stay exactly as they are, and the panel takes the body ahead of the display picker.
   it("a panel takes the card body, over the sheet, with the header still there", () => {
     render({ panel: "settings", panelBody: <div className="settings">panel</div>, sheet: true });
     expect(host.querySelector(".card-body .settings")?.textContent).toBe("panel");

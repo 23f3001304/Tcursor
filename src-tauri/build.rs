@@ -19,8 +19,14 @@ fn emit_wallpaper_table() {
     let mut found: Vec<(u8, String, &str, String)> = Vec::new(); // (group order, name, group, id)
     for entry in std::fs::read_dir(DIR).expect("read wallpapers dir") {
         let path = entry.expect("wallpaper dir entry").path();
-        if path.extension().and_then(|e| e.to_str()) != Some("jpg") { continue; }
-        let id = path.file_stem().expect("stem").to_string_lossy().to_string();
+        if path.extension().and_then(|e| e.to_str()) != Some("jpg") {
+            continue;
+        }
+        let id = path
+            .file_stem()
+            .expect("stem")
+            .to_string_lossy()
+            .to_string();
         let (order, group, rest) = match id.split_once('-') {
             Some(("folds", rest)) => (1, "Folds", rest),
             Some(("gradient", rest)) => (2, "Gradients", rest),
@@ -42,7 +48,8 @@ fn emit_wallpaper_table() {
         out.push_str(&format!("    Wallpaper {{ id: {id:?}, name: {name:?}, group: {group:?}, bytes: include_bytes!({src:?}) }},\n"));
     }
     out.push_str("];\n");
-    let dest = std::path::Path::new(&std::env::var("OUT_DIR").expect("OUT_DIR")).join("wallpapers_gen.rs");
+    let dest =
+        std::path::Path::new(&std::env::var("OUT_DIR").expect("OUT_DIR")).join("wallpapers_gen.rs");
     std::fs::write(&dest, out).expect("write wallpapers_gen.rs");
 }
 

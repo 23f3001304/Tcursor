@@ -1,6 +1,8 @@
 # src-tauri/src/capture/mod.rs
 
-MODULE OVERVIEW: The `capture` module defines the data types and interfaces for screen frame capture and delivers frames from the Windows Graphics Capture API to the encoder loop. It is structured around a clean producer-consumer split: `frame` defines the `Frame` struct that is the unit of data exchange, `frame_source` defines the `FrameSource` pull trait that the encoder drives, and `windows_capture` implements that trait on top of the WGC callback API by bridging WGC's push delivery into a synchronous mpsc channel. Row padding is stripped inside the WGC callback so all downstream consumers receive tightly-packed BGRA rows. Shutdown requires two coordinated steps - setting a halt handle and calling a one-shot stopper - to reliably exit the WGC thread without leaking it.
+MODULE OVERVIEW: The portable half of frame capture: the data type frames are exchanged as and the pull trait the encoder drives. `frame` defines the `Frame` struct (tight-packed BGRA plus a session-relative timestamp), and `frame_source` defines the `FrameSource` trait with a deterministic `FakeFrameSource` double, which is what lets `RecordingSession` be tested with no OS capture at all.
+
+The Windows implementation of `FrameSource` moved to `platform/windows/capture/legacy/wgc_source.rs` in Batch C1; nothing platform-specific is left in this folder, and Batch D deleted the `crate::capture::windows_capture` re-export that kept the old path resolving. `tests/manual_capture.rs`, its last caller, names the adapter path directly now, so what remains here compiles for any target.
 
 ## frame
 
@@ -9,7 +11,3 @@ Defines `Frame`, the fundamental unit of captured screen data: BGRA8 pixels with
 ## frame_source
 
 Defines the `FrameSource` pull trait for decoupling any capture backend from the encoder loop, and provides `FakeFrameSource` as a deterministic `VecDeque`-backed test double. Key items: `FrameSource` trait (`dimensions`, `next_frame` blocking pull, `drain_latest` non-blocking latest-frame pull), `FakeFrameSource::new` (constructs the test double from a `Vec<Frame>`).
-
-## windows_capture
-
-Bridges the Windows Graphics Capture API's callback-based frame delivery into the `FrameSource` pull interface via an internal mpsc channel, and handles two-phase shutdown via a halt handle and a one-shot stopper callable. Key items: `WgcFrameSource::for_primary_display` (creates a WGC capture session on the primary monitor and returns a ready `WgcFrameSource`), `WgcFrameSource::halt_handle` (returns the `Arc<AtomicBool>` for signaling stop from the main thread), `WgcFrameSource::take_stopper` (extracts the `WM_QUIT`-posting callable for coordinated WGC thread exit).

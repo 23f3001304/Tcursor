@@ -1,8 +1,7 @@
+// @vitest-environment jsdom
 import { describe, it, expect, vi } from "vitest";
 import { attachPointerGesture, type GestureTarget } from "./pointerGesture";
 
-/** A fake window-like target recording registered listeners per event type, so tests can dispatch
- *  a named event without a real DOM and assert exactly what's (still) registered afterward. */
 function fakeTarget(): GestureTarget & { dispatch(type: string): void; count(type: string): number } {
   const listeners = new Map<string, Set<(e: PointerEvent) => void>>();
   return {
@@ -52,8 +51,6 @@ describe("attachPointerGesture", () => {
   });
 
   it("pointercancel (no pointerup at all) ALSO calls onEnd and removes all three listeners - the exact fix", () => {
-    // Reproduces the round-2 bug: only pointerup was wired before, so a cancelled sequence left
-    // the gesture "stuck active" (its caller's drag flag never reset) and leaked both listeners.
     const target = fakeTarget();
     const onEnd = vi.fn();
     attachPointerGesture(vi.fn(), onEnd, target);
@@ -70,7 +67,7 @@ describe("attachPointerGesture", () => {
     attachPointerGesture(onMove, vi.fn(), target);
     target.dispatch("pointermove");
     target.dispatch("pointercancel");
-    target.dispatch("pointermove"); // should be a no-op now
+    target.dispatch("pointermove");
     expect(onMove).toHaveBeenCalledTimes(1);
   });
 
@@ -80,7 +77,6 @@ describe("attachPointerGesture", () => {
     attachPointerGesture(vi.fn(), onEnd, target);
     target.dispatch("pointerup");
     expect(() => target.dispatch("pointercancel")).not.toThrow();
-    // the second dispatch finds nothing registered (already removed), so onEnd isn't called again
     expect(onEnd).toHaveBeenCalledTimes(1);
   });
 

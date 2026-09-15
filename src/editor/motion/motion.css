@@ -1,0 +1,61 @@
+/* The motion graph's own surface, imported by MotionGraph.tsx (the only thing that draws it), so
+   these rules load with the editor but stay out of editor.css's shared vocabulary.
+
+   One accent per graph: `--m-accent` is the LANE's colour, the same token the region's timeline
+   pill and its inspector already borrow, so the curve belongs to the thing it edits. Everything
+   else is the panel's own quiet vocabulary - a dashed rail, a dim ghost, dim ticks - because the
+   only thing on this canvas that should catch the eye is the motion itself.
+
+   Sizes inside the svg are viewBox geometry, not type-scale sizes: the graph is drawn 320x140 and
+   laid out at whatever width the panel gives it, so a tick has to be 9 user units, not 11 px. */
+
+.e-mg { display: block; width: 100%; height: auto; margin-top: var(--e-sp-1);
+  border-radius: var(--e-r-sm); background: var(--e-surface-alt);
+  touch-action: none; user-select: none; outline: none; }
+.e-mg:focus-visible { box-shadow: 0 0 0 2px var(--e-line-strong); }
+
+.e-mg-zoom { --m-accent: var(--e-zoom); }
+.e-mg-layout { --m-accent: var(--e-layout); }
+.e-mg-cam { --m-accent: var(--e-cam); }
+
+/* Axes. Two rails only - rest and peak - because a motion curve has exactly two meaningful
+   values and a full grid would compete with the curve for the same pixels. */
+.e-mg-rail { stroke: var(--e-divider); stroke-width: 1; stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke; }
+.e-mg-tick { fill: var(--e-dim); font-size: 9px; font-weight: 500; }
+
+/* Phases: the ramps are shaded bands, the hold a flat dashed line between them. */
+.e-mg-band { fill: color-mix(in srgb, var(--m-accent) 8%, transparent); }
+.e-mg-hold { stroke: var(--m-accent); stroke-width: 1.5; stroke-dasharray: 4 3; opacity: .55;
+  vector-effect: non-scaling-stroke; }
+.e-mg-hint { fill: var(--e-dim); font-size: 9px; }
+
+/* The neighbours' handoffs, in the gutters outside the span: context, never content. */
+.e-mg-ghost { fill: none; stroke: var(--e-dim); stroke-width: 1.5; stroke-dasharray: 2 3;
+  opacity: .5; vector-effect: non-scaling-stroke; }
+
+.e-mg-curve { fill: none; stroke: var(--m-accent); stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+
+/* Keys. The dot is hollow until it is the selected one, so a glance says which key the arrow keys
+   will move without a second colour entering the picture. */
+.e-mg-arm { stroke: var(--e-line-strong); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.e-mg-h { fill: var(--e-mut); cursor: grab; transition: fill .12s ease; }
+.e-mg-h:hover { fill: var(--e-fg); }
+.e-mg-dot { fill: var(--e-surface-alt); stroke: var(--m-accent); stroke-width: 2;
+  cursor: grab; outline: none; transition: fill .12s ease; vector-effect: non-scaling-stroke; }
+.e-mg-dot:hover { fill: color-mix(in srgb, var(--m-accent) 45%, transparent); }
+.e-mg-key.on .e-mg-dot { fill: var(--m-accent); }
+.e-mg-dot:focus-visible { stroke: var(--e-fg); stroke-width: 3; }
+
+@media (prefers-reduced-motion: reduce) {
+  .e-mg-dot, .e-mg-h { transition: none; }
+}
+
+/* The preset row (`PresetRow.tsx`, matched by its aria-label since it is a plain Segmented): five
+   feel words plus Custom in the inspector's ~300px. A segment gives up its side padding and the
+   label one size step, so "Mechanical" and "Cinematic" keep their whole word rather than an
+   ellipsis, and the popover's 312px plane gets the same rule for free. */
+.e-segmented[aria-label="Motion preset"] .e-segment { padding: 0 2px; }
+.e-segmented[aria-label="Motion preset"] .e-segment-label {
+  font-size: calc(var(--e-text-hint-size) - 1px); letter-spacing: -0.01em; }

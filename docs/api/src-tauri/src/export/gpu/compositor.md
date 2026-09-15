@@ -41,7 +41,7 @@ Nothing (`()`). The impl resizes `out` to `out_w * out_h * 4` bytes and fully ov
 
 Tells the compositor whether `bg` now CHANGES every frame - that is, whether the background is a video/GIF asset (`export::scene::background::video_source` is the single answer to that question). Asserted by `FrameRenderer::new` and re-asserted by `reload_edit`, since an edit can flip a still background into a moving one and back.
 
-*Why it exists:* `GpuCompositor` caches `bg` in a texture and re-uploads only when a sampled content key changes (`gpu_compositor_tex::bg_key`, ~4096 strided pixels). A video frame that moves only a small region can hash equal to its predecessor, which would freeze the background on a stale upload. With this set, that path uploads unconditionally and skips computing the key at all.
+*Why it exists:* `GpuCompositor` caches `bg` in a texture and re-uploads only when a sampled content key changes (`gpu_compositor::bg_key`, ~4096 strided pixels). A video frame that moves only a small region can hash equal to its predecessor, which would freeze the background on a stale upload. With this set, that path uploads unconditionally and skips computing the key at all.
 
 *Why a defaulted no-op rather than a required method:* `CpuCompositor` copies `bg` into its base buffer every frame regardless, so it has nothing to do - and a default keeps every existing implementation and test call site untouched.
 
@@ -108,3 +108,21 @@ pub fn select_compositor(layout: &Layout) -> Box<dyn Compositor>
 ```
 
 Returns a `GpuCompositor` when a GPU adapter is available and construction succeeds; otherwise a `CpuCompositor`. Never fails. Public so `render.rs`'s `FrameRenderer` (which serves both the export loop and the preview engine) selects the same compositor once at init and reuses it per frame.
+
+## blit_ring
+
+```rust
+fn blit_ring(dst: &mut [u8], dw: u32, dh: u32, pw: u32, ph: u32, ox: i32, oy: i32,
+             r: f32, ring_px: f32, ring_color: [u8; 3], a: f32)
+```
+
+Blends `ring_color` over `dst` in a band just inside the panel edge, width `ring_px`, weighted by the panel's alpha `a`. The band is `d in [-ring_px, 0]` of the same rounded-box SDF `rrect_sd_px` computes, which is the same formula and the same band the WGSL shader uses after its camera mix - that is what keeps the CPU and GPU paths drawing the same ring.
+
+`ox`/`oy` are SIGNED: a panel-local pixel whose destination lands off any edge (negative as well as `>= dw`/`>= dh`) is skipped, so an off-canvas panel clips to its visible sub-rect instead of translating onto the destination's corner.
+
+Destination bytes are BGRA; `ring_color` is RGB, hence the channel order in the three blends.
+
+### Used by
+
+- `draw_panel` in this file - the only caller, when `panel.ring_px > 0.0`.
+- `src-tauri/src/export/gpu/shader.wgsl` - the GPU twin of this blend; the two must stay in step.

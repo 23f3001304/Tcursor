@@ -50,5 +50,5 @@ One choosable tile. `children` is the face, which today is always a `GlyphPlate`
 
 ### Used by
 
-- `src/editor/panels/CursorPackGrid.tsx` - one tile per pack, with `GlyphPlate` as the face.
-- `src/editor/panels/WallpaperGrid.tsx` (`TileGrid`) - one tile per wallpaper or gradient preset, with a `.e-tile-img` span as the face.
+- `src/editor/panels/cursor/CursorPackGrid.tsx` - one tile per pack, with `GlyphPlate` as the face.
+- `src/editor/panels/background/WallpaperGrid.tsx` (`TileGrid`) - one tile per wallpaper or gradient preset, with a `.e-tile-img` span as the face.

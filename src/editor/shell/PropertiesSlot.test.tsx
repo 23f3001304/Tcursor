@@ -1,21 +1,33 @@
+// @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import type { EditDoc } from "../../lib/edit";
+import type { EditDoc } from "../../shared/edit";
 import { shellProps } from "./shellFixture";
 import type { SlotProps } from "./slotProps";
 import { PropertiesSlot, selectedClip } from "./PropertiesSlot";
 
-// Routing only: which inspector one selection opens. The inspectors' own controls are covered where
-// they live; what can silently rot here is the `sel`-to-inspector chain, since every new region kind
-// has to be added to the same ladder - and `selectedClip` is now also what decides whether the
-// sidebar exists at all, so a wrong answer collapses a column that should be open.
 const DOC = {
-  zooms: [{ id: "z0", start_ms: 0, end_ms: 1000, target: "cursor", scale: 2, easing: "smooth", zoom_in_ms: 350, zoom_out_ms: 450, layer: 0 }],
-  effects: [], layout: [], camera_moves: [],
+  zooms: [
+    {
+      id: "z0",
+      start_ms: 0,
+      end_ms: 1000,
+      target: "cursor",
+      scale: 2,
+      easing: "smooth",
+      zoom_in_ms: 350,
+      zoom_out_ms: 450,
+      layer: 0,
+    },
+  ],
+  effects: [],
+  layout: [],
+  camera_moves: [],
   cuts: [{ id: "c0", start_ms: 1000, end_ms: 2500 }],
   speed: [{ id: "s0", start_ms: 3000, end_ms: 5000, factor: 2 }],
-  aspect: "source", trim: { in_ms: 0, out_ms: 0 },
+  aspect: "source",
+  trim: { in_ms: 0, out_ms: 0 },
   settings: { ai_model: "", cursor: {}, clickfx: {}, zoom: {}, appearance: {}, ui: {} },
 } as unknown as EditDoc;
 
@@ -23,10 +35,11 @@ let root: Root, container: HTMLDivElement;
 const q = (s: string) => container.querySelector<HTMLElement>(s);
 const labels = () => [...container.querySelectorAll(".e-fl")].map((e) => e.textContent ?? "");
 
-const show = (sel: string | null) => act(() => {
-  const p = { ...shellProps({ doc: DOC, sel, dur: 10_000 }), onTab: () => {} } as SlotProps;
-  root.render(<PropertiesSlot p={p} />);
-});
+const show = (sel: string | null) =>
+  act(() => {
+    const p = { ...shellProps({ doc: DOC, sel, dur: 10_000 }), onTab: () => {} } as SlotProps;
+    root.render(<PropertiesSlot p={p} />);
+  });
 
 beforeEach(() => {
   (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -34,10 +47,13 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
 });
-afterEach(() => { act(() => { root.unmount(); }); container.remove(); });
+afterEach(() => {
+  act(() => {
+    root.unmount();
+  });
+  container.remove();
+});
 
-// The pure half of "the sidebar collapses when nothing is selected": `ClassicShell` mounts the
-// aside exactly while this is non-null, so these cases ARE the collapsed/arrived states.
 describe("selectedClip (what the sidebar exists for)", () => {
   it("is null with no selection at all, which is the collapsed sidebar", () => {
     expect(selectedClip(DOC, null)).toBeNull();

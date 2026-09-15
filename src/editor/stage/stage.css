@@ -14,17 +14,26 @@
         transport's right group with the other chips.
      4. Rail buttons name themselves (`.e-tip`) and light up under the pointer.
      5. `.e-tbtn`/`.e-chip` lost their gradient + hover lift: in a bar where Play is the hero,
-        eight secondary controls should not each rise off the surface when touched. */
+        eight secondary controls should not each rise off the surface when touched.
+
+   The laptop density pass (2026-09-15) then put the rail's width, every control height and every
+   font-size in this sheet onto the editor's `--e-rail-*`/`--e-ctl-*`/`--e-text-*` rungs, which are
+   steps and `calc()`s of `--e-density` (`shell/density.ts`). The ONE thing here that deliberately
+   does not scale is the stage's own overlay geometry in editor.css (the drag handle, the reticle,
+   the arrange frames): those are drawn over the composited VIDEO at a size that has to stay
+   grabbable, not chrome sized against the type. Point 2 still holds at every density - nothing
+   floats over the preview, so a narrower window takes width from the columns, never from it. */
 
 /* ---- Rail -------------------------------------------------------------------------------------
    Floating sidebar: sits above the canvas with space around it (not edge-to-edge). Surface plane,
    no border (border doctrine) - it separates from the canvas by the surface step + resting shadow. */
-.e-rail { width: 56px; flex: none; display: flex; flex-direction: column; align-items: center;
-  padding: 10px 0; gap: 4px; border-radius: var(--e-r-lg); background: var(--e-surface);
+.e-rail { width: var(--e-rail-w); flex: none; display: flex; flex-direction: column; align-items: center;
+  padding: calc(10px * var(--e-density)) 0; gap: calc(4px * var(--e-density));
+  border-radius: var(--e-r-lg); background: var(--e-surface);
   box-shadow: var(--e-inset-hi), var(--e-shadow-1); }
 /* `Tooltip` wraps each button, so the wrapper must add no box of its own. */
 .e-rail .e-tipwrap { flex: none; }
-.e-ric { position: relative; width: 42px; height: 42px; border-radius: var(--e-r); border: none;
+.e-ric { position: relative; width: var(--e-rail-btn); height: var(--e-rail-btn); border-radius: var(--e-r); border: none;
   background: transparent; color: var(--e-dim); display: flex; align-items: center; justify-content: center;
   transition: color .12s ease, background-color .12s ease; }
 .e-ric > svg { position: relative; z-index: 1; }
@@ -56,8 +65,8 @@
    click it is describing. z-index sits above the panels and the timeline but below the modals (100),
    which the rail cannot be reached through anyway. */
 .e-tipwrap { position: relative; display: inline-flex; }
-.e-tip { position: fixed; height: 26px;
-  display: flex; align-items: center; padding: 0 9px; border-radius: var(--e-r-sm);
+.e-tip { position: fixed; height: var(--e-ctl-sm);
+  display: flex; align-items: center; padding: 0 calc(9px * var(--e-density)); border-radius: var(--e-r-sm);
   background: var(--e-card); color: var(--e-fg); box-shadow: var(--e-shadow-2);
   font-size: var(--e-text-hint-size); font-weight: var(--e-text-hint-weight);
   white-space: nowrap; pointer-events: none; z-index: 60; }
@@ -66,7 +75,7 @@
    12px of air, not 26: the preview is meant to dominate the centre, and the surrounding emptiness
    was the owner's first complaint. `overflow: hidden` is what crops the Fill view - see below. */
 .e-stagewrap { flex: 1; position: relative; display: flex; align-items: center; justify-content: center;
-  min-width: 0; min-height: 0; padding: 12px; overflow: hidden; border-radius: var(--e-r-lg);
+  min-width: 0; min-height: 0; padding: calc(12px * var(--e-density)); overflow: hidden; border-radius: var(--e-r-lg);
   background: var(--e-stage-well); }
 /* Fill means fill: the frame takes the whole area, so the 12px ring goes with it. */
 .e-stagewrap.fill { padding: 0; }
@@ -99,7 +108,7 @@
   color: var(--e-dim); text-align: center; padding: 0 24px; }
 .e-media-err-title { margin: 0; font-size: var(--e-text-body-size); font-weight: var(--e-text-body-weight); color: var(--e-mut); }
 .e-media-err-reason { margin: 0; font-size: var(--e-text-hint-size); }
-.e-media-err .e-modal-btn { margin-top: 4px; height: 30px; padding: 0 12px; font-size: var(--e-text-body-size); }
+.e-media-err .e-modal-btn { margin-top: 4px; height: calc(30px * var(--e-density)); padding: 0 var(--e-sp-2); font-size: var(--e-text-body-size); }
 
 /* ---- Transport --------------------------------------------------------------------------------
    One raised bar (design/premium-pass D3) floating below the stage rather than a full-width strip:
@@ -113,17 +122,17 @@
    keeps the resting bar byte-identical at a normal window (one row, 34px of content inside a 44px
    box) and lets it become two centred rows at 880px instead of losing controls off the edge. */
 .e-transport { flex: none; align-self: center; width: fit-content; max-width: calc(100% - 32px);
-  min-height: 44px; margin-bottom: var(--e-sp-1); padding: 0 var(--e-sp-3);
+  min-height: calc(44px * var(--e-density)); margin-bottom: var(--e-sp-1); padding: 0 var(--e-sp-3);
   border-radius: var(--e-r); background: var(--e-raised); box-shadow: var(--e-inset-hi), var(--e-shadow-1);
   display: flex; flex-wrap: wrap; align-items: center; align-content: center; justify-content: center;
   gap: 5px var(--e-sp-2);
-  font-size: 13px; color: var(--e-mut); }
+  font-size: calc(13px * var(--e-density)); color: var(--e-mut); }
 .e-tgroup { display: flex; align-items: center; gap: 8px; }
 .e-tdiv { width: 1px; height: 20px; background: var(--e-border2); flex: none; margin: 0 2px; }
 /* Quiet ghost icon buttons (seek, cut, speed, silences, add-zoom, wand, mute, reset-trim): no
    border at rest, only on hover/active - and a translucent wash (`--e-divider`) rather than the
    opaque `--e-soft` fill, since the bar itself sits on that same raised plane. */
-.e-tg { width: 32px; height: 32px; border: 1px solid transparent; background: transparent; color: var(--e-mut);
+.e-tg { width: var(--e-ctl); height: var(--e-ctl); border: 1px solid transparent; background: transparent; color: var(--e-mut);
   border-radius: var(--e-r-sm); display: flex; align-items: center; justify-content: center;
   transition: background .14s ease, color .14s ease, border-color .14s ease; }
 .e-tg:hover:not(:disabled) { background: var(--e-divider); border-color: var(--e-line-strong); color: var(--e-fg); }
@@ -133,8 +142,8 @@
 /* Trim: a labelled ghost pill, distinct from the bare icon tools beside it. Flat now - the
    gradient fill and the 1px hover lift it used to share with `.e-chip` made eight secondary
    controls all jump at the pointer in a bar whose one hero is Play. */
-.e-tbtn { height: 32px; padding: 0 12px; border: 1px solid var(--e-border); background: transparent;
-  color: var(--e-mut); border-radius: var(--e-r); font-size: 12.5px; font-weight: 500;
+.e-tbtn { height: var(--e-ctl); padding: 0 var(--e-sp-2); border: 1px solid var(--e-border); background: transparent;
+  color: var(--e-mut); border-radius: var(--e-r); font-size: var(--e-text-body-size); font-weight: 500;
   display: flex; align-items: center; gap: 6px;
   transition: background .14s ease, color .14s ease, border-color .14s ease; }
 .e-tbtn:hover { background: var(--e-divider); color: var(--e-fg); border-color: var(--e-line-strong); }
@@ -146,14 +155,14 @@
 .e-tbtn:disabled { opacity: .45; cursor: default; }
 /* Single optical unit (design/premium-pass D3): current time at 13px/600 --e-fg, the dimmed
    "/ total" tucked in tight rather than reading as two separate labels. */
-.e-time { font-variant-numeric: tabular-nums; color: var(--e-fg); font-weight: 600; font-size: 13px;
-  min-width: 106px; text-align: center; letter-spacing: -0.01em; white-space: nowrap; }
+.e-time { font-variant-numeric: tabular-nums; color: var(--e-fg); font-weight: 600;
+  font-size: calc(13px * var(--e-density)); min-width: calc(106px * var(--e-density)); text-align: center; letter-spacing: -0.01em; white-space: nowrap; }
 .e-time .sep { color: var(--e-dim); font-weight: 400; margin: 0 2px; }
 .e-time .tot { color: var(--e-dim); font-weight: 500; }
-.e-time .e-time-clip { margin-left: 8px; color: var(--e-mut); font-weight: 400; font-size: 11px; }
+.e-time .e-time-clip { margin-left: var(--e-sp-1); color: var(--e-mut); font-weight: 400; font-size: var(--e-text-micro-size); }
 /* Right-group chip (aspect / quality): flat, bordered, 28px, 11px tabular - see `.e-tbtn`. */
-.e-chip { height: 28px; padding: 0 9px; border: 1px solid var(--e-border); background: transparent;
-  color: var(--e-mut); border-radius: var(--e-r-sm); font-size: 11px; font-weight: 500;
+.e-chip { height: var(--e-ctl-sm); padding: 0 calc(9px * var(--e-density)); border: 1px solid var(--e-border); background: transparent;
+  color: var(--e-mut); border-radius: var(--e-r-sm); font-size: var(--e-text-micro-size); font-weight: 500;
   font-variant-numeric: tabular-nums; display: flex; align-items: center;
   transition: background .14s ease, color .14s ease, border-color .14s ease; }
 .e-chip:hover { background: var(--e-divider); color: var(--e-fg); border-color: var(--e-line-strong); }
@@ -162,11 +171,15 @@
    app's segmented idiom, one plane lower to suit the raised bar it sits in: the track is an inset
    well at the canvas plane and the chosen option is a raised pill on it (the same figure/ground the
    `.e-ai-progress` track uses). 2 + 24 + 2 = the 28px the chips beside it stand at. No border - it
-   is one control, and the well already draws its extent. */
-.e-viewseg { display: flex; align-items: center; gap: 2px; padding: 2px; border-radius: var(--e-r-sm);
-  background: var(--e-bg); }
-.e-viewseg button { height: 24px; padding: 0 8px; border: none; background: transparent;
-  color: var(--e-dim); border-radius: 6px; font-size: 11px; font-weight: 500;
+   is one control, and the well already draws its extent.
+   The padding is now that arithmetic written out rather than a literal 2: the button is the 24px
+   hit-target floor, which does not scale, while the chips beside it are `--e-ctl-sm`, which does -
+   so half the difference between the two is exactly the ring that keeps the group and the chips
+   the same height at every density (2px at full size, and nearly nothing at the 0.86 floor). */
+.e-viewseg { display: flex; align-items: center; gap: 2px; border-radius: var(--e-r-sm);
+  padding: calc((var(--e-ctl-sm) - var(--e-ctl-xs)) / 2); background: var(--e-bg); }
+.e-viewseg button { height: var(--e-ctl-xs); padding: 0 var(--e-sp-1); border: none; background: transparent;
+  color: var(--e-dim); border-radius: calc(6px * var(--e-density)); font-size: var(--e-text-micro-size); font-weight: 500;
   display: flex; align-items: center; transition: background .14s ease, color .14s ease; }
 .e-viewseg button:hover:not(.on) { color: var(--e-fg); }
 .e-viewseg button.on { background: var(--e-raised); color: var(--e-fg);
@@ -176,7 +189,7 @@
    and grounded with the button shadow so it reads as the one thing on the bar you press.
    `.e-play-glow` is a same-size absolute overlay carrying the soft-glow token; Transport.tsx
    remounts it (via a `key` that alternates with `playing`) so it pulses on every toggle. */
-.e-play { position: relative; width: 38px; height: 38px; border-radius: 50%;
+.e-play { position: relative; width: var(--e-ctl-lg); height: var(--e-ctl-lg); border-radius: 50%;
   background: var(--e-primary); color: var(--e-on-fill); border: none;
   display: flex; align-items: center; justify-content: center;
   box-shadow: var(--e-inset-hi), var(--e-shadow-btn), var(--e-shadow-1); transition: background .14s ease; }
@@ -195,5 +208,5 @@
    the button rather than a transparent strip laid over the view-mode control it covers. */
 .e-volwrap { display: flex; align-items: center; position: relative; }
 .e-volflyout { position: absolute; right: 100%; top: 0; height: 100%;
-  width: 76px; display: flex; align-items: center; overflow: hidden; padding-right: 6px;
+  width: calc(76px * var(--e-density)); display: flex; align-items: center; overflow: hidden; padding-right: 6px;
   border-radius: var(--e-r-sm); background: var(--e-raised); }

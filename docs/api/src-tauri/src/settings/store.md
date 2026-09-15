@@ -106,7 +106,7 @@ fn load_from(path: &Path) -> Settings
 
 1. `std::fs::read(path)`. A missing/unreadable file -> `Settings::default()` directly (no corrupt-preservation - there is nothing to preserve).
 2. On successfully-read bytes, `serde_json::from_slice`. On success, return the parsed `Settings`.
-3. **On a parse failure (M3, bug-sweep-2):** call `win::sys::proc::preserve_corrupt(path, &e)` - moves the bad bytes aside to `<path>.corrupt` and logs the parse error - THEN return `Settings::default()`. Before this fix the bytes were simply discarded (`.ok()` chained straight to `unwrap_or_default()`), so a torn write from a crash mid-`save` silently reset every hotkey/theme/spotlight/audio setting with zero recovery path; now the original bytes survive on disk next to the file, same guarantee `EditDoc::load` already gave `edit.json`.
+3. **On a parse failure (M3, bug-sweep-2):** call `process::proc::preserve_corrupt(path, &e)` - moves the bad bytes aside to `<path>.corrupt` and logs the parse error - THEN return `Settings::default()`. Before this fix the bytes were simply discarded (`.ok()` chained straight to `unwrap_or_default()`), so a torn write from a crash mid-`save` silently reset every hotkey/theme/spotlight/audio setting with zero recovery path; now the original bytes survive on disk next to the file, same guarantee `EditDoc::load` already gave `edit.json`.
 
 ### Behaviors
 
@@ -146,7 +146,7 @@ fn save_to(path: &Path, s: &Settings) -> std::io::Result<()>
 
 1. `fs::create_dir_all(path.parent())` - ensures the `TCursor` directory exists before writing. Returns early on error. *Why `parent()` rather than a hardcoded dir:* keeps the directory in sync with `config_path()` automatically.
 2. `serde_json::to_vec_pretty(s)` - serialise. Map the serde error to `io::Error::new(ErrorKind::Other, e)` so the return type is uniform.
-3. **(M3, bug-sweep-2)** `win::sys::proc::tmp_sibling(path)` - a unique temp path in the same directory. Write the JSON there; on write failure, remove the temp and return the error (nothing at `path` is touched).
+3. **(M3, bug-sweep-2)** `process::proc::tmp_sibling(path)` - a unique temp path in the same directory. Write the JSON there; on write failure, remove the temp and return the error (nothing at `path` is touched).
 4. `fs::rename(&tmp, path)` - atomically replaces `path`. *Why this replaced the old direct `fs::write(path, json)`:* `fs::write` truncates then writes IN PLACE - a crash or forced quit between those two steps left `config.json` truncated, which `load_from` would then read back as "corrupt" and silently reset to defaults, discarding every hotkey/theme/spotlight/audio setting with no recovery path. Settings panels write on every slider tick with no debounce (`SettingsPanel.tsx`, `Preferences.tsx`), which is the maximum-exposure pattern for an in-place write.
 
 ### Behaviors

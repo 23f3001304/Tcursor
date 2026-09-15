@@ -124,7 +124,7 @@ User-chosen export settings, collected by `ExportDialog` (frontend) and threaded
 
 - `src-tauri/src/commands.rs` - `export_project`'s new parameter.
 - `src-tauri/src/export/pipeline/run.rs` - `run_export`'s new parameter, threaded to `exporter::export`.
-- `src/lib/ipc.ts` - mirrored as the TS `ExportSettings` interface.
+- `src/shared/ipc.ts` - mirrored as the TS `ExportSettings` interface.
 
 ## Layout::rescale_to_resolution
 

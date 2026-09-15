@@ -24,7 +24,7 @@ Height of the card itself, border included, as a sum of named terms each a `hud.
 export const IDLE_HEIGHT: number  // 536
 ```
 
-The window around the card: the body's 16px top padding (`hud.css`), `CARD_HEIGHT`, and 10px for the shadow.
+The window around the card: the body's 16px top padding (`hud.css`), `CARD_HEIGHT`, and 10px of air underneath. Not a shadow allowance any more: the card draws no outer shadow (`hud.css` `.hud`), because a transparent window cut this tight clipped the 40px blur into a hard-edged dim band under the card, the artifact the owner saw on the desktop (2026-09-15).
 
 ## MENU_OVERFLOW
 
@@ -84,7 +84,7 @@ Horizontal size of the bar window while recording or saving: the take pill (`Tak
 export const TAKE_HEIGHT: number  // 88
 ```
 
-Vertical size of the window around the pill: the body's 16px top padding (`hud.css`), the 60px pill with its 1px border top and bottom, and 10px for the shadow to fall into. The idle bar's 132 stays as the literal it always was.
+Vertical size of the window around the pill: the body's 16px top padding (`hud.css`), the 60px pill with its 1px border top and bottom, and 10px of air underneath (no shadow, see `IDLE_HEIGHT`). The idle bar's 132 stays as the literal it always was.
 
 ### Used by
 

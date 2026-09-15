@@ -1,0 +1,43 @@
+import type { Dispatch, RefObject, SetStateAction } from "react";
+import type { EditDoc, EditOp } from "../shared/edit";
+import type { AiRun } from "../shared/aiRun";
+import type { CamPose } from "./stage/camera/cameraMoves";
+import type { Tab } from "./shell/PanelTabs";
+
+export interface EditorPanelsProps {
+  folder: string;
+  doc: EditDoc;
+  tab: Tab;
+  setTab: Dispatch<SetStateAction<Tab | null>>;
+  timeMs: number;
+  timeMsRef: RefObject<number>;
+  running: boolean;
+  exporting: boolean;
+  aiError: string | null;
+  aiProgress: { step: number; total: number } | null;
+  onRun: () => void;
+  onAutoModel: (v: string) => void;
+  applyOp: (op: EditOp) => Promise<EditDoc | null>;
+  saveDocSettings: (s: EditDoc["settings"]) => void;
+  reloadDoc: () => void;
+  sel: string | null;
+  onSel: (id: string | null) => void;
+  onSeek: (ms: number) => void;
+  moveMode: boolean;
+  requestMoveMode: (want: boolean) => void;
+  camDraftRef: RefObject<CamPose | null>;
+  addZoom: () => void;
+  addSpotlight: () => void;
+  addCameraMove: () => void;
+  osCursorInVideo: boolean;
+  hasCursorLayer: boolean;
+  hasWebcam: boolean;
+  aiRun: AiRun | null;
+  aiSkipped: ReadonlySet<string>;
+  aiApplying: boolean;
+  aiPreviewId: string | null;
+  onToggleItem: (id: string) => void;
+  onPreviewItem: (id: string) => void;
+  onApplyRun: () => void;
+  onDiscardRun: () => void;
+}

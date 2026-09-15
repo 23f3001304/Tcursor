@@ -51,7 +51,7 @@ Serializes to snake_case (e.g. `"zoom_hold_start"`). `Copy` because events are s
 ### Used by
 
 - `src-tauri/src/actions/matcher.rs` - `Arm.on_down` and `Arm.on_up` carry `ActionKind` values; `ActionMatcher::on_key` emits them.
-- `src-tauri/src/actions/keyboard.rs` - `KeyboardTracker` accumulates `ActionEvent` values containing `ActionKind`.
+- `src-tauri/src/platform/windows/input/hotkeys.rs` - `Win32Hotkeys` accumulates `ActionEvent` values containing `ActionKind`.
 - `src-tauri/src/export/fx/caption.rs` - matched in `caption_at` to determine which hotkey label to render.
 - `src-tauri/src/export/fx/hold.rs`, `src-tauri/src/export/fx/spotlight.rs`, `src-tauri/src/export/camera/manual.rs` - consume `ActionKind` variants to drive hold, spotlight, and manual zoom rendering.
 - `src-tauri/src/ai/backend/timeline.rs` - filters `SetLayout` variants into the AI transcript.
@@ -70,7 +70,7 @@ A single timestamped hotkey action.
 
 ### Used by
 
-- `src-tauri/src/actions/keyboard.rs` - produced by `KeyboardTracker` and returned from `stop()`.
+- `src-tauri/src/platform/windows/input/hotkeys.rs` - produced by `Win32Hotkeys` and returned from `stop()`.
 - `src-tauri/src/actions/model.rs` - stored in `ActionLog.actions`.
 - `src-tauri/src/ai/backend/timeline.rs` - consumed by `serialize` to emit layout-change lines in the AI transcript.
 - `src-tauri/src/export/fx/caption.rs` - sliced and searched in `caption_at`.
@@ -93,7 +93,7 @@ Container for all `ActionEvent` values from one recording session, with JSON per
 ### Used by
 
 - `src-tauri/src/session/record/recorder_threads.rs` - constructs `ActionLog { actions }` and calls `save(actions_path)` when a recording ends.
-- `src-tauri/src/ai/commands.rs` - `build_plan` (the shared LLM pass behind `ai_plan`) calls `ActionLog::load` to read the session's hotkey log for the AI timeline.
+- `src-tauri/src/ai/run.rs` - `propose` calls `ActionLog::load` to read the session's hotkey log for the AI transcript.
 - `src-tauri/src/export/pipeline/exporter.rs` - loads `ActionLog` to feed the export pipeline.
 
 ## ActionLog::save

@@ -1,4 +1,3 @@
-// Tests for export::settings, split into their own file so settings.rs stays under the size limit.
 use super::*;
 use crate::export::types::{Aspect, Layout};
 
@@ -21,7 +20,7 @@ fn fps_f60_is_always_60_regardless_of_capture_rate() {
 #[test]
 fn fps_source_reproduces_the_old_fallback_formula() {
     assert_eq!(Fps::Source.resolve_hz(75), 75);
-    assert_eq!(Fps::Source.resolve_hz(0), 60); // the old `if fps == 0 {60}` guard
+    assert_eq!(Fps::Source.resolve_hz(0), 60);
 }
 
 #[test]
@@ -41,7 +40,7 @@ fn resolution_source_is_a_noop_on_layout() {
 #[test]
 fn resolution_presets_use_the_short_edge_convention() {
     let mut l = Layout::default();
-    l.apply_aspect(Aspect::Wide16x9, 1, 1); // 1920x1080
+    l.apply_aspect(Aspect::Wide16x9, 1, 1);
     l.rescale_to_resolution(Resolution::P720);
     assert_eq!((l.out_w, l.out_h), (1280, 720));
 
@@ -50,15 +49,12 @@ fn resolution_presets_use_the_short_edge_convention() {
     l.rescale_to_resolution(Resolution::P2160);
     assert_eq!((l.out_w, l.out_h), (3840, 2160));
 
-    // Portrait: the short edge is the WIDTH, not the height.
     let mut l = Layout::default();
-    l.apply_aspect(Aspect::Vertical9x16, 1, 1); // 1080x1920
+    l.apply_aspect(Aspect::Vertical9x16, 1, 1);
     l.rescale_to_resolution(Resolution::P720);
     assert_eq!((l.out_w, l.out_h), (720, 1280));
 }
 
-/// The 4 fixed `Aspect` presets are already anchored at a 1080 short edge (long edge 1920), so
-/// combining them with `Resolution::P1080` must be a no-op - a cross-check that both mappings agree.
 #[test]
 fn resolution_p1080_matches_every_fixed_aspect_preset_exactly() {
     for (aspect, want) in [

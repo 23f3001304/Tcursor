@@ -25,7 +25,7 @@ Serialises as lowercase.
 ### Used by
 
 - `src-tauri/src/export/scene/background.rs` (`build`) - dispatches on `kind` to pick the render path (ffmpeg decode for `Mesh`, direct rasterization for `Solid`/`Gradient`).
-- `src/editor/panels/BackgroundPanel.tsx` - the segmented Background Type control (Wallpapers / Color / Gradient) writes this.
+- `src/editor/panels/background/BackgroundPanel.tsx` - the segmented Background Type control (Wallpapers / Color / Gradient) writes this.
 
 ## BackgroundSettings
 
@@ -59,7 +59,7 @@ Fields:
 - `gradient_mid: Option<[u8; 3]>` - optional middle stop for `Gradient`, sitting at the ramp's midpoint. Default `None`, and `skip_serializing_if` keeps it out of the JSON entirely when unset, so adding the field did not touch a single existing `edit.json`. Passed through to `export::types::Background::Gradient`'s own `mid`.
 - `blur: f32` - 0..1 softness applied once to the static background buffer. Default `0.0` (off, today's behavior). *Why safe to apply per-rebuild rather than per-frame:* `bg` is built once per export/preview (`FrameRenderer::new`/`reload_edit`), never per output frame, so even a non-trivial blur pass costs nothing in the steady state. *Consequence for `Video`:* a one-off pass over the static buffer reaches that background's FIRST frame only (the fallback still), not the streamed frames - so `BackgroundPanel` hides the Blur slider while `kind == Video` rather than leaving a control that visibly does nothing. Rust is unchanged either way.
 - `asset: Option<String>` - the imported background file, RELATIVE to the project folder (`background/<file>`), used by `Image`/`Video`. Default `None`, and `skip_serializing_if` keeps it out of every `edit.json` that has none. *Why relative:* a project folder is copyable/movable, and an absolute path would break the moment it was; `settings::bg_asset::asset_path` refuses anything absolute or containing `..` when resolving it back. *Why it survives switching away:* picking a wallpaper, colour or gradient only changes `kind` - the file stays on disk and in this field, so re-selecting the asset card restores it with no re-import. Only the card's own Remove deletes the file and clears this.
-- `dim: f32` - 0..0.8 black overlay over whichever background actually has pixels (wallpaper, image, video). Default `0.0`. Read through `dim_clamped`. Applied exactly ONCE, by whichever side owns the pixels: Rust for the static buffer and each streamed video frame, `src/editor/stage/stageBg.ts` for the preview's own `<video>`/GIF draw (the preview's still path consumes an already-dimmed PNG from `preview_bg`, so re-applying there would square it).
+- `dim: f32` - 0..0.8 black overlay over whichever background actually has pixels (wallpaper, image, video). Default `0.0`. Read through `dim_clamped`. Applied exactly ONCE, by whichever side owns the pixels: Rust for the static buffer and each streamed video frame, `src/editor/stage/canvas/stageBg.ts` for the preview's own `<video>`/GIF draw (the preview's still path consumes an already-dimmed PNG from `preview_bg`, so re-applying there would square it).
 
 ## dim_clamped
 
@@ -85,5 +85,5 @@ pub fn dim_clamped(&self) -> f32
 - `src-tauri/src/export/render/mod.rs` (`FrameRenderer::new`, `FrameRenderer::reload_edit`) - `reload_edit` compares old vs. new `BackgroundSettings` (via `PartialEq`) to decide whether to rebuild `bg` at all.
 - `src-tauri/src/settings/bg_asset.rs` - imports/removes the file `asset` names and resolves it back to an absolute path.
 - `src-tauri/src/export/pipeline/bg_pipe.rs` - streams a `Video` asset's frames on the output clock.
-- `src/editor/panels/BackgroundPanel.tsx` - reads/writes every field (`mesh` from the Wallpapers grid, the gradient fields from `GradientTab`, `asset` from the asset card, `dim` from the Dim slider).
-- `src/editor/stage/stageBg.ts` - the preview's own reading of `kind`/`asset`/`dim`.
+- `src/editor/panels/background/BackgroundPanel.tsx` - reads/writes every field (`mesh` from the Wallpapers grid, the gradient fields from `GradientTab`, `asset` from the asset card, `dim` from the Dim slider).
+- `src/editor/stage/canvas/stageBg.ts` - the preview's own reading of `kind`/`asset`/`dim`.

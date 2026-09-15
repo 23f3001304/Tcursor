@@ -12,7 +12,14 @@
         tween at or under 160ms. Nothing here animates a layout property in CSS.
      4. 24px is the floor for anything you can click, drag or type into (usability pass,
         2026-09-13). The readout button, its edit field, the slider's own hit strip and the switch
-        track were all 19-23px and are now 24; nothing in this sheet is smaller. */
+        track were all 19-23px and are now 24; nothing in this sheet is smaller.
+     5. The laptop density pass (2026-09-15) put every height and font-size in this sheet onto the
+        editor's `--e-ctl-*`/`--e-text-*` rungs, which are `calc()`s of `--e-density`. Rule 4 wins
+        over that: `--e-ctl-xs` is a flat 24px and `--e-ctl-sm` is clamped to it, so a laptop takes
+        type and padding away and never a hit target. Two controls opt OUT of scaling entirely,
+        because TypeScript mirrors their geometry for pointer maths and the two would desync: the
+        Slider (`.e-slider-rail`/`-thumb`, Slider.tsx's `THUMB = 14`) and the Switch (`.sw`/
+        `.sw-thumb`, whose thumb `left` Switch.tsx animates between a literal 3 and 20). */
 /* The hover step above --e-raised (`--e-raised-hi`) is the same 3-4% lightness jump the elevation
    system uses between --e-surface and --e-surface-alt, so hover reads as "one plane up", not as a
    tint. It is declared with the rest of the palette in editor.css - one per theme, since "up" from
@@ -34,15 +41,15 @@
    Name left, value right, on the label's own row. The value is a button until clicked, then an
    input: same box either way, so committing does not shift the row. */
 .e-fl-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.e-val { flex: none; height: 24px; padding: 0 5px; border: none; border-radius: 6px;
-  background: transparent; color: var(--e-fg); font: inherit; font-size: 12px; font-weight: 560;
+.e-val { flex: none; height: var(--e-ctl-xs); padding: 0 5px; border: none; border-radius: calc(6px * var(--e-density));
+  background: transparent; color: var(--e-fg); font: inherit; font-size: var(--e-text-hint-size); font-weight: 560;
   font-variant-numeric: tabular-nums; letter-spacing: -0.01em; text-align: right;
   transition: background-color .14s ease; }
 .e-val:hover:not(:disabled) { background: var(--e-raised); }
 .e-val:disabled { color: var(--e-dim); cursor: default; }
-.e-val-edit { flex: none; width: 74px; height: 24px; padding: 0 5px; box-sizing: border-box;
-  border: none; border-radius: 6px; background: var(--e-bg); color: var(--e-fg); font: inherit;
-  font-size: 12px; font-weight: 560; font-variant-numeric: tabular-nums; text-align: right; }
+.e-val-edit { flex: none; width: calc(74px * var(--e-density)); height: var(--e-ctl-xs); padding: 0 5px;
+  box-sizing: border-box; border: none; border-radius: calc(6px * var(--e-density)); background: var(--e-bg);
+  color: var(--e-fg); font: inherit; font-size: var(--e-text-hint-size); font-weight: 560; font-variant-numeric: tabular-nums; text-align: right; }
 
 /* ---- Segmented (Segmented.tsx) -------------------------------------------------------------
    Exclusive states, all of them visible: a sunken track with one raised slot that glides between
@@ -50,7 +57,7 @@
    here - an accent fill would spend the one accent on something that is not a selection marker. */
 .e-segmented { display: flex; gap: 2px; padding: 3px; border-radius: var(--e-r);
   background: var(--e-bg); width: 100%; box-sizing: border-box; }
-.e-segment { position: relative; flex: 1; min-width: 0; height: 28px; padding: 0 6px; border: none;
+.e-segment { position: relative; flex: 1; min-width: 0; height: var(--e-ctl-sm); padding: 0 6px; border: none;
   background: transparent; color: var(--e-mut); border-radius: 7px; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   transition: color .14s ease; }
@@ -58,16 +65,17 @@
 .e-segment.on { color: var(--e-fg); }
 .e-segment-slot { position: absolute; inset: 0; border-radius: 7px; background: var(--e-raised);
   box-shadow: var(--e-inset-hi), var(--e-shadow-1); }
-.e-segment-label { position: relative; z-index: 1; font-size: 12px; font-weight: 540;
+.e-segment-label { position: relative; z-index: 1; font-size: var(--e-text-hint-size); font-weight: 540;
   letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---- Picker --------------------------------------------------------------------------------
    Kept for long lists only (models, packs, easing curves); 2-to-4 exclusive states use Segmented
    above. Closed button and menu are both raised planes with no stroke; the chosen option is a
    3px accent tick rather than a filled row, so the menu stays quiet while scanning it. */
-.e-picker-btn { width: 100%; height: 34px; background: var(--e-raised); border: none;
-  border-radius: var(--e-r); padding: 0 11px; display: flex; align-items: center; justify-content: space-between;
-  gap: 8px; cursor: pointer; color: var(--e-fg); font-family: inherit; font-size: 12.5px; font-weight: 500;
+.e-picker-btn { width: 100%; height: var(--e-ctl-md); background: var(--e-raised); border: none;
+  border-radius: var(--e-r); padding: 0 calc(11px * var(--e-density)); display: flex; align-items: center;
+  justify-content: space-between; gap: var(--e-sp-1); cursor: pointer; color: var(--e-fg);
+  font-family: inherit; font-size: var(--e-text-body-size); font-weight: 500;
   text-align: left; outline: none; box-sizing: border-box; box-shadow: var(--e-inset-hi);
   transition: background-color .14s ease; }
 .e-picker-btn > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -79,14 +87,23 @@
    (100): three dialogs hold Pickers of their own. */
 .e-picker-menu { background: var(--e-raised); border-radius: var(--e-r); box-shadow: var(--e-shadow-2);
   z-index: 130; }
-.e-picker-opt { position: relative; width: 100%; min-height: 30px; box-sizing: border-box; padding: 6px 8px 6px 12px;
+.e-picker-opt { position: relative; width: 100%; min-height: calc(30px * var(--e-density)); box-sizing: border-box;
+  padding: calc(6px * var(--e-density)) var(--e-sp-1) calc(6px * var(--e-density)) var(--e-sp-2);
   display: flex; align-items: center; background: transparent; color: var(--e-mut); border: none;
-  border-radius: 7px; cursor: pointer; font-family: inherit; font-size: 12.5px; font-weight: 500;
+  border-radius: calc(7px * var(--e-density)); cursor: pointer; font-family: inherit;
+  font-size: var(--e-text-body-size); font-weight: 500;
   text-align: left; transition: background-color .14s ease, color .14s ease; }
 .e-picker-opt:hover { background: var(--e-raised-hi); color: var(--e-fg); }
 .e-picker-opt.on { color: var(--e-fg); font-weight: 600; }
 .e-picker-opt.on::before { content: ""; position: absolute; left: 3px; top: 8px; bottom: 8px; width: 3px;
   border-radius: 2px; background: var(--e-primary); }
+/* One short capability word after a label (AiPanel's "Vision"): a quiet chip, never louder than
+   the name it qualifies. `margin-right: auto` keeps it beside the label in the closed button,
+   whose `space-between` would otherwise strand it halfway to the chevron. */
+.e-picker-badge { flex: none; margin-left: 6px; margin-right: auto; padding: 1px 6px;
+  border-radius: 999px; background: var(--e-raised-hi); color: var(--e-mut);
+  font-size: calc(10px * var(--e-density)); font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
+.e-picker-opt .e-picker-badge { margin-right: 0; }
 .e-picker-menu::-webkit-scrollbar { width: 11px; }
 .e-picker-menu::-webkit-scrollbar-track { background: transparent; }
 .e-picker-menu::-webkit-scrollbar-thumb { background: var(--e-dim); border-radius: 999px;
@@ -109,7 +126,7 @@
 
 /* ---- NumberField ---------------------------------------------------------------------------- */
 .e-numfield { display: flex; align-items: center; background: var(--e-raised); border: none;
-  border-radius: var(--e-r); height: 34px; padding: 0 4px; width: 100%; box-sizing: border-box;
+  border-radius: var(--e-r); height: var(--e-ctl-md); padding: 0 4px; width: 100%; box-sizing: border-box;
   box-shadow: var(--e-inset-hi); transition: background-color .14s ease; }
 .e-numfield:hover { background: var(--e-raised-hi); }
 .e-numstep { background: transparent; opacity: .55; cursor: pointer;
@@ -121,22 +138,22 @@
 /* ---- Swatches -------------------------------------------------------------------------------
    Three variants, one selection language: a neutral --e-fg ring with a --e-bg gap. Neutral, not
    the accent, because these buttons ARE colours (see rule 2 at the top of this file). */
-.e-preset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(34px, 1fr)); gap: 8px; }
+.e-preset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--e-ctl-md), 1fr)); gap: var(--e-sp-1); }
 .e-preset-circle, .e-accent-circle, .e-swatch-sm { border: none; outline: none; padding: 0; cursor: pointer;
   border-radius: 50%; box-shadow: var(--e-inset-hi), var(--e-shadow-dot);
   transition: transform .14s ease, box-shadow .14s ease; }
 .e-preset-circle { width: 100%; aspect-ratio: 1; }
-.e-accent-circle, .e-swatch-sm { width: 24px; height: 24px; }
+.e-accent-circle, .e-swatch-sm { width: var(--e-ctl-xs); height: var(--e-ctl-xs); }
 .e-preset-circle:hover, .e-accent-circle:hover, .e-swatch-sm:hover:not(:disabled) { transform: translateY(-1px); }
 .e-preset-circle:active, .e-accent-circle:active, .e-swatch-sm:active { transform: translateY(0); }
 .e-preset-circle.on, .e-accent-circle.on, .e-swatch-sm.on {
   box-shadow: 0 0 0 2px var(--e-surface), 0 0 0 4px var(--e-fg); }
-.e-accent-list, .e-swatch-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.e-accent-list, .e-swatch-row { display: flex; flex-wrap: wrap; gap: calc(10px * var(--e-density)); }
 /* Inside a two-up column (`.e-two`, ~139px at the 320px panel) five 24px dots at a 10px gap are
    160px, so the fifth wrapped alone under the row (owner's screenshot, 2026-09-14): 22px dots at
    6px are 134px and the row stays one line. */
 .e-two .e-swatch-row { gap: 6px; }
-.e-two .e-swatch-sm { width: 22px; height: 22px; }
+.e-two .e-swatch-sm { width: calc(22px * var(--e-density)); height: calc(22px * var(--e-density)); }
 .e-swatch-sm:disabled { opacity: .4; cursor: default; }
 
 /* ---- ColorInput -----------------------------------------------------------------------------
@@ -144,23 +161,23 @@
    card border: it is what keeps a near-white colour from bleeding into the plane behind it. */
 .e-colorpick { display: flex; flex-direction: column; align-items: center; gap: 5px; cursor: pointer; }
 .e-colorpick input[type="color"] {
-  width: 34px; height: 34px; padding: 0; cursor: pointer; background: none; border: none;
+  width: var(--e-ctl-md); height: var(--e-ctl-md); padding: 0; cursor: pointer; background: none; border: none;
   border-radius: var(--e-r-sm);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--e-step) 14%, transparent), var(--e-shadow-dot);
   transition: transform .14s ease; }
 .e-colorpick:hover input[type="color"] { transform: translateY(-1px); }
 .e-colorpick input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
 .e-colorpick input[type="color"]::-webkit-color-swatch { border: none; border-radius: 7px; }
-.e-colorpick span { font-size: 11px; font-weight: var(--e-text-hint-weight); color: var(--e-dim); }
+.e-colorpick span { font-size: var(--e-text-micro-size); font-weight: var(--e-text-hint-weight); color: var(--e-dim); }
 
 /* ---- Disclosure (Disclosure.tsx) --------------------------------------------------------------
    One per panel, at its end. No plane and no rule above it: a dim word at section-heading weight,
    plus a chevron that turns. The body's own top gap sits on `.e-more-inner` so the height tween
    has nothing but height to animate. */
-.e-more-btn { display: flex; align-items: center; gap: 6px; width: 100%; height: 28px; padding: 0;
-  border: none; background: none; cursor: pointer; font: inherit; font-size: 11px; font-weight: 600;
+.e-more-btn { display: flex; align-items: center; gap: 6px; width: 100%; height: var(--e-ctl-sm); padding: 0;
+  border: none; background: none; cursor: pointer; font: inherit; font-size: var(--e-text-micro-size); font-weight: 600;
   color: var(--e-dim); text-align: left; transition: color .14s ease; }
 .e-more-btn:hover { color: var(--e-fg); }
 .e-more-chev { display: inline-flex; }
 .e-more-body { overflow: hidden; }
-.e-more-inner { padding-top: 14px; }
+.e-more-inner { padding-top: calc(14px * var(--e-density)); }

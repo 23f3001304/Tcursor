@@ -29,3 +29,5 @@ Resolves the theme, writes `document.documentElement.dataset.theme`, and sets th
 ### Used by
 
 - `src/hud/Hud.tsx` - called on initial settings load, on user settings change, and from the `prefers-color-scheme` change listener
+
+**`matchMedia` guard (2026-09-15).** `system` resolves to light when `matchMedia` is not a function, so the editor's mount effect can run under jsdom.

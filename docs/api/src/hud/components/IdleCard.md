@@ -4,14 +4,6 @@ The idle HUD as a vertical card (owner, 2026-09-14, chosen over a one-row bar): 
 
 The body has three states on one flip: the sources, the display picker (`TargetSheet`), and a panel (`panelBody` - Settings or Preferences). Since the card's height is fixed, the window never resizes for any of them.
 
-## Toggles
-
-```ts
-export interface Toggles { camOn: boolean; micOn: boolean; sysOn: boolean; gameMode: boolean }
-```
-
-The four source switches, by `Hud`'s own state names. `onToggle` reports the key that was pressed; `Hud` flips the matching setter.
-
 ## IdleCard
 
 ```ts
@@ -49,7 +41,7 @@ Every prop is `Hud`'s own truth; the card owns no state, so the take flow reads 
 - **Rows are planes.** Each source row is a raised 46px plane (`.dd-row`) with a 34px icon lead, the device name and a chevron; the camera and mic chevrons point down and open a full-width menu under the row, the screen row's points right and flips the card.
 - **The flip.** `AnimatePresence mode="wait"`, keyed `panel ?? (sheet ? "sheet" : "card")`, swaps `.card-body` between the three body states with a shallow version of the bar-to-pill frost (blur 10px, scale 0.97, a spring on the scale). Both the display picker (`.sheet`) and a panel (`.settings`, `settings.css`) are pinned to the body's own height (`--sheet-h`, 430px, `hud.css`), so no flip ever resizes the window - a panel taller than that scrolls inside itself, exactly as the picker's list does.
 - **The header stays.** It sits above the body, so the brand, the app buttons and the window buttons are there in all three states; only the body swaps. Settings can therefore be swapped for Preferences (or the window minimized or closed) without going back first.
-- **Toggles carry labels** (Camera, Mic, System, Compat) beside their icons, four equal segments in one plane; ON is the accent tint.
+- **Toggles** are `SourceToggles` (`SourceToggles.md`), which also owns the `Toggles` type this card takes.
 - **Record** is `RecordButton` at full width, 48px, the card's only accent.
 
 ### Used by

@@ -106,7 +106,7 @@ The only switch the webview itself owns, and the only one that is more than one 
 switchMic(id: string): Promise<void>
 ```
 
-Idle, or mic off for this take: just `setMicId(id)`. Otherwise `switchMic(id || null)` (`src/lib/ipc.ts`), which has Rust finalize the running WAV and start `mic_<n>.wav` on the new device; the selection is applied only if that succeeds, so a failed switch leaves the HUD showing the device that is actually recording.
+Idle, or mic off for this take: just `setMicId(id)`. Otherwise `switchMic(id || null)` (`src/shared/ipc.ts`), which has Rust finalize the running WAV and start `mic_<n>.wav` on the new device; the selection is applied only if that succeeds, so a failed switch leaves the HUD showing the device that is actually recording.
 
 #### switchDisplay
 
@@ -114,7 +114,7 @@ Idle, or mic off for this take: just `setMicId(id)`. Otherwise `switchMic(id || 
 switchDisplay(id: string): Promise<void>
 ```
 
-Idle: just `setDisplayId(id)`. Otherwise `switchDisplay(id)` (`src/lib/ipc.ts`), which has Rust restart the capture on the new target into the same encoder canvas and remap mouse coordinates at capture time. Same "apply only on success" rule as the mic.
+Idle: just `setDisplayId(id)`. Otherwise `switchDisplay(id)` (`src/shared/ipc.ts`), which has Rust restart the capture on the new target into the same encoder canvas and remap mouse coordinates at capture time. Same "apply only on success" rule as the mic.
 
 ### Used by
 

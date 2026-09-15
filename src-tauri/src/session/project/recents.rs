@@ -1,8 +1,3 @@
-// A small "recently opened" list, persisted next to settings::store's config.json (same
-// app-data convention). Tracks projects the user has explicitly opened (via `open_project`'s
-// dialog, or the file-association cold-start path) so a future recents UI has something to show;
-// today only `list_recent_projects` reads it. Best-effort throughout: a write failure here must
-// never block the project from opening.
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -15,14 +10,13 @@ pub struct RecentProject {
     pub opened_unix_ms: u64,
 }
 
-/// `<config-dir>/TCursor/recents.json`. Sibling to `settings::store::config_path`'s
-/// `TCursor/config.json` and `packdirs::cursors_dir`'s `TCursor/cursors`.
 fn recents_path() -> PathBuf {
-    dirs_next::config_dir().unwrap_or_else(std::env::temp_dir).join("TCursor").join("recents.json")
+    dirs_next::config_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("TCursor")
+        .join("recents.json")
 }
 
-/// Every recent entry, most-recently-opened first. Empty (never errors) if the file is missing,
-/// unreadable, or corrupt.
 pub fn list() -> Vec<RecentProject> {
     std::fs::read(recents_path())
         .ok()
@@ -30,9 +24,6 @@ pub fn list() -> Vec<RecentProject> {
         .unwrap_or_default()
 }
 
-/// Move (or insert) `folder` to the front of the recents list, capped at `MAX_RECENTS` entries.
-/// A prior entry for the same folder is dropped first so it doesn't appear twice with a stale
-/// timestamp. Best-effort: any I/O failure is swallowed rather than surfaced to the caller.
 pub fn touch(folder: &str) {
     let name = std::path::Path::new(folder)
         .file_name()
@@ -42,12 +33,21 @@ pub fn touch(folder: &str) {
 
     let mut entries = list();
     entries.retain(|r| r.folder != folder);
-    entries.insert(0, RecentProject { folder: folder.to_string(), name, opened_unix_ms: now_unix_ms() });
+    entries.insert(
+        0,
+        RecentProject {
+            folder: folder.to_string(),
+            name,
+            opened_unix_ms: now_unix_ms(),
+        },
+    );
     entries.truncate(MAX_RECENTS);
 
     let path = recents_path();
     if let Some(dir) = path.parent() {
-        if std::fs::create_dir_all(dir).is_err() { return; }
+        if std::fs::create_dir_all(dir).is_err() {
+            return;
+        }
     }
     if let Ok(json) = serde_json::to_vec_pretty(&entries) {
         let _ = std::fs::write(path, json);
@@ -75,11 +75,26 @@ mod tests {
     #[test]
     fn touch_moves_an_existing_folder_to_the_front_without_duplicating_it() {
         let mut entries = vec![
-            RecentProject { folder: "a".into(), name: "a".into(), opened_unix_ms: 1 },
-            RecentProject { folder: "b".into(), name: "b".into(), opened_unix_ms: 2 },
+            RecentProject {
+                folder: "a".into(),
+                name: "a".into(),
+                opened_unix_ms: 1,
+            },
+            RecentProject {
+                folder: "b".into(),
+                name: "b".into(),
+                opened_unix_ms: 2,
+            },
         ];
         entries.retain(|r| r.folder != "a");
-        entries.insert(0, RecentProject { folder: "a".into(), name: "a".into(), opened_unix_ms: 3 });
+        entries.insert(
+            0,
+            RecentProject {
+                folder: "a".into(),
+                name: "a".into(),
+                opened_unix_ms: 3,
+            },
+        );
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].folder, "a");
         assert_eq!(entries[0].opened_unix_ms, 3);
@@ -88,7 +103,11 @@ mod tests {
     #[test]
     fn truncates_to_max_recents() {
         let mut entries: Vec<RecentProject> = (0..(MAX_RECENTS + 5))
-            .map(|i| RecentProject { folder: i.to_string(), name: i.to_string(), opened_unix_ms: i as u64 })
+            .map(|i| RecentProject {
+                folder: i.to_string(),
+                name: i.to_string(),
+                opened_unix_ms: i as u64,
+            })
             .collect();
         entries.truncate(MAX_RECENTS);
         assert_eq!(entries.len(), MAX_RECENTS);

@@ -3,8 +3,9 @@ import { engineDisplayName } from "./engineName";
 
 describe("engineDisplayName", () => {
   it("shortens the HF GGUF proxy id from the audit screenshot", () => {
-    expect(engineDisplayName("hf.co/empero-ai/Qwythos-9B-Claude-Mythos-5-1M-GGUF:Q8_0"))
-      .toBe("Qwythos 9B (Q8)");
+    expect(engineDisplayName("hf.co/empero-ai/Qwythos-9B-Claude-Mythos-5-1M-GGUF:Q8_0")).toBe(
+      "Qwythos 9B (Q8)",
+    );
   });
 
   it("finds size/quant in the tag half of a plain Ollama id, not just the name half", () => {

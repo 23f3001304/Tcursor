@@ -17,7 +17,7 @@ Snapshot of the three modifier keys at the moment of a key event. `Default` yiel
 
 ### Used by
 
-- `src-tauri/src/actions/keyboard.rs` - `cur_mods()` constructs a `Mods` each poll cycle and compares it against each arm's chord.
+- `src-tauri/src/platform/windows/input/hotkeys.rs` - `cur_mods()` constructs a `Mods` each poll cycle and compares it against each arm's chord.
 - `src-tauri/src/actions/matcher.rs` - `KeyChord::matches` and `ActionMatcher::on_key` compare live `Mods` against the chord's expected `Mods`.
 
 ## KeyChord
@@ -35,7 +35,7 @@ A fully parsed hotkey: a `Mods` snapshot plus one Win32 virtual-key code for the
 ### Used by
 
 - `src-tauri/src/actions/matcher.rs` - `Arm` stores a `KeyChord`; `ActionMatcher::on_key` and `arming_from_settings` create and compare them.
-- `src-tauri/src/actions/keyboard.rs` - poll loop reads `arm.chord.vk` and passes live `Mods` to `arm.chord.mods ==` comparison.
+- `src-tauri/src/platform/windows/input/hotkeys.rs` - poll loop reads `arm.chord.vk` and passes live `Mods` to `arm.chord.mods ==` comparison.
 
 ## KeyChord::parse
 
@@ -98,7 +98,7 @@ Associates a parsed `KeyChord` with the `ActionKind` emitted on press and option
 ### Used by
 
 - `src-tauri/src/actions/matcher.rs` - `ActionMatcher` stores `Vec<Arm>`; `arming_from_settings` builds the table.
-- `src-tauri/src/actions/keyboard.rs` - `KeyboardTracker::start` receives `Vec<Arm>` to determine which VKs to poll.
+- `src-tauri/src/platform/windows/input/hotkeys.rs` - `Win32Hotkeys::start` receives `Vec<Arm>` to determine which VKs to poll.
 
 ## ActionMatcher
 

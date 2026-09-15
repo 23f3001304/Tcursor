@@ -2,7 +2,7 @@
 
 The one Tauri command that returns **all five** layout presets' panel rects at once, so the editor preview can resolve and cross-fade between layouts itself (mirroring `LayoutTrack::scene_at`) instead of only ever showing the single static layout `preview_layout` returns. Split out of `preview_track.rs` to keep both files inside the 200-line budget; it reuses the same `with_warm` renderer cache (`session.rs`).
 
-**T34 L2: also returns each DOC SEGMENT's own resolved rects.** Alongside the 5 presets, the response carries `segs: Vec<SegRectDto>` - one entry per `EditDoc.layout` segment, resolved from that segment's arrangement-or-preset via `FrameRenderer::resolve_seg` (`render/accessors.md`), the exact function the export's `LayoutTrack` uses per segment. This is how a segment carrying a T34 `Arrangement` previews its real posed panels instead of its provenance preset's - see `src/editor/timeline/layoutTrack.md`'s `layoutAt` for the TS side that consumes it.
+**T34 L2: also returns each DOC SEGMENT's own resolved rects.** Alongside the 5 presets, the response carries `segs: Vec<SegRectDto>` - one entry per `EditDoc.layout` segment, resolved from that segment's arrangement-or-preset via `FrameRenderer::resolve_seg` (`render/accessors.md`), the exact function the export's `LayoutTrack` uses per segment. This is how a segment carrying a T34 `Arrangement` previews its real posed panels instead of its provenance preset's - see `src/editor/timeline/model/layoutTrack.md`'s `layoutAt` for the TS side that consumes it.
 
 ## PanelRectDto
 
@@ -49,11 +49,11 @@ pub struct LayoutPresets {
 }
 ```
 
-All five `LayoutId` presets in one payload, named to match the enum (`Screen`, `Camera`, `Presenter`, `ScreenOnly`, `CameraOnly`). No `serde(rename_all)`, so the wire keys are the snake_case field names - which is what the TS side declares (`LayoutPresetName = "screen" | "camera" | "presenter" | "screen_only" | "camera_only"` in `src/lib/ipcPreview.ts`).
+All five `LayoutId` presets in one payload, named to match the enum (`Screen`, `Camera`, `Presenter`, `ScreenOnly`, `CameraOnly`). No `serde(rename_all)`, so the wire keys are the snake_case field names - which is what the TS side declares (`LayoutPresetName = "screen" | "camera" | "presenter" | "screen_only" | "camera_only"` in `src/shared/ipc.ts`).
 
 `segs: Vec<SegRectDto>` (T34 L2) - one entry per `EditDoc.layout` segment, IN DOC ORDER, not just posed ones: a lookup by id is then a single flat scan with no special-casing "this segment was never in the list" vs. "present but plain".
 
-`inset_w: f32` (fraction of `out_w`, from `FrameRenderer::inset_w_frac`, `render/accessors.md`) - the export's fixed reference width the synthetic cursor scales against (`cursorset::draw`'s `panel` factor). NOT one of the panel rects above: a baseline independent of the active preset/arrangement, so the editor preview can shrink the cursor exactly like the export does under a custom arrangement that narrows the screen panel (`src/editor/stage/cursorPanel.ts`'s `panelFactor`).
+`inset_w: f32` (fraction of `out_w`, from `FrameRenderer::inset_w_frac`, `render/accessors.md`) - the export's fixed reference width the synthetic cursor scales against (`cursorset::draw`'s `panel` factor). NOT one of the panel rects above: a baseline independent of the active preset/arrangement, so the editor preview can shrink the cursor exactly like the export does under a custom arrangement that narrows the screen panel (`src/editor/stage/cursor/cursorPanel.ts`'s `panelFactor`).
 
 ## SourceSpanDto
 

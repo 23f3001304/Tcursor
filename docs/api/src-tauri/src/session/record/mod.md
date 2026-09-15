@@ -2,6 +2,8 @@
 
 Submodule overviews for the `record` group, plus the two shared items the whole group is wired with.
 
+Batch C1 moved `gpu_record.rs`, `gpu_frames.rs`, `gpu_restart.rs`, `frame_scaler.rs`, `frame_chain.rs` and `target_bounds.rs` into `platform/windows/capture/` - `gpu/record.rs`, `gpu/frames.rs`, `gpu/restart.rs`, `gpu/fit.rs`, `gpu/chain.rs` and `target.rs` - and left two `#[cfg(windows)]` module re-exports here so `switch_display.rs` could keep naming them. Batch D deleted the re-exports: this group now reaches the capture only through `ports::capture`, so nothing under `record/` is conditional on a platform and the whole group compiles for any target. `frame_fit.rs` did not move: its geometry is pure, unit-tested and shared with the export.
+
 ## Notify
 
 ```rust
@@ -24,7 +26,7 @@ A repeating audio-level report from a capture thread to the HUD's meter: the 0..
 pub const CAPTURE_CLOSED: &str = "The recorded window or display closed. The recording was saved up to that point.";
 ```
 
-The reason passed to the capture-ended `Notify` when the OS - not the user - ends the capture: the recorded window was closed, or the recorded display was unplugged/disabled/slept. Both capture paths report it with the same wording (`gpu_frames::Cap::on_closed` and the ffmpeg video thread in `video_sink::start_ffmpeg`), so the HUD has exactly one message to show.
+The reason passed to the capture-ended `Notify` when the OS - not the user - ends the capture: the recorded window was closed, or the recorded display was unplugged/disabled/slept. Both capture paths report it with the same wording (`platform::windows::capture::gpu::frames::Cap::on_closed` and the ffmpeg video thread in `platform::windows::capture::legacy::start_ffmpeg`), so the HUD has exactly one message to show.
 
 ## DISPLAY_CHANGED
 
@@ -32,19 +34,19 @@ The reason passed to the capture-ended `Notify` when the OS - not the user - end
 pub const DISPLAY_CHANGED: &str = "Display changed - recording saved up to the change.";
 ```
 
-The reason passed to the same `Notify` when the capture's OWN dimensions change mid-record (finding H1) - a recorded window maximized/restored/snapped, or a recorded display changed resolution, rotated, or was docked/undocked. Sent by the LEGACY ffmpeg path only. Its rawvideo pipe is sized once, at start, so it cannot keep encoding: it used to silently discard every frame from that instant on (`FfmpegFrameSink::write_or_skip`'s `Ok(false)` skip, forever) and now ends the take on the FIRST mismatched frame instead - `recording_session::RecordingSession::pump_once` latches its `mismatched` flag, which `video_sink::start_ffmpeg` reads. This distinct wording is what tells the HUD (and the user) it was a size change, not a closed window or display. The default GPU path no longer sends it at all: `gpu_frames::Cap::on_frame_arrived` fits a resized frame into the encoder's fixed canvas (`frame_scaler`) and keeps recording.
+The reason passed to the same `Notify` when the capture's OWN dimensions change mid-record (finding H1) - a recorded window maximized/restored/snapped, or a recorded display changed resolution, rotated, or was docked/undocked. Sent by the LEGACY ffmpeg path only. Its rawvideo pipe is sized once, at start, so it cannot keep encoding: it used to silently discard every frame from that instant on (`FfmpegFrameSink::write_or_skip`'s `Ok(false)` skip, forever) and now ends the take on the FIRST mismatched frame instead - `recording_session::RecordingSession::pump_once` latches its `mismatched` flag, which `platform::windows::capture::legacy::start_ffmpeg` reads. This distinct wording is what tells the HUD (and the user) it was a size change, not a closed window or display. The default GPU path no longer sends it at all: `gpu::frames::Cap::on_frame_arrived` fits a resized frame into the encoder's fixed canvas (`gpu::fit`) and keeps recording.
 
 ## recorder
 
-Recording state plus the Start/Pause/Resume commands. Owns a `Mutex<Option<Running>>` as managed state; each command locks briefly, modifies or consumes the `Running` value, and returns. Key items: `Recorder` (managed-state singleton, with the `stopping` flag that keeps a start out of a stop's teardown window), `Running` (holds all live resources for one session), `start_recording` (creates folder, starts all threads), `pause_recording` / `resume_recording` (stamp the `PauseTotals` ledger and flip the shared `paused` flag).
+Recording state plus the Start/Pause/Resume commands. Owns a `Mutex<Option<Running>>` as managed state; each command locks briefly, modifies or consumes the `Running` value, and returns. Key items: `Recorder` (managed-state singleton, with the `stopping` flag that keeps a start out of a stop's teardown window), `Running` (holds all live resources for one session, as four trait objects since Batch D), `TakeSpec` (what a take is asked for, base folder included), `start_take` / `pause_take` / `resume_take` (the take lifecycle, taking `&Platform` and `&Recorder` and no Tauri types), and the three `#[tauri::command]` wrappers `start_recording` / `pause_recording` / `resume_recording` over them.
 
 ## emit
 
-The group's two frontend event bridges, split out of `recorder.rs` (at its line cap) when the level feed was added. Key items: `emitter` (wraps an `AppHandle` in a `Notify` for `record-warning` / `record-ended-early`), `level_emitter` (wraps one in a `Level` that emits `audio-level`, tagged with its source).
+The group's frontend event bridges and the bundle they are handed over as, split out of `recorder.rs` (at its line cap) when the level feed was added. Key items: `TakeHooks` (the four callbacks one take reports through, with `from_app` and the test-only `silent`), `emitter` (wraps an `AppHandle` in a `Notify` for `record-warning` / `record-ended-early`), `level_emitter` (wraps one in a `Level` that emits `audio-level`, tagged with its source).
 
 ## recorder_stop
 
-The Stop half of the command surface. Key items: `stop_recording` (the `async` + `spawn_blocking` command), `stop_blocking` (signals all threads, joins in dependency order, saves inputs, finalizes the video, then writes `sync.json` / `project.tcursor` / recents from whatever was recorded - even when the finalize failed), `RecordingResult` (returned to the frontend).
+The Stop half of the command surface. Key items: `stop_recording` (the `async` + `spawn_blocking` command), `stop_blocking` (its body, resolving the `Recorder` from the `AppHandle`), `stop_take` (signals all threads, joins in dependency order, saves inputs, finalizes the video, then writes `sync.json` / `project.tcursor` / recents from whatever was recorded - even when the finalize failed), `RecordingResult` (returned to the frontend).
 
 ## close_guard
 
@@ -52,7 +54,7 @@ The `CloseRequested` safety net (task-6, ruling R6): if the main window tries to
 
 ## recorder_threads
 
-Thread-spawning helpers and persistence logic factored out of `recorder.rs` to keep that file under the 200-line cap. Key items: `save_inputs` (stops each input tracker and writes `events.json`, `actions.json`, `typing.json`, `cursor.json` before the video thread is joined), `save_session_files` (`sync.json` + `project.tcursor` + recents), `spawn_mic_thread` / `spawn_system_thread` (spawn the audio holder threads, or return `None` when that input is off), `poll_until_stopped` (the shared 50ms stop-poll loop, which is also what reports each source's level), `LEVEL_POLL_MS`, `audio_warning` (the `record-warning` message for an input that would not open).
+Thread-spawning helpers and persistence logic factored out of `recorder.rs` to keep that file under its line cap. Key items: `save_inputs` (stops the three input ports and writes `events.json`, `actions.json`, `typing.json`, `cursor.json` before the video thread is joined), `save_session_files` (`sync.json` + `project.tcursor` + recents), `spawn_mic_thread` / `spawn_system_thread` (spawn the audio holder threads; the loopback device is handed in from the audio port rather than opened here), `poll_until_stopped` (the shared 50ms stop-poll loop, which is also what reports each source's level), `LEVEL_POLL_MS`, `audio_warning` (the `record-warning` message for an input that would not open).
 
 ## segments
 
@@ -74,37 +76,17 @@ Thin state machine wrapping one `FrameSource` and one `FrameSink`. Runs entirely
 
 Pure geometry for the GPU path's resize fit, split out so it is testable without live WGC or a GPU. Key items: `letterbox` (the centred, aspect-preserving destination rect for a source of one size inside a canvas of another).
 
-## frame_scaler
-
-The GPU path's OBS-style resize handling: one persistent D3D11 canvas at the encoder's size, with the D3D11 video processor scaling every differently-sized capture frame into it, so a mid-record resize neither ends the take nor freezes the picture. Key items: `FrameFit` (what `gpu_frames::Cap` holds - lazily built, and latched off if setup ever fails), `Scaler` (the canvas plus the video device/context), `Chain` (the processor and views for one source size). Names its D3D11 types through `Cargo.toml`'s `wgc-windows` alias of the same `windows` 0.61 package windows-capture builds against.
-
-## gpu_record
-
-The default capture path: WGC surfaces straight into the Media Foundation `VideoEncoder`, no readback. Key items: `GpuRecorder` (lifecycle + shared per-frame timestamps), `GpuStart` (its start config), `target_bitrate` / `video_settings` / `encoder` (encoder configuration).
-
-## gpu_frames
-
-The GPU path's frame callback, split out of `gpu_record.rs`. Key items: `Cap` (the `GraphicsCaptureApiHandler` - builds the encoder from the first frame's own size, rebases each frame's encoder PTS onto the recording clock, fits a later-resized frame into that fixed size via `frame_scaler::FrameFit`, and reports an OS-closed capture), `CapFlags`, `EncoderSpec`, `FrameTimes`. Its tests live in `gpu_frames_tests.rs` under `#[path]`.
-
-## gpu_restart
-
-Moving a running GPU capture onto another display or window mid-take without restarting the encoder (2026-09-14) - the recorder half of `switch_display`. Key items: `EncoderSeed` (the open encoder, the canvas size and the recording clock, lifted out of one capture for the next), `Cap::take_seed`, `GpuRecorder::restart`. See `gpu_restart.md`.
-
 ## switch_display
 
 The `switch_display` command: restarts the capture on a new target and installs the `events::remap::Remap` that keeps every later mouse sample landing where the pixels are. See `switch_display.md`.
 
-## target_bounds
-
-Where a capture target sits on the desktop, in the coordinates the mouse hook reports. Split out of `video_sink.rs` when the origin started being needed twice - once per take, once per display switch. Key items: `get_target_bounds`.
-
 ## video_sink
 
-Picks between the two capture paths and normalises their stop. Key items: `VideoSink` (the enum, including the `Dead` state a failed display switch leaves behind), `VideoStart` (shared start config), `VideoStopped` (frames + timestamps + an optional finalize error, so a failure never costs the session files), `start_video`, `VideoSink::switch`, `VideoSink::stop_and_collect`.
+What is left of the video sink in the portable tree: `VideoStopped` alone - frames + timestamps + an optional finalize error, so a failure never costs the session files. It stays here because it is `ports::capture::VideoSink::stop`'s return type. The pipeline itself lives in `platform/windows/capture/`, and Batch D deleted the `#[cfg(windows)]` re-exports that named it from here. See `video_sink.md`.
 
 ## pause_clock
 
-Private helper module (not re-exported beyond `record`) shared by `gpu_frames::Cap` and `recording_session::RecordingSession`. Key items: `PauseClock` (places each arriving frame on the recording clock from the shared `PauseTotals` ledger), `FrameTick` (that placement: the `sync.json` timestamp and the matching encoder PTS, from one ledger read).
+Shared by `platform::windows::capture::gpu::frames::Cap` and `recording_session::RecordingSession`. Key items: `PauseClock` (places each arriving frame on the recording clock from the shared `PauseTotals` ledger), `FrameTick` (that placement: the `sync.json` timestamp and the matching encoder PTS, from one ledger read).
 
 ## pause_totals
 

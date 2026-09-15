@@ -28,7 +28,7 @@ pub fn reload_edit(&mut self, paths: &ProjectPaths)
 
 Rebuilds the `EditState` with the renderer's own `full_dur_ms`, so a cut or speed edit in the editor changes the time map (and every remapped region) on the next preview frame without a renderer rebuild.
 
-Refresh the `edit.json`-derived state in place (zoom/layout/regions/effects/cam_moves) WITHOUT recreating the GPU compositor or re-probing dims - this is what makes a warm preview cheap. Moved here verbatim from `render/mod.rs`, plus one addition.
+Refresh the `edit.json`-derived state in place (zoom/layout/regions/effects/captions/cam_moves) WITHOUT recreating the GPU compositor or re-probing dims - this is what makes a warm preview cheap. Moved here verbatim from `render/mod.rs`, plus one addition.
 
 The cursor's three settings-driven filters are live-applied here rather than waiting for a rebuild: `Cursor::set_smoothness` (Smoothness), `set_idealize` (Path Idealization) and `set_tilt` (Motion Tilt), each through its `_at` variant so switching the style to `System` on a recording with no baked OS cursor also flips the path to raw and the lean to none in the same call.
 

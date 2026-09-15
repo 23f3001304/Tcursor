@@ -4,7 +4,7 @@ The user's own background file: import it INTO the project, describe it, remove 
 
 Everything in this file exists to keep a project **portable**. The chosen file is copied into `<project>/background/` and the settings store only `background/<name>` - relative, forward-slashed - so moving or copying the project folder moves the background with it. Nothing outside the project is ever referenced.
 
-*Why no `image` crate:* this build has none (only `png`, for encoding preview frames), and adding a decoder crate to read four extra formats is not a trade worth making when the bundled ffmpeg/ffprobe already reads every accepted format. Probing and thumbnailing both shell out through `export::pipeline::ffio` / `win::sys::proc::ffcmd`.
+*Why no `image` crate:* this build has none (only `png`, for encoding preview frames), and adding a decoder crate to read four extra formats is not a trade worth making when the bundled ffmpeg/ffprobe already reads every accepted format. Probing and thumbnailing both shell out through `export::pipeline::ffio` / `process::proc::ffcmd`.
 
 ## BackgroundAssetInfo
 
@@ -16,7 +16,7 @@ pub struct BackgroundAssetInfo {
 }
 ```
 
-What the panel's asset card needs: where the file lives (relative), which `BackgroundKind` it is (`"image"` / `"video"`), its pixel size, and - for a video - how long it loops. `duration_ms` is `None` for a still. Mirrored in TS as `BackgroundAssetInfo` (`src/lib/ipc.ts`).
+What the panel's asset card needs: where the file lives (relative), which `BackgroundKind` it is (`"image"` / `"video"`), its pixel size, and - for a video - how long it loops. `duration_ms` is `None` for a still. Mirrored in TS as `BackgroundAssetInfo` (`src/shared/ipc.ts`).
 
 ## asset_kind_for
 
@@ -26,7 +26,7 @@ pub fn asset_kind_for(ext: &str) -> Option<&'static str>
 
 `"image"` for png/jpg/jpeg/webp, `"video"` for gif/mp4/webm/mov, `None` for anything else. Case-insensitive.
 
-*Why a GIF is a video:* one decode path serves both, so the export never grows a second animation subsystem. The only place the distinction survives is the editor preview, which cannot play a GIF in a `<video>` element and reaches for `ImageDecoder` instead (`src/editor/stage/gifFrames.ts`) - and it decides that by extension, not by this kind.
+*Why a GIF is a video:* one decode path serves both, so the export never grows a second animation subsystem. The only place the distinction survives is the editor preview, which cannot play a GIF in a `<video>` element and reaches for `ImageDecoder` instead (`src/editor/stage/canvas/gifFrames.ts`) - and it decides that by extension, not by this kind.
 
 ## unique_name
 
@@ -146,5 +146,5 @@ pub fn remove_background_asset(project_dir: String, rel_path: String) -> Result<
 - `src-tauri/src/settings/background.rs` (`BackgroundSettings.asset`) - the field this file's paths live in.
 - `src-tauri/src/export/scene/background.rs` (`build`, `video_source`) - resolves the asset to real pixels.
 - `src-tauri/src/lib.rs` - registers the three commands.
-- `src/lib/ipc.ts` (`importBackgroundAsset`, `backgroundAssetInfo`, `removeBackgroundAsset`) - the TS wrappers.
-- `src/editor/panels/BackgroundAssetCard.tsx` - the only caller.
+- `src/shared/ipc.ts` (`importBackgroundAsset`, `backgroundAssetInfo`, `removeBackgroundAsset`) - the TS wrappers.
+- `src/editor/panels/background/BackgroundAssetCard.tsx` - the only caller.

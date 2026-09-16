@@ -2,19 +2,7 @@
 
 Which lanes the timeline shows, and what each one renders. Split out of `Timeline.tsx`, which keeps the scrub/drop surface, the ruler, the gutter and the overlays that are drawn across the whole stack; this hook owns the other half - the per-lane region memos, the four `useLaneDrag` commits, and the ordered `TimelineLane[]` the component maps over twice (once for the label gutter, once for the rows).
 
-## TimelineLane
-
-```ts
-export interface TimelineLane {
-  key: string;
-  label: string;
-  heightPx: number;
-  active: boolean;
-  body: React.ReactNode;
-}
-```
-
-One visible lane: the key both columns hang their `e-lane-${key}` class off, the gutter label, the height that label slot has to match, whether this lane owns the current selection, and the rows themselves.
+`TimelineLane` - one visible lane: the key both columns hang their `e-lane-${key}` class off, the gutter label, the height that label slot has to match, whether this lane owns the current selection, and the rows themselves - and the lane builders that assemble it (`laneHeight`, `zoomLabel`, `fxLabel`, `regionLane`) moved to `laneBuilders.tsx` (editor-parity foundations, task 9). `TimelineLane` is re-exported from here (`export type { TimelineLane } from "./laneBuilders";`) so this file's own callers didn't have to change their import path. See `laneBuilders.md`.
 
 ## useTimelineLanes
 
@@ -48,7 +36,7 @@ export function useTimelineLanes(p: {
 
 **Active-lane label (Task D2).** Each lane entry's `active` field is `isSel(regions)` - `sel != null && regions.some((r) => r.id === sel)` - run against that lane's own `zooms`/`fx`/`captions`/`layouts`/`doc.camera_moves` array (the Audio lane is never selectable, so it's always `false`). `.e-lanelabel` renders with an `.on` modifier when `active`, which takes it from 80%-`--e-fg` to full `--e-fg` and rings its accent dot (timeline.css) - so whichever lane owns the current selection reads clearly against the others.
 
-**One helper for the four region lanes.** Zoom, FX, Captions and Layout differ only in their key, label, row/pill classes and label render-prop, so they go through one local `regionLane(...)` that pushes nothing when the lane has no rows. The Time, Camera and Audio lanes each render a component of their own and stay written out.
+**One helper for the four region lanes.** Zoom, FX, Captions and Layout differ only in their key, label, row/pill classes and label render-prop, so they go through one shared `regionLane(...)` (`laneBuilders.tsx`) that pushes nothing when the lane has no rows. The Time, Camera and Audio lanes each render a component of their own and stay written out.
 
 ### Render hygiene
 
@@ -56,6 +44,6 @@ export function useTimelineLanes(p: {
 
 - `zooms`/`fx` (the `layoutRegions`-assigned arrays passed to `RegionRows`/`useRegionDrag`) are `useMemo`'d on the underlying `doc.zooms`/`doc.effects` arrays, instead of being a fresh array on every render regardless of whether the doc changed. `layouts` is `useLayoutLaneRegions(doc.layout, layoutPresets)` (T34 L4, `LayoutLane.tsx`) - the same idea, with a second inner `useMemo` keyed on `layoutPresets` so attaching each segment's resolved panels doesn't itself become a fresh-array-every-render source.
 - The four `onCommit` closures passed through `useLaneDrag` (`update_zoom`/`update_effect`/`update_caption`/`update_layout_seg`) are `useCallback`'d (deps `[onApply]`) instead of fresh inline arrows every render - `useRegionDrag`'s own listener-attach effect depends on `onCommit`'s identity being stable (see `useRegionDrag.md`).
-- `zoomLabel`/`fxLabel` (this file) and `layoutLabel`/`layoutExtraStyle` (T34 L4, hoisted out to `LayoutLane.tsx` alongside the `useLayoutLaneRegions` memo that feeds them) are all MODULE-scope, not declared inline in the component body - they're pure and close over nothing per-render (`layoutLabel` reads its thumbnail off the region object itself, not a closure over `layoutPresets` - see `LayoutLane.md`), so a fresh inline arrow every render would have been a fresh prop every render, defeating `RegionRows`' memo even when the underlying region data hadn't changed.
+- `zoomLabel`/`fxLabel` (`laneBuilders.tsx`, task 9) and `layoutLabel`/`layoutExtraStyle` (T34 L4, hoisted out to `LayoutLane.tsx` alongside the `useLayoutLaneRegions` memo that feeds them) are all MODULE-scope, not declared inline in the component body - they're pure and close over nothing per-render (`layoutLabel` reads its thumbnail off the region object itself, not a closure over `layoutPresets` - see `LayoutLane.md`), so a fresh inline arrow every render would have been a fresh prop every render, defeating `RegionRows`' memo even when the underlying region data hadn't changed.
 
-`regionLane` itself is declared in the hook body and closes over `dur`/`sel`, but it only ever CALLS `lanes.push` - it is never passed to a memoized child, so its identity does not matter.
+`regionLane` itself now lives in `laneBuilders.tsx` and takes an explicit `LaneCtx` (`{ROW_H, GAP, dur, sel, isSel}`) instead of closing over this hook's own variables; this hook builds that context once (`cx`, right after `isSel`) and calls `regionLane(lanes, cx, ...)` four times. It only ever CALLS `lanes.push` - it is never passed to a memoized child, so its identity does not matter.

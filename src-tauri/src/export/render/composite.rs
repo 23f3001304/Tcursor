@@ -1,7 +1,6 @@
 use super::screen_mix;
 use super::{FramePose, FrameRenderer};
 use crate::export::coordmap::inset_rect;
-use crate::export::fx::fx_state;
 
 impl FrameRenderer {
     pub fn composite_at(
@@ -49,35 +48,7 @@ impl FrameRenderer {
         let lens = (!captured)
             .then(|| self.lenses(pose, ow, oh, sc, inset_w))
             .flatten();
-        fx_state::render(
-            &*self.fx,
-            out,
-            ow,
-            oh,
-            &self.settings.clickfx,
-            self.cursor.events(),
-            &self.actions,
-            &self.effects,
-            &pose.scene,
-            pose.cam,
-            pose.cur,
-            &self.cursor.screen(),
-            self.has_webcam,
-            pose.out_t,
-            pose.ev_t,
-            &self.settings.hotkeys,
-            &mut self.spot_sim,
-            lens,
-        );
-        crate::export::fx::captiondraw::overlay(
-            out,
-            ow,
-            oh,
-            &self.captions,
-            &self.settings.captions,
-            self.settings.ui.accent,
-            pose.out_t,
-        );
+        self.fx_pass(pose, out, ow, oh, lens);
         if captured {
             let src_w = pose.scene.src.w.max(1.0) as u32;
             if let Some(cc) = &self.captured {

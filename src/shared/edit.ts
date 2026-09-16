@@ -4,6 +4,11 @@ export type ZoomTarget = "cursor" | { fixed: { x: number; y: number } };
 
 export type { CamZoomAction } from "../hud/settings/settings";
 export type { EditOp } from "./editOps";
+export type { TextAnchor, TextAnim, TextItem, TextKind, TextSize } from "./editText";
+export { TEXT_SIZE_FRACS } from "./editText";
+export type { Clip } from "./editClips";
+import type { TextItem } from "./editText";
+import type { Clip } from "./editClips";
 import type { CamZoomAction } from "../hud/settings/settings";
 
 export interface Zoom {
@@ -68,7 +73,9 @@ export function resolveTrim(trim: Trim, durMs: number): { inMs: number; outMs: n
   return { inMs, outMs };
 }
 
-export type EffectKind = "spotlight";
+export type EffectKind = "spotlight" | "blur" | "pixelate" | "highlight";
+export const MASK_KINDS = ["blur", "pixelate", "highlight"] as const;
+export const isMask = (e: EffectRegion): boolean => e.kind !== "spotlight";
 export interface EffectRegion {
   id: string;
   kind: EffectKind;
@@ -81,6 +88,9 @@ export interface EffectRegion {
   radius?: number;
   feather?: number;
   layer: number;
+  rect?: [number, number, number, number];
+  strength?: number;
+  roundness?: number;
 }
 
 export interface CaptionWord {
@@ -121,5 +131,7 @@ export interface EditDoc {
   aspect: Aspect;
   settings: Settings;
   captions: Caption[];
+  texts: TextItem[];
+  clips: Clip[];
   clip_ms: number;
 }

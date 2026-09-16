@@ -194,6 +194,9 @@ fn region_and_event_clocks_are_sampled_independently() {
         radius: None,
         feather: None,
         layer: 0,
+        rect: None,
+        strength: None,
+        roundness: None,
     };
     let s = fx_state_at(
         &fx(ClickFxStyle::Ripple, false),

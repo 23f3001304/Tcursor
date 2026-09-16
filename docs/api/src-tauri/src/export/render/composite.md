@@ -11,6 +11,14 @@ pub fn composite_at(&mut self, pose: &FramePose, screen: &[u8], prev: Option<&[u
 
 `prev` is the screen frame the caller latched before the mid-take display switch this frame is inside (`FramePose::hold` says which frame to latch, `FramePose::mix` says a switch is in flight), and `None` on every frame outside one - which is every frame of a take that never switched. When both are present the held frame is resampled into the current span's rect and blended under it (`render::screen_mix`) BEFORE the compositor runs, so the cross-dissolve needs no second screen input in either compositor and the exporter and the one-shot preview reach it through one path.
 
+### Implementation
+
+1. The display-switch dissolve, when `pose.mix` and `prev` are both present: `screen_mix::blend_into` resamples the held frame into this span's rect and blends it under the current one, into `self.mix_buf`.
+2. `compositor.composite_into` - background, screen panel, webcam panel - writes `out`.
+3. The lens, from `lenses`, but only when the captured-cursor path is not the one drawing.
+4. `fx_pass` (`render/fx_step.rs`) - the FX and caption passes, and the file the parity features add themselves to.
+5. The cursor, one of two ways: the captured OS cursor's own pixels (`cursor::captured`), or the cursor pack's sprite (`cursor::cursorset::draw`).
+
 ## FrameRenderer::lenses
 
 ```rust

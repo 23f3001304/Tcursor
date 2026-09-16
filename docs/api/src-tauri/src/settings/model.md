@@ -313,6 +313,7 @@ pub struct Settings {
     #[serde(default)] pub layout_presets: Vec<LayoutPreset>,
     pub captions: CaptionStyle,
     #[serde(default)] pub motion: MotionSettings,
+    #[serde(default)] pub grade: GradeSettings,
 }
 ```
 
@@ -333,6 +334,7 @@ Fields:
 - `motion: MotionSettings` - the project's ONE motion language (M3): the curve pair every newly added zoom, layout segment and camera keyframe inherits, and what `EditOp::ApplyMotionDefault` stamps onto the ones already placed. Lives in the sibling `settings/motion.rs` (see `motion.md`) rather than here, both for this file's line budget and because the default has a real story behind it. Default Soft, which is the bare word `"smooth"` - exactly what the add ops used to hardcode - so a config written before this field existed behaves identically and every existing region reads back as Soft rather than Custom.
 - `layout_presets: Vec<LayoutPreset>` - the user's saved layout looks, newest last. Default empty. *Why an explicit field-level `#[serde(default)]` on top of the container's:* same belt-and-suspenders as the two volumes - a `config.json` written before this field existed must load with an empty list under either code path rather than failing the whole `Settings` parse and silently resetting every other setting. `layout_presets_round_trip_and_default_empty` (`model_tests.rs`) pins both halves: `{}` loads empty, and a saved look survives a write/read cycle with all five layouts intact.
 - `captions: CaptionStyle` - the caption look plus its ASR inputs (`settings::captions::CaptionStyle`). Distinct from `clickfx.captions`, the OLD hotkey-chord toggle, which keeps its name and meaning unchanged.
+- `grade: GradeSettings` - the colour grade (spec 3.1, `docs/superpowers/specs/2026-09-15-editor-parity-features-design.md`): a preset name plus the three absolute numbers it seeds (`exposure`, `contrast`, `vignette`); the preset's other eight parameters stay a fixed lookup Batch 2b resolves in `export/grade`. Lives in the sibling `settings/grade.rs` (see `grade.md`), both for this file's line budget and because the model has a real story behind it, the same reason as `motion`. Default the identity, so a config written before this field existed loads and exports byte-identically.
 
 ### Used by
 

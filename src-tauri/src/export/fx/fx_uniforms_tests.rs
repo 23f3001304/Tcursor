@@ -13,9 +13,8 @@ fn style_id_covers_all_variants() {
     assert_eq!(style_id(Particles), 5.0);
     assert_eq!(style_id(Neon), 6.0);
 }
-#[test]
-fn maps_style_hits_spot_and_color() {
-    let st = FxState {
+fn state() -> FxState {
+    FxState {
         style: ClickFxStyle::Ripple,
         color: [255, 0, 0],
         intensity: 0.8,
@@ -40,8 +39,11 @@ fn maps_style_hits_spot_and_color() {
         }),
         video: None,
         lens: None,
-    };
-    let u = build_fx_u(&st, 1000, 2000);
+    }
+}
+#[test]
+fn maps_style_hits_spot_and_color() {
+    let u = build_fx_u(&state(), 1000, 2000);
     assert_eq!(u.a, [1000.0, 2000.0, 1.0, 1.0]);
     assert_eq!(u.b[3], 1.0);
     assert!((u.b[2] - 0.5).abs() < 1e-6);
@@ -184,5 +186,17 @@ fn dim_camera_true_clears_keep_flag() {
     assert_eq!(
         u.d[2], 0.0,
         "dim_camera:true -> keep-camera-lit flag clear (today's behavior)"
+    );
+}
+#[test]
+fn the_reserved_mask_and_grade_blocks_are_zero_and_trail_the_lens_slots() {
+    let u = build_fx_u(&state(), 1000, 2000);
+    assert!(u.mask.iter().all(|v| *v == [0.0; 4]));
+    assert!(u.grade.iter().all(|v| *v == [0.0; 4]));
+    assert_eq!(std::mem::size_of::<FxU>(), 16 * (7 + MAX_HITS + 8 + 16 + 6));
+    assert_eq!(std::mem::offset_of!(FxU, mask), 16 * (7 + MAX_HITS + 8));
+    assert_eq!(
+        std::mem::offset_of!(FxU, grade),
+        16 * (7 + MAX_HITS + 8 + 16)
     );
 }

@@ -79,6 +79,14 @@ export interface MotionSettings {
   easing: string;
   easing_out: string;
 }
+export type GradePreset =
+  "none" | "cinematic" | "noir" | "vintage" | "frost" | "golden" | "midnight" | "vivid" | "dreamy";
+export interface GradeSettings {
+  preset: GradePreset;
+  exposure: number;
+  contrast: number;
+  vignette: number;
+}
 export interface ClickFxSettings {
   enabled: boolean;
   style: ClickFxStyle;
@@ -153,4 +161,5 @@ export interface Settings {
   layout_presets: LayoutPreset[];
   captions: CaptionStyle;
   motion: MotionSettings;
+  grade: GradeSettings;
 }

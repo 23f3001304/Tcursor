@@ -81,14 +81,14 @@ impl FrameRenderer {
         dt_ms: f32,
         mut f: impl FnMut(&mut FrameRenderer, usize, u64, &FramePose) -> bool,
     ) -> Option<FramePose> {
-        let map = self.map.clone();
+        let snaps = self.map.plan_boundaries(fps);
         let ms = |k: u64| k * 1000 / fps;
         for k in 0..plan.first().copied().unwrap_or(0) {
             self.step_camera(video_start + ms(k), 0, dt_ms);
         }
         let mut last = None;
         for (j, &k) in plan.iter().enumerate().take(last_j.saturating_add(1)) {
-            if j > 0 && map.crosses_cut(plan[j - 1], k, fps) {
+            if snaps.binary_search(&j).is_ok() {
                 self.snap_cursor();
             }
             let pose = self.step_camera(video_start + ms(k), ms(j as u64) as u32, dt_ms);

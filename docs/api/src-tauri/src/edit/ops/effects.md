@@ -1,6 +1,6 @@
 # src-tauri/src/edit/ops/effects.rs
 
-Effect-region edit ops (add/update/remove), split out of `api.rs` so each file stays focused. v1 handles Spotlight regions; `api::apply` delegates the three effect-op variants here.
+Effect-region edit ops (add/update/remove), split out of `api.rs` so each file stays focused. It covers all four `EffectKind` variants - Spotlight, and the three masks Blur, Pixelate and Highlight - and carries the mask validation with them: `clamp_rect` holds a mask's canvas-fraction rect inside the canvas with a minimum size, `strength` is clamped to `STRENGTH_RANGE` and `roundness` to `0..0.5`, `add_effect` seeds a mask with `MASK_SEED_RECT` while a spotlight gets no rect at all, and a spotlight ignores rect/strength/roundness exactly as a mask ignores mode and radius. `api::apply` delegates the three effect-op variants here.
 
 ## apply_effect
 
@@ -10,11 +10,39 @@ pub fn apply_effect(doc: &mut EditDoc, op: EditOp)
 
 Applies an effect-region op:
 
-- `AddEffect { kind, start_ms, end_ms }` pushes a new `EffectRegion` with a generated id (`next_effect_id`: `e0`, `e1`, ... mirroring the zoom ids).
+- `AddEffect { kind, start_ms, end_ms }` pushes a new `EffectRegion` with a generated id (`next_effect_id`: `e0`, `e1`, ... mirroring the zoom ids); a new mask is seeded with `MASK_SEED_RECT`.
 - `UpdateEffect { id, start_ms?, end_ms? }` patches the supplied fields of the matching region, then runs `region::clamp_order` on the result (M5) so a partial update can never leave `start_ms > end_ms` persisted.
+- `rect`: every component finite; `w` and `h` clamped to `[0.01, 1.0]`; `x` to `[0.0, 1.0 - w]` and `y` to `[0.0, 1.0 - h]`, so a mask can never leave the canvas. A non-finite rect is dropped and the stored one kept.
+- `strength`: clamped to `[0.002, 0.120]`. Below the floor a blur does nothing and a pixel cell is one pixel; above the ceiling the blur costs more than the frame.
+- `roundness`: clamped to `[0.0, 0.5]`, the range `CameraMove::roundness` uses.
+- `rect` is ignored on a Spotlight, and `mode`/`radius` on a mask, so a stale field can never change a look.
 - `RemoveEffect { id }` drops the region by id.
 
 Any other op is a no-op (`_ => {}`) - `api::apply`'s match only routes the three effect variants here, so the fallback is unreachable by contract.
+
+### Behaviors
+
+- `adding_a_mask_seeds_the_centred_rect_and_a_spotlight_gets_none` - `AddEffect` with a mask kind seeds `rect` to `MASK_SEED_RECT`; a Spotlight gets `rect: None`.
+- `a_rect_is_clamped_so_it_never_leaves_the_canvas` - `clamp_rect` clamps an oversized/offset rect into `[0, 1]` and returns `None` for a non-finite component; an `UpdateEffect` carrying a non-finite `rect` leaves the region's stored rect unchanged.
+- `strength_and_roundness_are_clamped_to_their_ranges` - values outside `[0.002, 0.120]` and `[0.0, 0.5]` are clamped, not rejected or dropped.
+- `a_rect_is_ignored_on_a_spotlight_and_mode_and_radius_on_a_mask` - a Spotlight's `rect` write is a no-op; a mask's `mode`/`radius` writes are no-ops while its `dim`/`feather` writes still apply.
+- `update_effect_parses_with_the_mask_fields_absent` - an `update_effect` JSON op with no `rect`/`strength`/`roundness` keys deserializes with all three `None` (`#[serde(default)]`).
+
+## MASK_SEED_RECT
+
+```rust
+pub const MASK_SEED_RECT: [f32; 4] = [0.35, 0.40, 0.30, 0.20];
+```
+
+The centred canvas-fraction rect (`[x, y, w, h]`) a new mask region's `rect` is seeded with on `AddEffect`, so it lands visible and draggable instead of needing to be placed blind.
+
+## clamp_rect
+
+```rust
+pub fn clamp_rect(r: [f32; 4]) -> Option<[f32; 4]>
+```
+
+Clamps a canvas-fraction rect `[x, y, w, h]` so it never leaves the canvas: `w`/`h` to `[0.01, 1.0]`, then `x`/`y` to `[0.0, 1.0 - w]`/`[0.0, 1.0 - h]`. Returns `None` when any component is non-finite (`NaN`/`inf`), so the caller (`UpdateEffect`'s handling in `apply_effect`) keeps the region's existing stored rect rather than writing a broken one. Reused by Batch 2a's stage drag.
 
 ## lift_always_on_spotlight
 

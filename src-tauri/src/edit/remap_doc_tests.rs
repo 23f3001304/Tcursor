@@ -19,6 +19,9 @@ fn spot(id: &str, start_ms: u32, end_ms: u32) -> EffectRegion {
         radius: None,
         feather: None,
         layer: 0,
+        rect: None,
+        strength: None,
+        roundness: None,
     }
 }
 
@@ -162,4 +165,43 @@ fn a_plain_map_is_the_identity_on_regions() {
     });
     let r = remap_doc(&d, &TimeMap::identity(10_000));
     assert_eq!(r.layout, d.layout);
+}
+
+#[test]
+fn texts_move_to_the_output_clock_and_clips_are_consumed() {
+    let mut d = EditDoc::default();
+    d.texts.push(crate::edit::text::TextItem {
+        id: "t0".into(),
+        start_ms: 2200,
+        end_ms: 3200,
+        kind: Default::default(),
+        text: "x".into(),
+        sub: None,
+        style: "clean".into(),
+        pos: Default::default(),
+        offset: [0.0, 0.0],
+        size: Default::default(),
+        anim_in: Default::default(),
+        anim_out: Default::default(),
+        in_ms: 420,
+        out_ms: 420,
+        easing: "smooth".into(),
+    });
+    d.texts.push(crate::edit::text::TextItem {
+        id: "t1".into(),
+        start_ms: 1100,
+        end_ms: 1900,
+        ..d.texts[0].clone()
+    });
+    d.clips.push(crate::edit::clip::Clip {
+        id: "cl0".into(),
+        src_in_ms: 0,
+        src_out_ms: 9000,
+        transition_in_ms: 0,
+    });
+    let r = remap_doc(&d, &map());
+    assert_eq!(r.texts.len(), 1, "the text inside the cut is dropped");
+    assert_eq!((r.texts[0].start_ms, r.texts[0].end_ms), (700, 1350));
+    assert_eq!((r.texts[0].in_ms, r.texts[0].out_ms), (420, 420));
+    assert!(r.clips.is_empty());
 }

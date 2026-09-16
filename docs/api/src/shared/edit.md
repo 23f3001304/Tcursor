@@ -213,6 +213,8 @@ export interface EditDoc {
   aspect: Aspect;
   settings: Settings;
   captions: Caption[];
+  texts: TextItem[];
+  clips: Clip[];
   clip_ms: number;
 }
 ```
@@ -230,6 +232,8 @@ The complete editable state for one recording session. Loaded from `edit.json` i
 - `aspect: Aspect` - output frame aspect ratio; `"source"` (the default) matches today's behavior exactly, so a doc saved before this field existed loads unchanged.
 - `settings: Settings` - snapshot of the recorder settings at the time of capture. *Why embedded:* the exporter is fully self-contained per project; it must not depend on the current live settings, which may have changed since recording.
 - `captions: Caption[]` - the spoken-caption track, OUTPUT-clock like every other region list here. Empty on a doc written before captions existed.
+- `texts: TextItem[]` - the animated-text track, OUTPUT-clock like every other region list here. Empty on a doc written before text existed. The type lives in `src/shared/editText.ts`, re-exported from this file.
+- `clips: Clip[]` - the clip list, in output order. Empty means one clip covering the whole trim-resolved recording. The type lives in `src/shared/editClips.ts`, re-exported from this file.
 - `clip_ms: number` - the recording's true length in clip time, backfilled by the Rust migrate pass and rewritten by `remap_doc` to the output duration. Added to the TS mirror on 2026-09-15 (readability doc, task 6.1): the field always survived a `saveEdit` at runtime, since every doc the editor holds came from Rust and flows through spreads, but the type did not carry it, so a hand-built doc could drop it and `remapDoc` could not mirror the rewrite.
 
 ### Used by
@@ -239,18 +243,45 @@ The complete editable state for one recording session. Loaded from `edit.json` i
 ## EffectKind
 
 ```ts
-export type EffectKind = "spotlight";
+export type EffectKind = "spotlight" | "blur" | "pixelate" | "highlight";
 ```
 
-The kind of an editable effect region (mirrors the Rust `EffectKind`). The set grows over phases.
+The kind of an editable effect region (mirrors the Rust `EffectKind`). `"blur"`, `"pixelate"` and `"highlight"` are the three MASK kinds (added 2026-09-15, editor-parity batch 1) - a mask kind is any kind but `"spotlight"`; see `isMask`.
+
+## MASK_KINDS
+
+```ts
+export const MASK_KINDS = ["blur", "pixelate", "highlight"] as const;
+```
+
+The three mask `EffectKind`s, in the order the FX-lane "add mask" picker offers them. Mirrors the Rust `EffectKind::is_mask` split as a concrete list rather than a predicate, for UI that needs to enumerate rather than test.
+
+## isMask
+
+```ts
+export const isMask = (e: EffectRegion): boolean => e.kind !== "spotlight";
+```
+
+Whether `e` is a mask region rather than Spotlight - mirrors the Rust `EffectKind::is_mask`, but takes the whole `EffectRegion` (matching how call sites hold one) rather than a bare `EffectKind`.
 
 ## EffectRegion
 
 ```ts
-export interface EffectRegion { id: string; kind: EffectKind; start_ms: number; end_ms: number; fade_in_ms: number; fade_out_ms: number; mode?: string; dim?: number; radius?: number; feather?: number; layer: number }
+export interface EffectRegion {
+  id: string; kind: EffectKind; start_ms: number; end_ms: number;
+  fade_in_ms: number; fade_out_ms: number;
+  mode?: string; dim?: number; radius?: number; feather?: number; layer: number;
+  rect?: [number, number, number, number]; strength?: number; roundness?: number;
+}
 ```
 
-An editable effect region on the timeline (v1: spotlight), held in `EditDoc.effects`. The `add_effect` / `update_effect` / `remove_effect` `EditOp`s mutate it; the timeline lays them into layers (`layoutRegions`) and draws each as a draggable pill. `layer: number` doubles as that timeline row-stacking index and, for regions overlapping at the same instant, an explicit priority - the preview's `spotlightPreview.ts` picks the highest-`layer` region active at a given time (ties go to the last one in the array), mirroring the Rust `max_by_key` overlap rule.
+An editable effect region on the timeline: Spotlight, plus the three mask kinds. Held in `EditDoc.effects`. The `add_effect` / `update_effect` / `remove_effect` `EditOp`s mutate it; the timeline lays them into layers (`layoutRegions`) and draws each as a draggable pill. `layer: number` doubles as that timeline row-stacking index and, for regions overlapping at the same instant, an explicit priority - the preview's `spotlightPreview.ts` picks the highest-`layer` region active at a given time among `"spotlight"`-kind regions only (ties go to the last one in the array), mirroring the Rust `max_by_key` overlap rule.
+
+- `rect?: [number, number, number, number]` - *mask kinds only: `[x, y, w, h]` in CANVAS-FRACTION space - fractions of the recorded canvas, `[0, 1]` on each axis, `(0,0)` at its top left (spec 1.1). Absent on every doc written before masks existed, and on every Spotlight region forever.*
+- `strength?: number` - *blur radius or pixel-cell size, as a fraction of output height. Absent = the kind's default (unused by Highlight).*
+- `roundness?: number` - *corner rounding of the mask rect, as a fraction of its SHORT side, 0..0.5. Absent = 0.06.*
+- `feather?: number` - *Spotlight: its own soft edge. Masks: reused as the mask's soft edge width, a fraction of output height. Absent = 0.010.*
+- `dim?: number` - *Spotlight: max darkness outside the beam. Highlight (the mask kind): reused for the same purpose - how dark everything outside the rect goes. Absent = the global `clickfx.spotlight_dim` either way.*
 
 ## CaptionWord
 

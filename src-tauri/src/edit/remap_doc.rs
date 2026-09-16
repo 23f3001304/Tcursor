@@ -70,6 +70,18 @@ pub fn remap_doc(doc: &EditDoc, map: &TimeMap) -> EditDoc {
             })
         })
         .collect();
+    out.texts = doc
+        .texts
+        .iter()
+        .filter_map(|x| {
+            span(map, x.start_ms, x.end_ms).map(|(s, e)| {
+                let mut x = x.clone();
+                x.start_ms = s;
+                x.end_ms = e;
+                x
+            })
+        })
+        .collect();
     out.camera_moves = doc
         .camera_moves
         .iter()
@@ -81,6 +93,7 @@ pub fn remap_doc(doc: &EditDoc, map: &TimeMap) -> EditDoc {
         .collect();
     out.trim = Trim::default();
     out.cuts.clear();
+    out.clips.clear();
     out.speed.clear();
     out.clip_ms = map.out_dur_ms();
     out

@@ -41,6 +41,8 @@ struct FxU {
   back_a: vec4<f32>,            // cursor-back rounded rect (px): min_x, min_y, max_x, max_y
   back_b: vec4<f32>,            // corner radius(px), on(0/1), click squash, ink progress
   back_c: vec4<f32>,            // ink origin (px): x, y, ring-instead-of-drop(0/1), _pad
+  mask: array<vec4<f32>, 16>,   // reserved for Batch 2a: two vec4 per mask, eight masks, all zero until then
+  grade: array<vec4<f32>, 6>,   // reserved for Batch 2b: the grade parameters, all zero until then
 };
 @group(0) @binding(0) var frame_tex: texture_2d<f32>;
 @group(0) @binding(1) var samp: sampler;

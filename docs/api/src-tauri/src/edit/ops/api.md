@@ -36,13 +36,29 @@ pub enum EditOp {
     SetArrangement { id: String, screen: Option<Option<PanelPose>>, cam: Option<Option<PanelPose>> },
     ClearArrangement { id: String },
     AddEffect { kind: EffectKind, start_ms: u32, end_ms: u32 },
-    UpdateEffect { id: String, start_ms: Option<u32>, end_ms: Option<u32>, fade_in_ms: Option<u32>, fade_out_ms: Option<u32>, mode: Option<String>, dim: Option<f32>, radius: Option<f32>, feather: Option<f32>, layer: Option<u32> },
+    UpdateEffect { id: String, start_ms: Option<u32>, end_ms: Option<u32>, fade_in_ms: Option<u32>, fade_out_ms: Option<u32>, mode: Option<String>, dim: Option<f32>, radius: Option<f32>, feather: Option<f32>, layer: Option<u32>,
+        #[serde(default)] rect: Option<[f32; 4]>, #[serde(default)] strength: Option<f32>, #[serde(default)] roundness: Option<f32> },
     RemoveEffect { id: String },
     AddCameraMove { t_ms: u32, x: f32, y: f32, size: f32,
         #[serde(default)] shape: Option<String>, #[serde(default)] roundness: Option<f32> },
     UpdateCameraMove { id: String, t_ms: Option<u32>, x: Option<f32>, y: Option<f32>, size: Option<f32>, easing: Option<String>,
         #[serde(default)] shape: Option<String>, #[serde(default)] roundness: Option<f32> },
     RemoveCameraMove { id: String },
+    AddText { at_ms: u32, dur_ms: u32, #[serde(default)] kind: TextKind },
+    UpdateText {
+        id: String,
+        start_ms: Option<u32>, end_ms: Option<u32>,
+        text: Option<String>, sub: Option<Option<String>>,
+        kind: Option<TextKind>, style: Option<String>,
+        pos: Option<TextAnchor>, offset: Option<[f32; 2]>, size: Option<TextSize>,
+        anim_in: Option<TextAnim>, anim_out: Option<TextAnim>,
+        in_ms: Option<u32>, out_ms: Option<u32>, easing: Option<String>,
+    },
+    RemoveText { id: String },
+    SplitAt { at_ms: u32 },
+    MoveClip { id: String, to_index: usize },
+    UpdateClip { id: String, src_in_ms: Option<u32>, src_out_ms: Option<u32>, transition_in_ms: Option<u32> },
+    RemoveClip { id: String },
     ApplyMotionDefault,
 }
 ```
@@ -62,10 +78,12 @@ Discriminated-union command type serialized to/from the Tauri IPC channel and th
 - `SetSpeed` - *append a speed segment with the given `factor`; the id is auto-assigned and the caller controls ordering via the plan.*
 - `AddLayoutSeg` / `UpdateLayoutSeg` / `RemoveLayoutSeg` - *add/patch/remove a named-layout segment (`"screen"`, `"camera"`, `"presenter"`, ...), auto-id `l{n}`, clamped to the clip duration. Both carry the exit-transition pair as `Option`s: on `Add` they seed the segment (omitted = `NEW_LAYOUT_TRANSITION_MS`, the same value the entry gets, so a new segment is symmetric - see that const), on `Update` they follow the usual "only `Some` fields are written" rule. `easing_out` runs through `valid_easing` like every other easing setter, and defaults to `"smooth"` - again the same as the entry.*
 - `SetArrangement` / `ClearArrangement` - *set/hide a segment's panel poses, or drop the arrangement so the segment resolves from its `layout` preset again (T34); dispatched to `edit::ops::arrangement::apply_arrangement`, which documents the full semantics. Each panel field is THREE-valued on the wire - key absent = "leave this panel alone", `null` = hide it, an object = that pose - which needs `arrangement::double_option` to deserialize, because plain `Option<Option<_>>` folds `null` into the outer `None` and would make "hide" indistinguishable from "don't touch". (This is the same ambiguity `SetZoomCamAction` exists to avoid; here the three-valued shape is unavoidable because two independent panels are patched by one op, so it is handled explicitly instead.)*
-- `AddEffect` / `UpdateEffect` / `RemoveEffect` - *add/patch/remove a Spotlight effect region; dispatched to `edit::ops::effects::apply_effect`.*
+- `AddEffect` / `UpdateEffect` / `RemoveEffect` - *add/patch/remove an effect region (Spotlight or a mask kind); dispatched to `edit::ops::effects::apply_effect`. `UpdateEffect` also carries a mask's `rect`, `strength` and `roundness` (all three `#[serde(default)]` - absent leaves the field unchanged); a mask ignores `mode`/`radius`, a Spotlight ignores `rect` - see `effects.md` for the clamps.*
 - `AddCameraMove` - *set the webcam PiP keyframe at `t_ms`: center `(x, y)`, `size`, and optionally `shape` (`valid_cam_shape`, default `"layout"`) and `roundness` (clamped `[0.0, 0.5]`, default `DEFAULT_CAM_ROUNDNESS`); default easing `"smooth"`; auto-id `k{n}` (max existing `k`-suffix + 1); `t_ms` clamped to `[0, dur_bound(doc)]`, `x`/`y`/`size` clamped to `[0.0, 1.0]`. **One keyframe per instant:** if a keyframe already sits within `CAM_KF_SNAP_MS` (60 ms, the panel's own snap window - `region.md`) of the clamped `t_ms`, the nearest one is updated in place - its pose always, its `shape`/`roundness` only when the op carried them, its id/easing kept - rather than a duplicate pushed. The Move-mode slider commits with whatever doc it rendered with, which can be one IPC round-trip stale, so two quick commits both saying "add" used to stack a coincident duplicate that the sampler (which prefers the LAST coincident keyframe) then showed instead of the latest value; and an add that omitted the shape used to reset a circle keyframe to `"layout"` (bug sweep 2026-09-15). `doc.camera_moves` is kept sorted by `t_ms` after every add.*
 - `UpdateCameraMove` - *partial patch by `id`; only `Some` fields are written, same clamps/validation as `AddCameraMove`; re-sorts `doc.camera_moves` by `t_ms` only when `t_ms` itself changed.*
 - `RemoveCameraMove` - *drop a keyframe by id via `retain`; unknown ids are a no-op.*
+- `AddText` / `UpdateText` / `RemoveText` - *add/patch/remove an animated text overlay (a title, lower third, stat or callout); dispatched to `edit::ops::textops::apply_text`, which documents the full validation (`textops.md`). `AddText` seeds `text`/`sub`/`size`/`pos`/`style`/`anim_in` from a fixed table keyed by `kind`; auto-id `t{n}` (max existing `t`-suffix + 1, `ids::next_text_id`), span clamped to `[0, dur_bound(doc)]`. `UpdateText`'s `sub` is double-optional on the wire the same way `SetArrangement`'s panels are (key absent = leave it, `null` = clear to `None`, a string = set it), deserialized through the same `arrangement::double_option` helper. Nothing renders `EditDoc.texts` yet - this batch only adds the ops.*
+- `SplitAt` / `MoveClip` / `UpdateClip` / `RemoveClip` - *the clip track (spec 6.6): split the recording, reorder, retime a source range and its cross-dissolve, remove; dispatched to `edit::ops::clipops::apply_clip`, which documents the full semantics (`clipops.md`). `SplitAt` materialises `doc.clips` from the trim on its first call and auto-ids every new clip `cl{n}` (`ids::next_clip_id`); `RemoveClip` never takes the list below one clip. Every one of the four is a no-op on a doc whose length cannot yet be resolved (`region::dur_bound(doc) == u32::MAX`). Nothing renders `EditDoc.clips` yet - this batch only adds the ops (Batch 4 renders them).*
 - `UpdateCaption` / `RemoveCaption` / `MergeCaptions` / `SplitCaption` / `SetCaptions` / `ClearCaptions` - *the caption track (M5), dispatched in one arm to `edit::ops::captions::apply_caption`, which documents the full semantics. `SetCaptions` is the one a human never sends: the ASR pass writes the whole track through it under the doc lock (plan ADDED-8), so a transcription is one undoable step and no caption array ever travels back over IPC. The other five are the timeline lane's and the Captions panel's: a drag commits `UpdateCaption`, which also carries the text edit, and Merge/Split are the two structural edits a caption line needs that no other region has.*
 
 ### Used by
@@ -116,6 +134,8 @@ Mutates `doc` in place by dispatching on `op`. The single write point for all `E
 8. **UpdateLayoutSeg** - linear scan by `id`; writes only the `Some` fields (`start_ms`/`end_ms` clamped to the clip, `layout`/`easing`/`easing_out` validated same as above), then also runs `region::clamp_order` on `start_ms`/`end_ms` (M5), same as `UpdateZoom`.
 9. **SetArrangement / ClearArrangement** - delegated whole to `edit::ops::arrangement::apply_arrangement`, the same shape the effect ops use.
 10. **ApplyMotionDefault** - delegated whole to `edit::ops::motion::apply_default` (see `motion.md`).
+11. **AddText / UpdateText / RemoveText** - delegated whole to `edit::ops::textops::apply_text` (see `textops.md`), the same shape the effect and arrangement ops use.
+12. **SplitAt / MoveClip / UpdateClip / RemoveClip** - delegated whole to `edit::ops::clipops::apply_clip` (see `clipops.md`), the same shape.
 
 ### The motion default
 

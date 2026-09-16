@@ -1,5 +1,6 @@
 pub mod cammove;
 pub mod captions;
+pub mod clip;
 pub mod commands;
 pub mod effect;
 mod lock;
@@ -8,3 +9,4 @@ pub mod model;
 pub mod ops;
 pub mod remap_doc;
 pub mod seed;
+pub mod text;

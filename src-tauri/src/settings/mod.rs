@@ -3,6 +3,7 @@ pub mod background;
 pub mod bg_asset;
 pub mod captions;
 pub mod cursor;
+pub mod grade;
 pub mod interface;
 pub mod model;
 pub mod motion;

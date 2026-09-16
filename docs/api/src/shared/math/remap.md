@@ -17,10 +17,10 @@ export const FACTOR_MAX = 8;
 ## Segment
 
 ```ts
-export interface Segment { clipStart: number; clipEnd: number; factor: number; outStart: number }
+export interface Segment { clipStart: number; clipEnd: number; factor: number; outStart: number; clip: number }
 ```
 
-One kept range `[clipStart, clipEnd)` of clip time, the factor it plays at, the output time it starts at.
+One kept range `[clipStart, clipEnd)` of clip time, the factor it plays at, the output time it starts at, and `clip`, the index of the clip it came from in the clip list AS WRITTEN, so `clips[s.clip]` is always the clip that produced it. A dropped clip (inverted or empty) leaves a gap in the indices carried rather than renumbering the ones after it; 0 with no clips, the trim range being index 0. Ordered in clip time within one clip only; across a clip join it can jump anywhere.
 
 ## TimeMap
 
@@ -41,10 +41,12 @@ Mirrors Rust `Trim::resolve`: `out_ms === 0` means the whole clip; `in` is clamp
 ## buildTimeMap
 
 ```ts
-export function buildTimeMap(trim: Trim, cuts: Cut[], speed: Speed[], fullDurMs: number): TimeMap
+export function buildTimeMap(trim: Trim, cuts: Cut[], speed: Speed[], clips: Clip[], fullDurMs: number): TimeMap
 ```
 
 Trim first, then cuts clamped into it, sorted and merged when overlapping or touching, then speed spans clamped, sorted, a later span clamped to start at its predecessor's end, factors clamped to `[FACTOR_MIN, FACTOR_MAX]`; every kept piece split at span edges and tagged with the span's factor (1 outside). A cut inside a span removes those frames from it. Mirrors `TimeMap::build`.
+
+That is the body of an outer loop over the clip ranges (`clipRanges`, which returns `[index, a, b][]`): no clips means one range, the resolved trim at index 0, and every pinned table is unchanged; otherwise one range per clip in OUTPUT order, `[src_in_ms, src_out_ms]` clamped to `fullDurMs` with inverted and empty ranges dropped and the trim ignored. Cuts and speed spans stay in source time and resolve inside each range; `outStart` is declared before the loop and accumulates across the clips, so the output is the concatenation of each clip's kept pieces. Each segment carries the range's OWN index, not the loop's position, so dropping a clip does not renumber the ones after it and `clips[s.clip]` stays valid. `plain` compares the bounds only: it needs the ranges to be exactly the resolved trim AND no cut or span in any of them.
 
 ## identityMap
 
@@ -60,13 +62,21 @@ export const outDurMs = (m: TimeMap): number
 
 The exported length, rounded: the transport's total and the export dialog's length.
 
+## nextShown
+
+```ts
+export function nextShown(m: TimeMap, clipMs: number): Segment | undefined
+```
+
+The segment that shows the next kept source instant after a clip time: the smallest `clipStart` strictly greater than `clipMs`, ties broken by the smaller `outStart`; `undefined` when nothing after it is kept. The second pass of `outOf`, exported because `playbackAction` needs the SEGMENT, not its rounded output time: a seek target has to be an exact `clipStart`, and `clipOf(outOf(t))` rounds through the output clock, which on a fractional `outStart` lands back inside the cut.
+
 ## outOf
 
 ```ts
 export function outOf(m: TimeMap, clipMs: number): number
 ```
 
-Output time of a clip time; inside a gap, the next segment's start (the frame the viewer sees next); past the end, the total.
+Output time of a clip time: the first showing of that source instant. Two passes, since clips leave the segments unsorted in clip time - the segment containing it, else `nextShown` (the smallest `clipStart` greater than it, ties: the smaller `outStart`), else the total. With one clip in source order that is the old "next segment", which is why the trim/cut/speed tables hold.
 
 ## clipOf
 
@@ -76,13 +86,21 @@ export function clipOf(m: TimeMap, outMs: number): number
 
 The inverse on the kept ranges; at or past the end, the last kept edge.
 
-## gapContaining
+## crossesBoundary
 
 ```ts
-export function gapContaining(m: TimeMap, clipMs: number): [number, number] | null
+export function crossesBoundary(m: TimeMap, prevOutMs: number, outMs: number): boolean
 ```
 
-The gap a clip time falls in as `[previous kept end, next kept start]`, the trailing gap running to `Infinity` (Rust: `u32::MAX`); `null` on a kept range. The preview jumps the media over a finite gap and tells a cut jump from a seek with it.
+Whether two OUTPUT times are separated by a splice: their segments (`segOfOut`, the first whose output range has not ended) are `a < b` and some join between them has `clipEnd !== clipStart`. A cut and a clip join count; a speed-span edge, a contiguous clip join, a backwards step and a pair inside one segment do not, and neither does a trim edge (`segOfOut` is -1 outside the mapped range, so the trim's edges are the ends of the output rather than interior joins). Mirrors `TimeMap::crosses_boundary`, which replaced `gapContaining`/`crosses_cut` on both sides. The predicate for a caller holding two output times and no plan; a caller walking `framePlan` uses `planBoundaries` instead.
+
+## clipOutMs
+
+```ts
+export function clipOutMs(m: TimeMap, clip: number): number
+```
+
+The output length of one clip: the rounded sum of `(clipEnd - clipStart) / factor` over the segments with that index, 0 for an index with no segments - including an index whose clip was dropped, which contributes nothing to the output. The index is the position in the clip list as written, the same one the caller holds.
 
 ## factorAt
 
@@ -107,3 +125,5 @@ export function framePlan(m: TimeMap, fps: number): number[]
 ```
 
 For every output frame, the recording frame it shows. Not used by the preview itself (the media run on clip time); kept so the parity table can pin the plan on both sides.
+
+`TimeMap::plan_boundaries`, the last function of the Rust module, mirrors into `remapPlan.ts` rather than this file: `remap.ts` is at the 200-line budget and the plan walk is the one reader that is about the PLAN rather than the clocks.

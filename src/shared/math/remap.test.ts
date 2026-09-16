@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   buildTimeMap,
   clipOf,
+  crossesBoundary,
   factorAt,
   framePlan,
-  gapContaining,
   outDurMs,
   outOf,
   resolveTrim,
@@ -99,15 +99,15 @@ describe("TimeMap (parity with export::remap)", () => {
       [333, 9999, 30],
       [0, 12_345, 24],
     ]) {
-      const m = buildTimeMap({ in_ms: i, out_ms: o }, [], [], full);
+      const m = buildTimeMap({ in_ms: i, out_ms: o }, [], [], [], full);
       const [kIn, kLast] = trimFrameBounds(...resolveTrim({ in_ms: i, out_ms: o }, full), fps);
       expect(framePlan(m, fps), `trim ${i}..${o} @ ${fps}`).toEqual(range(kIn, kLast));
       expect(m.plain).toBe(true);
     }
-    expect(framePlan(buildTimeMap({ in_ms: 700, out_ms: 700 }, [], [], full), 60)).toEqual([]);
+    expect(framePlan(buildTimeMap({ in_ms: 700, out_ms: 700 }, [], [], [], full), 60)).toEqual([]);
   });
 
-  it("overlapping and touching cuts merge, a cut inside a speed span wins, gaps are reported", () => {
+  it("overlapping and touching cuts merge and a cut inside a speed span wins", () => {
     const m = buildTimeMap(
       { in_ms: 0, out_ms: 0 },
       [
@@ -116,15 +116,15 @@ describe("TimeMap (parity with export::remap)", () => {
         { id: "c", start_ms: 250, end_ms: 350 },
       ],
       [{ id: "s", start_ms: 0, end_ms: 1000, factor: 2 }],
+      [],
       1000,
     );
     expect(m.segments.map((s) => [s.clipStart, s.clipEnd, s.factor])).toEqual([
       [0, 100, 2],
       [400, 1000, 2],
     ]);
-    expect(gapContaining(m, 350)).toEqual([100, 400]);
-    expect(gapContaining(m, 50)).toBeNull();
-    expect(gapContaining(m, 1000)).toEqual([1000, Infinity]);
+    expect(crossesBoundary(m, 49, 50)).toBe(true);
+    expect(crossesBoundary(m, 10, 20)).toBe(false);
     expect(factorAt(m, 50)).toBe(2);
     expect(factorAt(m, 350)).toBe(1);
   });
@@ -137,6 +137,7 @@ describe("TimeMap (parity with export::remap)", () => {
         { id: "a", start_ms: 100, end_ms: 600, factor: 40 },
         { id: "b", start_ms: 400, end_ms: 800, factor: 0.01 },
       ],
+      [],
       1000,
     );
     expect(m.segments.map((s) => [s.clipStart, s.clipEnd, s.factor])).toEqual([
@@ -148,11 +149,11 @@ describe("TimeMap (parity with export::remap)", () => {
   });
 
   it("a cut covering everything leaves no segments and no frames", () => {
-    const m = buildTimeMap({ in_ms: 0, out_ms: 0 }, [{ id: "x", start_ms: 0, end_ms: 5000 }], [], 5000);
+    const m = buildTimeMap({ in_ms: 0, out_ms: 0 }, [{ id: "x", start_ms: 0, end_ms: 5000 }], [], [], 5000);
     expect(m.segments).toEqual([]);
     expect(outDurMs(m)).toBe(0);
     expect(framePlan(m, 60)).toEqual([]);
     expect(clipOf(m, 0)).toBe(0);
-    expect(gapContaining(m, 10)).toEqual([0, Infinity]);
+    expect(crossesBoundary(m, 0, 10)).toBe(false);
   });
 });

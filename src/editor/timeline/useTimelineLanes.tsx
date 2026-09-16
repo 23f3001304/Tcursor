@@ -1,48 +1,17 @@
 import { useCallback, useMemo, type RefObject } from "react";
-import { IconZoomIn, IconBulb } from "@tabler/icons-react";
 import type { EditDoc, EditOp } from "../../shared/edit";
 import type { LayoutPresets } from "../../shared/ipc";
 import { useDensity } from "../shell/useDensity";
 import { layoutRegions } from "./model/layers";
 import { useLaneDrag } from "./useLaneDrag";
-import type { BeginDrag, Drag } from "../hooks/input/useRegionDrag";
 import { useLayoutLaneRegions, layoutLabel, layoutExtraStyle } from "./lanes/LayoutLane";
 import { useCaptionLaneRegions, captionLabel, captionTitle } from "./lanes/CaptionLane";
 import { AudioTrack } from "./lanes/AudioTrack";
 import { CameraLane } from "./lanes/CameraLane";
 import { TimeLane } from "./lanes/TimeLane";
-import { RegionRows } from "./lanes/RegionRows";
+import { laneHeight, zoomLabel, fxLabel, regionLane, type TimelineLane } from "./laneBuilders";
 
-interface Region {
-  id: string;
-  start_ms: number;
-  end_ms: number;
-  layer: number;
-}
-
-export interface TimelineLane {
-  key: string;
-  label: string;
-  heightPx: number;
-  active: boolean;
-  body: React.ReactNode;
-}
-
-const laneHeight = (rows: number, rowH: number, gap: number) =>
-  rows > 0 ? rows * rowH + (rows - 1) * gap : 0;
-
-const zoomLabel = (z: { scale: number }) => (
-  <>
-    <IconZoomIn size={12} />
-    {z.scale.toFixed(1)}x
-  </>
-);
-const fxLabel = () => (
-  <>
-    <IconBulb size={12} />
-    Spotlight
-  </>
-);
+export type { TimelineLane } from "./laneBuilders";
 
 export function useTimelineLanes({
   doc,
@@ -101,6 +70,7 @@ export function useTimelineLanes({
 
   const audioRows = !wavesReady ? 2 : (waves.system ? 1 : 0) + (waves.mic ? 1 : 0);
   const isSel = (regions: { id: string }[]) => sel != null && regions.some((r) => r.id === sel);
+  const cx = { ROW_H, GAP, dur, sel, isSel };
   const lanes: TimelineLane[] = [];
   if (doc.cuts.length || doc.speed.length)
     lanes.push({
@@ -110,43 +80,11 @@ export function useTimelineLanes({
       active: isSel(doc.speed),
       body: <TimeLane doc={doc} dur={dur} sel={sel} onSel={onSel} onApply={onApply} track={track} />,
     });
-  const regionLane = <T extends Region>(
-    key: string,
-    label: string,
-    lane: { rows: number; drag: Drag | null; beginDrag: BeginDrag },
-    regions: T[],
-    rowClass: string,
-    blkClass: string,
-    renderLabel: (r: T) => React.ReactNode,
-    extraStyle?: (r: T, s: number, e: number) => React.CSSProperties,
-    titleOf?: (r: T) => string | undefined,
-  ) => {
-    if (lane.rows === 0) return;
-    lanes.push({
-      key,
-      label,
-      heightPx: laneHeight(lane.rows, ROW_H, GAP),
-      active: isSel(regions),
-      body: (
-        <RegionRows
-          rows={lane.rows}
-          regions={regions}
-          dur={dur}
-          sel={sel}
-          rowClass={rowClass}
-          blkClass={blkClass}
-          dragState={lane.drag}
-          beginDrag={lane.beginDrag}
-          renderLabel={renderLabel}
-          extraStyle={extraStyle}
-          titleOf={titleOf}
-        />
-      ),
-    });
-  };
-  regionLane("zoom", "Zoom", zoom, zooms, "e-zoomrow", "e-zblk", zoomLabel);
-  regionLane("fx", "FX", eff, fx, "e-fxrow", "e-fxblk", fxLabel);
+  regionLane(lanes, cx, "zoom", "Zoom", zoom, zooms, "e-zoomrow", "e-zblk", zoomLabel);
+  regionLane(lanes, cx, "fx", "FX", eff, fx, "e-fxrow", "e-fxblk", fxLabel);
   regionLane(
+    lanes,
+    cx,
     "captions",
     "Captions",
     cap,
@@ -157,7 +95,18 @@ export function useTimelineLanes({
     undefined,
     captionTitle,
   );
-  regionLane("layout", "Layout", lay, layouts, "e-layrow", "e-layblk", layoutLabel, layoutExtraStyle);
+  regionLane(
+    lanes,
+    cx,
+    "layout",
+    "Layout",
+    lay,
+    layouts,
+    "e-layrow",
+    "e-layblk",
+    layoutLabel,
+    layoutExtraStyle,
+  );
   lanes.push({
     key: "camera",
     label: "Camera",

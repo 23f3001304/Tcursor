@@ -22,6 +22,8 @@ export const DOC = {
   cuts: [],
   speed: [],
   captions: [],
+  texts: [],
+  clips: [],
   aspect: "source",
   trim: { in_ms: 0, out_ms: 5000 },
   settings: {

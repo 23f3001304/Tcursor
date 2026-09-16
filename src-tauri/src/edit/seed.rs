@@ -225,6 +225,8 @@ pub(crate) fn build_default(paths: &ProjectPaths) -> EditDoc {
         aspect: crate::export::types::Aspect::default(),
         settings,
         captions: vec![],
+        texts: vec![],
+        clips: vec![],
     }
 }
 
@@ -250,6 +252,9 @@ fn spotlight_effects(actions: &[ActionEvent], dur: u32) -> Vec<EffectRegion> {
         radius: None,
         feather: None,
         layer: 0,
+        rect: None,
+        strength: None,
+        roundness: None,
     })
     .collect()
 }

@@ -150,6 +150,10 @@ pub struct EditDoc {
     pub settings: crate::settings::model::Settings,
     #[serde(default)]
     pub captions: Vec<Caption>,
+    #[serde(default)]
+    pub texts: Vec<crate::edit::text::TextItem>,
+    #[serde(default)]
+    pub clips: Vec<crate::edit::clip::Clip>,
 }
 impl Default for EditDoc {
     fn default() -> Self {
@@ -166,6 +170,8 @@ impl Default for EditDoc {
             aspect: crate::export::types::Aspect::default(),
             settings: crate::settings::model::Settings::default(),
             captions: vec![],
+            texts: vec![],
+            clips: vec![],
         }
     }
 }

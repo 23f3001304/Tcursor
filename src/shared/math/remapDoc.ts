@@ -16,6 +16,7 @@ export function remapDoc(doc: EditDoc, map: TimeMap): EditDoc {
     zooms: moved(doc.zooms),
     layout: moved(doc.layout),
     effects: moved(doc.effects),
+    texts: moved(doc.texts),
     captions: doc.captions.flatMap((c) => {
       const sp = span(c.start_ms, c.end_ms);
       return sp ? [{ ...c, start_ms: sp[0], end_ms: sp[1], words: moved(c.words) }] : [];
@@ -24,6 +25,7 @@ export function remapDoc(doc: EditDoc, map: TimeMap): EditDoc {
     trim: { in_ms: 0, out_ms: 0 },
     cuts: [],
     speed: [],
+    clips: [],
     clip_ms: outDurMs(map),
   };
 }

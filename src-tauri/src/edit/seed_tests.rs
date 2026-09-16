@@ -55,6 +55,9 @@ fn effect(id: &str, start_ms: u32, end_ms: u32) -> EffectRegion {
         radius: None,
         feather: None,
         layer: 0,
+        rect: None,
+        strength: None,
+        roundness: None,
     }
 }
 fn seg(id: &str, start_ms: u32, end_ms: u32) -> LayoutSeg {

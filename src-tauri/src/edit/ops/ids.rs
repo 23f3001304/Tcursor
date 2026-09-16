@@ -43,3 +43,25 @@ pub(crate) fn next_caption_id(doc: &EditDoc) -> String {
         .unwrap_or(doc.captions.len() as u32);
     format!("c{}", n)
 }
+
+pub(crate) fn next_text_id(doc: &EditDoc) -> String {
+    let n = doc
+        .texts
+        .iter()
+        .filter_map(|t| t.id.strip_prefix('t').and_then(|d| d.parse::<u32>().ok()))
+        .max()
+        .map(|m| m + 1)
+        .unwrap_or(doc.texts.len() as u32);
+    format!("t{}", n)
+}
+
+pub(crate) fn next_clip_id(doc: &EditDoc) -> String {
+    let n = doc
+        .clips
+        .iter()
+        .filter_map(|c| c.id.strip_prefix("cl").and_then(|d| d.parse::<u32>().ok()))
+        .max()
+        .map(|m| m + 1)
+        .unwrap_or(doc.clips.len() as u32);
+    format!("cl{}", n)
+}

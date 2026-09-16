@@ -39,7 +39,7 @@ export function spotlightEffectsKey(effects: EffectRegion[]): string {
   return effects
     .map(
       (e) =>
-        `${e.id}:${e.start_ms}:${e.end_ms}:${e.fade_in_ms}:${e.fade_out_ms}:${e.mode}:${e.dim}:${e.radius}:${e.feather}`,
+        `${e.kind}:${e.id}:${e.start_ms}:${e.end_ms}:${e.fade_in_ms}:${e.fade_out_ms}:${e.mode}:${e.dim}:${e.radius}:${e.feather}`,
     )
     .join("|");
 }
@@ -54,6 +54,7 @@ function regionAlpha(e: EffectRegion, ms: number): number {
 function winner(effects: EffectRegion[], ms: number): EffectRegion | null {
   let best: EffectRegion | null = null;
   for (const e of effects) {
+    if (e.kind !== "spotlight") continue;
     if (ms < e.start_ms || ms >= e.end_ms) continue;
     if (!best || (e.layer ?? 0) >= (best.layer ?? 0)) best = e;
   }

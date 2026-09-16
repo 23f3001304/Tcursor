@@ -6,7 +6,7 @@ import { remapDoc } from "../../../shared/math/remapDoc";
 export function useTimeMap(doc: EditDoc | null, fullDurMs: number): { map: TimeMap; outDoc: EditDoc | null } {
   return useMemo(() => {
     if (!doc) return { map: identityMap(fullDurMs), outDoc: null };
-    const map = buildTimeMap(doc.trim, doc.cuts, doc.speed, fullDurMs);
+    const map = buildTimeMap(doc.trim, doc.cuts, doc.speed, doc.clips, fullDurMs);
     return { map, outDoc: remapDoc(doc, map) };
   }, [doc, fullDurMs]);
 }

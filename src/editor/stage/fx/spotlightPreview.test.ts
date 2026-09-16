@@ -191,3 +191,15 @@ describe("spotAlphaPlan", () => {
     expect(requests).toEqual(new Set([1]));
   });
 });
+
+describe("resolveSpotlight ignores masks", () => {
+  it("a blur region on a higher layer never drives the spotlight", () => {
+    const sim = newSpotlightSimState();
+    const effects = [region({ id: "m0", kind: "blur", start_ms: 0, end_ms: 10_000, layer: 9 }), region()];
+    expect(resolveSpotlight(input(effects), 1000, sim)).toBeNull();
+    expect(resolveSpotlight(input(effects), 4500, sim)).not.toBeNull();
+  });
+  it("the effects key changes when a region's kind changes", () => {
+    expect(spotlightEffectsKey([region()])).not.toBe(spotlightEffectsKey([region({ kind: "blur" })]));
+  });
+});

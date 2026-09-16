@@ -1,6 +1,6 @@
 # src/shared/editOps.ts
 
-The edit verb union, split out of `edit.ts`: that file is the document shape, this one is every mutation you can ask the backend to make to it. `edit.ts` re-exports `EditOp`, so `import type { EditOp } from "../shared/edit"` keeps working everywhere. The types the variants are built from (`ZoomTarget`, `PanelPose`, `Aspect`, `EffectKind`, `CamMoveShape`, `Caption`) stay in `edit.ts` and are imported back here - a type-only cycle, erased at build time.
+The edit verb union, split out of `edit.ts`: that file is the document shape, this one is every mutation you can ask the backend to make to it. `edit.ts` re-exports `EditOp`, so `import type { EditOp } from "../shared/edit"` keeps working everywhere. The types the variants are built from (`ZoomTarget`, `PanelPose`, `Aspect`, `EffectKind`, `CamMoveShape`, `Caption`, `TextKind`, `TextAnchor`, `TextSize`, `TextAnim`) stay in `edit.ts` and are imported back here - a type-only cycle, erased at build time.
 
 ## EditOp
 
@@ -24,11 +24,18 @@ export type EditOp =
   | { op: "set_arrangement"; id: string; screen?: PanelPose | null; cam?: PanelPose | null }
   | { op: "clear_arrangement"; id: string }
   | { op: "add_effect"; kind: EffectKind; start_ms: number; end_ms: number }
-  | { op: "update_effect"; id: string; start_ms?: number; end_ms?: number; fade_in_ms?: number; fade_out_ms?: number; mode?: string; dim?: number; radius?: number; feather?: number; layer?: number }
+  | { op: "update_effect"; id: string; start_ms?: number; end_ms?: number; fade_in_ms?: number; fade_out_ms?: number; mode?: string; dim?: number; radius?: number; feather?: number; layer?: number; rect?: [number, number, number, number]; strength?: number; roundness?: number }
   | { op: "remove_effect"; id: string }
   | { op: "add_camera_move"; t_ms: number; x: number; y: number; size: number; shape?: CamMoveShape; roundness?: number }
   | { op: "update_camera_move"; id: string; t_ms?: number; x?: number; y?: number; size?: number; easing?: string; shape?: CamMoveShape; roundness?: number }
   | { op: "remove_camera_move"; id: string }
+  | { op: "add_text"; at_ms: number; dur_ms: number; kind: TextKind }
+  | { op: "update_text"; id: string; start_ms?: number; end_ms?: number; text?: string; sub?: string | null; kind?: TextKind; style?: string; pos?: TextAnchor; offset?: [number, number]; size?: TextSize; anim_in?: TextAnim; anim_out?: TextAnim; in_ms?: number; out_ms?: number; easing?: string }
+  | { op: "remove_text"; id: string }
+  | { op: "split_at"; at_ms: number }
+  | { op: "move_clip"; id: string; to_index: number }
+  | { op: "update_clip"; id: string; src_in_ms?: number; src_out_ms?: number; transition_in_ms?: number }
+  | { op: "remove_clip"; id: string }
   | { op: "apply_motion_default" }
   | { op: "update_caption"; id: string; start_ms?: number; end_ms?: number; text?: string }
   | { op: "remove_caption"; id: string }
@@ -56,11 +63,18 @@ Discriminated union of all edit verbs. Each variant is tagged by the `op` string
 - `set_arrangement` - sets or hides a layout segment's panel poses. Each panel field is THREE-valued: **omit** the key to leave that panel as it is, pass `null` to hide it, pass a `PanelPose` to set (and un-hide) it. *Why omitted and `null` must differ:* they are the only way one op can patch two independent panels without a caller ever having to resend a pose it did not change. Note `JSON.stringify` drops `undefined` keys, so `{ cam: undefined }` correctly reads as "leave the cam alone" - but an explicit `cam: null` HIDES it, so never use `null` as a stand-in for "no value". On a segment with no arrangement yet the base is "both panels hidden", so converting a preset means sending BOTH panels: take them from the matching `LayoutPresetDto.arrangement` in `previewLayouts`. A change that would hide both panels is rejected by Rust (a no-op).
 - `clear_arrangement` - drops a segment's arrangement so it resolves from its `layout` preset again; the way back from a custom arrangement.
 - `add_effect` - appends a new `EffectRegion` of `kind` for the given time range.
-- `update_effect` - patches any subset of an effect region's fields by `id`, including `layer` for overlap stacking.
+- `update_effect` - patches any subset of an effect region's fields by `id`, including `layer` for overlap stacking, and a mask's `rect`, `strength` and `roundness` (each clamped in Rust; a mask ignores `mode`/`radius` and a Spotlight ignores `rect` - see `effects.md`).
 - `remove_effect` - deletes the effect region with the given `id`.
 - `add_camera_move` - sets the webcam PiP keyframe (`CameraMove`) at `t_ms` with position `x`/`y`, `size`, and optionally its `shape`/`roundness` (absent = `"layout"` / the backend default). An instant that already holds a keyframe is updated in place, not duplicated (Rust `EditOp::AddCameraMove`), so a slider committing twice before the doc round-trips cannot stack a stale twin.
 - `update_camera_move` - patches any subset of a camera-move keyframe's fields by `id`: time, position, size, `easing`, `shape`, `roundness`.
 - `remove_camera_move` - deletes the camera-move keyframe with the given `id`.
+- `add_text` - appends a new `TextItem` of `kind` (title / lower third / stat / callout) at `at_ms` lasting `dur_ms`. The backend seeds `text`, `sub`, `size`, `pos`, `style` and `anim_in` from a fixed table keyed by `kind` (see `textops.md`); the caller supplies only the placement.
+- `update_text` - patches any subset of a text item's fields by `id`: span, `text`, `kind`, `style`, `pos`, `offset`, `size`, the in/out `anim_in`/`anim_out` pair with their `in_ms`/`out_ms` durations, and `easing`. All fields except `id` are optional. **`sub` is THREE-valued on the wire**, the same convention `set_arrangement`'s panels use: omit the key to leave it, pass `null` to clear it, pass a string to set it. *Why:* a lower third's role line and a stat's caption need to be clearable independently of being left alone, and plain `string | undefined` cannot express "clear" once `JSON.stringify` drops `undefined` keys.
+- `remove_text` - deletes the text item with the given `id`.
+- `split_at` - splits the recording at `at_ms` (clip time). With no clips yet, materialises the trim-resolved range as two clips meeting at `at_ms`; with clips already present, divides whichever one contains `at_ms`. A split at a clip edge, or at a point no clip covers, is a no-op (see `clipops.md`).
+- `move_clip` - moves the clip with the given `id` to `to_index` in the output order; an out-of-range index clamps to the end rather than doing nothing.
+- `update_clip` - patches any subset of a clip's `src_in_ms`/`src_out_ms`/`transition_in_ms` by `id`. The source range is clamped and ordered in Rust; a range squeezed to zero length drops the clip, and a `transition_in_ms` sent in that same call is then moot. `transition_in_ms` is clamped to 2 s and further to half the shorter neighbouring clip's OUTPUT length, so a dissolve can never outlast the material it blends - see `clipops.md` for the exact clamp order.
+- `remove_clip` - deletes the clip with the given `id`. A no-op on the last remaining clip: a project can never be edited back down to zero clips, and dropping the second-to-last leaves one clip rather than normalising back to the pre-clips empty list.
 - `apply_motion_default` - stamps `settings.motion` onto every zoom, layout segment and camera move at once (Settings > Motion's "Apply to all regions"). One op, so the whole sweep is one undo step - the same reason `add_cuts` exists as a batch. Only the curves change; no timing, target or pose is touched. Wired from `Editor.tsx` through `EditorDialogs`' `onApplyMotion` prop.
 - `update_caption` - patches any subset of a caption's `start_ms` / `end_ms` / `text` by `id`. The time fields clamp and re-order exactly like every other region. `text` keeps the caption's `words` ONLY when the new text is exactly those words joined by single spaces; any other edit clears them, because a word-by-word highlight driven by stale timings lights the wrong word (see `src/editor/inspectors/captionEdit.md` for the full argument). `CaptionTextField` commits once per edit rather than per keystroke, so this is one undo step per sentence.
 - `remove_caption` - deletes the caption with the given `id`.

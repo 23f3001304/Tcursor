@@ -121,6 +121,9 @@ fn one(e: &RawEdit, total: u32, clicks: &[ClickAt]) -> Option<AiProposal> {
                     radius: Some(radius),
                     feather: None,
                     layer: None,
+                    rect: None,
+                    strength: None,
+                    roundness: None,
                 },
             ]
         }

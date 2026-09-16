@@ -24,6 +24,8 @@ const DOC = {
   effects: [],
   layout: [],
   camera_moves: [],
+  texts: [],
+  clips: [],
   cuts: [{ id: "c0", start_ms: 1000, end_ms: 2500 }],
   speed: [{ id: "s0", start_ms: 3000, end_ms: 5000, factor: 2 }],
   aspect: "source",

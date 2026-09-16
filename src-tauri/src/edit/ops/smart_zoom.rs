@@ -22,7 +22,13 @@ pub fn smart_end(start_ms: u32, keys: &[u32], hold_ms: u32, dur_ms: u32) -> Opti
 
 pub fn typing_on_doc_clock(paths: &ProjectPaths, doc: &EditDoc) -> Vec<u32> {
     let shift = crate::edit::seed::output_shift(paths);
-    let map = TimeMap::build(&doc.trim, &doc.cuts, &doc.speed, doc.clip_ms.max(1));
+    let map = TimeMap::build(
+        &doc.trim,
+        &doc.cuts,
+        &doc.speed,
+        &doc.clips,
+        doc.clip_ms.max(1),
+    );
     let mut keys: Vec<u32> = crate::events::track::typing::TypingLog::load(&paths.typing())
         .ms
         .iter()

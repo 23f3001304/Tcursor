@@ -505,6 +505,7 @@ export interface Settings {
   layout_presets: LayoutPreset[];
   captions: CaptionStyle;
   motion: MotionSettings;
+  grade: GradeSettings;
 }
 ```
 
@@ -524,6 +525,7 @@ Top-level interface aggregating all settings groups. Serialized to/from JSON by 
 - `captions: CaptionStyle` - the caption look plus its ASR inputs. Distinct from `clickfx.captions`, the OLD hotkey-chord toggle, which keeps its own name and meaning.
 
 - `motion: MotionSettings` - the project's motion language. Serde-defaulted on the Rust side, so a config written before it existed arrives as Soft.
+- `grade: GradeSettings` - the colour grade: a preset name plus the three absolute numbers it seeds (`exposure`, `contrast`, `vignette`). Serde-defaulted on the Rust side, so a config written before it existed arrives at the identity and renders unchanged.
 
 **Note on `EditDoc.settings`.** `Settings` is also the shape of a recording's `edit.json` settings block, so `layout_presets` technically rides along in every project file (serialized as `[]` unless a doc was seeded from a config that had looks in it). Nothing reads it from there: the panel always asks `get_settings` for the library, precisely so a look is global and a project carries only the look it was GIVEN, not the library it came from.
 
@@ -563,5 +565,49 @@ export type CursorBackStyle = "none" | "glass";
 The glass shape drawn BEHIND the cursor, whatever pack it comes from - the wire mirror of Rust `settings::cursor::CursorBack`. `"none"` is the original look; `"glass"` adds a refracting disc that morphs by cursor kind (a horizontal pill over text, stretching into a selection bar while the left button is held there).
 
 Independent of the pack's own `material`: a plain pack can have a glass back, and a glass pack can have none. Carried on `CursorSettings.back`, edited by `CursorPanel.tsx` (a `Picker`) and `SettingsCursor.tsx` (a segment), and read by the preview through `DrawCursor.back`.
+
+## GradePreset
+
+```ts
+export type GradePreset =
+  | "none"
+  | "cinematic"
+  | "noir"
+  | "vintage"
+  | "frost"
+  | "golden"
+  | "midnight"
+  | "vivid"
+  | "dreamy";
+```
+
+The nine names of Rust `settings::grade::GradePreset` - the wire mirror, one string per look (see `docs/api/src-tauri/src/settings/grade.md`). `"none"` is the default and the only one with no visual effect.
+
+### Used by
+
+- `src/hud/settings/settings.ts` (`GradeSettings.preset`)
+- `src-tauri/src/settings/grade.rs` (`GradePreset`) - the Rust source of truth
+
+## GradeSettings
+
+```ts
+export interface GradeSettings {
+  preset: GradePreset;
+  exposure: number;
+  contrast: number;
+  vignette: number;
+}
+```
+
+Mirrors Rust `settings::grade::GradeSettings` field for field (see `docs/api/src-tauri/src/settings/grade.md` for the full story: the three ABSOLUTE numbers a preset writes, the identity default, and why that makes every document byte-identical until a look is chosen).
+
+- `preset: GradePreset` - the last look picked. Default `"none"`.
+- `exposure: number` - stops, `-2.0` to `+2.0`. Default `0`.
+- `contrast: number` - multiplier about a 0.5 pivot, `0.5` to `1.8`. Default `1`.
+- `vignette: number` - `0` to `1`, how dark the corners go. Default `0`.
+
+### Used by
+
+- `src/hud/settings/settings.ts` (`Settings.grade`)
 
 **`CaptionStyle` grew seven fields on 2026-09-15** (`font_pct`, `text_color`, `highlight_color` or `null` for the interface accent, `pill_color`, `pill_alpha`, `animation`, `animation_ms`) and the `CaptionAnim` union (`none` | `fade` | `rise` | `pop` | `words`), mirroring `settings/captions.rs` field for field; the defaults live in `DEFAULT_CAPTION_STYLE` (`editor/panels/captions/CaptionStyleControls.tsx`) and reproduce the previous look.

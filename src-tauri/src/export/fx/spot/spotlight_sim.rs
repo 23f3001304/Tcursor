@@ -123,6 +123,9 @@ mod tests {
             radius: None,
             feather: None,
             layer,
+            rect: None,
+            strength: None,
+            roundness: None,
         }
     }
 
@@ -164,5 +167,15 @@ mod tests {
             after > 0.8,
             "alpha should not jump-drop toward b's own barely-started fade: {after}"
         );
+    }
+
+    #[test]
+    fn a_mask_region_never_drives_the_spotlight() {
+        let mut blur = region("m0", 0, 10_000, 250, 250, None, 9);
+        blur.kind = EffectKind::Blur;
+        let effects = [blur, region("e0", 3000, 6000, 250, 250, None, 0)];
+        let mut sim = SpotlightSim::new();
+        assert_eq!(sim.resolve(&effects, 1000, false), 0.0);
+        assert!(sim.resolve(&effects, 4500, false) > 0.0);
     }
 }

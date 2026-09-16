@@ -5,7 +5,7 @@ use crate::export::remap::TimeMap;
 const CANVAS: (u32, u32) = (1920, 1080);
 
 fn plain_map() -> TimeMap {
-    TimeMap::build(&Trim::default(), &[], &[], 60_000)
+    TimeMap::build(&Trim::default(), &[], &[], &[], 60_000)
 }
 fn sw(at_ms: u64, w: u32, h: u32) -> DisplaySwitch {
     DisplaySwitch {
@@ -47,6 +47,7 @@ fn the_instant_goes_through_video_start_and_the_time_map() {
             in_ms: 1000,
             out_ms: 0,
         },
+        &[],
         &[],
         &[],
         60_000,

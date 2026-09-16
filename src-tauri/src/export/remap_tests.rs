@@ -1,13 +1,13 @@
 use super::*;
 use crate::edit::model::{Cut, Speed, Trim};
 
-pub(crate) fn fixture() -> TimeMap {
-    TimeMap::build(
-        &Trim {
+pub(crate) fn fixture_parts() -> (Trim, Vec<Cut>, Vec<Speed>) {
+    (
+        Trim {
             in_ms: 500,
             out_ms: 9000,
         },
-        &[
+        vec![
             Cut {
                 id: "c0".into(),
                 start_ms: 1000,
@@ -19,7 +19,7 @@ pub(crate) fn fixture() -> TimeMap {
                 end_ms: 4500,
             },
         ],
-        &[
+        vec![
             Speed {
                 id: "s0".into(),
                 start_ms: 2500,
@@ -33,8 +33,12 @@ pub(crate) fn fixture() -> TimeMap {
                 factor: 0.5,
             },
         ],
-        10_000,
     )
+}
+
+pub(crate) fn fixture() -> TimeMap {
+    let p = fixture_parts();
+    TimeMap::build(&p.0, &p.1, &p.2, &[], 10_000)
 }
 
 #[test]
@@ -135,6 +139,7 @@ fn a_trim_only_map_reproduces_trim_frame_bounds_exactly() {
             },
             &[],
             &[],
+            &[],
             full,
         );
         let (in_ms, out_ms) = Trim {
@@ -155,6 +160,7 @@ fn a_trim_only_map_reproduces_trim_frame_bounds_exactly() {
             in_ms: 700,
             out_ms: 700
         },
+        &[],
         &[],
         &[],
         full
@@ -190,6 +196,7 @@ fn overlapping_and_touching_cuts_merge_and_a_cut_inside_a_speed_span_wins() {
             end_ms: 1000,
             factor: 2.0,
         }],
+        &[],
         1000,
     );
     let got: Vec<(u32, u32, f64)> = m
@@ -198,9 +205,11 @@ fn overlapping_and_touching_cuts_merge_and_a_cut_inside_a_speed_span_wins() {
         .map(|s| (s.clip_start, s.clip_end, s.factor))
         .collect();
     assert_eq!(got, vec![(0, 100, 2.0), (400, 1000, 2.0)]);
-    assert_eq!(m.gap_containing(350), Some((100, 400)));
-    assert_eq!(m.gap_containing(50), None);
-    assert_eq!(m.gap_containing(1000), Some((1000, u32::MAX)));
+    assert!(
+        m.crosses_boundary(49, 50),
+        "output 49 is in (0,100), 50 is in (400,1000): the cut is between"
+    );
+    assert!(!m.crosses_boundary(10, 20));
 }
 
 #[test]
@@ -222,6 +231,7 @@ fn speed_spans_are_clamped_against_each_other_and_into_range() {
                 factor: 0.01,
             },
         ],
+        &[],
         1000,
     );
     let got: Vec<(u32, u32, f64)> = m
@@ -250,11 +260,12 @@ fn a_cut_covering_everything_leaves_no_segments_and_no_frames() {
             end_ms: 5000,
         }],
         &[],
+        &[],
         5000,
     );
     assert!(m.segments().is_empty());
     assert_eq!(m.out_dur_ms(), 0);
     assert!(m.frame_plan(60).is_empty());
     assert_eq!(m.clip_of(0), 0);
-    assert_eq!(m.gap_containing(10), Some((0, u32::MAX)));
+    assert!(!m.crosses_boundary(0, 10));
 }

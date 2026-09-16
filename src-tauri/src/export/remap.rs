@@ -1,3 +1,4 @@
+use crate::edit::clip::Clip;
 use crate::edit::model::{Cut, Speed, Trim};
 
 pub const FACTOR_MIN: f64 = 0.25;
@@ -9,6 +10,7 @@ pub struct Segment {
     pub clip_end: u32,
     pub factor: f64,
     pub out_start: f64,
+    pub clip: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -58,60 +60,91 @@ fn clamped_spans(speed: &[Speed], lo: u32, hi: u32) -> Vec<(u32, u32, f64)> {
     out
 }
 
-impl TimeMap {
-    pub fn build(trim: &Trim, cuts: &[Cut], speed: &[Speed], full_dur_ms: u32) -> TimeMap {
+fn clip_ranges(trim: &Trim, clips: &[Clip], full_dur_ms: u32) -> Vec<(usize, u32, u32)> {
+    if clips.is_empty() {
         let (lo, hi) = trim.resolve(full_dur_ms);
-        let cuts = merged_cuts(cuts, lo, hi);
-        let spans = clamped_spans(speed, lo, hi);
-        let mut kept: Vec<(u32, u32)> = Vec::new();
-        let mut at = lo;
-        for (a, b) in &cuts {
-            if at < *a {
-                kept.push((at, *a));
-            }
-            at = at.max(*b);
-        }
-        if at < hi {
-            kept.push((at, hi));
-        }
+        return vec![(0, lo, hi)];
+    }
+    clips
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            (
+                i,
+                c.src_in_ms.min(full_dur_ms),
+                c.src_out_ms.min(full_dur_ms),
+            )
+        })
+        .filter(|(_, a, b)| a < b)
+        .collect()
+}
+
+impl TimeMap {
+    pub fn build(
+        trim: &Trim,
+        cuts: &[Cut],
+        speed: &[Speed],
+        clips: &[Clip],
+        full_dur_ms: u32,
+    ) -> TimeMap {
+        let (lo, hi) = trim.resolve(full_dur_ms);
+        let ranges = clip_ranges(trim, clips, full_dur_ms);
         let mut segs: Vec<Segment> = Vec::new();
         let mut out_start = 0.0f64;
-        for (keep_start, keep_end) in kept {
-            let mut edges: Vec<u32> = vec![keep_start, keep_end];
-            for (a, b, _) in &spans {
-                for e in [a, b] {
-                    if *e > keep_start && *e < keep_end {
-                        edges.push(*e);
+        let mut plain = ranges.len() == 1 && (ranges[0].1, ranges[0].2) == (lo, hi);
+        for &(ci, rlo, rhi) in ranges.iter() {
+            let cuts = merged_cuts(cuts, rlo, rhi);
+            let spans = clamped_spans(speed, rlo, rhi);
+            plain = plain && cuts.is_empty() && spans.is_empty();
+            let mut kept: Vec<(u32, u32)> = Vec::new();
+            let mut at = rlo;
+            for (a, b) in &cuts {
+                if at < *a {
+                    kept.push((at, *a));
+                }
+                at = at.max(*b);
+            }
+            if at < rhi {
+                kept.push((at, rhi));
+            }
+            for (keep_start, keep_end) in kept {
+                let mut edges: Vec<u32> = vec![keep_start, keep_end];
+                for (a, b, _) in &spans {
+                    for e in [a, b] {
+                        if *e > keep_start && *e < keep_end {
+                            edges.push(*e);
+                        }
                     }
                 }
-            }
-            edges.sort_unstable();
-            edges.dedup();
-            for w in edges.windows(2) {
-                let (seg_start, seg_end) = (w[0], w[1]);
-                let factor = spans
-                    .iter()
-                    .find(|(a, b, _)| *a <= seg_start && seg_end <= *b)
-                    .map_or(1.0, |s| s.2);
-                segs.push(Segment {
-                    clip_start: seg_start,
-                    clip_end: seg_end,
-                    factor,
-                    out_start,
-                });
-                out_start += (seg_end - seg_start) as f64 / factor;
+                edges.sort_unstable();
+                edges.dedup();
+                for w in edges.windows(2) {
+                    let (seg_start, seg_end) = (w[0], w[1]);
+                    let factor = spans
+                        .iter()
+                        .find(|(a, b, _)| *a <= seg_start && seg_end <= *b)
+                        .map_or(1.0, |s| s.2);
+                    segs.push(Segment {
+                        clip_start: seg_start,
+                        clip_end: seg_end,
+                        factor,
+                        out_start,
+                        clip: ci,
+                    });
+                    out_start += (seg_end - seg_start) as f64 / factor;
+                }
             }
         }
         TimeMap {
             segs,
             out_dur: out_start,
             trim_in: lo,
-            plain: cuts.is_empty() && spans.is_empty(),
+            plain,
         }
     }
 
     pub fn identity(full_dur_ms: u32) -> TimeMap {
-        TimeMap::build(&Trim::default(), &[], &[], full_dur_ms)
+        TimeMap::build(&Trim::default(), &[], &[], &[], full_dur_ms)
     }
     pub fn is_plain(&self) -> bool {
         self.plain
@@ -124,15 +157,22 @@ impl TimeMap {
     }
 
     pub fn out_of(&self, clip_ms: u32) -> u32 {
-        for s in &self.segs {
-            if clip_ms < s.clip_start {
-                return s.out_start.round() as u32;
-            }
-            if clip_ms < s.clip_end {
-                return (s.out_start + (clip_ms - s.clip_start) as f64 / s.factor).round() as u32;
-            }
+        if let Some(s) = self
+            .segs
+            .iter()
+            .find(|s| s.clip_start <= clip_ms && clip_ms < s.clip_end)
+        {
+            return (s.out_start + (clip_ms - s.clip_start) as f64 / s.factor).round() as u32;
         }
-        self.out_dur.round() as u32
+        self.segs
+            .iter()
+            .filter(|s| s.clip_start > clip_ms)
+            .min_by(|a, b| {
+                (a.clip_start, a.out_start)
+                    .partial_cmp(&(b.clip_start, b.out_start))
+                    .unwrap()
+            })
+            .map_or(self.out_dur.round() as u32, |s| s.out_start.round() as u32)
     }
 
     pub fn clip_of(&self, out_ms: u32) -> u32 {
@@ -146,25 +186,29 @@ impl TimeMap {
         self.segs.last().map_or(self.trim_in, |s| s.clip_end)
     }
 
-    pub fn gap_containing(&self, clip_ms: u32) -> Option<(u32, u32)> {
-        let mut prev_end = 0u32;
-        for s in &self.segs {
-            if clip_ms < s.clip_start {
-                return Some((prev_end, s.clip_start));
-            }
-            if clip_ms < s.clip_end {
-                return None;
-            }
-            prev_end = s.clip_end;
-        }
-        Some((prev_end, u32::MAX))
+    fn seg_of_out(&self, out_ms: u32) -> Option<usize> {
+        let o = out_ms as f64;
+        self.segs
+            .iter()
+            .position(|s| o < s.out_start + (s.clip_end - s.clip_start) as f64 / s.factor)
     }
 
-    pub fn crosses_cut(&self, prev_k: u64, k: u64, fps: u64) -> bool {
-        k > prev_k + 1
-            && self
-                .gap_containing(((prev_k + 1) * 1000 / fps) as u32)
-                .is_some()
+    pub fn crosses_boundary(&self, prev_out_ms: u32, out_ms: u32) -> bool {
+        match (self.seg_of_out(prev_out_ms), self.seg_of_out(out_ms)) {
+            (Some(a), Some(b)) if a < b => {
+                (a..b).any(|i| self.segs[i].clip_end != self.segs[i + 1].clip_start)
+            }
+            _ => false,
+        }
+    }
+
+    pub fn clip_out_ms(&self, clip: usize) -> u32 {
+        self.segs
+            .iter()
+            .filter(|s| s.clip == clip)
+            .map(|s| (s.clip_end - s.clip_start) as f64 / s.factor)
+            .sum::<f64>()
+            .round() as u32
     }
 
     pub fn frame_bounds(&self, i: usize, fps: u64) -> Option<(u64, u64)> {
@@ -194,8 +238,28 @@ impl TimeMap {
         }
         plan
     }
+
+    pub fn plan_boundaries(&self, fps: u64) -> Vec<usize> {
+        let mut out = Vec::new();
+        let (mut last_end, mut at) = (None::<u32>, 0usize);
+        for (i, s) in self.segs.iter().enumerate() {
+            let Some((k_start, k_end)) = self.frame_bounds(i, fps) else {
+                continue;
+            };
+            if last_end.is_some_and(|e| e != s.clip_start) {
+                out.push(at);
+            }
+            last_end = Some(s.clip_end);
+            at += ((k_end - k_start) as f64 / s.factor).floor() as usize + 1;
+        }
+        out
+    }
 }
 
 #[cfg(test)]
 #[path = "remap_tests.rs"]
 pub(crate) mod tests;
+
+#[cfg(test)]
+#[path = "remap_clips_tests.rs"]
+mod clips_tests;

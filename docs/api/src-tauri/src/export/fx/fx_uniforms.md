@@ -31,6 +31,9 @@ pub struct FxU {
     pub hits: [[f32; 4]; MAX_HITS], // x, y, progress, _pad
     pub e: [f32; 4],                // video_mode_id, alpha, t, _pad
     pub cam: [f32; 4],              // camera-exclusion rect (px): min_x, min_y, max_x, max_y
+    // ... then the six glass-cursor slots (see `FxU::lens_a`), and last:
+    pub mask: [[f32; 4]; 16],       // reserved, zero today (see `FxU::mask`)
+    pub grade: [[f32; 4]; 6],       // reserved, zero today (see `FxU::mask`)
 }
 ```
 
@@ -48,6 +51,7 @@ The shader uniform block. All fields are `[f32; 4]` (vec4) for std140 alignment.
 - `hits` - *up to `MAX_HITS` click hits, each `[x, y, progress, 0.0]` in output pixels.*
 - `e` - *`[video_mode_id, alpha, time_s, _pad]`: video FX mode (0..3), fade alpha, and elapsed time; all zero when no video FX is active.*
 - `cam` - *`[min_x, min_y, max_x, max_y]`: the active camera panel's rect in output pixels (`Spot::cam_rect`, itself from `scene.camera.rect`). The shader's `rrect_cov` helper tests pixels against this rect + `d.w`'s radius to build the un-dim mask; zero when there is no active spot.*
+- `mask`, `grade` - *reserved blocks at the tail of the struct, all zero until the parity features land. See `FxU::mask`.*
 
 ### Used by
 
@@ -90,6 +94,25 @@ See `FxU::lens_a`.
 ### FxU::back_c
 
 See `FxU::lens_a`.
+
+### FxU::mask
+
+```rust
+pub mask: [[f32; 4]; 16],  // reserved for the masks: two vec4 per mask, eight masks
+pub grade: [[f32; 4]; 6],  // reserved for the colour grade parameters
+```
+
+Two reserved blocks at the END of the struct, after the lens slots, written as `[[0.0; 4]; N]` by `build_fx_u` and read by nothing. They buy the parity features room to land one at a time: the mask agent fills `mask` (`[x, y, w, h]` in output pixels, then `[kind, strength_px, roundness_px, feather_px]`, per mask) and the grade agent fills `grade`, each through its own packing function, so neither has to edit this struct or re-check its layout against the shader. Until then every slot is zero and the shader ignores them, which is why reserving them changes no pixel.
+
+`the_reserved_mask_and_grade_blocks_are_zero_and_trail_the_lens_slots` pins their OFFSETS, not just the total size: `offset_of!(FxU, mask)` is `16 * (7 + MAX_HITS + 8)` and `offset_of!(FxU, grade)` is `16 * (7 + MAX_HITS + 8 + 16)`, so inserting or removing a field ANYWHERE ahead of them fails the test instead of silently sliding what each agent's packing function writes. Size alone cannot see a field swapped for another of the same width.
+
+*Why reserve rather than add later:* the uniform is two declarations that must agree byte for byte - this one and `struct FxU` in `fx.wgsl` - and the only thing checked across that seam is the bound buffer's SIZE. The FX bind group declares `min_binding_size: None` (`fx_gpu_pipeline.rs`), so nothing validates field ORDER: swap two `vec4`s on one side only and every GPU test still passes while the shader reads the wrong numbers. **Batch 2a and 2b must therefore pin their own packing offsets with tests** - a slot-by-slot assertion on what `build_fx_u` writes, next to these two - because no GPU test will catch a disagreement for them. Growing the tail once, with both sides moved together and the GPU tests green, costs nothing (the struct is 848 bytes against a 64 KiB uniform limit, and `fx_gpu.rs` sizes the buffer from `bytemuck::bytes_of(&u)`, so it follows the struct on its own); growing it twice more, concurrently, from two agents editing the same two files, is where the layouts drift apart.
+
+WGSL's `array<vec4<f32>, N>` and `#[repr(C)]`'s `[[f32; 4]; N]` agree - 16-byte stride, no padding between elements - so the two arrays mirror across the seam like every other field here.
+
+### FxU::grade
+
+See `FxU::mask`.
 
 ## style_id
 
@@ -158,7 +181,7 @@ Packs a complete `FxState` into an `FxU` ready for GPU upload.
 
 ### Returns
 
-`FxU` - fully populated uniform; unused slots (no spotlight, no video FX, excess hits) are zero-initialized.
+`FxU` - fully populated uniform; unused slots (no spotlight, no video FX, excess hits, and the reserved `mask`/`grade` blocks) are zero-initialized.
 
 ### Implementation
 
@@ -180,6 +203,7 @@ Packs a complete `FxState` into an `FxU` ready for GPU upload.
 - `spot_mode_id_and_tint_pack` - `Nebula` mode -> `d[0]=4.0`, time in `d[1]`, tint channel normalization verified.
 - `dim_camera_false_sets_keep_flag_and_cam_rect` - `Spot::dim_camera = false` -> `d[2] = 1.0`, `d[3]` equals `cam_radius`, `cam` equals `cam_rect` verbatim.
 - `dim_camera_true_clears_keep_flag` - `Spot::dim_camera = true` (today's default) -> `d[2] = 0.0`.
+- `the_reserved_mask_and_grade_blocks_are_zero_and_trail_the_lens_slots` - every reserved slot comes back zero, `size_of::<FxU>()` is `16 * (7 + MAX_HITS + 8 + 16 + 6)` bytes, and `offset_of!` puts `mask` at `16 * (7 + MAX_HITS + 8)` and `grade` 16 vec4 after it - the arithmetic pins the two blocks to the tail by position, so a field added, removed or reordered ahead of them (which would silently shift what the shader reads) fails the test rather than the pixels.
 
 ## NEON_HUE_SHIFT
 

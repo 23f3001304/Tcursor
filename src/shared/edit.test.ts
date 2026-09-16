@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveTrim, type Caption, type EditDoc } from "./edit";
+import { isMask, MASK_KINDS, resolveTrim, type Caption, type EditDoc, type EffectRegion } from "./edit";
 import type { CaptionStyle, Settings } from "../hud/settings/settings";
 
 describe("resolveTrim", () => {
@@ -47,5 +47,24 @@ describe("the caption track's TS mirror", () => {
     const hotkeyToggle: boolean | undefined = s.clickfx?.captions;
     expect(style).toBeUndefined();
     expect(hotkeyToggle).toBeUndefined();
+  });
+});
+
+describe("mask kinds", () => {
+  const spot: EffectRegion = {
+    id: "e0",
+    kind: "spotlight",
+    start_ms: 0,
+    end_ms: 1,
+    fade_in_ms: 250,
+    fade_out_ms: 250,
+    layer: 0,
+  };
+  it("names the three mask kinds and nothing else", () => {
+    expect([...MASK_KINDS]).toEqual(["blur", "pixelate", "highlight"]);
+  });
+  it("isMask is false for a spotlight and true for every mask kind", () => {
+    expect(isMask(spot)).toBe(false);
+    for (const kind of MASK_KINDS) expect(isMask({ ...spot, kind })).toBe(true);
   });
 });

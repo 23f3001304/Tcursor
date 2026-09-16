@@ -54,6 +54,8 @@ fn sample_doc() -> EditDoc {
         aspect: crate::export::types::Aspect::default(),
         settings: crate::settings::model::Settings::default(),
         captions: vec![],
+        texts: vec![],
+        clips: vec![],
     }
 }
 
@@ -259,3 +261,7 @@ mod save_tests;
 
 #[path = "model_arrangement_tests.rs"]
 mod arrangement_tests;
+
+#[cfg(test)]
+#[path = "model_roundtrip_tests.rs"]
+mod roundtrip_tests;

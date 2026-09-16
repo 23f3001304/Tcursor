@@ -13,6 +13,18 @@ fn next_effect_id(doc: &EditDoc) -> String {
     format!("e{}", n)
 }
 
+pub const MASK_SEED_RECT: [f32; 4] = [0.35, 0.40, 0.30, 0.20];
+const STRENGTH_RANGE: (f32, f32) = (0.002, 0.120);
+
+pub fn clamp_rect(r: [f32; 4]) -> Option<[f32; 4]> {
+    if r.iter().any(|v| !v.is_finite()) {
+        return None;
+    }
+    let w = r[2].clamp(0.01, 1.0);
+    let h = r[3].clamp(0.01, 1.0);
+    Some([r[0].clamp(0.0, 1.0 - w), r[1].clamp(0.0, 1.0 - h), w, h])
+}
+
 pub fn lift_always_on_spotlight(doc: &mut EditDoc) -> bool {
     let dur = dur_bound(doc);
     if !doc.settings.clickfx.spotlight
@@ -37,6 +49,9 @@ pub fn lift_always_on_spotlight(doc: &mut EditDoc) -> bool {
         radius: None,
         feather: None,
         layer: 0,
+        rect: None,
+        strength: None,
+        roundness: None,
     });
     doc.settings.clickfx.spotlight = false;
     true
@@ -70,6 +85,9 @@ pub fn apply_effect(doc: &mut EditDoc, op: EditOp) {
                 radius: None,
                 feather: None,
                 layer,
+                rect: kind.is_mask().then_some(MASK_SEED_RECT),
+                strength: None,
+                roundness: None,
             });
         }
         EditOp::UpdateEffect {
@@ -83,6 +101,9 @@ pub fn apply_effect(doc: &mut EditDoc, op: EditOp) {
             radius,
             feather,
             layer,
+            rect,
+            strength,
+            roundness,
         } => {
             let dur = dur_bound(doc);
             if let Some(e) = doc.effects.iter_mut().find(|e| e.id == id) {
@@ -99,29 +120,42 @@ pub fn apply_effect(doc: &mut EditDoc, op: EditOp) {
                 if let Some(v) = fade_out_ms {
                     e.fade_out_ms = v;
                 }
-                if let Some(s) = mode {
-                    e.mode = match s.as_str() {
-                        "global" | "default" | "none" => None,
-                        "classic" => Some(crate::settings::model::SpotlightMode::Classic),
-                        "blur" => Some(crate::settings::model::SpotlightMode::Blur),
-                        "halo" => Some(crate::settings::model::SpotlightMode::Halo),
-                        "breathing" => Some(crate::settings::model::SpotlightMode::Breathing),
-                        "nebula" => Some(crate::settings::model::SpotlightMode::Nebula),
-                        "vignette" => Some(crate::settings::model::SpotlightMode::Vignette),
-                        _ => e.mode,
-                    };
+                if !e.kind.is_mask() {
+                    if let Some(s) = mode {
+                        e.mode = match s.as_str() {
+                            "global" | "default" | "none" => None,
+                            "classic" => Some(crate::settings::model::SpotlightMode::Classic),
+                            "blur" => Some(crate::settings::model::SpotlightMode::Blur),
+                            "halo" => Some(crate::settings::model::SpotlightMode::Halo),
+                            "breathing" => Some(crate::settings::model::SpotlightMode::Breathing),
+                            "nebula" => Some(crate::settings::model::SpotlightMode::Nebula),
+                            "vignette" => Some(crate::settings::model::SpotlightMode::Vignette),
+                            _ => e.mode,
+                        };
+                    }
+                    if let Some(v) = radius {
+                        e.radius = if v < 0.0 { None } else { Some(v) };
+                    }
                 }
                 if let Some(v) = dim {
                     e.dim = if v < 0.0 { None } else { Some(v) };
-                }
-                if let Some(v) = radius {
-                    e.radius = if v < 0.0 { None } else { Some(v) };
                 }
                 if let Some(v) = feather {
                     e.feather = if v < 0.0 { None } else { Some(v) };
                 }
                 if let Some(v) = layer {
                     e.layer = v;
+                }
+                if e.kind.is_mask() {
+                    if let Some(r) = rect.and_then(clamp_rect) {
+                        e.rect = Some(r);
+                    }
+                    if let Some(v) = strength {
+                        e.strength = Some(v.clamp(STRENGTH_RANGE.0, STRENGTH_RANGE.1));
+                    }
+                    if let Some(v) = roundness {
+                        e.roundness = Some(v.clamp(0.0, 0.5));
+                    }
                 }
             }
         }
@@ -133,3 +167,7 @@ pub fn apply_effect(doc: &mut EditDoc, op: EditOp) {
 #[cfg(test)]
 #[path = "effects_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "effects_mask_tests.rs"]
+mod mask_tests;

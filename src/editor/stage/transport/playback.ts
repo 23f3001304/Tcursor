@@ -1,4 +1,4 @@
-import { factorAt, gapContaining, type TimeMap } from "../../../shared/math/remap";
+import { factorAt, nextShown, type TimeMap } from "../../../shared/math/remap";
 
 export const FRAME_MS = 1000 / 60;
 
@@ -8,8 +8,9 @@ export interface PlaybackAction {
 }
 
 export function playbackAction(map: TimeMap, tMs: number): PlaybackAction {
-  const gap = gapContaining(map, tMs);
-  return { seekTo: gap && Number.isFinite(gap[1]) ? gap[1] : null, rate: factorAt(map, tMs) };
+  const rate = factorAt(map, tMs);
+  if (map.segments.some((s) => s.clipStart <= tMs && tMs < s.clipEnd)) return { seekTo: null, rate };
+  return { seekTo: nextShown(map, tMs)?.clipStart ?? null, rate };
 }
 
 /** True when a jump from `prevMs` to `tMs` is the preview skipping a cut (the tick that triggered the

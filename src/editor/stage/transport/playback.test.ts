@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { identityMap } from "../../../shared/math/remap";
-import { fixtureMap } from "../../../shared/math/remap.fixture";
+import { clipOf, identityMap, outOf } from "../../../shared/math/remap";
+import { clipsFixtureMap, fixtureMap, fractionalFixtureMap } from "../../../shared/math/remap.fixture";
 import { isCutJump, isNaturalPlaybackTick, NATURAL_TICK_MAX_DELTA_MS, playbackAction } from "./playback";
 
 describe("playbackAction", () => {
@@ -20,6 +20,31 @@ describe("playbackAction", () => {
   });
   it("is the identity on a plain map", () => {
     expect(playbackAction(identityMap(10_000), 4321)).toEqual({ seekTo: null, rate: 1 });
+  });
+  it("does not seek when the media is within a frame of where the output clock says it should be", () => {
+    const m = fixtureMap();
+    expect(playbackAction(m, 2501).seekTo).toBeNull();
+    expect(playbackAction(m, 7003).seekTo).toBeNull();
+  });
+  it("seeks to the next shown source instant from inside a cut on the clips fixture", () => {
+    expect(playbackAction(clipsFixtureMap(), 1500).seekTo).toBe(2000);
+    expect(playbackAction(clipsFixtureMap(), 9500).seekTo).toBeNull();
+  });
+  it("leaves a cut whose output start is fractional, where the rounded round trip could not", () => {
+    const m = fractionalFixtureMap();
+    for (const [t, seekTo] of [
+      [3500, 4000],
+      [3000, 4000],
+      [3020, 4000],
+      [1000, null],
+      [9999, null],
+    ] as [number, number | null][])
+      expect(playbackAction(m, t).seekTo, `seekTo(${t})`).toBe(seekTo);
+  });
+  it("pins the rounded round trip that used to strand the preview inside that cut", () => {
+    const m = fractionalFixtureMap();
+    expect(outOf(m, 3000)).toBe(2333);
+    expect(clipOf(m, 2333)).toBe(3000);
   });
 });
 

@@ -22,6 +22,8 @@ pub struct FxU {
     pub back_a: [f32; 4],
     pub back_b: [f32; 4],
     pub back_c: [f32; 4],
+    pub mask: [[f32; 4]; 16],
+    pub grade: [[f32; 4]; 6],
 }
 
 pub fn style_id(s: ClickFxStyle) -> f32 {
@@ -178,6 +180,8 @@ pub fn build_fx_u(state: &FxState, ow: u32, oh: u32) -> FxU {
         back_a,
         back_b,
         back_c,
+        mask: [[0.0; 4]; 16],
+        grade: [[0.0; 4]; 6],
     }
 }
 

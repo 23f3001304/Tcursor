@@ -237,6 +237,8 @@ pub struct EditDoc {
     pub aspect: crate::export::types::Aspect,
     pub settings: crate::settings::model::Settings,
     #[serde(default)] pub captions: Vec<Caption>,
+    #[serde(default)] pub texts: Vec<crate::edit::text::TextItem>,
+    #[serde(default)] pub clips: Vec<crate::edit::clip::Clip>,
 }
 ```
 
@@ -256,6 +258,8 @@ Root of `edit.json`. Carries the complete editor state for one recording project
 - `aspect` - *output frame aspect ratio; `#[serde(default)]` so a pre-existing `edit.json` with no `aspect` loads as `Aspect::Source` - today's behavior exactly. See `export::types::Aspect`.*
 - `settings` - *snapshot of the user's `Settings` at the time the doc was seeded; preserves the zoom config and theme for a re-render even if the user later changes settings.*
 - `captions` - *the spoken-caption track (see `edit::captions::Caption`), OUTPUT-clock like every other region list here. `#[serde(default)]` so a doc written before captions existed loads with an empty track.*
+- `texts` - *the animated-text track (see `edit::text::TextItem`, `text.md`), OUTPUT-clock like every other region list here. `#[serde(default)]` so a doc written before text existed loads with an empty track. `texts` is a region list and is moved by `remap_doc`.*
+- `clips` - *the clip list, in output order (see `edit::clip::Clip`, `clip.md`). `#[serde(default)]` so a doc written before clips existed loads empty, which resolves to one clip covering the whole trim-resolved recording. `clips` is consumed by `TimeMap::build` (a later task), not moved by `remap_doc`.*
 
 ### Used by
 
@@ -287,6 +291,11 @@ Serializes the doc to pretty-printed JSON and writes it atomically to `path`: th
 - `round_trip_save_load` - a full `EditDoc` with all fields populated serializes and deserializes without data loss.
 - `save_leaves_no_tmp_sibling_on_success` - after a successful save, the directory contains only the target file, no leftover temp sibling.
 - `save_overwrites_an_existing_file` - saving over a path that already holds a doc replaces it (the common per-edit-op case).
+- `a_plain_doc_a_full_house_and_a_migrated_legacy_doc_round_trip_byte_identically` - a bare doc, one with every list populated (masks, a spotlight, a text, two clips, a grade) and a migrated v1 doc all satisfy `parse(save(doc)) == doc` and `save(parse(save(doc))) == save(doc)`.
+- `the_legacy_doc_lands_on_every_default_the_new_fields_have` - a pre-`texts`/`clips`/`grade` doc loads with those lists empty and `settings.grade` at the identity grade, without bumping `version`.
+- `the_new_fields_are_always_written_so_the_frontend_never_sees_undefined` - a saved doc's JSON always contains `texts`, `clips`, `grade`, `captions` and `effects` keys, empty lists included.
+
+The rule these enforce: every list on `EditDoc` is ALWAYS written (empty lists included, no `skip_serializing_if`) and every new field is `#[serde(default)]`, so an old file loads and a saved file never depends on which fields the writer knew about.
 
 ## EditDoc::assign_missing_ids
 

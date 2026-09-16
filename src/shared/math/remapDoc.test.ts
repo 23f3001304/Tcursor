@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { EditDoc, EffectRegion } from "../edit";
+import type { EditDoc, EffectRegion, TextItem } from "../edit";
 import { identityMap, outDurMs } from "./remap";
 import { fixtureMap } from "./remap.fixture";
 import { remapDoc } from "./remapDoc";
@@ -16,6 +16,8 @@ const base = (): EditDoc => ({
   aspect: "16:9" as EditDoc["aspect"],
   settings: {} as EditDoc["settings"],
   captions: [],
+  texts: [],
+  clips: [],
   clip_ms: 60_000,
 });
 const spot = (id: string, start_ms: number, end_ms: number): EffectRegion => ({
@@ -117,5 +119,32 @@ describe("remapDoc (parity with edit::remap_doc)", () => {
       easing_out: "smooth",
     });
     expect(remapDoc(d, identityMap(10_000)).layout).toEqual(d.layout);
+  });
+
+  it("texts move to the output clock and clips are consumed", () => {
+    const text = (id: string, start_ms: number, end_ms: number): TextItem => ({
+      id,
+      start_ms,
+      end_ms,
+      kind: "title",
+      text: "x",
+      style: "clean",
+      pos: "bottom_center",
+      offset: [0, 0],
+      size: "m",
+      anim_in: "fade",
+      anim_out: "fade",
+      in_ms: 420,
+      out_ms: 420,
+      easing: "smooth",
+    });
+    const doc = {
+      ...base(),
+      texts: [text("t0", 2200, 3200), text("t1", 1100, 1900)],
+      clips: [{ id: "cl0", src_in_ms: 0, src_out_ms: 9000, transition_in_ms: 0 }],
+    };
+    const r = remapDoc(doc, fixtureMap());
+    expect(r.texts.map((t) => [t.id, t.start_ms, t.end_ms])).toEqual([["t0", 700, 1350]]);
+    expect(r.clips).toEqual([]);
   });
 });

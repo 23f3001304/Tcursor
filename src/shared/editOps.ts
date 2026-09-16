@@ -1,5 +1,16 @@
 import type { CamZoomAction } from "../hud/settings/settings";
-import type { Aspect, CamMoveShape, Caption, EffectKind, PanelPose, ZoomTarget } from "./edit";
+import type {
+  Aspect,
+  CamMoveShape,
+  Caption,
+  EffectKind,
+  PanelPose,
+  TextAnchor,
+  TextAnim,
+  TextKind,
+  TextSize,
+  ZoomTarget,
+} from "./edit";
 
 export type EditOp =
   | { op: "add_zoom"; at_ms: number; dur_ms: number }
@@ -65,6 +76,9 @@ export type EditOp =
       radius?: number;
       feather?: number;
       layer?: number;
+      rect?: [number, number, number, number];
+      strength?: number;
+      roundness?: number;
     }
   | { op: "remove_effect"; id: string }
   | {
@@ -88,6 +102,30 @@ export type EditOp =
       roundness?: number;
     }
   | { op: "remove_camera_move"; id: string }
+  | { op: "add_text"; at_ms: number; dur_ms: number; kind: TextKind }
+  | {
+      op: "update_text";
+      id: string;
+      start_ms?: number;
+      end_ms?: number;
+      text?: string;
+      sub?: string | null;
+      kind?: TextKind;
+      style?: string;
+      pos?: TextAnchor;
+      offset?: [number, number];
+      size?: TextSize;
+      anim_in?: TextAnim;
+      anim_out?: TextAnim;
+      in_ms?: number;
+      out_ms?: number;
+      easing?: string;
+    }
+  | { op: "remove_text"; id: string }
+  | { op: "split_at"; at_ms: number }
+  | { op: "move_clip"; id: string; to_index: number }
+  | { op: "update_clip"; id: string; src_in_ms?: number; src_out_ms?: number; transition_in_ms?: number }
+  | { op: "remove_clip"; id: string }
   | { op: "apply_motion_default" }
   | { op: "update_caption"; id: string; start_ms?: number; end_ms?: number; text?: string }
   | { op: "remove_caption"; id: string }

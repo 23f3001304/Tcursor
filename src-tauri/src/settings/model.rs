@@ -200,6 +200,8 @@ pub struct Settings {
     pub captions: CaptionStyle,
     #[serde(default)]
     pub motion: crate::settings::motion::MotionSettings,
+    #[serde(default)]
+    pub grade: crate::settings::grade::GradeSettings,
 }
 fn default_volume() -> f32 {
     1.0
@@ -221,6 +223,7 @@ impl Default for Settings {
             layout_presets: Vec::new(),
             captions: CaptionStyle::default(),
             motion: crate::settings::motion::MotionSettings::default(),
+            grade: crate::settings::grade::GradeSettings::default(),
         }
     }
 }

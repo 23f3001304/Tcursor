@@ -22,7 +22,11 @@ export interface PlaybackAction { seekTo: number | null; rate: number }
 export function playbackAction(map: TimeMap, tMs: number): PlaybackAction
 ```
 
-What the media elements must do at clip time `tMs` while playing. Inside a finite gap (a cut, or before the trim-in) `seekTo` is the gap's end: `useCompositeLoop` jumps every media element there and skips that frame's composite, so no frame from inside the cut ever shows. The trailing gap past the trim-out has no end to jump to, so playback runs out as it always has. `rate` is the containing segment's factor (1 outside every span); the loop writes it to `playbackRate` on all three media (Chromium keeps the pitch).
+What the media elements must do at clip time `tMs` while playing, decided on the SEGMENT LIST, not on a clock: if some segment has `clipStart <= tMs < clipEnd` the instant is kept and shown where it is, so `seekTo` is `null`; otherwise `tMs` falls in a cut, before the trim-in, or in source the clip list never shows, and `seekTo` is `nextShown(map, tMs)?.clipStart` - the start of the next kept segment - or `null` past the last one, where playback runs out as it always has.
+
+Deciding on the segment list rather than on the output clock is what fixes the stranded preview. The old rule seeked to `clipOf(map, outOf(map, tMs))`, and `outOf` rounds: a cut whose next segment starts at a fractional `outStart` (2333.33 for a 1.5x span of 2000 ms before it) rounds DOWN to 2333, which `clipOf` resolves in the segment BEFORE the cut and maps back to 3000, the cut's own start - so the seek either did nothing or drove the media back into the cut, tick after tick. A `clipStart` is exact, needs no round trip, and is what `useCompositeLoop` already jumps every media element to (it also skips that frame's composite, so no frame from inside the cut ever shows).
+
+Since a kept instant now short-circuits before any arithmetic, the `FRAME_MS` tolerance that used to absorb the rounding inside a speed span is no longer needed here; `FRAME_MS` stays exported for `isCutJump` and its callers. Traversing a REORDERED clip list - the media sitting past the last source instant an earlier-listed clip shows, where the next segment in output order is backwards in source - is Batch 4's, together with the per-clip decoder; this rule only ever seeks forward in source. `rate` is unchanged, the containing segment's factor (1 outside every span); the loop writes it to `playbackRate` on all three media (Chromium keeps the pitch).
 
 ## isCutJump
 

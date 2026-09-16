@@ -1,4 +1,4 @@
-import type { Cut, Speed, Trim } from "../edit";
+import type { Clip, Cut, Speed, Trim } from "../edit";
 
 export const FACTOR_MIN = 0.25;
 export const FACTOR_MAX = 8;
@@ -8,6 +8,7 @@ export interface Segment {
   clipEnd: number;
   factor: number;
   outStart: number;
+  clip: number;
 }
 
 export interface TimeMap {
@@ -54,45 +55,82 @@ function clampedSpans(speed: Speed[], lo: number, hi: number): [number, number, 
   return out;
 }
 
-export function buildTimeMap(trim: Trim, cuts: Cut[], speed: Speed[], fullDurMs: number): TimeMap {
-  const [lo, hi] = resolveTrim(trim, fullDurMs);
-  const merged = mergedCuts(cuts, lo, hi);
-  const spans = clampedSpans(speed, lo, hi);
-  const kept: [number, number][] = [];
-  let at = lo;
-  for (const [a, b] of merged) {
-    if (at < a) kept.push([at, a]);
-    at = Math.max(at, b);
+function clipRanges(trim: Trim, clips: Clip[], fullDurMs: number): [number, number, number][] {
+  if (clips.length === 0) {
+    const [lo, hi] = resolveTrim(trim, fullDurMs);
+    return [[0, lo, hi]];
   }
-  if (at < hi) kept.push([at, hi]);
+  return clips
+    .map((c, i): [number, number, number] => [
+      i,
+      Math.min(c.src_in_ms, fullDurMs),
+      Math.min(c.src_out_ms, fullDurMs),
+    ])
+    .filter(([, a, b]) => a < b);
+}
+
+export function buildTimeMap(
+  trim: Trim,
+  cuts: Cut[],
+  speed: Speed[],
+  clips: Clip[],
+  fullDurMs: number,
+): TimeMap {
+  const [lo, hi] = resolveTrim(trim, fullDurMs);
+  const ranges = clipRanges(trim, clips, fullDurMs);
   const segments: Segment[] = [];
   let outStart = 0;
-  for (const [ks, ke] of kept) {
-    const edges = [ks, ke];
-    for (const [a, b] of spans) for (const e of [a, b]) if (e > ks && e < ke) edges.push(e);
-    const uniq = [...new Set(edges)].sort((x, y) => x - y);
-    for (let i = 0; i + 1 < uniq.length; i++) {
-      const [cs, ce] = [uniq[i], uniq[i + 1]];
-      const span = spans.find(([a, b]) => a <= cs && ce <= b);
-      const factor = span ? span[2] : 1;
-      segments.push({ clipStart: cs, clipEnd: ce, factor, outStart });
-      outStart += (ce - cs) / factor;
+  let plain = ranges.length === 1 && ranges[0][1] === lo && ranges[0][2] === hi;
+  for (const [ci, rlo, rhi] of ranges) {
+    const merged = mergedCuts(cuts, rlo, rhi);
+    const spans = clampedSpans(speed, rlo, rhi);
+    plain = plain && merged.length === 0 && spans.length === 0;
+    const kept: [number, number][] = [];
+    let at = rlo;
+    for (const [a, b] of merged) {
+      if (at < a) kept.push([at, a]);
+      at = Math.max(at, b);
+    }
+    if (at < rhi) kept.push([at, rhi]);
+    for (const [ks, ke] of kept) {
+      const edges = [ks, ke];
+      for (const [a, b] of spans) for (const e of [a, b]) if (e > ks && e < ke) edges.push(e);
+      const uniq = [...new Set(edges)].sort((x, y) => x - y);
+      for (let i = 0; i + 1 < uniq.length; i++) {
+        const [cs, ce] = [uniq[i], uniq[i + 1]];
+        const span = spans.find(([a, b]) => a <= cs && ce <= b);
+        const factor = span ? span[2] : 1;
+        segments.push({ clipStart: cs, clipEnd: ce, factor, outStart, clip: ci });
+        outStart += (ce - cs) / factor;
+      }
     }
   }
-  return { segments, outDur: outStart, trimIn: lo, plain: merged.length === 0 && spans.length === 0 };
+  return { segments, outDur: outStart, trimIn: lo, plain };
 }
 
 export const identityMap = (fullDurMs: number): TimeMap =>
-  buildTimeMap({ in_ms: 0, out_ms: 0 }, [], [], fullDurMs);
+  buildTimeMap({ in_ms: 0, out_ms: 0 }, [], [], [], fullDurMs);
 
 export const outDurMs = (m: TimeMap): number => Math.round(m.outDur);
 
+export function nextShown(m: TimeMap, clipMs: number): Segment | undefined {
+  let next: Segment | undefined;
+  for (const g of m.segments)
+    if (
+      g.clipStart > clipMs &&
+      (!next ||
+        g.clipStart < next.clipStart ||
+        (g.clipStart === next.clipStart && g.outStart < next.outStart))
+    )
+      next = g;
+  return next;
+}
+
 export function outOf(m: TimeMap, clipMs: number): number {
-  for (const s of m.segments) {
-    if (clipMs < s.clipStart) return Math.round(s.outStart);
-    if (clipMs < s.clipEnd) return Math.round(s.outStart + (clipMs - s.clipStart) / s.factor);
-  }
-  return Math.round(m.outDur);
+  const s = m.segments.find((g) => g.clipStart <= clipMs && clipMs < g.clipEnd);
+  if (s) return Math.round(s.outStart + (clipMs - s.clipStart) / s.factor);
+  const next = nextShown(m, clipMs);
+  return Math.round(next ? next.outStart : m.outDur);
 }
 
 export function clipOf(m: TimeMap, outMs: number): number {
@@ -104,14 +142,23 @@ export function clipOf(m: TimeMap, outMs: number): number {
   return last ? last.clipEnd : m.trimIn;
 }
 
-export function gapContaining(m: TimeMap, clipMs: number): [number, number] | null {
-  let prevEnd = 0;
-  for (const s of m.segments) {
-    if (clipMs < s.clipStart) return [prevEnd, s.clipStart];
-    if (clipMs < s.clipEnd) return null;
-    prevEnd = s.clipEnd;
-  }
-  return [prevEnd, Infinity];
+function segOfOut(m: TimeMap, outMs: number): number {
+  return m.segments.findIndex((s) => outMs < s.outStart + (s.clipEnd - s.clipStart) / s.factor);
+}
+
+export function crossesBoundary(m: TimeMap, prevOutMs: number, outMs: number): boolean {
+  const [a, b] = [segOfOut(m, prevOutMs), segOfOut(m, outMs)];
+  if (a < 0 || b < 0 || a >= b) return false;
+  for (let i = a; i < b; i++) if (m.segments[i].clipEnd !== m.segments[i + 1].clipStart) return true;
+  return false;
+}
+
+export function clipOutMs(m: TimeMap, clip: number): number {
+  return Math.round(
+    m.segments
+      .filter((s) => s.clip === clip)
+      .reduce((acc, s) => acc + (s.clipEnd - s.clipStart) / s.factor, 0),
+  );
 }
 
 export function factorAt(m: TimeMap, clipMs: number): number {

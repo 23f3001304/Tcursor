@@ -34,7 +34,7 @@ impl EditState {
         full_dur_ms: u32,
     ) -> Self {
         let raw = crate::edit::seed::load_or_seed(paths);
-        let map = TimeMap::build(&raw.trim, &raw.cuts, &raw.speed, full_dur_ms);
+        let map = TimeMap::build(&raw.trim, &raw.cuts, &raw.speed, &raw.clips, full_dur_ms);
         let doc = crate::edit::remap_doc::remap_doc(&raw, &map);
         let settings = doc.settings.clone();
         let cfg = settings.zoom.to_zoom_config();

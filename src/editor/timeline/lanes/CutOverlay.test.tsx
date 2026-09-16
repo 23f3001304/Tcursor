@@ -17,6 +17,8 @@ const DOC = {
   effects: [],
   layout: [],
   camera_moves: [],
+  texts: [],
+  clips: [],
 } as unknown as EditDoc;
 
 let ops: EditOp[] = [];

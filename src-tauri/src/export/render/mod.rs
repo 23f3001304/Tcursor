@@ -195,6 +195,7 @@ impl FrameRenderer {
 
 mod accessors;
 mod composite;
+mod fx_step;
 mod step;
 
 pub mod bg;

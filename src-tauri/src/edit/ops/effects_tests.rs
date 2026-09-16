@@ -112,6 +112,9 @@ fn update_effect_changes_supplied_fields_only() {
             radius: None,
             feather: None,
             layer: None,
+            rect: None,
+            strength: None,
+            roundness: None,
         },
     );
     assert_eq!((doc.effects[0].start_ms, doc.effects[0].end_ms), (100, 500));
@@ -143,6 +146,9 @@ fn update_effect_sets_fades() {
             radius: None,
             feather: None,
             layer: None,
+            rect: None,
+            strength: None,
+            roundness: None,
         },
     );
     assert_eq!(
@@ -176,6 +182,9 @@ fn update_effect_sets_layer() {
             radius: None,
             feather: None,
             layer: Some(3),
+            rect: None,
+            strength: None,
+            roundness: None,
         },
     );
     assert_eq!(doc.effects[0].layer, 3);
@@ -223,6 +232,9 @@ fn update_effect_start_past_end_pulls_end_to_match() {
             radius: None,
             feather: None,
             layer: None,
+            rect: None,
+            strength: None,
+            roundness: None,
         },
     );
     assert_eq!(
@@ -257,6 +269,9 @@ fn update_effect_end_before_start_pulls_start_to_match() {
             radius: None,
             feather: None,
             layer: None,
+            rect: None,
+            strength: None,
+            roundness: None,
         },
     );
     assert_eq!(

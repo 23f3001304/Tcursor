@@ -130,6 +130,12 @@ pub enum EditOp {
         radius: Option<f32>,
         feather: Option<f32>,
         layer: Option<u32>,
+        #[serde(default)]
+        rect: Option<[f32; 4]>,
+        #[serde(default)]
+        strength: Option<f32>,
+        #[serde(default)]
+        roundness: Option<f32>,
     },
     RemoveEffect {
         id: String,
@@ -157,6 +163,53 @@ pub enum EditOp {
         roundness: Option<f32>,
     },
     RemoveCameraMove {
+        id: String,
+    },
+    AddText {
+        at_ms: u32,
+        dur_ms: u32,
+        #[serde(default)]
+        kind: crate::edit::text::TextKind,
+    },
+    UpdateText {
+        id: String,
+        start_ms: Option<u32>,
+        end_ms: Option<u32>,
+        text: Option<String>,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "crate::edit::ops::arrangement::double_option"
+        )]
+        sub: Option<Option<String>>,
+        kind: Option<crate::edit::text::TextKind>,
+        style: Option<String>,
+        pos: Option<crate::edit::text::TextAnchor>,
+        offset: Option<[f32; 2]>,
+        size: Option<crate::edit::text::TextSize>,
+        anim_in: Option<crate::edit::text::TextAnim>,
+        anim_out: Option<crate::edit::text::TextAnim>,
+        in_ms: Option<u32>,
+        out_ms: Option<u32>,
+        easing: Option<String>,
+    },
+    RemoveText {
+        id: String,
+    },
+    SplitAt {
+        at_ms: u32,
+    },
+    MoveClip {
+        id: String,
+        to_index: usize,
+    },
+    UpdateClip {
+        id: String,
+        src_in_ms: Option<u32>,
+        src_out_ms: Option<u32>,
+        transition_in_ms: Option<u32>,
+    },
+    RemoveClip {
         id: String,
     },
     ApplyMotionDefault,
@@ -422,6 +475,13 @@ pub fn apply(doc: &mut EditDoc, op: EditOp) {
         EditOp::RemoveCameraMove { id } => {
             doc.camera_moves.retain(|m| m.id != id);
         }
+        op @ (EditOp::AddText { .. } | EditOp::UpdateText { .. } | EditOp::RemoveText { .. }) => {
+            crate::edit::ops::textops::apply_text(doc, op)
+        }
+        op @ (EditOp::SplitAt { .. }
+        | EditOp::MoveClip { .. }
+        | EditOp::UpdateClip { .. }
+        | EditOp::RemoveClip { .. }) => crate::edit::ops::clipops::apply_clip(doc, op),
         EditOp::ApplyMotionDefault => motion::apply_default(doc),
         op @ (EditOp::UpdateCaption { .. }
         | EditOp::RemoveCaption { .. }

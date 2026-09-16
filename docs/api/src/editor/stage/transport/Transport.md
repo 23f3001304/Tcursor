@@ -4,6 +4,8 @@ The transport bar rendered between the Stage and the Timeline. Left: Trim In/Out
 
 ## Transport
 
+**Add a text item (Batch 2c).** `onAddText: () => void`, threaded straight through to `TransportTools` exactly as `onAddZoom` is. It takes no kind here on purpose: `ClassicShell` closes over the default (`() => p.addText("title")`), so the transport stays a bar of one-click tools and the four-way choice lives where there is room for it, in the Effects panel's Add pills.
+
 **Cut and Speed (T7).** Four more props, all threaded straight through to `TransportTools` and not otherwise read here: `clicks` (the recording's clicks on clip time, the range-less span's lookahead), `range`/`setRange` (the ruler's selection and the way to clear it) and `onApply` (the op sink). `timeMs` and `dur`, which the readout already took, are passed down as well - `TransportTools` needs both to compute the span.
 
 **Time remap readout.** Three props: `outTimeMs` (output time, what the viewer will see: cuts skipped, speed applied), `outDur` (the exported length) and `plain` (no cuts and no speed spans). The big number is `outTimeMs` over `outDur`; clip time (`timeMs`, the raw recording's clock every lane still sits on) appears as `.e-time-clip` fine print only when `plain` is false. `dur` remains the seek range (jump to the end seeks to clip `dur`). The readout itself lives in `PlaybackGroup`; the props are declared here because this file is the bar's single contract with `Editor`.
@@ -11,7 +13,7 @@ The transport bar rendered between the Stage and the Timeline. Left: Trim In/Out
 ```tsx
 export const Transport: React.MemoExoticComponent<(props: {
   timeMs: number; dur: number; playing: boolean; onPlay: () => void; onSeek: (ms: number) => void;
-  onAddZoom: () => void; onAutoedit: () => void; aiRunning: boolean; exporting: boolean;
+  onAddZoom: () => void; onAddText: () => void; onAutoedit: () => void; aiRunning: boolean; exporting: boolean;
   trimmed: boolean; onTrimIn: () => void; onTrimOut: () => void; onResetTrim: () => void;
   aspect: Aspect; onAspect: (aspect: Aspect) => void;
   quality: number; onQuality: () => void;

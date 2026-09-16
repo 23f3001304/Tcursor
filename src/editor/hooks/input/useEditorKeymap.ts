@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import type { EditDoc, EditOp } from "../../../shared/edit";
+import type { EditDoc, EditOp, TextKind } from "../../../shared/edit";
 import { resolveKeyAction, type TargetLike } from "../../model/keymap";
 
 export function useEditorKeymap(opts: {
@@ -11,6 +11,7 @@ export function useEditorKeymap(opts: {
   applyOp: (op: EditOp) => Promise<EditDoc | null>;
   addZoom: () => Promise<void>;
   addSpotlight: () => Promise<void>;
+  addText: (kind: TextKind) => Promise<void>;
   onOverlay: () => void;
   modalOpen: boolean;
   shortcutsOpen: boolean;
@@ -25,6 +26,7 @@ export function useEditorKeymap(opts: {
     applyOp,
     addZoom,
     addSpotlight,
+    addText,
     onOverlay,
     modalOpen,
     shortcutsOpen,
@@ -49,12 +51,14 @@ export function useEditorKeymap(opts: {
           const isCamMove = doc?.camera_moves.some((m) => m.id === sel);
           const isCut = doc?.cuts.some((c) => c.id === sel);
           const isSpeed = doc?.speed.some((s) => s.id === sel);
+          const isText = doc?.texts?.some((t) => t.id === sel);
           if (isZoom) void applyOp({ op: "remove_zoom", id: sel });
           else if (isEffect) void applyOp({ op: "remove_effect", id: sel });
           else if (isLayout) void applyOp({ op: "remove_layout_seg", id: sel });
           else if (isCamMove) void applyOp({ op: "remove_camera_move", id: sel });
           else if (isCut) void applyOp({ op: "remove_cut", id: sel });
           else if (isSpeed) void applyOp({ op: "remove_speed", id: sel });
+          else if (isText) void applyOp({ op: "remove_text", id: sel });
           else break;
           setSel(null);
           break;
@@ -67,6 +71,9 @@ export function useEditorKeymap(opts: {
           break;
         case "spotlight":
           void addSpotlight();
+          break;
+        case "text":
+          void addText("title");
           break;
         case "play":
           e.preventDefault();

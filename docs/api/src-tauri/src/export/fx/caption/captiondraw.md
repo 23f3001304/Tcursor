@@ -2,7 +2,7 @@
 
 The spoken-caption blit: a scrim pill, a centred glyph run, and a highlight on the word being spoken. Every number it positions against comes from `captionlayout`, which the preview mirrors, so this file only decides how the pixels land - never where the caption sits, and never how far into an animation the caption is.
 
-It is a CPU `ab_glyph` blit, like the hotkey chord overlay, and it reuses that module's embedded Inter SemiBold and its `put` blend so there is exactly one text blend in the tree. It is called from `FrameRenderer::composite_at` directly rather than through `fx_state::render`, because that function already carries eighteen arguments and a `#[allow(clippy::too_many_arguments)]`. Since every output format composites through `composite_at`, GIF export keeps captions for free.
+It is a CPU `ab_glyph` blit, and it draws with the tree's one embedded face and its one BGRA blend, `export/fx/glyph.rs`'s `font()` and `put` (which `hotkeycap.rs` used to own and which moved out when a third overlay, the animated text items, needed them too). What it deliberately does NOT share is `glyph::draw_run`: the word reveal and the spoken-word highlight give individual glyphs different colours and different alphas inside one line, and a single-colour single-alpha run cannot express that, so `draw_line` keeps its own loop over `put`. It is called from `FrameRenderer::composite_at` directly rather than through `fx_state::render`, because that function already carries eighteen arguments and a `#[allow(clippy::too_many_arguments)]`. Since every output format composites through `composite_at`, GIF export keeps captions for free.
 
 Ordering: after the FX pass, before the cursor. A caption sits over the picture and its effects, but never over the pointer.
 
@@ -72,6 +72,6 @@ It also raises each covered pixel's ALPHA byte. This is deliberate and worth sta
 
 #### draw_line
 
-`fn draw_line(...)` - one line of glyphs, centred on the pill's centre x and sitting on its baseline. `ab_glyph`'s own measured advances place the run, so the export uses REAL Inter metrics inside the character-count pill `captionlayout` handed it - that split is the whole of ADDED-5. Characters inside the highlight range take `pen.lit`, the rest `pen.text`; both get the 1 px dark shadow `hotkeycap` uses, which is what keeps text legible when the pill is off.
+`fn draw_line(...)` - one line of glyphs, centred on the pill's centre x and sitting on its baseline. `ab_glyph`'s own measured advances place the run, so the export uses REAL Inter metrics inside the character-count pill `captionlayout` handed it - that split is the whole of ADDED-5. Characters inside the highlight range take `pen.lit`, the rest `pen.text`; both get the same 1 px dark shadow at 0.6 coverage that `glyph::draw_run` lays down, which is what keeps text legible when the pill is off.
 
 Under a `words` reveal each glyph's alpha is decided by `pen.cut` before it is rasterised, and an unrevealed glyph STILL ADVANCES `x`. That is the invariant worth keeping: the run is centred on the whole caption's width from the first frame, so a word appearing never reflows the words already on screen.

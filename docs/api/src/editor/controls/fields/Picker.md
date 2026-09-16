@@ -19,9 +19,9 @@ Otherwise steps by one and clamps at `[0, length-1]` (does not wrap).
 ## Picker
 
 ```tsx
-export function Picker<T extends string>({ value, options, onChange, ariaLabel }: {
+export function Picker<T extends string>({ value, options, onChange, ariaLabel, label }: {
   value: T; options: { value: T; label: string; title?: string; badge?: string }[];
-  onChange: (v: T) => void; ariaLabel?: string;
+  onChange: (v: T) => void; ariaLabel?: string; label?: string;
 }): JSX.Element
 ```
 
@@ -41,6 +41,17 @@ export function Picker<T extends string>({ value, options, onChange, ariaLabel }
   places the caller cannot reach. *Why it exists:* `AiPanel` badges a vision-capable engine
   "Vision" - whether a model can actually LOOK at the recording is the one thing its name cannot
   say, and it changes what a run will do. Omitted everywhere else, so no other picker changes.
+- `label?: string` (Batch 2b) - overrides the text shown on the CLOSED button only. The menu, the
+  `aria-selected` marks and `onChange` all still run off `value`, so the picker still reports one
+  of its own options as selected and nothing about picking changes. *Why it exists:* the colour
+  grade needs a "Custom" state that is NOT a value - spec 3.1 says picking a look writes three
+  absolute numbers the user may then bend, and once bent the button should stop claiming to be
+  that look while the menu still shows which one it started from. *Why an override rather than a
+  synthetic option:* every option in the menu is a clickable row, so a "Custom" entry would be
+  selectable and would have to be ignored on click, and it would sit in the list forever. *Why not
+  a falsy `value`:* the component already falls back to the raw `value` string when it matches no
+  option, which would render `custom` rather than `Custom` and would break `aria-selected`.
+  Omitted everywhere except `GradeSection`, so no other picker changes.
 
 ### Behavior (Task 26 additions)
 

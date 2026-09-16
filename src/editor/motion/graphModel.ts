@@ -2,7 +2,7 @@ import { ease } from "../timeline/model/layoutTrack";
 import { parseKeys, toKeys, type KeyMode } from "./keys";
 import { graphKeys, r2, sampleRamp, SAMPLES_PER_RAMP } from "./graphCoords";
 
-export type Lane = "zoom" | "layout" | "cam";
+export type Lane = "zoom" | "layout" | "cam" | "text";
 export interface RampSpec {
   easing: string;
   durMs: number;

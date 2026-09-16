@@ -48,13 +48,7 @@ fn render_empty(w: u32, h: u32) -> usize {
             w,
             h,
             &FxState {
-                style: ClickFxStyle::None,
-                color: [0, 0, 0],
-                intensity: 1.0,
-                hits: vec![],
-                spot: None,
-                video: None,
-                lens: None,
+                ..Default::default()
             },
         );
         buf.len()

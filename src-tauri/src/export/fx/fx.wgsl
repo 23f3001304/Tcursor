@@ -41,8 +41,10 @@ struct FxU {
   back_a: vec4<f32>,            // cursor-back rounded rect (px): min_x, min_y, max_x, max_y
   back_b: vec4<f32>,            // corner radius(px), on(0/1), click squash, ink progress
   back_c: vec4<f32>,            // ink origin (px): x, y, ring-instead-of-drop(0/1), _pad
-  mask: array<vec4<f32>, 16>,   // reserved for Batch 2a: two vec4 per mask, eight masks, all zero until then
-  grade: array<vec4<f32>, 6>,   // reserved for Batch 2b: the grade parameters, all zero until then
+  mask: array<vec4<f32>, 24>,   // three vec4 per mask, eight masks (fx_mask.wgsl); kind id 0 = empty slot
+  grade: array<vec4<f32>, 6>,   // read by grade_fx (fx_grade.wgsl): [0] exposure, contrast, saturation,
+                                // vignette; [1] temp, tint, active(0/1), _pad; [2] lift [3] gamma
+                                // [4] gain, each rgb + _pad; [5] spare. All zero when ungraded.
 };
 @group(0) @binding(0) var frame_tex: texture_2d<f32>;
 @group(0) @binding(1) var samp: sampler;
@@ -130,6 +132,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     color = vec3<f32>(textureSample(frame_tex, samp, uv + ofs).r, color.g,
                       textureSample(frame_tex, samp, uv - ofs).b);
   }
+  color = mask_fx(color, px, dims, uv);
+  color = grade_fx(color, px, dims);
   if (u.e.y > 0.001) {
     let vmode = u.e.x;
     let va = u.e.y;

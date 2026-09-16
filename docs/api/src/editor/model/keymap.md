@@ -15,9 +15,7 @@ The minimal shape `keyAction` reads off a `KeyboardEvent` - a plain interface (n
 ## keyAction
 
 ```ts
-export type KeyAction =
-  | "delete" | "zoom" | "spotlight" | "play" | "overlay" | "deselect"
-  | null;
+export type KeyAction = "delete" | "zoom" | "spotlight" | "text" | "play" | "overlay" | "deselect" | null;
 
 export function keyAction(e: KeyLike, hasSel: boolean): KeyAction
 ```
@@ -46,6 +44,7 @@ The table, in the order the function checks it:
 | `Tab` (no Shift) | `"focus-properties"` - jump to the first Properties area (M1a A5) | allowed |
 | `z` / `Z` | `"zoom"` | ignored |
 | `s` / `S` | `"spotlight"` | ignored |
+| `t` / `T` | `"text"` | ignored |
 | `Delete` / `Backspace` | `"delete"`, only with a selection | allowed |
 | `Escape` | `"deselect"`, only with a selection | allowed |
 | `Space` | `"play"` | allowed |
@@ -55,7 +54,7 @@ The table, in the order the function checks it:
 - **Modifier guard.** Returns `null` whenever `ctrlKey || metaKey || altKey` is true - for everything the chord above did not already claim. This is the actual bug fix: `z`/`s` previously had no modifier guard, so `Ctrl+Z` (the browser/OS undo chord) ALSO matched the bare `z` shortcut (add zoom) - the async add-zoom apply usually won the race against the synchronous undo, so `Ctrl+Z` visibly appeared to undo by adding a zoom instead. Shift is deliberately excluded from the guard set: `"?"` is what a US-layout browser delivers in `.key` for Shift+/, so matching it directly (see below) handles that combo without special-casing `shiftKey`.
 - **`"?"` -> `"overlay"`, guarded against `repeat`.** Checked right after the modifier guard, before the lowercase dispatch below (`"?".toLowerCase()` would still be `"?"`, so order doesn't functionally matter here, but it reads top-to-bottom as "the overlay key first"). The repeat guard: `useEditorKeymap` fires `onOverlay` as a plain toggle (open<->closed) on every "overlay" action, so without it, holding `?` down would flicker `ShortcutsOverlay` open/closed at the OS key-repeat rate instead of opening it once.
 - **`Tab` -> `"focus-properties"` (M1a A5), Shift+Tab -> `null`.** This is the one row that reads `shiftKey`, because Shift+Tab carries no distinct `.key` and has to stay the browser's own reverse traversal - the only way back out of wherever the jump landed. `useShellKeys` additionally stands down when the focus is ALREADY inside the target area, so a second press walks that area's own controls instead of bouncing off its body.
-- **`z`/`s` -> `"zoom"`/`"spotlight"`, case-insensitive, guarded against `repeat`.** Holding the key down must not spam regions at the OS key-repeat rate.
+- **`z`/`s`/`t` -> `"zoom"`/`"spotlight"`/`"text"`, case-insensitive, guarded against `repeat`.** Holding the key down must not spam regions at the OS key-repeat rate. `t` (Batch 2c) adds a TITLE, the default of the four text kinds, because a single key cannot choose between four seeds and the title is the one that needs no second line; the four Add pills and the four drop types are where a kind is picked. Like the other two it is a bare letter with the modifier guard in front of it, so `Ctrl+T` stays the browser's own.
 - **`Delete`/`Backspace` -> `"delete"` only when `hasSel`.** Repeat is ALLOWED here (unlike zoom/spotlight) - holding Delete to clear several selections in a row is a reasonable thing to do, and each keydown re-evaluates `hasSel` against whatever is selected at that moment (the hook clears `sel` after each delete, so a genuine held-key repeat naturally stops mattering once nothing is left selected).
 - **`Escape` -> `"deselect"` only when `hasSel` (M1a).** Selection became its own axis when the areas landed - a panel tab change no longer clears it - so leaving a selection needed a key of its own. With nothing selected it returns `null` rather than a consumed no-op, which keeps Escape available to whatever surface wants it (a dialog's dismiss, arrange mode's exit). Repeat is allowed for the same reason `"delete"` allows it: there is nothing to spam. `useEditorKeymap` additionally withholds the action while `escOwned` is true.
 - **`" "` (Space) -> `"play"`.** Repeat allowed (holding Space to keep playing is harmless - the hook just toggles `playing` on every keydown, so this multi-fires, which is an existing tradeoff kept as-is, not introduced by this guard pass).

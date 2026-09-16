@@ -45,3 +45,7 @@ Single-frame preview engine: renders one composited frame at an arbitrary scrub 
 ## remap
 
 The clip-to-output clock map (`TimeMap`): trim, cuts and speed spans as kept segments with factors and output starts, `out_of`/`clip_of` between the two clocks, and `frame_plan` (the recording frame every output frame shows). The exporter, the one-shot preview and `camera_track` all walk the same plan; `edit::remap_doc` moves every region onto the output clock before the renderer builds its tracks. Mirrored by `src/shared/math/remap.ts`.
+
+## grade
+
+Resolves a document's four stored grade numbers into the eleven parameters of the colour-grade transform, and defines that transform. Pure and stateless; the look is constant for a whole export, so `params_of` runs once in `render_edit::EditState::load`. Key items: `GradeParams` (the eleven parameters), `seed_of(preset)` (the three numbers a pick writes), `params_of(&GradeSettings) -> Option<GradeParams>` (`None` on the identity), `vignette_k(u, v)`, `apply_px(c, p, u, v)` (the reference the WGSL and GLSL transcriptions must match), `gradedraw::draw_grade` (the CPU per-pixel loop).

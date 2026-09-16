@@ -3,15 +3,9 @@ import { PanelHeader } from "../PanelHeader";
 import type { EditDoc } from "../../../shared/edit";
 import type { BackgroundSettings } from "../../../hud/settings/settings";
 import { backgroundThumbs, type BackgroundThumb } from "../../../shared/ipc";
-import {
-  ColorInput,
-  Disclosure,
-  Segmented,
-  Slider,
-  Swatches,
-  type SwatchItem,
-} from "../../controls/Controls";
-import { COLOR_PRESETS, DEFAULT_BG } from "./backgroundPresets";
+import { ColorInput, Disclosure, Segmented, Slider, Swatches } from "../../controls/Controls";
+import { COLOR_ITEMS, DEFAULT_BG, rgb } from "./backgroundPresets";
+import { GradeSection, NO_GRADE } from "./GradeSection";
 import { WallpaperTab } from "./WallpaperGrid";
 import { GradientTab } from "./GradientTab";
 
@@ -22,14 +16,6 @@ const TABS: { value: BgTab; label: string }[] = [
   { value: "color", label: "Color" },
   { value: "gradient", label: "Gradient" },
 ];
-const rgb = (c: [number, number, number]) => `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
-
-const COLOR_ITEMS: SwatchItem<[number, number, number]>[] = COLOR_PRESETS.map((p) => ({
-  key: rgb(p.rgb),
-  css: rgb(p.rgb),
-  value: p.rgb,
-  ariaLabel: p.name,
-}));
 
 export function BackgroundPanel({
   folder,
@@ -72,6 +58,7 @@ export function BackgroundPanel({
     onSaveSettings({
       ...doc.settings,
       background: DEFAULT_BG,
+      grade: NO_GRADE,
       appearance: { ...app, screen: { ...app.screen, pad: 0.03125, screen_radius: 0.016 } },
     });
   };
@@ -93,7 +80,7 @@ export function BackgroundPanel({
     <div className="e-panel e-insp">
       <PanelHeader
         title="Background"
-        lede="What sits behind the screen, and its frame."
+        lede="What sits behind the screen, its frame, and the look of the whole picture."
         onReset={handleReset}
         onClose={onClose}
       />
@@ -192,6 +179,11 @@ export function BackgroundPanel({
           </div>
         </div>
       </Disclosure>
+
+      <GradeSection
+        grade={doc.settings.grade}
+        onChange={(grade) => onSaveSettings({ ...doc.settings, grade })}
+      />
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { memo, useRef, useState } from "react";
 import { useStagePointer } from "./useStagePointer";
 import { ArrangeOverlay } from "./arrange/ArrangeOverlay";
 import { CamDragHandle } from "./camera/CamDragHandle";
+import { MaskOverlay } from "./mask/MaskOverlay";
 import { ZoomReticle } from "./ZoomReticle";
 import { StageOutline } from "./StageOutline";
 import { StageEmpty } from "./StageEmpty";
@@ -26,8 +27,19 @@ export const Stage = memo(function Stage(p: StageProps) {
   const [err, setErr] = useState<string | null>(null);
   const [canvasW, canvasH] = p.layout?.canvas ?? DEFAULT_CANVAS;
 
-  const { arrange, arranging, dirtyRef, tOut, mapRef, layoutRef, trackRef, timeRef, playRef, onTimeRef } =
-    useStageEngine(p, { screen, webcam, audio, canvas }, canvasW, canvasH);
+  const {
+    arrange,
+    arranging,
+    mask,
+    dirtyRef,
+    tOut,
+    mapRef,
+    layoutRef,
+    trackRef,
+    timeRef,
+    playRef,
+    onTimeRef,
+  } = useStageEngine(p, { screen, webcam, audio, canvas }, canvasW, canvasH);
 
   const { onCanvasClick, reticle, aimDrag, onReticleDown } = useStagePointer({
     canvasRef: canvas,
@@ -108,6 +120,16 @@ export const Stage = memo(function Stage(p: StageProps) {
             canvasRef={canvas}
             camDraftRef={p.camDraftRef}
             dirtyRef={dirtyRef}
+          />
+        )}
+        {mask.box && !arranging && !p.moveMode && (
+          <MaskOverlay
+            box={mask.box}
+            canvasW={canvasW}
+            canvasH={canvasH}
+            guideX={mask.guideX}
+            guideY={mask.guideY}
+            onHandleDown={mask.onHandleDown}
           />
         )}
         {p.arrangeSeg && arrange.panels && (

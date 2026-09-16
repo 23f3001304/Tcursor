@@ -10,6 +10,16 @@ impl FrameRenderer {
         oh: u32,
         lens: Option<crate::export::fx::fx_lens::Lenses>,
     ) {
+        let masks = crate::export::fx::fx_masks::masks_at(
+            &self.effects,
+            &pose.scene,
+            pose.cam,
+            crate::export::coordmap::full_src(self.sw, self.sh),
+            ow,
+            oh,
+            pose.out_t,
+            self.settings.clickfx.spotlight_dim,
+        );
         fx_state::render(
             &*self.fx,
             out,
@@ -29,6 +39,16 @@ impl FrameRenderer {
             &self.settings.hotkeys,
             &mut self.spot_sim,
             lens,
+            masks,
+            self.grade,
+        );
+        crate::export::fx::textdraw::overlay(
+            out,
+            ow,
+            oh,
+            &self.texts,
+            self.settings.ui.accent,
+            pose.out_t,
         );
         crate::export::fx::captiondraw::overlay(
             out,

@@ -12,9 +12,19 @@ import type {
   CaptionStyle,
   CursorSettings,
   ClickFxSettings,
+  GradeSettings,
   ZoomSettings,
 } from "../../hud/settings/settings";
-import type { Caption, CameraMove, EditDoc, EditOp, EffectRegion, LayoutSeg, Zoom } from "../../shared/edit";
+import type {
+  Caption,
+  CameraMove,
+  EditDoc,
+  EditOp,
+  EffectRegion,
+  LayoutSeg,
+  TextItem,
+  Zoom,
+} from "../../shared/edit";
 import type { CamPose } from "./camera/cameraMoves";
 import type { StageBg } from "./canvas/stageBg";
 import type { TimeMap } from "../../shared/math/remap";
@@ -40,7 +50,9 @@ export interface StageProps {
   cursor: CursorSettings;
   effects: EffectRegion[];
   clickfx: ClickFxSettings;
+  grade: GradeSettings;
   captions: Caption[];
+  texts: TextItem[];
   capStyle: CaptionStyle;
   accent: [number, number, number];
   audioSrc: string;
@@ -52,6 +64,7 @@ export interface StageProps {
   aimPoint: [number, number] | null;
   aimMode: boolean;
   arrangeSeg: LayoutSeg | null;
+  sel: string | null;
   outline: [number, number, number, number] | null;
   camDraftRef: RefObject<CamPose | null>;
   onTime: (ms: number) => void;

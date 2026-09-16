@@ -2,6 +2,7 @@ use crate::export::fx::fx_state::FxState;
 use crate::settings::model::{ClickFxStyle, SpotlightMode, VideoFxMode};
 
 pub const MAX_HITS: usize = 16;
+pub const MAX_MASKS: usize = 8;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -22,7 +23,7 @@ pub struct FxU {
     pub back_a: [f32; 4],
     pub back_b: [f32; 4],
     pub back_c: [f32; 4],
-    pub mask: [[f32; 4]; 16],
+    pub mask: [[f32; 4]; 3 * MAX_MASKS],
     pub grade: [[f32; 4]; 6],
 }
 
@@ -89,6 +90,16 @@ pub fn spot_mode_id(m: SpotlightMode) -> f32 {
         SpotlightMode::Nebula => 4.0,
         SpotlightMode::Vignette => 5.0,
     }
+}
+
+pub fn pack_masks(masks: &[crate::export::fx::fx_masks::MaskDraw]) -> [[f32; 4]; 3 * MAX_MASKS] {
+    let mut m = [[0.0f32; 4]; 3 * MAX_MASKS];
+    for (i, d) in masks.iter().take(MAX_MASKS).enumerate() {
+        m[i * 3] = [d.mn[0], d.mn[1], d.mx[0], d.mx[1]];
+        m[i * 3 + 1] = [d.r, d.feather_px, d.amount_px, d.kind as f32];
+        m[i * 3 + 2] = [d.dim, d.alpha, 0.0, 0.0];
+    }
+    m
 }
 
 pub fn build_fx_u(state: &FxState, ow: u32, oh: u32) -> FxU {
@@ -180,8 +191,22 @@ pub fn build_fx_u(state: &FxState, ow: u32, oh: u32) -> FxU {
         back_a,
         back_b,
         back_c,
-        mask: [[0.0; 4]; 16],
-        grade: [[0.0; 4]; 6],
+        mask: pack_masks(&state.masks),
+        grade: pack_grade(state.grade.as_ref()),
+    }
+}
+
+pub fn pack_grade(g: Option<&crate::export::grade::GradeParams>) -> [[f32; 4]; 6] {
+    match g {
+        None => [[0.0; 4]; 6],
+        Some(p) => [
+            [p.exposure, p.contrast, p.saturation, p.vignette],
+            [p.temp, p.tint, 1.0, 0.0],
+            [p.lift[0], p.lift[1], p.lift[2], 0.0],
+            [p.gamma[0], p.gamma[1], p.gamma[2], 0.0],
+            [p.gain[0], p.gain[1], p.gain[2], 0.0],
+            [0.0; 4],
+        ],
     }
 }
 

@@ -3,7 +3,7 @@ import { useGraphDrag } from "./useGraphDrag";
 import type { GraphPatch } from "./graphEdits";
 import "./motion.css";
 
-const LANE_LABEL = { zoom: "Zoom", layout: "Layout", cam: "Camera move" } as const;
+const LANE_LABEL = { zoom: "Zoom", layout: "Layout", cam: "Camera move", text: "Text" } as const;
 
 export function MotionGraph({
   input,

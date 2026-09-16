@@ -28,7 +28,9 @@ pub fn reload_edit(&mut self, paths: &ProjectPaths)
 
 Rebuilds the `EditState` with the renderer's own `full_dur_ms`, so a cut or speed edit in the editor changes the time map (and every remapped region) on the next preview frame without a renderer rebuild.
 
-Refresh the `edit.json`-derived state in place (zoom/layout/regions/effects/captions/cam_moves) WITHOUT recreating the GPU compositor or re-probing dims - this is what makes a warm preview cheap. Moved here verbatim from `render/mod.rs`, plus one addition.
+Refresh the `edit.json`-derived state in place (zoom/layout/regions/effects/captions/cam_moves/grade/texts) WITHOUT recreating the GPU compositor or re-probing dims - this is what makes a warm preview cheap. Moved here verbatim from `render/mod.rs`, plus one addition.
+
+The fields are copied across ONE BY ONE rather than by replacing the whole struct, because `FrameRenderer` also holds the edit-independent state (the GPU compositor, the decoded background, the cursor prep) that `EditState` deliberately excludes. So every field the renderer carries out of the edit doc needs a line here as well as on `EditState` and on `FrameRenderer`. **Anything added to `EditState` must be added here too**, or it will load correctly on a cold build and then never refresh on an edit: `self.grade = es.grade;` is why changing the look in the Background panel repaints the preview instead of taking effect only on the next export, and `self.texts = es.texts;` is the same for an edited text item.
 
 The cursor's three settings-driven filters are live-applied here rather than waiting for a rebuild: `Cursor::set_smoothness` (Smoothness), `set_idealize` (Path Idealization) and `set_tilt` (Motion Tilt), each through its `_at` variant so switching the style to `System` on a recording with no baked OS cursor also flips the path to raw and the lean to none in the same call.
 

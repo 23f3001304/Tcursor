@@ -1,8 +1,12 @@
 import type { RefObject } from "react";
 import { camAt } from "../../stage/camera/camera";
 import { activeCamDraft, frameCamLayout } from "../../stage/camera/frameCam";
+import { drawCursorLayer } from "../../stage/canvas/cursorLayer";
 import { drawPreview } from "../../stage/canvas/previewCanvas";
+import { gradeCanvas } from "../../stage/grade/gradePass";
 import { drawOverlays } from "../../stage/fx/overlayDraw";
+import { drawMasks } from "../../stage/mask/maskDraw";
+import { maskDraws } from "../../stage/mask/maskPreview";
 import { layoutAt } from "../../timeline/model/layoutTrack";
 import { newTilt, tiltFromCam, type TiltState } from "../../stage/cursor/cursorTilt";
 import { exactKey } from "./useExactFrame";
@@ -84,7 +88,7 @@ export function drawCompositeFrame(
     cur.tiltDeg = tiltFromCam(s.tiltRef.current, cam.curx, cam.cury, aspect, dtOut, cs.tilt);
     if (!s.offscreenRef.current) s.offscreenRef.current = document.createElement("canvas");
     if (!s.layerRef.current) s.layerRef.current = document.createElement("canvas");
-    drawPreview(
+    const geom = drawPreview(
       ctx,
       c.width,
       c.height,
@@ -93,14 +97,38 @@ export function drawCompositeFrame(
       cam,
       frameLayout,
       r.bgRef.current,
-      r.clicksRef.current,
       t,
-      cur,
       s.offscreenRef.current,
       s.layerRef.current,
-      r.layoutPresetsRef.current?.inset_w,
       tOut,
     );
+    drawMasks(
+      ctx,
+      c,
+      maskDraws(
+        r.effectsRef.current,
+        frameLayout,
+        cam,
+        c.width,
+        c.height,
+        tOut,
+        r.clickfxRef.current.spotlight_dim,
+      ),
+    );
+    gradeCanvas(ctx, c, r.gradeRef.current);
+    if (geom) {
+      drawCursorLayer(
+        ctx,
+        c.width,
+        c.height,
+        cam,
+        cur,
+        r.clicksRef.current,
+        t,
+        r.layoutPresetsRef.current?.inset_w ?? 1,
+        geom,
+      );
+    }
     drawOverlays(ctx, c, r, s, t, tOut, frameLayout, cam);
     const ex = r.exactRef.current;
     if (!play && ex && ex.key === exactKey(t, r.editGenRef.current))

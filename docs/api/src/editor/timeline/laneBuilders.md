@@ -49,10 +49,12 @@ The Zoom lane's pill label: an `IconZoomIn` plus the region's scale to one decim
 ## fxLabel
 
 ```ts
-export const fxLabel = (): React.ReactNode
+export const fxLabel = (e: { kind: string }): React.ReactNode
 ```
 
-The FX lane's pill label: an `IconBulb` plus the static text "Spotlight" - every FX region today is the spotlight, so nothing on the region itself varies the label. Passed to `regionLane` as `renderLabel`.
+The FX lane's pill label: the region's own icon plus its kind's name, looked up in the module's `FX_KINDS` table - `IconBulb` Spotlight, `IconBlur` Blur, `IconGridDots` Pixelate, `IconFocus2` Highlight. Passed to `regionLane` as `renderLabel`, whose signature already supplies the region, so no call site changed when it stopped ignoring its argument.
+
+*Why the icon carries the kind and not the colour:* all four kinds share the `--e-fx` accent and the `.e-fxblk` pill, because they are one lane. Four accents on one lane would read as four lanes. An unknown kind falls back to the spotlight entry rather than rendering an empty pill.
 
 Both `zoomLabel` and `fxLabel` are MODULE-scope, not declared inline in a component body - they're pure and close over nothing, so a fresh inline arrow every render would have been a fresh `renderLabel` prop every render, defeating `RegionRows`' `React.memo` even when the underlying region data hadn't changed.
 

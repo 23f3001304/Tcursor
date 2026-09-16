@@ -4,6 +4,10 @@ pub struct CpuFx;
 
 impl FxRenderer for CpuFx {
     fn apply(&self, out: &mut [u8], ow: u32, oh: u32, state: &FxState) {
+        crate::export::fx::maskdraw::draw_masks(out, ow, oh, &state.masks);
+        if let Some(g) = state.grade {
+            crate::export::grade::gradedraw::draw_grade(out, ow, oh, &g);
+        }
         if let Some(v) = state.video {
             crate::export::fx::videodraw::draw_video(out, ow, oh, &v);
         }
@@ -36,9 +40,7 @@ mod tests {
                 y: 50.0,
                 progress: 0.5,
             }],
-            spot: None,
-            video: None,
-            lens: None,
+            ..Default::default()
         };
         CpuFx.apply(&mut out, w, h, &st);
         assert!(
@@ -51,10 +53,6 @@ mod tests {
         let (w, h) = (100u32, 100u32);
         let mut out = vec![200u8; (w * h * 4) as usize];
         let st = FxState {
-            style: ClickFxStyle::None,
-            color: [0, 0, 0],
-            intensity: 1.0,
-            hits: vec![],
             spot: Some(Spot {
                 cx: 50.0,
                 cy: 50.0,
@@ -69,8 +67,7 @@ mod tests {
                 cam_radius: 0.0,
                 dim_camera: true,
             }),
-            video: None,
-            lens: None,
+            ..Default::default()
         };
         CpuFx.apply(&mut out, w, h, &st);
         assert!(
@@ -85,15 +82,12 @@ mod tests {
         let st = FxState {
             style: ClickFxStyle::Glow,
             color: [255, 255, 255],
-            intensity: 1.0,
             hits: vec![FxHit {
                 x: 50.0,
                 y: 50.0,
                 progress: 0.2,
             }],
-            spot: None,
-            video: None,
-            lens: None,
+            ..Default::default()
         };
         CpuFx.apply(&mut out, w, h, &st);
         assert!(
@@ -108,15 +102,12 @@ mod tests {
         let st = FxState {
             style: ClickFxStyle::Neon,
             color: [0, 128, 255],
-            intensity: 1.0,
             hits: vec![FxHit {
                 x: 60.0,
                 y: 60.0,
                 progress: 0.5,
             }],
-            spot: None,
-            video: None,
-            lens: None,
+            ..Default::default()
         };
         CpuFx.apply(&mut out, w, h, &st);
         assert!(
@@ -131,15 +122,12 @@ mod tests {
         let st = FxState {
             style: ClickFxStyle::Shockwave,
             color: [255, 255, 255],
-            intensity: 1.0,
             hits: vec![FxHit {
                 x: 70.0,
                 y: 70.0,
                 progress: 0.5,
             }],
-            spot: None,
-            video: None,
-            lens: None,
+            ..Default::default()
         };
         CpuFx.apply(&mut out, w, h, &st);
         assert!(
@@ -154,15 +142,12 @@ mod tests {
         let st = FxState {
             style: ClickFxStyle::Pulse,
             color: [0, 0, 255],
-            intensity: 1.0,
             hits: vec![FxHit {
                 x: 100.0,
                 y: 100.0,
                 progress: 0.2,
             }],
-            spot: None,
-            video: None,
-            lens: None,
+            ..Default::default()
         };
         CpuFx.apply(&mut out, w, h, &st);
         let c = ((100 * w + 100) * 4) as usize;
@@ -188,16 +173,12 @@ mod tests {
             let mut out = vec![0u8; (w * h * 4) as usize];
             let st = FxState {
                 style,
-                color: [0, 0, 0],
-                intensity: 1.0,
                 hits: vec![FxHit {
                     x: 60.0,
                     y: 60.0,
                     progress: 0.0,
                 }],
-                spot: None,
-                video: None,
-                lens: None,
+                ..Default::default()
             };
             CpuFx.apply(&mut out, w, h, &st);
             let c = ((60 * w + 60) * 4) as usize;
@@ -215,15 +196,12 @@ mod tests {
         let st = FxState {
             style: ClickFxStyle::Particles,
             color: [255, 255, 255],
-            intensity: 1.0,
             hits: vec![FxHit {
                 x: 80.0,
                 y: 80.0,
                 progress: 0.5,
             }],
-            spot: None,
-            video: None,
-            lens: None,
+            ..Default::default()
         };
         CpuFx.apply(&mut out, w, h, &st);
         assert!(
@@ -238,13 +216,23 @@ mod tests {
         let st = FxState {
             style: ClickFxStyle::Ripple,
             color: [255, 0, 0],
-            intensity: 1.0,
-            hits: vec![],
-            spot: None,
-            video: None,
-            lens: None,
+            ..Default::default()
         };
         CpuFx.apply(&mut out, w, h, &st);
         assert!(out.iter().all(|&b| b == 7), "no hits/spot -> no draw");
+    }
+    #[test]
+    fn the_default_fx_state_is_inert_and_paints_nothing() {
+        let d = FxState::default();
+        assert!(matches!(d.style, ClickFxStyle::None));
+        assert_eq!(d.intensity, 1.0);
+        assert!(d.hits.is_empty() && d.spot.is_none() && d.video.is_none() && d.lens.is_none());
+        let (w, h) = (24u32, 24u32);
+        let mut out = vec![9u8; (w * h * 4) as usize];
+        CpuFx.apply(&mut out, w, h, &d);
+        assert!(
+            out.iter().all(|&b| b == 9),
+            "the default state paints nothing"
+        );
     }
 }

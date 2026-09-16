@@ -1,6 +1,8 @@
 import { fxFrameGeometry } from "./fxGeometry";
 import { drawMirroredRipples, overlayNeedsClicks } from "./ripplePreview";
 import { drawCaptions } from "./captionDraw";
+import { drawTexts } from "../text/textDraw";
+import { laidTexts } from "../text/textPreview";
 import { resolveSpotlight, spotAlphaPlan } from "./spotlightPreview";
 import type { Cam } from "../camera/camera";
 import type { frameCamLayout } from "../camera/frameCam";
@@ -64,6 +66,7 @@ export function drawOverlays(
     ctx.drawImage(fxImg, 0, 0, c.width, c.height);
     ctx.restore();
   }
+  drawTexts(ctx, laidTexts(r.textsRef.current, r.accentRef.current, c.width, c.height, tOut));
   drawCaptions(
     ctx,
     c.width,

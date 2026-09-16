@@ -17,6 +17,7 @@
 .e-mg-zoom { --m-accent: var(--e-zoom); }
 .e-mg-layout { --m-accent: var(--e-layout); }
 .e-mg-cam { --m-accent: var(--e-cam); }
+.e-mg-text { --m-accent: var(--e-text); }
 
 /* Axes. Two rails only - rest and peak - because a motion curve has exactly two meaningful
    values and a full grid would compete with the curve for the same pixels. */

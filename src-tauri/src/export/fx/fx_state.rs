@@ -50,9 +50,27 @@ pub struct FxState {
     pub color: [u8; 3],
     pub intensity: f32,
     pub hits: Vec<FxHit>,
+    pub masks: Vec<crate::export::fx::fx_masks::MaskDraw>,
     pub spot: Option<Spot>,
     pub video: Option<VideoFx>,
     pub lens: Option<crate::export::fx::lens::Lenses>,
+    pub grade: Option<crate::export::grade::GradeParams>,
+}
+
+impl Default for FxState {
+    fn default() -> Self {
+        Self {
+            style: ClickFxStyle::None,
+            color: [0, 0, 0],
+            intensity: 1.0,
+            hits: Vec::new(),
+            masks: Vec::new(),
+            spot: None,
+            video: None,
+            lens: None,
+            grade: None,
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -146,7 +164,7 @@ pub fn fx_state_at(
         hits,
         spot,
         video,
-        lens: None,
+        ..Default::default()
     })
 }
 
@@ -183,6 +201,8 @@ pub fn render(
     keys: &HotkeySettings,
     spot_sim: &mut SpotlightSim,
     lens: Option<crate::export::fx::lens::Lenses>,
+    masks: Vec<crate::export::fx::fx_masks::MaskDraw>,
+    grade: Option<crate::export::grade::GradeParams>,
 ) {
     let built = fx
         .enabled
@@ -193,22 +213,27 @@ pub fn render(
             )
         })
         .flatten();
-    let state = match (built, lens) {
-        (Some(mut s), l) => {
-            s.lens = l;
-            Some(s)
-        }
-        (None, Some(l)) => Some(FxState {
-            style: ClickFxStyle::None,
+    let spill = masks
+        .len()
+        .saturating_sub(crate::export::fx::fx_uniforms::MAX_MASKS);
+    let (keep, over) = masks.split_at(masks.len() - spill);
+    if !over.is_empty() {
+        crate::export::fx::maskdraw::draw_masks(out, ow, oh, over);
+    }
+    let masks = keep.to_vec();
+    let extra = lens.is_some() || !masks.is_empty() || grade.is_some();
+    let mut state = built.or_else(|| {
+        extra.then(|| FxState {
             color: fx.color,
             intensity: fx.intensity,
-            hits: Vec::new(),
-            spot: None,
-            video: None,
-            lens: Some(l),
-        }),
-        (None, None) => None,
-    };
+            ..Default::default()
+        })
+    });
+    if let Some(s) = state.as_mut() {
+        s.lens = lens;
+        s.masks = masks;
+        s.grade = grade;
+    }
     if let Some(state) = state {
         r.apply(out, ow, oh, &state);
     }

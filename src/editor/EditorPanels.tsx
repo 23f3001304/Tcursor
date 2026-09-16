@@ -39,7 +39,9 @@ export const EditorPanels = memo(function EditorPanels({
   camDraftRef,
   addZoom,
   addSpotlight,
+  addMask,
   addCameraMove,
+  addText,
   osCursorInVideo,
   hasCursorLayer,
   hasWebcam,
@@ -143,6 +145,7 @@ export const EditorPanels = memo(function EditorPanels({
             onClose={collapse}
             onAddZoom={addZoom}
             onAddSpotlight={addSpotlight}
+            onAddMask={addMask}
             onAddLayout={async () => {
               await applyOp({
                 op: "add_layout_seg",
@@ -152,6 +155,7 @@ export const EditorPanels = memo(function EditorPanels({
               });
             }}
             onAddCameraMove={addCameraMove}
+            onAddText={addText}
           />
         ) : (
           assertNever(tab)

@@ -108,13 +108,16 @@ describe("keyAction", () => {
     ).toBeNull();
   });
 
-  it("is case-insensitive for z/s", () => {
+  it("is case-insensitive for z/s/t, and t adds a text item unless it is a repeat", () => {
     expect(keyAction({ key: "Z", ctrlKey: false, metaKey: false, altKey: false, repeat: false }, false)).toBe(
       "zoom",
     );
     expect(keyAction({ key: "S", ctrlKey: false, metaKey: false, altKey: false, repeat: false }, false)).toBe(
       "spotlight",
     );
+    expect(keyAction(key({ key: "t" }), false)).toBe("text");
+    expect(keyAction(key({ key: "T" }), false)).toBe("text");
+    expect(keyAction(key({ key: "t", repeat: true }), false)).toBeNull();
   });
 });
 

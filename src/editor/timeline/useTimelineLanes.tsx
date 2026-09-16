@@ -6,6 +6,7 @@ import { layoutRegions } from "./model/layers";
 import { useLaneDrag } from "./useLaneDrag";
 import { useLayoutLaneRegions, layoutLabel, layoutExtraStyle } from "./lanes/LayoutLane";
 import { useCaptionLaneRegions, captionLabel, captionTitle } from "./lanes/CaptionLane";
+import { useTextLaneRegions, textLabel, textTitle } from "./lanes/TextLane";
 import { AudioTrack } from "./lanes/AudioTrack";
 import { CameraLane } from "./lanes/CameraLane";
 import { TimeLane } from "./lanes/TimeLane";
@@ -41,6 +42,7 @@ export function useTimelineLanes({
   const fx = useMemo(() => layoutRegions(doc.effects), [doc.effects]);
   const layouts = useLayoutLaneRegions(doc.layout, layoutPresets);
   const captions = useCaptionLaneRegions(doc.captions);
+  const texts = useTextLaneRegions(doc.texts);
 
   const onCommitZoom = useCallback(
     (id: string, start_ms: number, end_ms: number, layer: number) =>
@@ -63,10 +65,17 @@ export function useTimelineLanes({
     [onApply],
   );
 
+  const onCommitText = useCallback(
+    (id: string, start_ms: number, end_ms: number) =>
+      void onApply({ op: "update_text", id, start_ms, end_ms }),
+    [onApply],
+  );
+
   const zoom = useLaneDrag(zooms, dur, track, ROW_H, onCommitZoom, onSel);
   const eff = useLaneDrag(fx, dur, track, ROW_H, onCommitFx, onSel);
   const lay = useLaneDrag(layouts, dur, track, ROW_H, onCommitLayout, onSel);
   const cap = useLaneDrag(captions, dur, track, ROW_H, onCommitCaption, onSel);
+  const txt = useLaneDrag(texts, dur, track, ROW_H, onCommitText, onSel);
 
   const audioRows = !wavesReady ? 2 : (waves.system ? 1 : 0) + (waves.mic ? 1 : 0);
   const isSel = (regions: { id: string }[]) => sel != null && regions.some((r) => r.id === sel);
@@ -82,6 +91,19 @@ export function useTimelineLanes({
     });
   regionLane(lanes, cx, "zoom", "Zoom", zoom, zooms, "e-zoomrow", "e-zblk", zoomLabel);
   regionLane(lanes, cx, "fx", "FX", eff, fx, "e-fxrow", "e-fxblk", fxLabel);
+  regionLane(
+    lanes,
+    cx,
+    "text",
+    "Text",
+    txt,
+    texts,
+    "e-textrow",
+    "e-textblk",
+    textLabel,
+    undefined,
+    textTitle,
+  );
   regionLane(
     lanes,
     cx,

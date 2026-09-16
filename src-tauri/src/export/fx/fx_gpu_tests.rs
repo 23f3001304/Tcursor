@@ -31,10 +31,6 @@ fn added(base: u8, buf: &[u8]) -> i64 {
 fn cpu_spotlight_dim_matches_the_shader_at_probe_points() {
     let (w, h) = (128u32, 128u32);
     let st = FxState {
-        style: ClickFxStyle::None,
-        color: [0, 0, 0],
-        intensity: 1.0,
-        hits: vec![],
         spot: Some(Spot {
             cx: 64.0,
             cy: 64.0,
@@ -49,8 +45,7 @@ fn cpu_spotlight_dim_matches_the_shader_at_probe_points() {
             cam_radius: 0.0,
             dim_camera: true,
         }),
-        video: None,
-        lens: None,
+        ..Default::default()
     };
     let Some((gpu, cpu)) = both(&st, w, h) else {
         return;
@@ -80,15 +75,12 @@ fn cpu_click_ring_gains_match_the_shader() {
             let st = FxState {
                 style,
                 color: [0, 128, 255],
-                intensity: 1.0,
                 hits: vec![FxHit {
                     x: 64.0,
                     y: 64.0,
                     progress,
                 }],
-                spot: None,
-                video: None,
-                lens: None,
+                ..Default::default()
             };
             let Some((gpu, cpu)) = both(&st, w, h) else {
                 return;
@@ -112,16 +104,12 @@ fn the_impact_flash_is_brightest_at_the_click_and_gone_by_p_0_2() {
     let at = |p: f32| {
         let st = FxState {
             style: ClickFxStyle::Particles,
-            color: [0, 0, 0],
-            intensity: 1.0,
             hits: vec![FxHit {
                 x: 64.0,
                 y: 64.0,
                 progress: p,
             }],
-            spot: None,
-            video: None,
-            lens: None,
+            ..Default::default()
         };
         both(&st, w, h).map(|(gpu, _)| gpu[((64 * w + 64) * 4) as usize] as i32)
     };
@@ -148,10 +136,6 @@ fn spotlight_dims_corner_more_than_center() {
     let (w, h) = (64u32, 64u32);
     let mut out = vec![200u8; (w * h * 4) as usize];
     let st = FxState {
-        style: ClickFxStyle::None,
-        color: [0, 0, 0],
-        intensity: 1.0,
-        hits: vec![],
         spot: Some(Spot {
             cx: 32.0,
             cy: 32.0,
@@ -166,8 +150,7 @@ fn spotlight_dims_corner_more_than_center() {
             cam_radius: 0.0,
             dim_camera: true,
         }),
-        video: None,
-        lens: None,
+        ..Default::default()
     };
     g.apply(&mut out, w, h, &st);
     assert!(

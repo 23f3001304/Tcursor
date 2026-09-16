@@ -105,6 +105,7 @@ pub struct FxState {
     pub color: [u8; 3],
     pub intensity: f32,
     pub hits: Vec<FxHit>,
+    pub masks: Vec<MaskDraw>,
     pub spot: Option<Spot>,
     pub video: Option<VideoFx>,
 }
@@ -118,6 +119,7 @@ Complete renderer-agnostic description of all active FX at one output frame. Bui
 - `color` - *user-configured effect color as RGB bytes.*
 - `intensity` - *user-configured effect strength scalar.*
 - `hits` - *zero or more active click effects; always empty when `style` is `ClickFxStyle::None`.*
+- `masks` - *the mask rectangles live at this frame, in layer order. See `FxState::masks`.*
 - `spot` - *`None` when neither the spotlight toggle nor any Spotlight effect region is active at this frame.*
 - `video` - *`None` when no `VideoFxHold` pair is active at this frame.*
 
@@ -127,6 +129,18 @@ Complete renderer-agnostic description of all active FX at one output frame. Bui
 - `src-tauri/src/export/fx/fx_gpu.rs` - `GpuFx::apply` dispatches the GPU shader.
 - `src-tauri/src/export/fx/fxdraw.rs` - `CpuFx::apply` handles the software path.
 - `src-tauri/src/export/fx/videodraw.rs` - reads `FxState.video`.
+
+### FxState::masks
+
+```rust
+pub masks: Vec<crate::export::fx::fx_masks::MaskDraw>,
+```
+
+The **blur, pixelate and highlight rectangles** live at this frame, already projected to output pixels and sorted by layer (`fx_masks::masks_at`). Empty for a project with no masks, which is every recording until someone draws one.
+
+*Why it is a `Vec` and not an `Option` like `spot`:* two spotlights at once is a lighting contradiction and `SpotlightSim` elects a winner, but two blurs over two different passwords must both be blurred. Masks compose; there is no winner to elect.
+
+*Why it rides the FX pass.* Blur and pixelate must re-sample the composited frame, and this is the one pass that has the frame uploaded as a texture. Like `lens`, it is **not a click effect**: `fx_state_at` never sets it, `render` attaches it afterwards, and a user who turned click animations off still gets the blur over their password. The renderers see the first `MAX_MASKS` here; `render` has already painted any beyond that on the CPU.
 
 ### FxState::lens
 
@@ -139,6 +153,36 @@ The **glass cursor material** for this frame - the refracting lens under a `mate
 *Why it rides the FX pass at all.* It has to refract, which means re-sampling the composited frame - and this is the one pass that has the frame uploaded as a texture. It is not a click effect, though: `fx_state_at` never sets it (it returns `lens: None`), `render` attaches it afterwards, and a user who turned click FX off still gets their glass cursor.
 
 *Why it is placed before the pass rather than during it.* The sprite it belongs to is blitted AFTER this pass by `cursorset::draw`, so the box is computed one step earlier by `lens::build::lenses_at` and handed in. Both sides then read the same box (`cursormorph::sprite_box`), which is what stops the glass drifting off the cursor.
+
+### FxState::grade
+
+```rust
+pub grade: Option<crate::export::grade::GradeParams>,
+```
+
+The project's **colour grade** for this frame: the eleven parameters `export::grade::params_of` resolved from `Settings.grade`, or `None` when the document has no look. Step 4 of the composite order (spec 1.3), drawn by `grade_fx` in `fx_grade.wgsl` on the GPU path and by `grade::gradedraw::draw_grade` on the CPU path, in both cases after the masks and before the video FX.
+
+*Why it rides the FX pass.* A grade is a remap of every output pixel, and this is the one pass that already reads and writes every output pixel with the frame bound as a texture. Adding it here costs no extra pass, no extra readback and no extra upload.
+
+*Why it is not a click effect.* Like `lens`, `fx_state_at` never sets it; `render` attaches it afterwards from its own parameter. The grade is deliberately NOT gated on `ClickFxSettings.enabled`: turning click animations off must not remove the project's look, so `render` builds a state for a grade alone the same way it does for the lens, before the `!fx.enabled` early return.
+
+*Why it is `Option` rather than an identity value.* `params_of` returns `None` for a document that has never picked a look, which is most of them, and that `None` is what keeps an ungraded export byte-identical to one from before the grade existed: no state is built, no shader branch is taken and `pack_grade` writes zeros.
+
+*Why it is constant for the whole export.* A grade is a document setting and not a region, so it is resolved once in `render::render_edit::EditState::load` and carried on `FrameRenderer`, never rebuilt per frame. `reload_edit` refreshes it for free by rebuilding the whole `EditState`.
+
+## FxState::default
+
+```rust
+impl Default for FxState {
+    fn default() -> Self {
+        Self { style: ClickFxStyle::None, color: [0, 0, 0], intensity: 1.0, hits: Vec::new(), spot: None, video: None, lens: None }
+    }
+}
+```
+
+The inert state: no click style, no hits, no spotlight, no video FX, no lens, full intensity. Every `FxState` construction site - `fx_state_at`'s own literal, `render`'s fallback arm, the preview FX overlay (`export/preview/preview_fx.rs`'s `render_fx_overlay`, which builds the state the editor's live FX preview renders), and every literal across `fxdraw.rs`'s, `fx_uniforms_tests.rs`'s, `fx_gpu_tests.rs`'s, `preview_fx_tests.rs`'s and `preview_fx_alpha_tests.rs`'s test modules - spreads `..Default::default()` and names only the fields it cares about, so a field added to the struct costs each of those sites one line instead of requiring every site to list it explicitly.
+
+`CpuFx::apply` given the default state is a byte-identical no-op: every byte of the output buffer comes back exactly as it went in. `the_default_fx_state_is_inert_and_paints_nothing` (in `fxdraw.rs`'s test module) pins this by filling a buffer with a sentinel byte, applying the default state, and asserting every byte is still the sentinel.
 
 ## fx_state_at
 
@@ -232,10 +276,13 @@ pub fn render(
     r: &dyn FxRenderer, out: &mut [u8], ow: u32, oh: u32, fx: &ClickFxSettings,
     events: &[MouseEvent], actions: &[ActionEvent], effects: &[EffectRegion], scene: &Scene, cam: Camera, cur: FramePoint, screen: &ScreenInfo, has_webcam: bool,
     region_t: u32, ev_t: u32, keys: &HotkeySettings, spot_sim: &mut SpotlightSim,
+    lens: Option<Lenses>, masks: Vec<MaskDraw>, grade: Option<GradeParams>,
 )
 ```
 
 Per-frame entry point called by the exporter after compositing the base frame. Builds FX state, applies the renderer, then overlays captions.
+
+**Three of the things this pass draws are not click effects**, and all three are computed by the CALLER and merged in here rather than by `fx_state_at`: the cursor `lens`, the `masks` and the `grade`. `fx_state_at` only runs when `fx.enabled`, so anything built inside it disappears when a user turns click animations off. **Turning click animations off must not remove a blur over a password**, and it must not remove the glass cursor or the project's look either. So `render` builds its state as "whatever `fx_state_at` produced, OR an otherwise-inert `FxState` if any of the three is present", then attaches all three.
 
 ### Inputs
 
@@ -244,10 +291,20 @@ Per-frame entry point called by the exporter after compositing the base frame. B
 - `fx: &ClickFxSettings` - FX settings; `fx.enabled` is checked first as a fast exit. *Why early return:* when FX is fully disabled, no state is built and no renderer is invoked.*
 - `events`, `actions`, `effects`, `scene`, `cam`, `cur`, `screen`, `has_webcam`, `sw`, `sh`, `region_t`, `ev_t`, `spot_sim` - forwarded verbatim to `fx_state_at`. `FrameRenderer::composite_at` passes `&self.cursor.screen()` (the `Cursor`'s own `ScreenInfo`, already used for its own `to_frame` conversions in `clicks`/`path::PathModel::new`) rather than storing a second copy, and `self.has_webcam` (computed once via `paths.webcam().exists()` in `FrameRenderer::new`).
 - `keys: &HotkeySettings` - hotkey bindings forwarded to `caption::overlay`. *Why:* captions label hotkey actions and need the binding strings to construct the text.*
+- `lens: Option<Lenses>` - the glass cursor shapes for this frame, placed by `lens::build::lenses_at` before the pass because the sprite they belong to is blitted after it. See `FxState::lens`.
+- `masks: Vec<MaskDraw>` - the mask rectangles for this frame, projected by `fx_masks::masks_at`, in layer order. See `FxState::masks`.
+- `grade: Option<GradeParams>` - the project's colour grade, resolved once by `EditState::load` and carried on `FrameRenderer`. Like `lens` and `masks` it is attached to the state after `fx_state_at` has run, never by it. **It is not gated on `fx.enabled`:** turning click animations off must not remove the project's look, so a `Some` here builds a state on its own even when nothing else is active, and the `!fx.enabled` early return sits AFTER the renderer is applied rather than before it. See `FxState::grade`.
+
+### The ninth mask
+
+The GPU uniform block holds `fx_uniforms::MAX_MASKS` (eight) masks. `render` splits the list at that point, hands the first eight to the renderer through `FxState::masks`, and paints **any beyond the eighth straight onto `out` with `maskdraw::draw_masks` before the renderer runs**. So the cap degrades instead of dropping a mask, at two costs worth knowing: a spilled mask is drawn by the CPU path even on a GPU machine, and because it lands before the pass it sits UNDER everything the pass draws - the kept masks, and the grade.
 
 ### Implementation
 
-1. Return immediately if `!fx.enabled`.
-2. Call `fx_state_at`; if `Some(state)`, call `r.apply(out, ow, oh, &state)`.
-3. Call `caption::overlay(out, ow, oh, actions, keys, ev_t, fx.captions)` unconditionally. *Why `ev_t`:* captions label hotkey presses read straight from the action log, which is an event-clock stream - not a doc region. *Why always:* captions are independent of click/spotlight FX and must appear even when FX rendering was skipped.*
+1. Call `fx_state_at` only when `fx.enabled`; otherwise nothing is built from the click settings.
+2. Split `masks` at `MAX_MASKS` and CPU-paint the overflow onto `out`.
+3. `let extra = lens.is_some() || !masks.is_empty() || grade.is_some();` - if nothing was built but there IS an extra, stand up an inert `FxState` over `Default::default()` carrying only `fx.color` and `fx.intensity`, so the renderer has something to attach them to. All three bypass `fx.enabled` for the same reason: none of them is a click animation, and a user who turned click FX off still wants their blur, their glass cursor and their look.
+4. Attach `lens`, `masks` and `grade` to whichever state exists, then `r.apply(out, ow, oh, &state)`.
+5. Return before the hotkey captions when `!fx.enabled` - those ARE a click-FX feature, and this is the one thing the toggle really does switch off.
+6. Otherwise call `click::hotkeycap::overlay(out, ow, oh, actions, keys, ev_t, fx.captions)`. *Why `ev_t`:* captions label hotkey presses read straight from the action log, which is an event-clock stream, not a doc region.
 

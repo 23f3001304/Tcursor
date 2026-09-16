@@ -1,6 +1,6 @@
 use super::captionlayout::{caption_at, layout, word_span};
 use crate::edit::captions::Caption;
-use crate::export::fx::click::hotkeycap::{put, FONT};
+use crate::export::fx::glyph::{font as ui_font, put};
 use crate::settings::captions::CaptionStyle;
 use ab_glyph::{point, Font, FontRef, Glyph, PxScale, ScaleFont};
 
@@ -35,9 +35,8 @@ pub fn overlay(
     if l.alpha <= 0.0 || l.lines.is_empty() {
         return;
     }
-    let font = match FontRef::try_from_slice(FONT) {
-        Ok(f) => f,
-        Err(_) => return,
+    let Some(font) = ui_font() else {
+        return;
     };
     if style.pill {
         let a = l.alpha * style.pill_alpha as f32 / 100.0;

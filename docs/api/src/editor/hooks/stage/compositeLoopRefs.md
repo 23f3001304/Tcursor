@@ -11,8 +11,8 @@ export interface CompositeLoopRefs {
   screenRef; webcamRef; audioRef; canvasRef;      // the hidden media and the canvas
   playRef; timeRef; onTimeRef;                     // the clock
   trackRef; layoutRef; layoutPresetsRef; layoutSegsRef; cameraMovesRef; zoomsRef; zoomSettingsRef;
-  dragPoseRef; arrangingRef; clicksRef; effectsRef; clickfxRef;
-  captionsRef; capStyleRef; accentRef;             // the caption draw
+  dragPoseRef; arrangingRef; clicksRef; effectsRef; clickfxRef; gradeRef;
+  captionsRef; textsRef; capStyleRef; accentRef;   // the caption and text draws
   kindsRef; cursorRef; spritesRef; trailRef;
   dirtyRef; bgRef; spotSimRef; mapRef; exactRef; editGenRef;
 }
@@ -24,6 +24,7 @@ Everything the rAF tick reads, as `RefObject`s so the loop mounts once (empty de
 
 - `captionsRef` is `outDoc.captions` - the caption track on the OUTPUT clock, remapped by `remapDoc` exactly like zooms, layout segments and effects. The tick therefore reads it at `tOut`, not at clip time.
 - `capStyleRef` is `doc.settings.captions` and `accentRef` is `doc.settings.ui.accent`: the same three inputs Rust `FrameRenderer::composite_at` hands `captiondraw::overlay`, so the preview and the export are fed identically.
+- `textsRef` is `outDoc.texts`, on the OUTPUT clock like `captionsRef` and read at `tOut` for the same reason. With `accentRef` it is the whole of what `laidTexts` needs, which is exactly the pair `fx_pass` hands `textdraw::overlay`.
 - `mapRef` is the clip-to-output clock map from `useTimeMap`; `spotSimRef` is owned by `Stage.tsx` because it is also reset on a paused effects-content edit, which the loop's own discontinuous-jump gate cannot see.
 - `exactRef` / `editGenRef` carry the export's own frame for a resting playhead, keyed on the instant AND the edit generation.
 

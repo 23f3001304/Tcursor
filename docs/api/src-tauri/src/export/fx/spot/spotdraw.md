@@ -4,17 +4,7 @@ Renders the cursor spotlight effect in all six modes (Classic, Breathing, Vignet
 
 **`fx.wgsl` is the reference look, not this file.** `select_fx` picks the GPU shader whenever an adapter exists, and since the FX-parity fix the editor preview uses that same selector (`preview_fx.rs`'s `with_fx`), so on any machine with a GPU *neither* the export nor the preview runs this code - it is the fallback for adapter-less machines only. Where the two can diverge, this file must move toward the shader. Two modes stay deliberate approximations because mirroring them per-pixel on the CPU is not affordable: **Blur** (the shader takes 4 extra texture samples per pixel, which needs an unmutated copy of the frame; here it just dims ~15% harder instead) and **Nebula** (the shader evaluates a domain-warped 4-octave fbm per pixel - roughly 100 `sin` calls - which is seconds per frame at 4K; here it is a flat additive tint wash). Everything else - the feather curve, the vignette falloff, the breathing scale, the halo ring including its `intensity` scale, and the camera-exclusion mix - is a line-for-line mirror.
 
-## rrect_cov
-
-```rust
-fn rrect_cov(x: f32, y: f32, mn: [f32; 2], mx: [f32; 2], r: f32) -> f32
-```
-
-Rounded-rect coverage at pixel `(x, y)`: ~1 inside the rounded rect bounded by `mn`/`mx` with corner radius `r`, ~0 outside, with a roughly 1px antialiased transition at the edge. A line-for-line Rust port of `fx.wgsl`'s `rrect_cov` (signed-distance rounded-box formula) so the CPU and GPU paths agree pixel-for-pixel. *Why the bounding-box corner itself reads ~0:* a true rounded rect's corner arc is inset by `r` from the bounding box's literal corner, so the pixel at e.g. `mn` exactly is legitimately outside the shape - this matches a real rounded-rect SDF, not a bug (see `dim_camera_false_keeps_camera_rect_lit`, which probes the rect's center rather than its corner for this reason).
-
-### Used by
-
-- `src-tauri/src/export/fx/spot/spotdraw.rs` (`draw_spot`) - builds the per-pixel camera-exclusion mask.
+**The rounded rectangle is no longer this file's.** `rrect_cov` used to be a private helper here; it now comes from `export::fx::mask`, which holds the one rounded-rect shape the whole app draws - the camera-exclusion rect, the mask regions and the shader all describe the same corner. Behaviour is unchanged by the move: `dim_camera_false_keeps_camera_rect_lit` and `dim_camera_true_dims_the_camera_rect_too` pass unmodified, which is what pins that the two bodies were identical. See `mask/rrect.md` for the formula, the half-pixel convention and why the bounding-box corner reads as outside the shape once `r > 0`.
 
 ## draw_spot
 

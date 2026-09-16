@@ -1,6 +1,6 @@
 # src/editor/panels/EffectsPanel.tsx
 
-The Effects rail panel: quick-add pills for timeline elements (zoom/spotlight/layout/camera-move,
+The Effects rail panel: quick-add pills for timeline elements (zoom/spotlight/the three masks/layout/camera-move,
 via `EffectPills`), click-ripple controls, and - under its one `Disclosure` - the always-on spotlight
 and video-effect controls that now live in `SpotlightSection.tsx`. Together they are the full set of
 `doc.settings.clickfx` (`ClickFxSettings`) controls, matching the HUD's own `SettingsClickFx`
@@ -9,9 +9,10 @@ one-for-one.
 ## EffectsPanel
 
 ```tsx
-export function EffectsPanel({ settings, onChange, onClose, onAddZoom, onAddSpotlight, onAddLayout, onAddCameraMove }: {
+export function EffectsPanel({ settings, onChange, onClose, onAddZoom, onAddSpotlight, onAddMask, onAddLayout, onAddCameraMove, onAddText }: {
   settings: ClickFxSettings; onChange: (v: ClickFxSettings) => void; onClose: () => void;
-  onAddZoom: () => void; onAddSpotlight: () => void; onAddLayout: () => void; onAddCameraMove: () => void;
+  onAddZoom: () => void; onAddSpotlight: () => void; onAddMask: (kind: MaskKind) => void;
+  onAddLayout: () => void; onAddCameraMove: () => void; onAddText: (kind: TextKind) => void;
 }): JSX.Element
 ```
 
@@ -21,6 +22,7 @@ export function EffectsPanel({ settings, onChange, onClose, onAddZoom, onAddSpot
 - `onChange: (v: ClickFxSettings) => void` - called with the full next `ClickFxSettings` on every control change, via the panel's own `set(k, v)` helper (`{ ...settings, [k]: v }`) - the standard per-panel idiom. `set` is also handed down to `SpotlightSection`, so this file is the only place that knows how one key becomes a whole next object.
 - `onClose: () => void` - closes the panel (back to the AI tab).
 - `onAddZoom` / `onAddSpotlight` / `onAddLayout` / `onAddCameraMove: () => void` - add-at-playhead callbacks passed straight through to `EffectPills`; this panel doesn't know *how* each element gets added, only that the pill was clicked.
+- `onAddText: (kind: TextKind) => void` - the same, for the four text pills. It is the one that takes an argument, because a text item is seeded from its kind.
 
 ### Behavior
 

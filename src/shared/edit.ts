@@ -75,6 +75,7 @@ export function resolveTrim(trim: Trim, durMs: number): { inMs: number; outMs: n
 
 export type EffectKind = "spotlight" | "blur" | "pixelate" | "highlight";
 export const MASK_KINDS = ["blur", "pixelate", "highlight"] as const;
+export type MaskKind = (typeof MASK_KINDS)[number];
 export const isMask = (e: EffectRegion): boolean => e.kind !== "spotlight";
 export interface EffectRegion {
   id: string;

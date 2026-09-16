@@ -1,5 +1,5 @@
 import { memo, useRef, useState } from "react";
-import type { EditDoc, EditOp } from "../../shared/edit";
+import type { EditDoc, EditOp, TextKind } from "../../shared/edit";
 import type { LayoutPresets } from "../../shared/ipc";
 import { useTimelineLanes } from "./useTimelineLanes";
 import { Filmstrip } from "./lanes/Filmstrip";
@@ -92,6 +92,15 @@ export const Timeline = memo(function Timeline({
             void onApply({ op: "add_layout_seg", at_ms: dropMs, dur_ms: 2000, layout: "camera" });
           } else if (type === "cammove") {
             void onApply({ op: "add_camera_move", t_ms: dropMs, x: 0.5, y: 0.5, size: 0.25 });
+          } else if (type === "blur" || type === "pixelate" || type === "highlight") {
+            void onApply({ op: "add_effect", kind: type, start_ms: dropMs, end_ms: dropMs + 3000 });
+          } else if (type.startsWith("text:")) {
+            void onApply({
+              op: "add_text",
+              at_ms: dropMs,
+              dur_ms: 3000,
+              kind: type.slice(5) as TextKind,
+            });
           }
         }}
         onPointerDown={(e) => {

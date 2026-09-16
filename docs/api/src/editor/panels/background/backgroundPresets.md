@@ -40,3 +40,25 @@ export const ACCENTS: NamedColor[]
 ```
 
 Five UI accent colours (`settings.ui.accent`). Unrelated to the background itself; they share this file because they share the swatch component and the panel. Since 2026-09-15 the swatches are drawn by `shell/settings/InterfaceSection.tsx`, not by this panel.
+
+## rgb
+
+```ts
+export const rgb = (c: [number, number, number]) => `rgb(${c[0]}, ${c[1]}, ${c[2]})`
+```
+
+An RGB triple as a CSS colour string. Used both to paint a swatch and, because the result is a canonical string, to compare the current background against a preset without a triple-wise equality helper: `rgb(bg.solid) === rgb(c)` is the panel's selection test.
+
+It moved here out of `BackgroundPanel.tsx` when the Color section landed, because that file was at 197 of its 200-line budget and this is data plumbing rather than UI. `COLOR_ITEMS` came with it, since it is the only other caller.
+
+## COLOR_ITEMS
+
+```ts
+export const COLOR_ITEMS: SwatchItem<[number, number, number]>[]
+```
+
+`COLOR_PRESETS` in the shape the `Swatches` control takes: the CSS string as both the React key and the painted colour, the raw triple as the value handed back on select, and the preset's display name as the aria-label. Built once at module load rather than per render, because the table is static.
+
+### Used by
+
+- `src/editor/panels/background/BackgroundPanel.tsx` - the Color tab's preset swatches.

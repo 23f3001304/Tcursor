@@ -1,4 +1,5 @@
 import type { BackgroundSettings } from "../../../hud/settings/settings";
+import type { SwatchItem } from "../../controls/Controls";
 
 export const DEFAULT_BG: BackgroundSettings = {
   kind: "mesh",
@@ -39,3 +40,12 @@ export const ACCENTS: NamedColor[] = [
   { rgb: [34, 197, 94], name: "Green" },
   { rgb: [245, 158, 11], name: "Orange" },
 ];
+
+export const rgb = (c: [number, number, number]) => `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
+
+export const COLOR_ITEMS: SwatchItem<[number, number, number]>[] = COLOR_PRESETS.map((p) => ({
+  key: rgb(p.rgb),
+  css: rgb(p.rgb),
+  value: p.rgb,
+  ariaLabel: p.name,
+}));

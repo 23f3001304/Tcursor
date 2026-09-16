@@ -1,5 +1,5 @@
 import type { Dispatch, RefObject, SetStateAction } from "react";
-import type { EditDoc, EditOp } from "../shared/edit";
+import type { EditDoc, EditOp, MaskKind, TextKind } from "../shared/edit";
 import type { AiRun } from "../shared/aiRun";
 import type { CamPose } from "./stage/camera/cameraMoves";
 import type { Tab } from "./shell/PanelTabs";
@@ -28,7 +28,9 @@ export interface EditorPanelsProps {
   camDraftRef: RefObject<CamPose | null>;
   addZoom: () => void;
   addSpotlight: () => void;
+  addMask: (kind: MaskKind) => void;
   addCameraMove: () => void;
+  addText: (kind: TextKind) => void;
   osCursorInVideo: boolean;
   hasCursorLayer: boolean;
   hasWebcam: boolean;

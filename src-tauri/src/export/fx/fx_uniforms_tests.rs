@@ -37,8 +37,7 @@ fn state() -> FxState {
             cam_radius: 0.0,
             dim_camera: true,
         }),
-        video: None,
-        lens: None,
+        ..Default::default()
     }
 }
 #[test]
@@ -82,13 +81,7 @@ fn neon_hue_shift_is_pinned_at_30_degrees() {
 #[test]
 fn no_spot_sets_inactive() {
     let st = FxState {
-        style: ClickFxStyle::None,
-        color: [0, 0, 0],
-        intensity: 1.0,
-        hits: vec![],
-        spot: None,
-        video: None,
-        lens: None,
+        ..Default::default()
     };
     assert_eq!(build_fx_u(&st, 8, 8).b[3], 0.0);
 }
@@ -99,10 +92,6 @@ fn spot_mode_id_and_tint_pack() {
     assert_eq!(spot_mode_id(Nebula), 4.0);
     assert_eq!(spot_mode_id(Vignette), 5.0);
     let st = crate::export::fx::fx_state::FxState {
-        style: crate::settings::model::ClickFxStyle::None,
-        color: [0, 0, 0],
-        intensity: 1.0,
-        hits: vec![],
         spot: Some(crate::export::fx::fx_state::Spot {
             cx: 1.0,
             cy: 2.0,
@@ -117,8 +106,7 @@ fn spot_mode_id_and_tint_pack() {
             cam_radius: 0.0,
             dim_camera: true,
         }),
-        video: None,
-        lens: None,
+        ..Default::default()
     };
     let u = build_fx_u(&st, 100, 100);
     assert_eq!(u.d[0], 4.0);
@@ -128,10 +116,6 @@ fn spot_mode_id_and_tint_pack() {
 #[test]
 fn dim_camera_false_sets_keep_flag_and_cam_rect() {
     let st = FxState {
-        style: ClickFxStyle::None,
-        color: [0, 0, 0],
-        intensity: 1.0,
-        hits: vec![],
         spot: Some(Spot {
             cx: 1.0,
             cy: 2.0,
@@ -146,8 +130,7 @@ fn dim_camera_false_sets_keep_flag_and_cam_rect() {
             cam_radius: 8.0,
             dim_camera: false,
         }),
-        video: None,
-        lens: None,
+        ..Default::default()
     };
     let u = build_fx_u(&st, 200, 200);
     assert_eq!(u.d[2], 1.0, "dim_camera:false -> keep-camera-lit flag set");
@@ -161,10 +144,6 @@ fn dim_camera_false_sets_keep_flag_and_cam_rect() {
 #[test]
 fn dim_camera_true_clears_keep_flag() {
     let st = FxState {
-        style: ClickFxStyle::None,
-        color: [0, 0, 0],
-        intensity: 1.0,
-        hits: vec![],
         spot: Some(Spot {
             cx: 1.0,
             cy: 2.0,
@@ -179,8 +158,7 @@ fn dim_camera_true_clears_keep_flag() {
             cam_radius: 0.0,
             dim_camera: true,
         }),
-        video: None,
-        lens: None,
+        ..Default::default()
     };
     let u = build_fx_u(&st, 100, 100);
     assert_eq!(
@@ -189,14 +167,88 @@ fn dim_camera_true_clears_keep_flag() {
     );
 }
 #[test]
-fn the_reserved_mask_and_grade_blocks_are_zero_and_trail_the_lens_slots() {
+fn the_mask_block_is_three_vec4_per_mask_and_the_grade_block_still_trails_it() {
     let u = build_fx_u(&state(), 1000, 2000);
-    assert!(u.mask.iter().all(|v| *v == [0.0; 4]));
+    assert!(
+        u.mask.iter().all(|v| *v == [0.0; 4]),
+        "no masks in the state, no slots set"
+    );
     assert!(u.grade.iter().all(|v| *v == [0.0; 4]));
-    assert_eq!(std::mem::size_of::<FxU>(), 16 * (7 + MAX_HITS + 8 + 16 + 6));
+    assert_eq!(MAX_MASKS, 8);
+    assert_eq!(
+        std::mem::size_of::<FxU>(),
+        16 * (7 + MAX_HITS + 8 + 3 * MAX_MASKS + 6)
+    );
     assert_eq!(std::mem::offset_of!(FxU, mask), 16 * (7 + MAX_HITS + 8));
     assert_eq!(
         std::mem::offset_of!(FxU, grade),
-        16 * (7 + MAX_HITS + 8 + 16)
+        16 * (7 + MAX_HITS + 8 + 3 * MAX_MASKS),
+        "resizing the mask block moves the grade block; fx.wgsl must agree"
     );
+}
+
+#[test]
+fn pack_masks_lays_out_three_vec4_per_slot_and_caps_at_eight() {
+    use crate::export::fx::fx_masks::MaskDraw;
+    let d = |k: u32, a: f32| MaskDraw {
+        mn: [10.0, 20.0],
+        mx: [110.0, 220.0],
+        r: 6.0,
+        feather_px: 11.0,
+        amount_px: 21.0,
+        dim: 0.6,
+        kind: k,
+        alpha: a,
+    };
+    let packed = pack_masks(&[d(1, 0.5), d(3, 1.0)]);
+    assert_eq!(packed[0], [10.0, 20.0, 110.0, 220.0]);
+    assert_eq!(packed[1], [6.0, 11.0, 21.0, 1.0]);
+    assert_eq!(packed[2], [0.6, 0.5, 0.0, 0.0]);
+    assert_eq!(packed[4][3], 3.0, "the second slot's kind id sits in b.w");
+    assert_eq!(packed[5][1], 1.0);
+    assert_eq!(
+        packed[6], [0.0; 4],
+        "an unused slot stays zero, which is the empty marker"
+    );
+    let many: Vec<MaskDraw> = (0..12).map(|_| d(2, 1.0)).collect();
+    let packed = pack_masks(&many);
+    assert_eq!(
+        packed[3 * MAX_MASKS - 1][1],
+        1.0,
+        "the eighth slot is filled"
+    );
+    assert_eq!(packed.len(), 3 * MAX_MASKS, "and there is no ninth");
+}
+
+#[test]
+fn pack_grade_lays_out_the_eleven_parameters_and_flags_the_inactive_case() {
+    use crate::export::grade::GradeParams;
+    assert_eq!(
+        pack_grade(None),
+        [[0.0; 4]; 6],
+        "no grade means an all zero block"
+    );
+    assert_eq!(pack_grade(None)[1][2], 0.0, "and the active flag is clear");
+    let p = GradeParams {
+        exposure: 0.25,
+        contrast: 1.12,
+        vignette: 0.28,
+        saturation: 0.92,
+        temp: -0.08,
+        tint: 0.02,
+        lift: [0.012, 0.016, 0.030],
+        gamma: [1.00, 1.00, 1.04],
+        gain: [1.00, 0.99, 0.96],
+    };
+    let g = pack_grade(Some(&p));
+    assert_eq!(
+        g[0],
+        [0.25, 1.12, 0.92, 0.28],
+        "exposure, contrast, saturation, vignette"
+    );
+    assert_eq!(g[1], [-0.08, 0.02, 1.0, 0.0], "temp, tint, active, pad");
+    assert_eq!(g[2], [0.012, 0.016, 0.030, 0.0]);
+    assert_eq!(g[3], [1.00, 1.00, 1.04, 0.0]);
+    assert_eq!(g[4], [1.00, 0.99, 0.96, 0.0]);
+    assert_eq!(g[5], [0.0; 4], "the sixth slot stays spare");
 }

@@ -32,10 +32,10 @@ The end is clamped into the clip; the start is clamped at 0. Pure, so the fallba
 ## TransportTools
 
 ```tsx
-export function TransportTools({ locked, trimmed, onTrimIn, onTrimOut, onResetTrim, onAddZoom, onAutoedit, aiRunning, exporting, timeMs, dur, clicks, range, setRange, onApply, onDetectSilences }): JSX.Element
+export function TransportTools({ locked, trimmed, onTrimIn, onTrimOut, onResetTrim, onAddZoom, onAddText, onAutoedit, aiRunning, exporting, timeMs, dur, clicks, range, setRange, onApply, onDetectSilences }): JSX.Element
 ```
 
-Trim start/end to the playhead (the timeline edge handles do the same), a reset that appears once trimmed (Motion press spring), then a divider and the timeline tools: **Cut** (`IconCut`), **Speed 2x** (`IconPlayerTrackNext`), add a zoom, run the AI director. The wand is disabled while a run or an export is in progress so a double click cannot fire two interleaved reveals, and carries `data-director-anchor="wand"` for the director's fake pointer. `locked` is the transport's own `exporting || dur <= 0` and disables Cut and Speed too - neither is meaningful with no clip, and neither may change the doc mid-export.
+Trim start/end to the playhead (the timeline edge handles do the same), a reset that appears once trimmed (Motion press spring), then a divider and the timeline tools: **Cut** (`IconCut`), **Speed 2x** (`IconPlayerTrackNext`), add a zoom, add a text item (`IconTypography`, `onAddText`, titled with its `(T)` shortcut and placed directly beside the zoom tool because the two are the same gesture - drop an element at the playhead - and Z and T are neighbours in the keymap), run the AI director. The wand is disabled while a run or an export is in progress so a double click cannot fire two interleaved reveals, and carries `data-director-anchor="wand"` for the director's fake pointer. `locked` is the transport's own `exporting || dur <= 0` and disables Cut and Speed too - neither is meaningful with no clip, and neither may change the doc mid-export.
 
 ### Magnetic pull (micro-interaction pass, 2026-09-14)
 

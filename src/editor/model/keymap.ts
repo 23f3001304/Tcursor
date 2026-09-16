@@ -7,7 +7,7 @@ export interface KeyLike {
   shiftKey?: boolean;
 }
 
-export type KeyAction = "delete" | "zoom" | "spotlight" | "play" | "overlay" | "deselect" | null;
+export type KeyAction = "delete" | "zoom" | "spotlight" | "text" | "play" | "overlay" | "deselect" | null;
 
 export interface TargetLike {
   tagName: string;
@@ -43,6 +43,7 @@ export function keyAction(e: KeyLike, hasSel: boolean): KeyAction {
   const k = e.key.toLowerCase();
   if (k === "z") return e.repeat ? null : "zoom";
   if (k === "s") return e.repeat ? null : "spotlight";
+  if (k === "t") return e.repeat ? null : "text";
   if (k === "delete" || k === "backspace") return hasSel ? "delete" : null;
   if (k === "escape") return hasSel ? "deselect" : null;
   if (k === " ") return "play";

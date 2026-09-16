@@ -65,6 +65,11 @@
   --e-primary: #ef4444; --e-primaryh: #dc2626;
   --e-zoom: #7c7ce6; --e-fx: #d99a2b; --e-layout: #2f9e8f; --e-cam: #e05d9e; --e-ai: #7c6cf0; --e-ok: #22c55e;
   --e-speed: #3f8fd6;   /* the Time lane's speed pills - the one lane accent the palette was missing */
+  /* The Text lane. A new hue rather than a reuse: text sits between FX (amber) and Captions
+     (--e-wave blue) in the lane stack and had to be legible against both, and every other accent
+     already names a lane. Orchid is the widest gap left on the wheel - 26 degrees off --e-ai's
+     violet and 57 off --e-cam's pink - and it reads as authored rather than as status. */
+  --e-text: #a970d8;
   /* The camera accent one step brighter, for `.e-camdrag`'s hover/drag border - the same
      +10/+37/+24 step off --e-cam in either theme, so the hover reads as one notch hotter rather
      than as a different pink. */
@@ -145,6 +150,7 @@
   --e-primary: #dc2626; --e-primaryh: #b91c1c;
   --e-zoom: #4b4bc8; --e-fx: #945e00; --e-layout: #12766a; --e-cam: #b83280; --e-ai: #5b4cc4; --e-ok: #1a7f3c;
   --e-speed: #2069a8;
+  --e-text: #853caf;
   --e-cam-hi: #c25798;
   --e-danger: #c9282e; --e-dangerh: #b02026;
   --e-err-fg: #b42318;
@@ -185,6 +191,7 @@
     --e-primary: #dc2626; --e-primaryh: #b91c1c;
     --e-zoom: #4b4bc8; --e-fx: #945e00; --e-layout: #12766a; --e-cam: #b83280; --e-ai: #5b4cc4; --e-ok: #1a7f3c;
     --e-speed: #2069a8;
+    --e-text: #853caf;
     --e-cam-hi: #c25798;
     --e-danger: #c9282e; --e-dangerh: #b02026;
     --e-err-fg: #b42318;

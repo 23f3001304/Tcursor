@@ -1,7 +1,7 @@
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import type { TimeMap } from "../../shared/math/remap";
 import type { Range } from "../timeline/useRangeSelect";
-import type { Aspect, EditDoc, EditOp, LayoutSeg } from "../../shared/edit";
+import type { Aspect, EditDoc, EditOp, LayoutSeg, MaskKind, TextKind } from "../../shared/edit";
 import type {
   CamSample,
   ClickSample,
@@ -83,7 +83,9 @@ export interface SlotProps {
   retryMedia: () => void;
   addZoom: () => void;
   addSpotlight: () => void;
+  addMask: (kind: MaskKind) => void;
   addCameraMove: () => void;
+  addText: (kind: TextKind) => void;
   onRun: () => void;
   onAutoModel: (v: string) => void;
   aiError: string | null;

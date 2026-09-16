@@ -51,6 +51,7 @@ function Harness() {
     applyOp,
     addZoom: async () => {},
     addSpotlight: async () => {},
+    addText: async () => {},
     onOverlay: () => {},
     modalOpen: false,
     shortcutsOpen: false,

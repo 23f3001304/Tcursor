@@ -15,6 +15,21 @@ Maximum simultaneous click effects packed into the shader uniform. Clicks beyond
 - `src-tauri/src/export/fx/fx_uniforms.rs` - `build_fx_u` uses `.take(MAX_HITS)` when iterating hits.
 - `src-tauri/src/export/fx/fx_gpu.rs` - `FxU` embeds `[[f32; 4]; MAX_HITS]`, so its size in bytes determines the uniform buffer allocation.
 
+## MAX_MASKS
+
+```rust
+pub const MAX_MASKS: usize = 8;
+```
+
+How many masks one frame can carry on the GPU. The `mask` block is `3 * MAX_MASKS` vec4, and `fx_mask.wgsl`'s `mask_fx` loops over exactly this many slots, so the two must match: the WGSL side spells it as the literal `8` in its loop bound and `24` in the `fx.wgsl` struct, and `the_mask_block_is_three_vec4_per_mask_and_the_grade_block_still_trails_it` pins this constant to 8 so a change here fails the test rather than reading past the array on one side only.
+
+*What happens to a ninth mask:* `fx_state::render` splits the list, keeps the first eight for the uniform and paints the rest through `maskdraw::draw_masks` on the CPU before the renderer runs. So the cap degrades rather than dropping anything, and the spilled masks sit UNDER the kept ones.
+
+### Used by
+
+- `src-tauri/src/export/fx/fx_uniforms.rs` - `pack_masks` uses `.take(MAX_MASKS)`.
+- `src-tauri/src/export/fx/fx_state.rs` - `render` computes the spill against it.
+
 ## FxU
 
 ```rust
@@ -32,8 +47,8 @@ pub struct FxU {
     pub e: [f32; 4],                // video_mode_id, alpha, t, _pad
     pub cam: [f32; 4],              // camera-exclusion rect (px): min_x, min_y, max_x, max_y
     // ... then the six glass-cursor slots (see `FxU::lens_a`), and last:
-    pub mask: [[f32; 4]; 16],       // reserved, zero today (see `FxU::mask`)
-    pub grade: [[f32; 4]; 6],       // reserved, zero today (see `FxU::mask`)
+    pub mask: [[f32; 4]; 3 * MAX_MASKS], // three vec4 per mask, eight masks (see `FxU::mask`)
+    pub grade: [[f32; 4]; 6],       // the colour grade's eleven parameters (see `FxU::grade`)
 }
 ```
 
@@ -51,7 +66,8 @@ The shader uniform block. All fields are `[f32; 4]` (vec4) for std140 alignment.
 - `hits` - *up to `MAX_HITS` click hits, each `[x, y, progress, 0.0]` in output pixels.*
 - `e` - *`[video_mode_id, alpha, time_s, _pad]`: video FX mode (0..3), fade alpha, and elapsed time; all zero when no video FX is active.*
 - `cam` - *`[min_x, min_y, max_x, max_y]`: the active camera panel's rect in output pixels (`Spot::cam_rect`, itself from `scene.camera.rect`). The shader's `rrect_cov` helper tests pixels against this rect + `d.w`'s radius to build the un-dim mask; zero when there is no active spot.*
-- `mask`, `grade` - *reserved blocks at the tail of the struct, all zero until the parity features land. See `FxU::mask`.*
+- `mask` - *eight mask slots of three vec4 each, filled by `pack_masks`. See `FxU::mask`.*
+- `grade` - *the resolved colour grade, six vec4 written by `pack_grade` and read by `fx_grade.wgsl`. All zero, with the active flag clear, when the project has no look. See `FxU::grade`.*
 
 ### Used by
 
@@ -98,13 +114,13 @@ See `FxU::lens_a`.
 ### FxU::mask
 
 ```rust
-pub mask: [[f32; 4]; 16],  // reserved for the masks: two vec4 per mask, eight masks
-pub grade: [[f32; 4]; 6],  // reserved for the colour grade parameters
+pub mask: [[f32; 4]; 3 * MAX_MASKS],  // three vec4 per mask, eight masks
+pub grade: [[f32; 4]; 6],             // reserved for the colour grade parameters
 ```
 
-Two reserved blocks at the END of the struct, after the lens slots, written as `[[0.0; 4]; N]` by `build_fx_u` and read by nothing. They buy the parity features room to land one at a time: the mask agent fills `mask` (`[x, y, w, h]` in output pixels, then `[kind, strength_px, roundness_px, feather_px]`, per mask) and the grade agent fills `grade`, each through its own packing function, so neither has to edit this struct or re-check its layout against the shader. Until then every slot is zero and the shader ignores them, which is why reserving them changes no pixel.
+Two blocks at the END of the struct, after the lens slots. `mask` is live: `build_fx_u` fills it through `pack_masks` and `fx_mask.wgsl` reads it. `grade` is live too (Batch 2b: see `FxU::grade`), filled through `pack_grade` and read by `fx_grade.wgsl`. They bought the parity features room to land one at a time, each through its own packing function, so neither had to edit this struct's shape or re-check its layout against the shader.
 
-`the_reserved_mask_and_grade_blocks_are_zero_and_trail_the_lens_slots` pins their OFFSETS, not just the total size: `offset_of!(FxU, mask)` is `16 * (7 + MAX_HITS + 8)` and `offset_of!(FxU, grade)` is `16 * (7 + MAX_HITS + 8 + 16)`, so inserting or removing a field ANYWHERE ahead of them fails the test instead of silently sliding what each agent's packing function writes. Size alone cannot see a field swapped for another of the same width.
+`the_mask_block_is_three_vec4_per_mask_and_the_grade_block_still_trails_it` pins their OFFSETS, not just the total size: `offset_of!(FxU, mask)` is `16 * (7 + MAX_HITS + 8)` and `offset_of!(FxU, grade)` is `16 * (7 + MAX_HITS + 8 + 3 * MAX_MASKS)`, so inserting or removing a field ANYWHERE ahead of them fails the test instead of silently sliding what each packing function writes. Size alone cannot see a field swapped for another of the same width. **Resizing `mask` moved `grade` 128 bytes later**, and the `fx.wgsl` struct was widened from `array<vec4<f32>, 16>` to `array<vec4<f32>, 24>` in the same commit for exactly that reason.
 
 *Why reserve rather than add later:* the uniform is two declarations that must agree byte for byte - this one and `struct FxU` in `fx.wgsl` - and the only thing checked across that seam is the bound buffer's SIZE. The FX bind group declares `min_binding_size: None` (`fx_gpu_pipeline.rs`), so nothing validates field ORDER: swap two `vec4`s on one side only and every GPU test still passes while the shader reads the wrong numbers. **Batch 2a and 2b must therefore pin their own packing offsets with tests** - a slot-by-slot assertion on what `build_fx_u` writes, next to these two - because no GPU test will catch a disagreement for them. Growing the tail once, with both sides moved together and the GPU tests green, costs nothing (the struct is 848 bytes against a 64 KiB uniform limit, and `fx_gpu.rs` sizes the buffer from `bytemuck::bytes_of(&u)`, so it follows the struct on its own); growing it twice more, concurrently, from two agents editing the same two files, is where the layouts drift apart.
 
@@ -112,7 +128,26 @@ WGSL's `array<vec4<f32>, N>` and `#[repr(C)]`'s `[[f32; 4]; N]` agree - 16-byte 
 
 ### FxU::grade
 
-See `FxU::mask`.
+```rust
+pub grade: [[f32; 4]; 6],
+```
+
+The colour grade's eleven parameters, written by `pack_grade` and read by `grade_fx` in `fx_grade.wgsl`. Slot by slot:
+
+| slot | contents |
+|---|---|
+| `grade[0]` | `exposure`, `contrast`, `saturation`, `vignette` |
+| `grade[1]` | `temp`, `tint`, `active` (0 or 1), pad |
+| `grade[2]` | `lift.rgb`, pad |
+| `grade[3]` | `gamma.rgb`, pad |
+| `grade[4]` | `gain.rgb`, pad |
+| `grade[5]` | spare, always zero |
+
+`grade[0]` is deliberately not in the struct's field order: it pairs the four numbers the shader reads as one `vec4` in its first two lines, which keeps the hot branch to one load. `active` is the flag `grade_fx` branches on, so an ungraded project costs exactly one uniform compare per fragment and no arithmetic.
+
+See `FxU::mask` for why this block sits at the tail and what it costs.
+
+*The layout is pinned by index, not by type.* The FX bind group declares `min_binding_size: None`, so only the buffer's SIZE crosses the seam: swap two slots on one side and every GPU test still passes while the shader reads the wrong numbers. `pack_grade_lays_out_the_eleven_parameters_and_flags_the_inactive_case` asserts each of the six slots by value, and `fx_grade.wgsl` is edited in the same commit as `pack_grade`, which together are the only guard there is.
 
 ## style_id
 
@@ -166,6 +201,30 @@ Maps a `SpotlightMode` variant to the shader id stored in `FxU.d[0]`.
 
 `f32` - `Classic=0.0`, `Blur=1.0`, `Halo=2.0`, `Breathing=3.0`, `Nebula=4.0`, `Vignette=5.0`.
 
+## pack_masks
+
+```rust
+pub fn pack_masks(masks: &[MaskDraw]) -> [[f32; 4]; 3 * MAX_MASKS]
+```
+
+Lays the first `MAX_MASKS` masks into the uniform's `mask` block, three vec4 per slot. Slot `i` occupies:
+
+| Index | Contents |
+|---|---|
+| `mask[3i]` | `[min_x, min_y, max_x, max_y]` - the projected rect in output pixels |
+| `mask[3i + 1]` | `[radius_px, feather_px, amount_px, kind_id]` - the shape and the strength |
+| `mask[3i + 2]` | `[dim, alpha, 0, 0]` - the highlight darkness and this region's fade |
+
+**A slot whose `kind_id` is 0 is empty**, which is why there is no count field beside the block. A count is a second number that has to stay in step with the array, and `mask_fx` would have to read it before every slot anyway; a per-slot marker cannot go stale. Unused slots are left as zeros, so `kind_id` there is 0 for free (`pack_masks_lays_out_three_vec4_per_slot_and_caps_at_eight` pins that).
+
+More than `MAX_MASKS` masks are not an error here: the extra ones are simply not packed, because `fx_state::render` has already split them off and painted them on the CPU.
+
+**Why the layout is pinned by tests and by nothing else.** The FX bind group declares `min_binding_size: None` (`fx_gpu_pipeline.rs`), so the only thing that crosses the Rust-to-WGSL seam is the buffer's SIZE. Swap two vec4s on one side only, or reorder the three fields inside a slot, and every GPU test still passes while `mask_fx` reads the radius as a coordinate. The `offset_of!` assertions on `FxU` and the index-by-index assertions on this function's output are the whole guard, which is why `fx_mask.wgsl` is edited in the same commit as this file.
+
+### Used by
+
+- `src-tauri/src/export/fx/fx_uniforms.rs` - `build_fx_u`, as the `mask:` line of its returned literal.
+
 ## build_fx_u
 
 ```rust
@@ -204,6 +263,27 @@ Packs a complete `FxState` into an `FxU` ready for GPU upload.
 - `dim_camera_false_sets_keep_flag_and_cam_rect` - `Spot::dim_camera = false` -> `d[2] = 1.0`, `d[3]` equals `cam_radius`, `cam` equals `cam_rect` verbatim.
 - `dim_camera_true_clears_keep_flag` - `Spot::dim_camera = true` (today's default) -> `d[2] = 0.0`.
 - `the_reserved_mask_and_grade_blocks_are_zero_and_trail_the_lens_slots` - every reserved slot comes back zero, `size_of::<FxU>()` is `16 * (7 + MAX_HITS + 8 + 16 + 6)` bytes, and `offset_of!` puts `mask` at `16 * (7 + MAX_HITS + 8)` and `grade` 16 vec4 after it - the arithmetic pins the two blocks to the tail by position, so a field added, removed or reordered ahead of them (which would silently shift what the shader reads) fails the test rather than the pixels.
+
+## pack_grade
+
+```rust
+pub fn pack_grade(g: Option<&crate::export::grade::GradeParams>) -> [[f32; 4]; 6]
+```
+
+Packs a resolved colour grade into `FxU.grade`'s six vec4. `None` gives `[[0.0; 4]; 6]`, which leaves the active flag at `grade[1][2]` clear so `grade_fx` returns the colour untouched after a single compare. The layout table is in `FxU::grade`.
+
+`build_fx_u` calls it as `pack_grade(state.grade.as_ref())`, so an ungraded project writes zeros exactly as it did before the grade existed. There is no separate "grade enabled" flag anywhere in the pipeline: `export::grade::params_of` returns `None` for the identity, `FxState.grade` carries that `None` through, and the zero block is the end of the chain.
+
+**`min_binding_size: None`.** The FX bind group does not declare a binding size (`fx_gpu_pipeline.rs`), so wgpu validates only the buffer's total SIZE against the shader, never its field ORDER. A slot written here and read at a different index in `fx_grade.wgsl` produces wrong pixels with every GPU test still green. The guards are the index-by-index assertion in `pack_grade_lays_out_the_eleven_parameters_and_flags_the_inactive_case` and the rule that this function and the shader are edited in one commit.
+
+### Used by
+
+- `src-tauri/src/export/fx/fx_uniforms.rs` (`build_fx_u`) - fills `FxU.grade`
+- `src-tauri/src/export/fx/fx_grade.wgsl` (`grade_fx`) - the consumer, slot for slot
+
+### Behaviors
+
+- `pack_grade_lays_out_the_eleven_parameters_and_flags_the_inactive_case` - `None` gives six zero vec4 with the active flag clear; a filled `GradeParams` lands in the exact six slots the table names, with the spare slot still zero.
 
 ## NEON_HUE_SHIFT
 

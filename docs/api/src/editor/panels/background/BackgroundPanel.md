@@ -15,7 +15,11 @@ export function BackgroundPanel({ folder, doc, onSaveSettings, onClose }: {
 
 ### Behavior
 
-**Flow.** Five groups: **Background Type** and the chosen kind's own choices (what the background IS), then **Look** (Background Blur, Dim), then **Frame** (Corner Radius, Padding), then **Accent Colors** last. Every control and every name is unchanged; Accent Colors moved from the middle of the panel to the end because it is the editor's own accent and not part of the background at all, and the four unlabelled sliders that used to trail off the bottom now sit under the two headings that say what they do.
+**Flow.** **Background Type** and the chosen kind's own choices (what the background IS), then the `Disclosure` holding **Look** (Background Blur, Dim) and **Frame** (Corner Radius, Padding), and last, OUTSIDE the disclosure, **Color** (`GradeSection`).
+
+**The panel became the look panel** when Batch 2b's colour grade landed (spec 3.6). Its lede is now "What sits behind the screen, its frame, and the look of the whole picture.", `handleReset` writes `grade: NO_GRADE` alongside the background and the frame, and `GradeSection` renders as the LAST child of the panel, after the closing `</Disclosure>` rather than inside it, because a grade is a CHOICE and the disclosure holds tuning. The section is handed `doc.settings.grade` and calls back with a whole `GradeSettings`, so one pick is one `onSaveSettings` and therefore one undo step.
+
+**Earlier flow, for the record.** Five groups, ending in **Accent Colors**. Every control and every name is unchanged; Accent Colors moved from the middle of the panel to the end because it is the editor's own accent and not part of the background at all, and the four unlabelled sliders that used to trail off the bottom now sit under the two headings that say what they do.
 
 ### Height (arrangements pass, 2026-09-14)
 

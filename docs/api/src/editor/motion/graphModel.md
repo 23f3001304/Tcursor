@@ -9,10 +9,12 @@ The picture behind `MotionGraph`: a region's whole motion - the in ramp, the hol
 ## Lane
 
 ```ts
-export type Lane = "zoom" | "layout" | "cam"
+export type Lane = "zoom" | "layout" | "cam" | "text"
 ```
 
-Which of the three regions the graph is drawing. It picks the accent (`--e-zoom` / `--e-layout` / `--e-cam`, the timeline lanes' own tokens), the axis labels (`x` for a scale, `%` for a progress) and the rest value.
+Which of the four regions the graph is drawing. It picks the accent (`--e-zoom` / `--e-layout` / `--e-cam` / `--e-text`, the timeline lanes' own tokens), the axis labels (`x` for a scale, `%` for a progress) and the rest value.
+
+`"text"` (Batch 2c) rests at 0 and peaks at 1 like `layout` and `cam`, because a text item's graph IS its alpha: it comes up from nothing, holds, and goes back to nothing. Only `zoom` rests at 1 (`baseOf`), because a zoom that is not zooming is still showing the picture at 1x.
 
 ## RampSpec
 

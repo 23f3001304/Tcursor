@@ -1,8 +1,6 @@
 use crate::actions::model::{ActionEvent, ActionKind, LayoutId};
+use crate::export::fx::glyph;
 use crate::settings::model::HotkeySettings;
-use ab_glyph::{point, Font, FontRef, Glyph, PxScale, ScaleFont};
-
-pub(crate) const FONT: &[u8] = include_bytes!("../../../../assets/fonts/Inter-SemiBold.ttf");
 
 const CAP_MS: u32 = 1300;
 
@@ -56,46 +54,25 @@ pub fn draw_caption(out: &mut [u8], ow: u32, oh: u32, text: &str, alpha: f32) {
     if text.is_empty() || alpha <= 0.0 {
         return;
     }
-    let font = match FontRef::try_from_slice(FONT) {
-        Ok(f) => f,
-        Err(_) => return,
+    let Some(font) = glyph::font() else {
+        return;
     };
     let px = (oh as f32 * 0.030).max(8.0);
-    let scaled = font.as_scaled(PxScale::from(px));
-    let width: f32 = text
-        .chars()
-        .map(|c| scaled.h_advance(font.glyph_id(c)))
-        .sum();
-    let mut x = (ow as f32 - width) / 2.0;
+    let x = (ow as f32 - glyph::run_width(&font, px, text)) / 2.0;
     let baseline = oh as f32 - oh as f32 * 0.06;
-    for ch in text.chars() {
-        let gid = font.glyph_id(ch);
-        let g: Glyph = gid.with_scale_and_position(px, point(x, baseline));
-        if let Some(og) = font.outline_glyph(g) {
-            let bb = og.px_bounds();
-            og.draw(|gx, gy, cov| {
-                let bx = bb.min.x as i32 + gx as i32;
-                let by = bb.min.y as i32 + gy as i32;
-                put(out, ow, oh, bx + 1, by + 1, [0, 0, 0], cov * alpha * 0.6);
-                put(out, ow, oh, bx, by, [255, 255, 255], cov * alpha);
-            });
-        }
-        x += scaled.h_advance(gid);
-    }
-}
-
-pub(crate) fn put(out: &mut [u8], ow: u32, oh: u32, x: i32, y: i32, c: [u8; 3], a: f32) {
-    if x < 0 || y < 0 || x as u32 >= ow || y as u32 >= oh {
-        return;
-    }
-    let a = a.clamp(0.0, 1.0);
-    if a <= 0.0 {
-        return;
-    }
-    let i = ((y as u32 * ow + x as u32) * 4) as usize;
-    out[i] = (c[2] as f32 * a + out[i] as f32 * (1.0 - a)).round() as u8;
-    out[i + 1] = (c[1] as f32 * a + out[i + 1] as f32 * (1.0 - a)).round() as u8;
-    out[i + 2] = (c[0] as f32 * a + out[i + 2] as f32 * (1.0 - a)).round() as u8;
+    glyph::draw_run(
+        out,
+        ow,
+        oh,
+        &font,
+        px,
+        x,
+        baseline,
+        text,
+        [255, 255, 255],
+        alpha,
+        true,
+    );
 }
 
 #[cfg(test)]

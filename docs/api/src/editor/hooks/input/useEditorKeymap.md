@@ -16,6 +16,7 @@ export function useEditorKeymap(opts: {
   applyOp: (op: EditOp) => Promise<EditDoc | null>;
   addZoom: () => Promise<void>;
   addSpotlight: () => Promise<void>;
+  addText: (kind: TextKind) => Promise<void>;
   onOverlay: () => void;
   modalOpen: boolean;
   shortcutsOpen: boolean;
@@ -25,9 +26,10 @@ export function useEditorKeymap(opts: {
 ### Inputs
 
 - `sel: string | null` - the currently selected zoom/effect/layout/camera-move id, or `null`.
-- `doc: EditDoc | null` - the edit doc; used to figure out WHICH region list `sel` belongs to before dispatching the matching `remove_*` op.
+- `doc: EditDoc | null` - the edit doc; used to figure out WHICH region list `sel` belongs to before dispatching the matching `remove_*` op. The `delete` arm walks zooms, effects, layout segments, camera moves, cuts, speed spans and texts in that order, and `doc.texts` is read with `?.` because a document written before Batch 1 has no such list.
 - `timeMs: number` - unused inside the handler itself, but in the effect's dependency array (kept alongside `sel`/`doc`/`modalOpen`/`shortcutsOpen`) so the closures captured by `window.addEventListener` stay reasonably fresh - matches the hook's pre-existing minimal-deps convention (`addZoom`/`addSpotlight`/`applyOp`/`setSel`/`setPlaying`/`onOverlay` are NOT deps; the listener re-subscribes only on `sel`/`doc`/`timeMs`/`modalOpen`/`shortcutsOpen`/`escOwned` changes).
 - `setSel`, `setPlaying`, `applyOp`, `addZoom`, `addSpotlight` - as before.
+- `addText: (kind: TextKind) => Promise<void>` - `useTimelineActions`' own `addText`. The `"text"` action calls it with `"title"`: one key cannot choose between four kinds, so the shortcut takes the default and the Add pills take the choice.
 - `onOverlay: () => void` - called (with `e.preventDefault()`) when `resolveKeyAction` returns `"overlay"`; `Editor.tsx` wires this to toggle `showShortcuts` for `ShortcutsOverlay`.
 - `modalOpen: boolean` (bug-sweep-2 Task 8, M4; extended in review round 1) - `Editor.tsx`'s `showExportDialog || showShortcuts || showSettings || moveOffOpen || running`. Every shortcut is inert while this is true, so e.g. `z` typed while the Export dialog is open (or the AI director is running) can no longer silently add a zoom (and an undo step) behind it.
 - `shortcutsOpen: boolean` (review round 1 minor) - `Editor.tsx`'s `showShortcuts`, passed SEPARATELY from `modalOpen` (even though it's also one of the terms that makes `modalOpen` true) so `resolveKeyAction` can still let `?` through to CLOSE the overlay while it, specifically, is the open modal - see `keymap.md`'s `resolveKeyAction`.

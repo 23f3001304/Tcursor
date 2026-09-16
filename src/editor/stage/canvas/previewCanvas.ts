@@ -1,6 +1,4 @@
-import type { PreviewLayout, ClickSample } from "../../../shared/ipc";
-import { drawCursorSprite, type DrawCursor } from "../cursor/cursorPreview";
-import { panelFactor, panelClipRect, contentScale } from "../cursor/cursorPanel";
+import type { PreviewLayout } from "../../../shared/ipc";
 import { FULL_SRC } from "./sourceSpans";
 import { drawBackground, type StageBgState } from "./stageBg";
 import { coverDraw, paintPanel, roundRect } from "./previewDraw";
@@ -15,6 +13,14 @@ export interface DrawCam {
   cury: number;
 }
 
+export interface PreviewGeom {
+  panel: [number, number, number, number];
+  crop: [number, number, number, number];
+  src: [number, number, number, number];
+  screenAlpha: number;
+  hasVideo: boolean;
+}
+
 export function drawPreview(
   ctx: CanvasRenderingContext2D,
   w: number,
@@ -24,18 +30,15 @@ export function drawPreview(
   cam: DrawCam,
   layout: PreviewLayout | null,
   bg: StageBgState | null,
-  clicks: ClickSample[],
   now: number,
-  cursor: DrawCursor | null,
   offscreen: HTMLCanvasElement,
   layer: HTMLCanvasElement,
-  insetW: number = 1,
   bgTimeMs?: number,
-) {
+): PreviewGeom | null {
   if (offscreen.width !== w) offscreen.width = w;
   if (offscreen.height !== h) offscreen.height = h;
   const octx = offscreen.getContext("2d");
-  if (!octx) return;
+  if (!octx) return null;
 
   drawBackground(octx, w, h, bg, bgTimeMs ?? now);
 
@@ -85,25 +88,6 @@ export function drawPreview(
   const cx0 = Math.min(Math.max(camPxX - cw / 2, 0), Math.max(0, w - cw));
   const cy0 = Math.min(Math.max(camPxY - ch / 2, 0), Math.max(0, h - ch));
   ctx.drawImage(offscreen, cx0, cy0, cw, ch, 0, 0, w, h);
-
-  if (cursor && vw > 0 && vh > 0 && screenAlpha >= 0.5) {
-    const curPxX = dx + cam.curx * dw,
-      curPxY = dy + cam.cury * dh;
-    const cpos: [number, number] = [((curPxX - cx0) * w) / cw, ((curPxY - cy0) * h) / ch];
-    const panel = panelFactor(dw / w, insetW);
-    const clip = panelClipRect({ x: dx, y: dy, w: dw, h: dh }, { cx0, cy0, cw, ch }, w, h);
-    drawCursorSprite(
-      ctx,
-      cpos,
-      now,
-      cursor,
-      clicks,
-      h,
-      panel,
-      clip,
-      contentScale(panel, insetW * w, (cursor.captured?.srcW ?? 0) * src[2]),
-    );
-  }
 
   const camAlpha = layout?.camAlpha ?? 1;
   if (webcam && webcam.videoWidth > 0 && webcam.videoHeight > 0 && camAlpha > 0.004) {
@@ -173,4 +157,11 @@ export function drawPreview(
       }
     });
   }
+  return {
+    panel: [dx, dy, dw, dh],
+    crop: [cx0, cy0, cw, ch],
+    src,
+    screenAlpha,
+    hasVideo: vw > 0 && vh > 0,
+  };
 }

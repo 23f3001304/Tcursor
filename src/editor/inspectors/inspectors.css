@@ -189,3 +189,40 @@
   cursor: pointer; transition: background-color .14s ease, color .14s ease; }
 .e-capword:hover { color: var(--e-fg);
   background: color-mix(in srgb, var(--insp-accent, var(--e-fg)) 18%, var(--e-raised)); }
+
+/* Mask inspector: the Region row carries four fields where .e-field2 is built for two,
+   so it wraps to a 2x2 grid instead of squeezing each NumberField to a quarter width. */
+.e-maskregion { flex-wrap: wrap; }
+.e-maskregion .e-field { flex: 1 1 calc(50% - var(--e-sp-2)); }
+
+/* Text item editing. The content field is the panel's own input plane, like `.e-captext` above:
+   a text item is the other region whose content IS text, and it takes a second line as well. */
+.e-itextarea { width: 100%; box-sizing: border-box; min-height: calc(48px * var(--e-density));
+  padding: calc(8px * var(--e-density)) calc(9px * var(--e-density)); border: none;
+  border-radius: var(--e-r-sm); background: var(--e-raised); color: var(--e-fg); font: inherit;
+  font-size: var(--e-text-body-size); line-height: var(--e-text-hint-lh); box-shadow: var(--e-inset-hi);
+  outline: none; resize: vertical; }
+.e-itextarea:focus-visible { box-shadow: inset 0 0 0 2px var(--e-fg); }
+.e-isubrow { display: flex; align-items: center; gap: 5px; margin-top: var(--e-sp-2); }
+.e-isubinput { flex: 1; min-width: 0; box-sizing: border-box; border: none; border-radius: var(--e-r-sm);
+  padding: calc(6px * var(--e-density)) calc(9px * var(--e-density)); background: var(--e-raised);
+  color: var(--e-fg); font: inherit; font-size: var(--e-text-body-size);
+  box-shadow: var(--e-inset-hi); outline: none; }
+.e-isubinput:focus-visible { box-shadow: inset 0 0 0 2px var(--e-fg); }
+.e-isubclear { flex: none; display: flex; align-items: center; justify-content: center; border: none;
+  width: var(--e-ctl); height: var(--e-ctl); border-radius: var(--e-r-sm); background: var(--e-raised);
+  box-shadow: var(--e-inset-hi); color: var(--e-mut); cursor: pointer;
+  transition: color .14s ease, background-color .14s ease; }
+.e-isubclear:hover:not(:disabled) { color: var(--e-fg); background: var(--e-raised-hi); }
+.e-isubclear:disabled { opacity: .35; cursor: default; }
+/* The nine anchors as a three by three grid of dots, in reading order. It reuses `SegRow` rather
+   than inventing a control, so the keyboard behaviour and the selected tick are the ones every
+   other segmented row in the editor already has; the grid is imposed here, on the row's own flex
+   container, because a nine-way choice about POSITION has to be shaped like the frame it places
+   things in. The dot is the label, so `.e-preseg-t` is empty and collapses. */
+.e-anchorgrid { width: calc(108px * var(--e-density)); margin: var(--e-sp-2) auto; }
+.e-anchorgrid .e-preseg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; }
+.e-anchorgrid .e-preseg-b { aspect-ratio: 1; padding: 0; min-width: 0; }
+.e-anchorgrid .e-preseg-tick { display: none; }
+.e-anchordot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: .55; }
+.e-anchorgrid .e-preseg-b.on .e-anchordot { opacity: 1; width: 7px; height: 7px; }

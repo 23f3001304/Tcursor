@@ -15,14 +15,18 @@ pub(crate) struct EditState {
     pub regions: Vec<ZoomRegion>,
     pub effects: Vec<EffectRegion>,
     pub captions: Vec<Caption>,
+    pub texts: Vec<crate::edit::text::TextItem>,
     pub cam_moves: CameraMoveTrack,
+    pub grade: Option<GradeParams>,
 }
 ```
 
 Everything the renderer derives from `edit.json` that a zoom/spotlight/camera-move edit can change: the settings, the zoom config, the layout track, the zoom regions (raw canvas-space anchors - `step_camera` re-anchors them per frame), the effect regions, the spoken-caption track, and the camera-moves track (Task 4). Pure CPU - no GPU, no video probe, no background decode, no cursor prep - so it rebuilds in ~microseconds.
 
 - `captions: Vec<Caption>` - `doc.captions`, already moved onto the output clock by `remap_doc` along with each caption's own word timings. It sits on `EditState` rather than being read straight off the doc in `composite_at` so that a caption edit refreshes through exactly the path a zoom edit does - `reload_edit`, not a rebuild.
+- `texts: Vec<TextItem>` - `doc.texts`, the animated text items, carried for exactly the reason `captions` is: `remap_doc` has already moved them onto the output clock (so a text item inside a cut is already gone and one under a speed span has already been re-timed), and sitting on `EditState` means a text edit refreshes through `reload_edit` rather than forcing a renderer rebuild. Their LOOK needs no second field: the four styles are a fixed table in `export/fx/text/text_style.rs` and the only document-level input is `settings.ui.accent`, which `settings` already carries.
 - `cam_moves: CameraMoveTrack` - `CameraMoveTrack::from_doc(&doc.camera_moves)`; empty when the doc has no `camera_moves` (the default), which is the signal `FrameRenderer::step_camera` uses to leave the scene's camera panel untouched.
+- `grade: Option<GradeParams>` - `export::grade::params_of(&settings.grade)`, the project's colour grade resolved to its eleven parameters. *Why resolved here and not per frame:* a grade is a doc SETTING and not a region, so it is the same for every frame of the export; resolving it once means the FX pass gets a value to copy rather than a preset table to look up sixty times a second, and `reload_edit` refreshes it for free along with everything else on this struct. `None` for a document that has never picked a look, which is what keeps such an export byte-identical to one from before the grade existed.
 
 ## EditState::load
 

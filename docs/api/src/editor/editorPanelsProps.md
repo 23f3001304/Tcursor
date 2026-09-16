@@ -29,5 +29,7 @@ The full field list is in the source; every field is documented below in the ord
 - `hasCursorLayer` - likewise passed straight through to `CursorPanel` (`cursorLyr !== null`), which uses it to suppress that annotation on a recording that carries a captured cursor layer.
 - `hasWebcam` (panel pass, 2026-09-15) - `hasWebcamSignal(layout)` from `Editor`, passed straight through to `CameraPanel` for its no-webcam empty state; the same flag `ClassicShell` already hands the `Timeline` for the camera lane's hint.
 - `addZoom` / `addSpotlight` / `addCameraMove: () => void` - add-at-playhead callbacks, passed to the Effects panel's quick-add buttons (and `addCameraMove` also to `CameraPanel`).
+- `addMask: (kind: MaskKind) => void` - the same, for the three mask pills. One callback rather than three, discriminated by the kind, because they differ only in what they pass to `add_effect`.
+- `addText: (kind: TextKind) => void` - the same for the four text kinds, passed to the Effects panel as `onAddText`. It carries a kind because `add_text` seeds the whole item from it.
 
 **Gone in M1a:** `sel` / `setSel` / `dur` / `aimMode` / `onAimMode` / `onSeek` / `layoutPresets` / `arrangeOn` / `onArrange`. All nine existed only for the inspector branch and now reach the inspectors through `PropertiesSlot`.

@@ -8,12 +8,6 @@ fn spot_alpha_channel(
     mode: SpotlightMode,
 ) -> Vec<u8> {
     let state = FxState {
-        style: ClickFxStyle::None,
-        color: [0, 0, 0],
-        intensity: 1.0,
-        hits: vec![],
-        video: None,
-        lens: None,
         spot: Some(Spot {
             cx: w as f32 / 2.0,
             cy: h as f32 / 2.0,
@@ -28,6 +22,7 @@ fn spot_alpha_channel(
             cam_radius: 0.0,
             dim_camera: true,
         }),
+        ..Default::default()
     };
     let n = (w * h * 4) as usize;
     let mut on_black = vec![0u8; n];

@@ -153,7 +153,7 @@ fn render_fx_overlay(
         hits,
         spot,
         video,
-        lens: None,
+        ..Default::default()
     };
 
     let n = (ow * oh * 4) as usize;

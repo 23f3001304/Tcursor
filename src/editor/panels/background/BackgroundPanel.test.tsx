@@ -37,11 +37,15 @@ const DOC = {
     },
     appearance: { screen: { pad: 0.03125, screen_radius: 0.016 } },
     ui: { accent: [239, 68, 68] },
+    grade: { preset: "none", exposure: 0, contrast: 1, vignette: 0 },
   },
 } as unknown as EditDoc;
 
 const docWith = (mesh: string): EditDoc =>
   ({ ...DOC, settings: { ...DOC.settings, background: { ...DOC.settings.background, mesh } } }) as EditDoc;
+
+const docGraded = (grade: EditDoc["settings"]["grade"]): EditDoc =>
+  ({ ...DOC, settings: { ...DOC.settings, grade } }) as EditDoc;
 
 let root: Root, container: HTMLDivElement;
 let saved: EditDoc["settings"][] = [];
@@ -146,5 +150,46 @@ describe("BackgroundPanel wallpaper sections", () => {
     });
     expect(container.textContent).toContain("Corner Radius");
     expect(container.textContent).toContain("Background Blur");
+  });
+});
+
+describe("BackgroundPanel colour grade", () => {
+  const look = () => container.querySelector<HTMLButtonElement>('[aria-label="Look"]')!;
+  const options = () => Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="option"]'));
+
+  it("offers the nine looks and writes all four grade fields in one save", async () => {
+    await show();
+    act(() => {
+      look().click();
+    });
+    expect(options().map((o) => o.textContent)).toEqual([
+      "None",
+      "Cinematic",
+      "Noir",
+      "Vintage",
+      "Frost",
+      "Golden",
+      "Midnight",
+      "Vivid",
+      "Dreamy",
+    ]);
+    act(() => {
+      options()[1].click();
+    });
+    expect(saved).toHaveLength(1);
+    expect(saved[0].grade).toEqual({
+      preset: "cinematic",
+      exposure: 0,
+      contrast: 1.12,
+      vignette: 0.28,
+    });
+  });
+
+  it("puts the grade back to none when the panel is reset", async () => {
+    await show(docGraded({ preset: "noir", exposure: 0.05, contrast: 1.3, vignette: 0.4 }));
+    act(() => {
+      container.querySelector<HTMLButtonElement>('[aria-label="Reset to defaults"]')!.click();
+    });
+    expect(saved[0].grade).toEqual({ preset: "none", exposure: 0, contrast: 1, vignette: 0 });
   });
 });

@@ -31,6 +31,7 @@ const mount = (range: Range | null, timeMs: number, clicks: ClickSample[]) =>
         onTrimOut={() => {}}
         onResetTrim={() => {}}
         onAddZoom={() => {}}
+        onAddText={() => {}}
         onAutoedit={() => {}}
         aiRunning={false}
         exporting={false}
@@ -107,6 +108,16 @@ describe("TransportTools", () => {
     click("speed");
     expect(ops).toEqual([{ op: "set_speed", start_ms: 1200, end_ms: 3400, factor: 2 }]);
     expect(ranges).toEqual([null]);
+  });
+});
+
+describe("the text tool", () => {
+  it("is one button beside the zoom tool, and its title names the T shortcut", () => {
+    mount(null, 0, []);
+    const tools = [...container.querySelectorAll<HTMLElement>("button.e-tg")];
+    const text = tools.find((b) => (b.getAttribute("title") ?? "").includes("(T)"));
+    expect(text, "no transport tool carries the T shortcut").toBeTruthy();
+    expect(text!.getAttribute("title")).toContain("callout");
   });
 });
 

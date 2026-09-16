@@ -1,4 +1,4 @@
-import { IconZoomIn, IconBulb } from "@tabler/icons-react";
+import { IconZoomIn, IconBulb, IconBlur, IconGridDots, IconFocus2 } from "@tabler/icons-react";
 import type { BeginDrag, Drag } from "../hooks/input/useRegionDrag";
 import { RegionRows } from "./lanes/RegionRows";
 
@@ -26,12 +26,22 @@ export const zoomLabel = (z: { scale: number }) => (
     {z.scale.toFixed(1)}x
   </>
 );
-export const fxLabel = () => (
-  <>
-    <IconBulb size={12} />
-    Spotlight
-  </>
-);
+const FX_KINDS: Record<string, { Icon: typeof IconBulb; label: string }> = {
+  spotlight: { Icon: IconBulb, label: "Spotlight" },
+  blur: { Icon: IconBlur, label: "Blur" },
+  pixelate: { Icon: IconGridDots, label: "Pixelate" },
+  highlight: { Icon: IconFocus2, label: "Highlight" },
+};
+
+export const fxLabel = (e: { kind: string }) => {
+  const { Icon, label } = FX_KINDS[e.kind] ?? FX_KINDS.spotlight;
+  return (
+    <>
+      <Icon size={12} />
+      {label}
+    </>
+  );
+};
 
 export interface LaneCtx {
   ROW_H: number;

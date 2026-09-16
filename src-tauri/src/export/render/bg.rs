@@ -51,6 +51,8 @@ impl FrameRenderer {
         self.cam_moves = es.cam_moves;
         self.map = es.map;
         self.captions = es.captions;
+        self.grade = es.grade;
+        self.texts = es.texts;
     }
 
     pub fn background(&self) -> &BackgroundSettings {

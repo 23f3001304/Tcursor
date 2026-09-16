@@ -10,9 +10,10 @@ import type {
   CaptionStyle,
   ClickFxSettings,
   CursorSettings,
+  GradeSettings,
   ZoomSettings,
 } from "../../../hud/settings/settings";
-import type { Caption, CameraMove, EffectRegion, LayoutSeg, Zoom } from "../../../shared/edit";
+import type { Caption, CameraMove, EffectRegion, LayoutSeg, TextItem, Zoom } from "../../../shared/edit";
 import type { CamPose } from "../../stage/camera/cameraMoves";
 import type { StageBgState } from "../../stage/canvas/stageBg";
 import type { SpotlightSimState } from "../../stage/fx/spotlightPreview";
@@ -40,7 +41,9 @@ export interface CompositeLoopRefs {
   clicksRef: RefObject<ClickSample[]>;
   effectsRef: RefObject<EffectRegion[]>;
   clickfxRef: RefObject<ClickFxSettings>;
+  gradeRef: RefObject<GradeSettings>;
   captionsRef: RefObject<Caption[]>;
+  textsRef: RefObject<TextItem[]>;
   capStyleRef: RefObject<CaptionStyle>;
   accentRef: RefObject<[number, number, number]>;
   kindsRef: RefObject<CursorKindSample[]>;

@@ -16,6 +16,7 @@ export const Transport = memo(function Transport({
   onPlay,
   onSeek,
   onAddZoom,
+  onAddText,
   onAutoedit,
   aiRunning,
   exporting,
@@ -46,6 +47,7 @@ export const Transport = memo(function Transport({
   onPlay: () => void;
   onSeek: (ms: number) => void;
   onAddZoom: () => void;
+  onAddText: () => void;
   onAutoedit: () => void;
   aiRunning: boolean;
   exporting: boolean;
@@ -78,6 +80,7 @@ export const Transport = memo(function Transport({
         onTrimOut={onTrimOut}
         onResetTrim={onResetTrim}
         onAddZoom={onAddZoom}
+        onAddText={onAddText}
         onAutoedit={onAutoedit}
         aiRunning={aiRunning}
         exporting={exporting}

@@ -256,6 +256,14 @@ export const MASK_KINDS = ["blur", "pixelate", "highlight"] as const;
 
 The three mask `EffectKind`s, in the order the FX-lane "add mask" picker offers them. Mirrors the Rust `EffectKind::is_mask` split as a concrete list rather than a predicate, for UI that needs to enumerate rather than test.
 
+## MaskKind
+
+```ts
+export type MaskKind = (typeof MASK_KINDS)[number];
+```
+
+`"blur" | "pixelate" | "highlight"`, derived FROM the list rather than written out a second time, so adding a fourth mask kind to `MASK_KINDS` widens every signature that takes one without a second edit. The type `addMask(kind)` travels as, from the pill row through `slotProps` and `editorPanelsProps` to `useTimelineActions`.
+
 ## isMask
 
 ```ts

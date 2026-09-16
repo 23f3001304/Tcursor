@@ -6,6 +6,7 @@ import {
   IconCut,
   IconEarOff,
   IconPlayerTrackNext,
+  IconTypography,
   IconWand,
   IconX,
   IconZoomIn,
@@ -40,6 +41,7 @@ export function TransportTools({
   onTrimOut,
   onResetTrim,
   onAddZoom,
+  onAddText,
   onAutoedit,
   aiRunning,
   exporting,
@@ -57,6 +59,7 @@ export function TransportTools({
   onTrimOut: () => void;
   onResetTrim: () => void;
   onAddZoom: () => void;
+  onAddText: () => void;
   onAutoedit: () => void;
   aiRunning: boolean;
   exporting: boolean;
@@ -147,6 +150,14 @@ export function TransportTools({
       </motion.button>
       <motion.button className="e-tg" title="Add a zoom region here (Z)" onClick={onAddZoom} {...TAP_SPRING}>
         <IconZoomIn size={16} />
+      </motion.button>
+      <motion.button
+        className="e-tg"
+        title="Add a title, lower third, stat or callout here (T)"
+        onClick={onAddText}
+        {...TAP_SPRING}
+      >
+        <IconTypography size={16} />
       </motion.button>
       <motion.button
         className="e-tg"

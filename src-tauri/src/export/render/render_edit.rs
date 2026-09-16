@@ -19,7 +19,9 @@ pub(crate) struct EditState {
     pub regions: Vec<ZoomRegion>,
     pub effects: Vec<EffectRegion>,
     pub captions: Vec<Caption>,
+    pub texts: Vec<crate::edit::text::TextItem>,
     pub cam_moves: CameraMoveTrack,
+    pub grade: Option<crate::export::grade::GradeParams>,
 }
 
 impl EditState {
@@ -38,6 +40,7 @@ impl EditState {
         let doc = crate::edit::remap_doc::remap_doc(&raw, &map);
         let settings = doc.settings.clone();
         let cfg = settings.zoom.to_zoom_config();
+        let grade = crate::export::grade::params_of(&settings.grade);
         let acts: Vec<ActionEvent> = crate::edit::seed::actions_on_output_clock(actions, shift)
             .into_iter()
             .map(|a| ActionEvent {
@@ -80,7 +83,9 @@ impl EditState {
             regions,
             effects: doc.effects.clone(),
             captions: doc.captions.clone(),
+            texts: doc.texts.clone(),
             cam_moves,
+            grade,
         }
     }
 }

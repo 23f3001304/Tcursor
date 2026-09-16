@@ -1,7 +1,9 @@
 import { PanelHeader } from "./PanelHeader";
+import type { TextKind } from "../../shared/edit";
 import type { ClickFxSettings, ClickFxStyle } from "../../hud/settings/settings";
 import { Switch, Slider, Picker, Swatches, Disclosure } from "../controls/Controls";
 import { EffectPills } from "./EffectPills";
+import type { MaskKind } from "../../shared/edit";
 import { SpotlightSection } from "./SpotlightSection";
 import { RIPPLE_COLORS, rgb, swatchItems } from "./effectSwatches";
 
@@ -21,16 +23,20 @@ export function EffectsPanel({
   onClose,
   onAddZoom,
   onAddSpotlight,
+  onAddMask,
   onAddLayout,
   onAddCameraMove,
+  onAddText,
 }: {
   settings: ClickFxSettings;
   onChange: (v: ClickFxSettings) => void;
   onClose: () => void;
   onAddZoom: () => void;
   onAddSpotlight: () => void;
+  onAddMask: (kind: MaskKind) => void;
   onAddLayout: () => void;
   onAddCameraMove: () => void;
+  onAddText: (kind: TextKind) => void;
 }) {
   const set = <K extends keyof ClickFxSettings>(k: K, v: ClickFxSettings[K]) => {
     onChange({ ...settings, [k]: v });
@@ -48,8 +54,10 @@ export function EffectsPanel({
       <EffectPills
         onAddZoom={onAddZoom}
         onAddSpotlight={onAddSpotlight}
+        onAddMask={onAddMask}
         onAddLayout={onAddLayout}
         onAddCameraMove={onAddCameraMove}
+        onAddText={onAddText}
       />
 
       <div className="e-grp">

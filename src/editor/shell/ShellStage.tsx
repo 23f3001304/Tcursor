@@ -27,7 +27,9 @@ export function ShellStage({ p }: { p: ShellProps }) {
         cursor={p.doc.settings.cursor}
         effects={p.outDoc.effects}
         clickfx={p.doc.settings.clickfx}
+        grade={p.doc.settings.grade}
         captions={p.outDoc.captions}
+        texts={p.outDoc.texts}
         capStyle={p.doc.settings.captions}
         accent={p.doc.settings.ui.accent}
         audioSrc={p.audioUrl}
@@ -39,6 +41,7 @@ export function ShellStage({ p }: { p: ShellProps }) {
         aimPoint={p.aimPoint}
         aimMode={p.aimMode}
         arrangeSeg={p.arrangeSeg}
+        sel={p.sel}
         outline={p.stageOutline}
         camDraftRef={p.camDraftRef}
         onTime={p.onTime}

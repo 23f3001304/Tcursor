@@ -1,13 +1,6 @@
 use crate::export::fx::fx_state::Spot;
+use crate::export::fx::mask::rrect_cov;
 use crate::settings::model::SpotlightMode;
-
-fn rrect_cov(x: f32, y: f32, mn: [f32; 2], mx: [f32; 2], r: f32) -> f32 {
-    let (cx, cy) = ((mn[0] + mx[0]) * 0.5, (mn[1] + mx[1]) * 0.5);
-    let (hx, hy) = ((mx[0] - mn[0]) * 0.5 - r, (mx[1] - mn[1]) * 0.5 - r);
-    let (qx, qy) = ((x - cx).abs() - hx, (y - cy).abs() - hy);
-    let sd = (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt() + qx.max(qy).min(0.0) - r;
-    (0.5 - sd).clamp(0.0, 1.0)
-}
 
 pub fn draw_spot(out: &mut [u8], ow: u32, oh: u32, s: &Spot, intensity: f32) {
     let dim = s.dim.clamp(0.0, 1.0) * s.alpha.clamp(0.0, 1.0);

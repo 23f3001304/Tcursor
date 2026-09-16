@@ -6,6 +6,7 @@ pub mod cursor;
 pub mod easing;
 pub mod fx;
 pub mod gpu;
+pub mod grade;
 pub mod keys;
 pub mod overlay;
 pub mod pipeline;

@@ -6,9 +6,9 @@ It exists as its own file because of who edits it next. The parity features (mas
 
 The order those calls land in, ruled by the controller (spec 1.3, `docs/superpowers/specs/2026-09-15-editor-parity-features-design.md`), is inside `fx_pass` and in full:
 
-1. **Batch 2a's masks** - blur, pixelate, highlight. First, because a mask hides something in the PICTURE, and everything after it should treat the hidden pixels as if they had always looked that way.
-2. **Batch 2b's grade** - exposure, contrast, vignette. After the masks, so a blurred password takes the same grade as the pixels around it rather than a differently-lit patch; before `fx_state::render`, so the grade covers the picture (background, screen, webcam) and not the overlays whose colour the user picked - a tinted spotlight or a click ring the grade had darkened would no longer be the colour the settings show.
-3. **`fx_state::render`** - spotlight dim, video FX, click effects, and the cursor lens.
+1. **Batch 2a's masks** - blur, pixelate, highlight. First, because a mask hides something in the PICTURE, and everything after it should treat the hidden pixels as if they had always looked that way. **Landed:** not as a separate call but as a list built here and handed to `fx_state::render` as its `masks` argument, which is where the renderers draw it - first inside `fx.wgsl`'s `fs_main` and first inside `CpuFx::apply`. Riding the FX pass is what lets the GPU draw a mask at all: blur and pixelate must re-sample the composited frame, and that pass is the one place it is uploaded as a texture.
+2. **Batch 2b's grade** - exposure, contrast, vignette. After the masks, so a blurred password takes the same grade as the pixels around it rather than a differently-lit patch; and ahead of every overlay, so the grade covers the picture (background, screen, webcam) and not the things whose colour the user picked - a tinted spotlight or a click ring the grade had darkened would no longer be the colour the settings show. **Landed** the same way the masks did: it rides `fx_state::render` as the argument after them (`self.grade`) and is drawn second inside that pass, by `grade_fx` in `fx.wgsl` or by `gradedraw::draw_grade` in `CpuFx::apply`. *Why inside:* the grade is per-pixel work on every output pixel, and that pass is the one place the frame is already bound as a texture; a call of its own would be a second full read and write of the frame for nothing.
+3. **The rest of `fx_state::render`** - spotlight dim, video FX, click effects, and the cursor lens, all over the masked and graded picture.
 4. **Batch 2c's animated text** - titles, lower thirds, stats, callouts. After the effects: text is authored content the viewer reads, not part of the picture being graded.
 5. **`captiondraw::overlay`** - the spoken captions, last in this file.
 
@@ -21,8 +21,28 @@ pub(super) fn fx_pass(&mut self, pose: &FramePose, out: &mut [u8], ow: u32, oh: 
                       lens: Option<crate::export::fx::fx_lens::Lenses>)
 ```
 
-Draws everything between the compositor and the cursor, over the composited frame in `out`: `fx_state::render` (spotlight dim, video FX, click effects, and the cursor lens when there is one, on the GPU through `fx.wgsl` or on the CPU fallback), then `captiondraw::overlay`.
+Draws everything between the compositor and the cursor, over the composited frame in `out`, in this order:
+
+1. The mask list for this frame, built here and handed straight on.
+2. `fx_state::render` - the masks and then the colour grade first of all, then spotlight dim, video FX, click effects, and the cursor lens when there is one, on the GPU through `fx.wgsl` or on the CPU fallback.
+3. `textdraw::overlay` - the animated text items (`self.texts`, `self.settings.ui.accent`, `pose.out_t`). **After** the effects, so a grade, a spotlight scrim or a video effect does not tint a title whose colour the user chose; text is authored content the viewer reads, not part of the picture being graded.
+4. `captiondraw::overlay` - the spoken captions, and always last.
+
+**The masks are built here**, by `fx_masks::masks_at(&self.effects, &pose.scene, pose.cam, coordmap::full_src(self.sw, self.sh), ow, oh, pose.out_t, self.settings.clickfx.spotlight_dim)`, and handed to `fx_state::render` as its `masks` argument, just ahead of `self.grade` - the same shape `lens` already has, and for the same reason: none of the three is a click effect, and anything built inside `fx_state_at` vanishes when a user turns click animations off.
+
+Two arguments are worth naming:
+
+- `coordmap::full_src(self.sw, self.sh)` is the WHOLE RECORDED CANVAS, which is what a mask's stored `[x, y, w, h]` fractions are fractions of. It is deliberately not `pose.scene.src`, the slice of that canvas currently being shown: using the live slice would make a mask drift whenever a mid-take display switch changed it, where using the full canvas makes the mask stay put and correctly fall off the panel instead.
+- `self.effects` is already on the OUTPUT clock, because `EditState::load` runs `remap_doc` before the renderer sees the document, so `pose.out_t` is the right time to sample the fades at.
+
+`self.grade` is passed as an argument of `fx_state::render` rather than being read from `self.settings.grade` here, because it is already resolved to `GradeParams` (`EditState::load`) and because `None` is the signal that there is no look at all - the FX pass is then not built for the grade's sake and an ungraded project costs exactly what it did before the grade existed. Step 2 of the ordered list above is inside `fx_state::render`, not beside it, for the same reason the spotlight is: the grade is per-pixel work on the frame the pass already has bound as a texture.
 
 `lens` is passed in rather than built here because the caller already knows whether it wants one: a captured OS cursor is the real pixels, so `composite_at` builds no lens for it and hands `None` down (see `FrameRenderer::lenses`).
+
+The text step sits BEFORE the captions because of spec 4's fit point 1: captions are drawn last and nothing may cover them. So a text item the user parks at the bottom centre COLLIDES with a caption rather than winning, and nothing here moves anything to avoid it - the Text inspector hints the collision instead, because silently relocating something the user positioned is worse than letting them see the overlap.
+
+`composite_at` draws the cursor after this function returns, so the cursor is still topmost and both the text and the captions sit under it.
+
+The order is pinned by `export/fx/text/textdraw_tests.rs::the_pass_order_is_text_over_the_effects_and_under_the_captions`, which `include_str!`s this file and asserts the three call sites appear in that sequence. A source-order assertion is a blunt instrument and it is there on purpose: the alternative is an end-to-end frame render inside a unit test, and this fails loudly the moment someone reorders the seam.
 
 `pub(super)` - `composite_at` is the only caller, and the frame's passes are `render`'s business, not the exporter's.

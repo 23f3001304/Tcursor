@@ -39,3 +39,6 @@ tools/assetgen/probe_*.png
 
 # Python bytecode from the asset generator
 __pycache__/
+
+# agent worktrees for parallel feature tracks
+.worktrees/

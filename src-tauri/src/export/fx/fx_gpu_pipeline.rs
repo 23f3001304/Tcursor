@@ -52,7 +52,11 @@ pub(super) fn build_pipeline(
                 "\n",
                 include_str!("fx_clicks.wgsl"),
                 "\n",
-                include_str!("fx_lens.wgsl")
+                include_str!("fx_lens.wgsl"),
+                "\n",
+                include_str!("mask/fx_mask.wgsl"),
+                "\n",
+                include_str!("fx_grade.wgsl")
             )
             .into(),
         ),

@@ -19,7 +19,7 @@ Sizes INSIDE the svg are viewBox geometry, not type-scale sizes: the graph is dr
 ## LANE_LABEL
 
 ```ts
-const LANE_LABEL = { zoom: "Zoom", layout: "Layout", cam: "Camera move" }
+const LANE_LABEL = { zoom: "Zoom", layout: "Layout", cam: "Camera move", text: "Text" }
 ```
 
 What a screen reader hears the graph called. The lane's name plus what can be done with it ("drag a key to shape it"), because an svg of paths announces nothing useful on its own.

@@ -210,3 +210,23 @@
 .e-volflyout { position: absolute; right: 100%; top: 0; height: 100%;
   width: calc(76px * var(--e-density)); display: flex; align-items: center; overflow: hidden; padding-right: 6px;
   border-radius: var(--e-r-sm); background: var(--e-raised); }
+
+.e-maskwrap { position: absolute; inset: 0; pointer-events: none; }
+.e-maskbox {
+  position: absolute; pointer-events: auto; cursor: move;
+  border: 1px solid var(--e-fx);
+  box-shadow: var(--e-shadow-1);
+  background: color-mix(in srgb, var(--e-fx) 8%, transparent);
+}
+.e-maskhandle {
+  position: absolute; width: 10px; height: 10px; pointer-events: auto;
+  background: var(--e-fx); border-radius: 2px;
+}
+.e-maskhandle.nw { left: -5px; top: -5px; cursor: nwse-resize; }
+.e-maskhandle.n { left: calc(50% - 5px); top: -5px; cursor: ns-resize; }
+.e-maskhandle.ne { right: -5px; top: -5px; cursor: nesw-resize; }
+.e-maskhandle.e { right: -5px; top: calc(50% - 5px); cursor: ew-resize; }
+.e-maskhandle.se { right: -5px; bottom: -5px; cursor: nwse-resize; }
+.e-maskhandle.s { left: calc(50% - 5px); bottom: -5px; cursor: ns-resize; }
+.e-maskhandle.sw { left: -5px; bottom: -5px; cursor: nesw-resize; }
+.e-maskhandle.w { left: -5px; top: calc(50% - 5px); cursor: ew-resize; }

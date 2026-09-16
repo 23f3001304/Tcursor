@@ -68,7 +68,9 @@ export function ClassicShell(p: ShellProps) {
                 hasCursorLayer={p.cursorLyr !== null}
                 addZoom={p.addZoom}
                 addSpotlight={p.addSpotlight}
+                addMask={p.addMask}
                 addCameraMove={p.addCameraMove}
+                addText={p.addText}
                 aiRun={p.aiRun}
                 aiSkipped={p.aiSkipped}
                 aiApplying={p.aiApplying}
@@ -116,6 +118,7 @@ export function ClassicShell(p: ShellProps) {
         onPlay={p.onPlayToggle}
         onSeek={p.onSeek}
         onAddZoom={p.addZoom}
+        onAddText={() => p.addText("title")}
         onAutoedit={p.onRun}
         aiRunning={p.running}
         exporting={p.exporting}

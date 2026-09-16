@@ -1,7 +1,12 @@
 import { useRef } from "react";
 import type { CamSample, ClickSample, PreviewLayout, CursorKindSample } from "../../../shared/ipc";
-import type { CaptionStyle, ClickFxSettings, CursorSettings } from "../../../hud/settings/settings";
-import type { Caption, EffectRegion } from "../../../shared/edit";
+import type {
+  CaptionStyle,
+  ClickFxSettings,
+  CursorSettings,
+  GradeSettings,
+} from "../../../hud/settings/settings";
+import type { Caption, EffectRegion, TextItem } from "../../../shared/edit";
 
 export function useSyncRefs({
   playing,
@@ -12,7 +17,9 @@ export function useSyncRefs({
   clicks,
   effects,
   clickfx,
+  grade,
   captions,
+  texts,
   capStyle,
   accent,
   cursorKinds,
@@ -26,7 +33,9 @@ export function useSyncRefs({
   clicks: ClickSample[];
   effects: EffectRegion[];
   clickfx: ClickFxSettings;
+  grade: GradeSettings;
   captions: Caption[];
+  texts: TextItem[];
   capStyle: CaptionStyle;
   accent: [number, number, number];
   cursorKinds: CursorKindSample[];
@@ -48,8 +57,12 @@ export function useSyncRefs({
   effectsRef.current = effects;
   const clickfxRef = useRef(clickfx);
   clickfxRef.current = clickfx;
+  const gradeRef = useRef(grade);
+  gradeRef.current = grade;
   const captionsRef = useRef(captions);
   captionsRef.current = captions;
+  const textsRef = useRef(texts);
+  textsRef.current = texts;
   const capStyleRef = useRef(capStyle);
   capStyleRef.current = capStyle;
   const accentRef = useRef(accent);
@@ -68,7 +81,9 @@ export function useSyncRefs({
     clicksRef,
     effectsRef,
     clickfxRef,
+    gradeRef,
     captionsRef,
+    textsRef,
     capStyleRef,
     accentRef,
     kindsRef,

@@ -1,11 +1,13 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ZoomInspector } from "../inspectors/ZoomInspector";
 import { EffectInspector } from "../inspectors/EffectInspector";
+import { MaskInspector } from "../inspectors/MaskInspector";
 import { LayoutInspector } from "../inspectors/LayoutInspector";
 import { CameraMoveInspector } from "../inspectors/CameraMoveInspector";
 import { CutInspector } from "../inspectors/CutInspector";
 import { SpeedInspector } from "../inspectors/SpeedInspector";
 import { CaptionInspector } from "../inspectors/CaptionInspector";
+import { TextInspector } from "../inspectors/TextInspector";
 import type {
   CameraMove,
   Caption,
@@ -14,8 +16,10 @@ import type {
   EffectRegion,
   LayoutSeg,
   Speed,
+  TextItem,
   Zoom,
 } from "../../shared/edit";
+import { isMask } from "../../shared/edit";
 import type { SlotProps } from "./slotProps";
 import "../inspectors/inspectors.css";
 
@@ -24,18 +28,20 @@ const SWAP_TWEEN = { type: "tween" as const, duration: 0.16, ease: [0.4, 0, 0.2,
 export type SelectedClip =
   | { kind: "zoom"; zoom: Zoom }
   | { kind: "fx"; effect: EffectRegion }
+  | { kind: "mask"; effect: EffectRegion }
   | { kind: "layout"; layout: LayoutSeg }
   | { kind: "cam"; move: CameraMove }
   | { kind: "cut"; cut: Cut }
   | { kind: "speed"; speed: Speed }
-  | { kind: "caption"; caption: Caption };
+  | { kind: "caption"; caption: Caption }
+  | { kind: "text"; text: TextItem };
 
 export function selectedClip(doc: EditDoc, sel: string | null): SelectedClip | null {
   if (!sel) return null;
   const zoom = doc.zooms.find((z) => z.id === sel);
   if (zoom) return { kind: "zoom", zoom };
   const effect = doc.effects.find((e) => e.id === sel);
-  if (effect) return { kind: "fx", effect };
+  if (effect) return isMask(effect) ? { kind: "mask", effect } : { kind: "fx", effect };
   const layout = doc.layout.find((l) => l.id === sel);
   if (layout) return { kind: "layout", layout };
   const move = doc.camera_moves.find((m) => m.id === sel);
@@ -46,6 +52,8 @@ export function selectedClip(doc: EditDoc, sel: string | null): SelectedClip | n
   if (speed) return { kind: "speed", speed };
   const caption = doc.captions?.find((c) => c.id === sel);
   if (caption) return { kind: "caption", caption };
+  const text = doc.texts?.find((t) => t.id === sel);
+  if (text) return { kind: "text", text };
   return null;
 }
 
@@ -92,6 +100,14 @@ export function PropertiesSlot({ p }: { p: SlotProps }) {
                 })
               }
             />
+          ) : hit.kind === "mask" ? (
+            <MaskInspector
+              effect={hit.effect}
+              dur={p.dur}
+              settings={doc.settings}
+              onApply={p.applyOp}
+              onClose={close}
+            />
           ) : hit.kind === "layout" ? (
             <LayoutInspector
               seg={hit.layout}
@@ -122,6 +138,8 @@ export function PropertiesSlot({ p }: { p: SlotProps }) {
               onApply={p.applyOp}
               onClose={close}
             />
+          ) : hit.kind === "text" ? (
+            <TextInspector item={hit.text} dur={p.dur} onApply={p.applyOp} onClose={close} />
           ) : (
             <SpeedInspector speed={hit.speed} dur={p.dur} onApply={p.applyOp} onClose={close} />
           )}

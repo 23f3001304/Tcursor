@@ -8,16 +8,26 @@ The `properties` editor type: the seven inspectors, routed by `p.sel`.
 export type SelectedClip =
   | { kind: "zoom"; zoom: Zoom }
   | { kind: "fx"; effect: EffectRegion }
+  | { kind: "mask"; effect: EffectRegion }
   | { kind: "layout"; layout: LayoutSeg }
   | { kind: "cam"; move: CameraMove }
   | { kind: "cut"; cut: Cut }
   | { kind: "speed"; speed: Speed }
-  | { kind: "caption"; caption: Caption };
+  | { kind: "caption"; caption: Caption }
+  | { kind: "text"; text: TextItem };
 ```
 
 What one selection resolves to: the lane it belongs to, plus the clip itself, already typed. The
 `kind` strings are `InspectorKind`'s, so the routing, the accent class and the timeline lane all
-name a clip the same way.
+name a clip the same way - with one exception: `"text"` is NOT an `InspectorKind`, and
+`TextInspector` mounts its shell as `kind="caption"` to borrow that accent. A text item and a
+caption are both words over the picture, so the borrowed accent is not wrong; if the owner's look
+pass wants the Text lane's own orchid in the inspector too, `"text"` joins `InspectorKind` then.
+
+`fx` and `mask` are the exception to that one-to-one: both carry an `EffectRegion` from the SAME
+`doc.effects` list and both render under `InspectorKind` `"fx"`, because a mask and a spotlight
+share the FX lane and its accent. They are two members here because they open two different
+inspectors, which is the one thing about them that genuinely differs.
 
 ## selectedClip
 
@@ -26,7 +36,9 @@ export function selectedClip(doc: EditDoc, sel: string | null): SelectedClip | n
 ```
 
 The selection-to-inspector ladder, as a pure function: zoom / effect / layout segment / camera move
-/ cut / speed span / caption, in that order, by id (cut and speed from the time remap, T7; caption from M5, read through `doc.captions?` because a doc fetched before Rust's serde default has been through it may carry no key at all). `null` for no
+/ cut / speed span / caption / text item, in that order, by id. The effect rung splits on `isMask`: one
+`doc.effects.find` and then `isMask(effect) ? { kind: "mask" } : { kind: "fx" }`, rather than two
+searches of the same list (cut and speed from the time remap, T7; caption from M5 and text from Batch 2, both read through `?.` because a doc fetched before Rust's serde default has been through it may carry no such key at all). `null` for no
 selection, for an empty string, and for a **stale** id that matches nothing - so deleting the
 selected clip reads as "nothing is selected" rather than as "an inspector that failed to load".
 

@@ -3,6 +3,7 @@ import { newSpotlightSimState, type SpotlightSimState } from "./fx/spotlightPrev
 import { useStageInvalidation } from "./useStageInvalidation";
 import type { StageBgState } from "./canvas/stageBg";
 import { useArrangeDrag } from "./arrange/useArrangeDrag";
+import { useStageMask } from "./mask/useStageMask";
 import { useCompositeLoop } from "../hooks/stage/useCompositeLoop";
 import { useExactFrame } from "../hooks/stage/useExactFrame";
 import { useCursorSprites } from "../hooks/stage/useCursorSprites";
@@ -35,7 +36,9 @@ export function useStageEngine(p: StageProps, el: StageElements, canvasW: number
     clicksRef,
     effectsRef,
     clickfxRef,
+    gradeRef,
     captionsRef,
+    textsRef,
     capStyleRef,
     accentRef,
     kindsRef,
@@ -49,7 +52,9 @@ export function useStageEngine(p: StageProps, el: StageElements, canvasW: number
     clicks: p.clicks,
     effects: p.effects,
     clickfx: p.clickfx,
+    grade: p.grade,
     captions: p.captions,
+    texts: p.texts,
     capStyle: p.capStyle,
     accent: p.accent,
     cursorKinds: plainOs ? [] : p.cursorKinds,
@@ -65,6 +70,7 @@ export function useStageEngine(p: StageProps, el: StageElements, canvasW: number
     onApply: p.onApply,
   });
   const arranging = p.arrangeSeg !== null;
+  const mask = useStageMask(p, canvasW, canvasH, tOut, dirtyRef, arranging);
   const arrangingRef = useRef(arranging);
   arrangingRef.current = arranging;
   const layoutPresetsRef = useRef(arrange.presets);
@@ -96,12 +102,14 @@ export function useStageEngine(p: StageProps, el: StageElements, canvasW: number
     p.effects,
     p.cursor,
     p.clickfx,
+    p.grade,
     p.cursorKinds,
     captured,
     arranging,
     p.captions,
     p.capStyle,
     p.accent,
+    p.texts,
   ];
 
   useStageInvalidation({
@@ -157,9 +165,11 @@ export function useStageEngine(p: StageProps, el: StageElements, canvasW: number
     clicksRef,
     effectsRef,
     clickfxRef,
+    gradeRef,
     kindsRef,
     cursorRef,
     captionsRef,
+    textsRef,
     capStyleRef,
     accentRef,
     spritesRef,
@@ -172,5 +182,17 @@ export function useStageEngine(p: StageProps, el: StageElements, canvasW: number
     editGenRef: exact.editGenRef,
   });
 
-  return { arrange, arranging, dirtyRef, tOut, mapRef, layoutRef, trackRef, timeRef, playRef, onTimeRef };
+  return {
+    arrange,
+    arranging,
+    mask,
+    dirtyRef,
+    tOut,
+    mapRef,
+    layoutRef,
+    trackRef,
+    timeRef,
+    playRef,
+    onTimeRef,
+  };
 }

@@ -12,7 +12,7 @@ It takes the whole `p: ShellProps` bag rather than its own prop list, the same w
 
 ### What it derives
 
-Everything here is spread off `p` rather than carried as its own `SlotProps` field, which is why the caption renderer needed no change to `slotProps.ts`: `Stage` gets `captions={p.outDoc.captions}` (the track on the OUTPUT clock, beside `effects` and `layoutSegs`), `capStyle={p.doc.settings.captions}` and `accent={p.doc.settings.ui.accent}` straight off the doc. The AI review sheet's `stageOutline` arrives the same way, as `Stage`'s `outline` prop - the shell decides nothing about it (see `ClassicShell.md`).
+Everything here is spread off `p` rather than carried as its own `SlotProps` field, which is why the caption renderer needed no change to `slotProps.ts`: `Stage` gets `captions={p.outDoc.captions}` (the track on the OUTPUT clock, beside `effects` and `layoutSegs`), `texts={p.outDoc.texts}` (the OUT doc again, because the text layout runs on output time), `capStyle={p.doc.settings.captions}` and `accent={p.doc.settings.ui.accent}` straight off the doc. The colour grade arrives the same way, as `grade={p.doc.settings.grade}` beside `clickfx`: it is a doc SETTING and not a region, so there is nothing on `outDoc` to read and nothing for `remapDoc` to move onto the output clock. The AI review sheet's `stageOutline` arrives the same way, as `Stage`'s `outline` prop - the shell decides nothing about it (see `ClassicShell.md`).
 
 ### Why the toast and the overlay live here
 

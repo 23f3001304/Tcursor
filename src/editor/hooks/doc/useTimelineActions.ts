@@ -1,5 +1,5 @@
 import { useCallback, type RefObject } from "react";
-import type { CameraMove, EditDoc, EditOp } from "../../../shared/edit";
+import type { CameraMove, EditDoc, EditOp, MaskKind, TextKind } from "../../../shared/edit";
 
 export function pickAddedCameraMoveId(before: CameraMove[], after: CameraMove[]): string | null {
   const beforeIds = new Set(before.map((m) => m.id));
@@ -22,6 +22,14 @@ export function useTimelineActions(
     const d = await applyOp({ op: "add_effect", kind: "spotlight", start_ms: t, end_ms: t + 2000 });
     if (d && d.effects.length) setSel(d.effects[d.effects.length - 1].id);
   }, [applyOp, timeMsRef, setSel]);
+  const addMask = useCallback(
+    async (kind: MaskKind) => {
+      const t = Math.round(timeMsRef.current);
+      const d = await applyOp({ op: "add_effect", kind, start_ms: t, end_ms: t + 3000 });
+      if (d && d.effects.length) setSel(d.effects[d.effects.length - 1].id);
+    },
+    [applyOp, timeMsRef, setSel],
+  );
   const addCameraMove = useCallback(async () => {
     const before = docRef.current?.camera_moves ?? [];
     const d = await applyOp({
@@ -34,6 +42,14 @@ export function useTimelineActions(
     const id = d && pickAddedCameraMoveId(before, d.camera_moves);
     if (id) setSel(id);
   }, [applyOp, timeMsRef, docRef, setSel]);
+  const addText = useCallback(
+    async (kind: TextKind) => {
+      const at_ms = Math.round(timeMsRef.current);
+      const d = await applyOp({ op: "add_text", at_ms, dur_ms: 3000, kind });
+      if (d && d.texts.length) setSel(d.texts[d.texts.length - 1].id);
+    },
+    [applyOp, timeMsRef, setSel],
+  );
   const zoomAt = useCallback(
     async (x: number, y: number) => {
       setPlaying(false);
@@ -51,5 +67,5 @@ export function useTimelineActions(
     },
     [applyOp, timeMsRef, setSel, setPlaying],
   );
-  return { addZoom, addSpotlight, addCameraMove, zoomAt };
+  return { addZoom, addSpotlight, addMask, addCameraMove, addText, zoomAt };
 }

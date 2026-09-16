@@ -44,6 +44,7 @@ pub struct FrameRenderer {
     actions: Vec<ActionEvent>,
     effects: Vec<crate::edit::model::EffectRegion>,
     captions: Vec<crate::edit::captions::Caption>,
+    texts: Vec<crate::edit::text::TextItem>,
     has_webcam: bool,
     os_cursor_in_video: bool,
     sw: u32,
@@ -52,6 +53,7 @@ pub struct FrameRenderer {
     video_start: u64,
     map: crate::export::remap::TimeMap,
     full_dur_ms: u32,
+    grade: Option<crate::export::grade::GradeParams>,
 }
 
 impl FrameRenderer {
@@ -179,6 +181,7 @@ impl FrameRenderer {
                 actions,
                 effects: es.effects,
                 captions: es.captions,
+                texts: es.texts,
                 has_webcam,
                 os_cursor_in_video: os_cur,
                 sw,
@@ -187,6 +190,7 @@ impl FrameRenderer {
                 video_start,
                 map: es.map,
                 full_dur_ms,
+                grade: es.grade,
             },
             meta,
         ))

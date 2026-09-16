@@ -18,11 +18,13 @@ export function Picker<T extends string>({
   options,
   onChange,
   ariaLabel,
+  label,
 }: {
   value: T;
   options: { value: T; label: string; title?: string; badge?: string }[];
   onChange: (v: T) => void;
   ariaLabel?: string;
+  label?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -76,7 +78,7 @@ export function Picker<T extends string>({
 
   const currentIndex = options.findIndex((o) => o.value === value);
   const currentOption = options.find((o) => o.value === value);
-  const currentLabel = currentOption?.label ?? value;
+  const currentLabel = label ?? currentOption?.label ?? value;
 
   const openMenu = () => {
     setAt(null);

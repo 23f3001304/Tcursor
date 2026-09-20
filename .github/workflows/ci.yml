@@ -63,6 +63,10 @@ jobs:
     runs-on: windows-latest
     env:
       LIBCLANG_PATH: C:\Program Files\LLVM\bin
+      # No incremental state and no debug info: a clean runner gains nothing from the first, and
+      # the second makes every test executable link faster and take far less disk.
+      CARGO_INCREMENTAL: 0
+      CARGO_PROFILE_DEV_DEBUG: 0
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -71,11 +75,11 @@ jobs:
       - name: Format
         working-directory: src-tauri
         run: cargo fmt --check
-      - name: Vulkan SDK (whisper.cpp builds its GPU backend with glslc)
-        uses: humbletim/install-vulkan-sdk@v1.2
-        with:
-          version: 1.4.357.0
-          cache: true
+      # whisper.cpp needs the SDK to build (vulkan-1.lib, headers, glslc) and every test
+      # executable imports vulkan-1.dll, which a runner without a GPU driver does not have.
+      - name: Vulkan SDK and loader
+        shell: pwsh
+        run: ./tools/ci/install-vulkan-sdk.ps1
       - name: FFmpeg resources
         shell: pwsh
         run: ./tools/ci/fetch-ffmpeg.ps1

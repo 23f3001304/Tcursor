@@ -28,11 +28,9 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Vulkan SDK (whisper.cpp builds its GPU backend with glslc)
-        uses: humbletim/install-vulkan-sdk@v1.2
-        with:
-          version: 1.4.357.0
-          cache: true
+      - name: Vulkan SDK (whisper.cpp builds its GPU backend with glslc; pinned by version and SHA-256)
+        shell: pwsh
+        run: ./tools/ci/install-vulkan-sdk.ps1
 
       - name: FFmpeg resources (pinned by version and SHA-256)
         shell: pwsh

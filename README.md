@@ -19,7 +19,7 @@ GitHub runner, and ships with a `SHA256SUMS.txt` you can check the download agai
 
 ## Build from source
 
-Requires Node 20+, Rust (stable), `src-tauri/resources/ffmpeg.exe` + `ffprobe.exe` (`pwsh tools/ci/fetch-ffmpeg.ps1` downloads the pinned build and checks its SHA-256), and for the on-device captions (whisper.cpp with its Vulkan GPU backend): CMake 3.14+ on PATH, the MSVC C++ workload, an LLVM whose `libclang` bindgen can find (`LIBCLANG_PATH`), and the Vulkan SDK (`winget install KhronosGroup.VulkanSDK`). The Rust crate builds into `C:/tct` (`src-tauri/.cargo/config.toml`) because whisper's shader generator overruns Windows' path limit from a deep checkout. GPU inference works on NVIDIA, AMD and Intel from the same build; an NVIDIA-only CUDA backend is the opt-in cargo feature `asr-cuda` (needs the CUDA toolkit).
+Requires Node 24 (the version CI runs), Rust (stable), `src-tauri/resources/ffmpeg.exe` + `ffprobe.exe` (`pwsh tools/ci/fetch-ffmpeg.ps1` downloads the pinned build and checks its SHA-256), and for the on-device captions (whisper.cpp with its Vulkan GPU backend): CMake 3.14+ on PATH, the MSVC C++ workload, an LLVM whose `libclang` bindgen can find (`LIBCLANG_PATH`), and the Vulkan SDK (`winget install KhronosGroup.VulkanSDK`). The Rust crate builds into `C:/tct` (`src-tauri/.cargo/config.toml`) because whisper's shader generator overruns Windows' path limit from a deep checkout. GPU inference works on NVIDIA, AMD and Intel from the same build; an NVIDIA-only CUDA backend is the opt-in cargo feature `asr-cuda` (needs the CUDA toolkit).
 
 ```bash
 npm install

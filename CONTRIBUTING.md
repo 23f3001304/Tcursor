@@ -22,7 +22,11 @@ TCursor is a Windows screen recorder and editor built with Tauri v2: a Rust core
 5. CI runs the same gate plus the two pull request rules (size and docs pages). A red check is fixed in the same pull request with new commits; do not force-push over a review.
 6. A maintainer reviews and merges. `main` always builds and always passes the gate.
 
-Commit messages use a conventional prefix and then say what changed and why in plain sentences, for example `fix(preview): the paused frame is asked for by output time, because after a reorder one source instant can be shown twice`. No trailers.
+Commit messages have a short subject and an explanatory body:
+
+- The subject is a conventional prefix plus one plain clause, **at most 72 characters**, with no full stop: `fix(preview): the paused exact frame is addressed by output time`.
+- A blank line, then the body says what changed and why in full sentences. Everything that does not fit the subject goes here, never into a longer subject.
+- No trailers.
 
 ## Docs pages travel with the code
 

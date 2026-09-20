@@ -16,3 +16,4 @@
 - [ ] No file over its line budget, and nothing compressed to fit one.
 - [ ] Export and preview still agree (if this touches either one, the fix went into the preview).
 - [ ] No new dependency, or the pull request says why it is needed.
+- [ ] Commit subjects are at most 72 characters; the explanation is in the body.

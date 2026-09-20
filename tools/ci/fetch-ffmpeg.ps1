@@ -2,6 +2,9 @@
 # The two executables ship inside the installer as Tauri resources but are not committed
 # (they are about 100 MB each), so CI and a fresh clone fetch them with this script.
 # The archive is pinned by version AND by SHA-256: bump both together, never one alone.
+# On a CI runner the folder also goes on PATH. Outside the running app nothing has chosen an
+# FFmpeg folder, so the crate spawns a bare `ffmpeg`, and the tests that need it either skip
+# themselves ("SKIPPED: no ffmpeg on PATH") or, like tests/ffmpeg_encode.rs, fail.
 $ErrorActionPreference = "Stop"
 
 $version = "8.1.1"
@@ -11,6 +14,7 @@ $url     = "https://github.com/GyanD/codexffmpeg/releases/download/$version/$nam
 
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $dest = Join-Path $root "src-tauri\resources"
+if ($env:GITHUB_PATH) { Add-Content -Path $env:GITHUB_PATH -Value $dest }
 if ((Test-Path "$dest\ffmpeg.exe") -and (Test-Path "$dest\ffprobe.exe")) {
   Write-Host "FFmpeg is already in $dest"
   exit 0

@@ -19,7 +19,7 @@ TCursor is a Windows screen recorder and editor built with Tauri v2: a Rust core
 2. Make the change with its tests and its docs pages (next section).
 3. Run the gate locally (below) until it is green.
 4. Open the pull request against `main` and fill in the template: what and why, how it was verified, the checklist.
-5. CI runs the same gate plus the two pull request rules (size and docs pages). A red check is fixed in the same pull request with new commits; do not force-push over a review.
+5. CI runs the same gate plus the two pull request rules (size and docs pages). A red check is fixed in the same pull request with new commits; do not force-push over a review. When a build or test step fails, its error lines are repeated as an annotation on the run, so the reason is on the checks page without opening the log.
 6. A maintainer reviews and merges. `main` always builds and always passes the gate.
 
 Commit messages have a short subject and an explanatory body:

@@ -45,10 +45,13 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      # run-logged.ps1 repeats a failing step's error lines as an annotation on the run.
       - name: Types
-        run: npx tsc --noEmit
+        shell: pwsh
+        run: ./tools/ci/run-logged.ps1 -Title "Types" -Command "npx tsc --noEmit"
       - name: Tests
-        run: npx vitest run
+        shell: pwsh
+        run: ./tools/ci/run-logged.ps1 -Title "Frontend tests" -Command "npx vitest run"
       - name: Format
         run: npx prettier --check "src/**/*.{ts,tsx}"
       - name: Line budgets
@@ -90,7 +93,9 @@ jobs:
           if (-not (Test-Path dist/index.html)) { Set-Content dist/index.html "<!doctype html><title>ci</title>" }
       - name: Build
         working-directory: src-tauri
-        run: cargo build --tests
+        shell: pwsh
+        run: ../tools/ci/run-logged.ps1 -Title "Rust build" -Command "cargo build --tests"
       - name: Tests
         working-directory: src-tauri
-        run: cargo test
+        shell: pwsh
+        run: ../tools/ci/run-logged.ps1 -Title "Rust tests" -Command "cargo test"

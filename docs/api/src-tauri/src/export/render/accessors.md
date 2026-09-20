@@ -64,7 +64,7 @@ How much smaller (w, h) a span's screen panel is than the full-canvas one, as ra
 pub fn time_map(&self) -> &TimeMap
 ```
 
-The clip-to-output clock map built from the doc's trim, cuts and speed spans in `EditState::load` (`export/remap.md`). The exporter reads its `frame_plan`; `preview::walk_to` and `camera_track` walk the same plan.
+The clip-to-output clock map built from the doc's trim, cuts and speed spans in `EditState::load` (`export/remap.md`). The exporter reads its `frame_plan`; `preview::compose::walk_to` and `camera_track` walk the same plan.
 
 ## FrameRenderer::actions
 

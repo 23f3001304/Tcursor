@@ -33,6 +33,7 @@ pub struct FramePose {
     pub cam: Camera,
     pub mix: Option<crate::export::render::spans::SpanMix>,
     pub hold: Option<usize>,
+    pub clip_mix: Option<crate::export::render::clipmix::ClipMix>,
 }
 
 pub fn webcam_box(

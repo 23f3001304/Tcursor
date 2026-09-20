@@ -1,14 +1,17 @@
 import { useCallback, useMemo, type RefObject } from "react";
 import type { EditDoc, EditOp } from "../../shared/edit";
 import type { LayoutPresets } from "../../shared/ipc";
+import type { TimeMap } from "../../shared/math/remap";
 import { useDensity } from "../shell/useDensity";
 import { layoutRegions } from "./model/layers";
+import { clipRegions } from "./model/clipModel";
 import { useLaneDrag } from "./useLaneDrag";
 import { useLayoutLaneRegions, layoutLabel, layoutExtraStyle } from "./lanes/LayoutLane";
 import { useCaptionLaneRegions, captionLabel, captionTitle } from "./lanes/CaptionLane";
 import { useTextLaneRegions, textLabel, textTitle } from "./lanes/TextLane";
 import { AudioTrack } from "./lanes/AudioTrack";
 import { CameraLane } from "./lanes/CameraLane";
+import { ClipLane } from "./lanes/ClipLane";
 import { TimeLane } from "./lanes/TimeLane";
 import { laneHeight, zoomLabel, fxLabel, regionLane, type TimelineLane } from "./laneBuilders";
 
@@ -25,6 +28,7 @@ export function useTimelineLanes({
   wavesReady,
   hasWebcam,
   layoutPresets,
+  map,
 }: {
   doc: EditDoc;
   dur: number;
@@ -36,8 +40,13 @@ export function useTimelineLanes({
   wavesReady: boolean;
   hasWebcam: boolean;
   layoutPresets: LayoutPresets | null;
+  map: TimeMap;
 }): TimelineLane[] {
   const { row: ROW_H, audioRow: AUDIO_ROW_H, gap: GAP } = useDensity();
+  const clipRows = useMemo(
+    () => (doc.clips.length > 1 ? Math.max(1, ...clipRegions(doc.clips, map).map((r) => r.layer + 1)) : 0),
+    [doc.clips, map],
+  );
   const zooms = useMemo(() => layoutRegions(doc.zooms), [doc.zooms]);
   const fx = useMemo(() => layoutRegions(doc.effects), [doc.effects]);
   const layouts = useLayoutLaneRegions(doc.layout, layoutPresets);
@@ -81,6 +90,24 @@ export function useTimelineLanes({
   const isSel = (regions: { id: string }[]) => sel != null && regions.some((r) => r.id === sel);
   const cx = { ROW_H, GAP, dur, sel, isSel };
   const lanes: TimelineLane[] = [];
+  if (clipRows > 0)
+    lanes.push({
+      key: "clips",
+      label: "Clips",
+      heightPx: laneHeight(clipRows, ROW_H, GAP),
+      active: isSel(doc.clips),
+      body: (
+        <ClipLane
+          clips={doc.clips}
+          map={map}
+          dur={dur}
+          sel={sel}
+          onSel={onSel}
+          onApply={onApply}
+          track={track}
+        />
+      ),
+    });
   if (doc.cuts.length || doc.speed.length)
     lanes.push({
       key: "time",

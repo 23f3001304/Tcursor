@@ -1,17 +1,27 @@
 import { useRef } from "react";
-import type { CamSample, ClickSample, PreviewLayout, CursorKindSample } from "../../../shared/ipc";
+import type {
+  CamSample,
+  ClickSample,
+  PreviewLayout,
+  CursorKindSample,
+  LayoutPresets,
+} from "../../../shared/ipc";
 import type {
   CaptionStyle,
   ClickFxSettings,
   CursorSettings,
   GradeSettings,
+  ZoomSettings,
 } from "../../../hud/settings/settings";
-import type { Caption, EffectRegion, TextItem } from "../../../shared/edit";
+import type { CameraMove, Caption, EffectRegion, LayoutSeg, TextItem, Zoom } from "../../../shared/edit";
+import type { TimeMap } from "../../../shared/math/remap";
+import type { ClipDissolve } from "../../stage/clips/clipDissolve";
 
 export function useSyncRefs({
   playing,
   timeMs,
   onTime,
+  onSeek,
   track,
   layout,
   clicks,
@@ -24,10 +34,20 @@ export function useSyncRefs({
   accent,
   cursorKinds,
   cursor,
+  layoutPresets,
+  layoutSegs,
+  cameraMoves,
+  zooms,
+  zoomSettings,
+  arranging,
+  map,
+  dissolves,
+  motionEasing,
 }: {
   playing: boolean;
   timeMs: number;
   onTime: (ms: number) => void;
+  onSeek: (ms: number) => void;
   track: CamSample[];
   layout: PreviewLayout | null;
   clicks: ClickSample[];
@@ -40,6 +60,15 @@ export function useSyncRefs({
   accent: [number, number, number];
   cursorKinds: CursorKindSample[];
   cursor: CursorSettings;
+  layoutPresets: LayoutPresets | null;
+  layoutSegs: LayoutSeg[];
+  cameraMoves: CameraMove[];
+  zooms: Zoom[];
+  zoomSettings: ZoomSettings;
+  arranging: boolean;
+  map: TimeMap;
+  dissolves: ClipDissolve[];
+  motionEasing: string;
 }) {
   const playRef = useRef(playing);
   playRef.current = playing;
@@ -47,6 +76,8 @@ export function useSyncRefs({
   timeRef.current = timeMs;
   const onTimeRef = useRef(onTime);
   onTimeRef.current = onTime;
+  const onSeekRef = useRef(onSeek);
+  onSeekRef.current = onSeek;
   const trackRef = useRef(track);
   trackRef.current = track;
   const layoutRef = useRef(layout);
@@ -71,11 +102,30 @@ export function useSyncRefs({
   kindsRef.current = cursorKinds;
   const cursorRef = useRef(cursor);
   cursorRef.current = cursor;
+  const layoutPresetsRef = useRef(layoutPresets);
+  layoutPresetsRef.current = layoutPresets;
+  const layoutSegsRef = useRef(layoutSegs);
+  layoutSegsRef.current = layoutSegs;
+  const cameraMovesRef = useRef(cameraMoves);
+  cameraMovesRef.current = cameraMoves;
+  const zoomsRef = useRef(zooms);
+  zoomsRef.current = zooms;
+  const zoomSettingsRef = useRef(zoomSettings);
+  zoomSettingsRef.current = zoomSettings;
+  const arrangingRef = useRef(arranging);
+  arrangingRef.current = arranging;
+  const mapRef = useRef(map);
+  mapRef.current = map;
+  const dissolvesRef = useRef(dissolves);
+  dissolvesRef.current = dissolves;
+  const motionEasingRef = useRef(motionEasing);
+  motionEasingRef.current = motionEasing;
 
   return {
     playRef,
     timeRef,
     onTimeRef,
+    onSeekRef,
     trackRef,
     layoutRef,
     clicksRef,
@@ -88,5 +138,14 @@ export function useSyncRefs({
     accentRef,
     kindsRef,
     cursorRef,
+    layoutPresetsRef,
+    layoutSegsRef,
+    cameraMovesRef,
+    zoomsRef,
+    zoomSettingsRef,
+    arrangingRef,
+    mapRef,
+    dissolvesRef,
+    motionEasingRef,
   };
 }

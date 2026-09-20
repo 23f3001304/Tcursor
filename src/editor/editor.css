@@ -65,6 +65,9 @@
   --e-primary: #ef4444; --e-primaryh: #dc2626;
   --e-zoom: #7c7ce6; --e-fx: #d99a2b; --e-layout: #2f9e8f; --e-cam: #e05d9e; --e-ai: #7c6cf0; --e-ok: #22c55e;
   --e-speed: #3f8fd6;   /* the Time lane's speed pills - the one lane accent the palette was missing */
+  /* The Clips lane. The palette's one neutral accent: a clip pill is the recording's own material,
+     not an effect laid over it, so it takes a grey rather than a hue. */
+  --e-clip: #8a93a6;
   /* The Text lane. A new hue rather than a reuse: text sits between FX (amber) and Captions
      (--e-wave blue) in the lane stack and had to be legible against both, and every other accent
      already names a lane. Orchid is the widest gap left on the wheel - 26 degrees off --e-ai's
@@ -119,6 +122,7 @@
      --e-ai       #7c6cf0 -> #5b4cc4   3.62 -> 5.71, and white-on-Run 3.99 -> 6.41
      --e-ok       #22c55e -> #1a7f3c   2.09 -> 4.56  (it is the "done" LINE of the director log)
      --e-speed    #3f8fd6 -> #2069a8   3.13 -> 5.16
+     --e-clip     #8a93a6 -> #4f5668   the Clips lane's pills, the recording's own material rather than an effect
      --e-wave     #4c8dd9 -> #356fae   3.13 -> 4.67
      --e-danger   #e5484d -> #c9282e   white-on-fill 3.91 -> 5.49
      --e-err-fg   #f7b4b4 -> #b42318   2.3 -> 6.57 (a pale red is unreadable on white)
@@ -150,6 +154,7 @@
   --e-primary: #dc2626; --e-primaryh: #b91c1c;
   --e-zoom: #4b4bc8; --e-fx: #945e00; --e-layout: #12766a; --e-cam: #b83280; --e-ai: #5b4cc4; --e-ok: #1a7f3c;
   --e-speed: #2069a8;
+  --e-clip: #4f5668;
   --e-text: #853caf;
   --e-cam-hi: #c25798;
   --e-danger: #c9282e; --e-dangerh: #b02026;
@@ -191,6 +196,7 @@
     --e-primary: #dc2626; --e-primaryh: #b91c1c;
     --e-zoom: #4b4bc8; --e-fx: #945e00; --e-layout: #12766a; --e-cam: #b83280; --e-ai: #5b4cc4; --e-ok: #1a7f3c;
     --e-speed: #2069a8;
+    --e-clip: #4f5668;
     --e-text: #853caf;
     --e-cam-hi: #c25798;
     --e-danger: #c9282e; --e-dangerh: #b02026;

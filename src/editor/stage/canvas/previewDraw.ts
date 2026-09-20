@@ -58,3 +58,54 @@ export function roundRect(
   ctx.arcTo(x, y, x + w, y, rr);
   ctx.closePath();
 }
+
+export interface ScreenPanelGeom {
+  dx: number;
+  dy: number;
+  dw: number;
+  dh: number;
+  r: number;
+  w: number;
+  h: number;
+  alpha: number;
+  src: [number, number, number, number];
+}
+
+export interface ScreenMix {
+  video: HTMLVideoElement;
+  alpha: number;
+}
+
+export function drawScreenPanel(
+  octx: CanvasRenderingContext2D,
+  layer: HTMLCanvasElement,
+  g: ScreenPanelGeom,
+  screen: HTMLVideoElement,
+  mix: ScreenMix | null,
+) {
+  const vw = screen.videoWidth,
+    vh = screen.videoHeight;
+  if (!(vw > 0 && vh > 0) || g.alpha < 0.004) return;
+  const frame = (c: CanvasRenderingContext2D, v: HTMLVideoElement) =>
+    c.drawImage(v, g.src[0] * vw, g.src[1] * vh, g.src[2] * vw, g.src[3] * vh, g.dx, g.dy, g.dw, g.dh);
+  paintPanel(octx, g.alpha, layer, g.w, g.h, (c) => {
+    c.save();
+    c.shadowColor = "rgba(0,0,0,.5)";
+    c.shadowBlur = 34;
+    c.shadowOffsetY = 14;
+    roundRect(c, g.dx, g.dy, g.dw, g.dh, g.r);
+    c.fillStyle = "#000";
+    c.fill();
+    c.restore();
+    c.save();
+    roundRect(c, g.dx, g.dy, g.dw, g.dh, g.r);
+    c.clip();
+    if (mix && mix.video.videoWidth > 0) {
+      frame(c, mix.video);
+      c.globalAlpha = Math.min(1, Math.max(0, mix.alpha));
+    }
+    frame(c, screen);
+    c.globalAlpha = 1;
+    c.restore();
+  });
+}

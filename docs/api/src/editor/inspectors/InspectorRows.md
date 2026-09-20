@@ -5,13 +5,20 @@ The inspector's row widgets - the three controls a section's body is built from 
 ## TimingRow
 
 ```tsx
-export function TimingRow({ startMs, endMs, durMs, onStart, onEnd }): JSX.Element
+export function TimingRow({ startMs, endMs, durMs, minSpanMs = 0, onStart, onEnd }): JSX.Element
 ```
 
 Start and End as two `NumberField`s on one row, in clip seconds, each clamped by the other (Start's
 ceiling is End, End's floor is Start and its ceiling is the clip duration). The Timing section of
 every span-shaped inspector **except zoom** is exactly this, so the four cannot disagree about
 bounds or rounding.
+
+`minSpanMs` widens that mutual clamp into a floor: Start stops at `endMs - minSpanMs` and End at
+`startMs + minSpanMs`, so the row cannot walk a span down to nothing. It is 0 by default, which is
+the behaviour every caller but one has, and the one exception is `ClipInspector` (`ClipInspector.md`),
+which passes the Clips lane's own `MIN_CLIP_MS` because `update_clip` deletes a clip whose two
+bounds meet, the last remaining clip included. A kind whose op tolerates a zero-length span keeps
+the default and reads exactly as it did.
 
 **Why two fields and not three.** A `NumberField` spends 52px on its two steppers before any
 digits, so three of them in a panel row leave a reading like `120.40` colliding with the steppers.

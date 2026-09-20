@@ -52,10 +52,4 @@ function giveUp(why: string): false
 
 Release the context, latch `failed`, write the one DEV note and return `false`. Not exported; it exists so the two ways this pass can stop (no WebGL2 at all, and a lost context) cannot drift apart in what they leave behind. Returning `false` rather than `void` is what lets both call sites be a single `return giveUp(...)` line.
 
-## resetGradePassForTests
-
-```ts
-export function resetGradePassForTests()
-```
-
-Drops the held context and clears the `failed` latch. Exists because both are module-level state: without it a test that reached the unavailable path, or the lost-context path, would poison every later test in the same file.
+**`held` and `failed` are module state with no reset, deliberately.** There was an exported `resetGradePassForTests` for a while; it never had a caller and could not get one, because jsdom has no WebGL2 and so no test in this tree ever reaches `build` at all - `gradeCanvas` returns on `paramsOf` or latches `failed` on the first call and every later one is a single compare. The preview's numbers are pinned instead on `gradeCpu.ts`, a transcription that draws nothing and needs no context. If a browser-run test ever wants the latch cleared, it should come back with that test and not before.

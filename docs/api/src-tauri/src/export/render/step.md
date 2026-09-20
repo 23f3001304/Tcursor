@@ -1,6 +1,6 @@
 # src-tauri/src/export/render/step.rs
 
-The per-frame camera step, moved out of `render/mod.rs` (at the size cap) and given the two clocks the time remap needs (`docs/superpowers/specs/2026-09-13-time-remap-design.md`): `t_clip_abs` feeds the cursor and the raw event streams, `t_out` feeds everything the viewer sees. `walk_plan` is the one walk along a `TimeMap::frame_plan` that the exporter (`pipeline/frame_loop.rs`), the one-shot preview (`preview::walk_to`) and `camera_track` share, which is what keeps the preview's camera the export's.
+The per-frame camera step, moved out of `render/mod.rs` (at the size cap) and given the two clocks the time remap needs (`docs/superpowers/specs/2026-09-13-time-remap-design.md`): `t_clip_abs` feeds the cursor and the raw event streams, `t_out` feeds everything the viewer sees. `walk_plan` is the one walk along a `TimeMap::frame_plan` that the exporter (`pipeline/frame_loop.rs`), the one-shot preview (`preview::compose::walk_to`) and `camera_track` share, which is what keeps the preview's camera the export's.
 
 ## FrameRenderer::reset_camera
 
@@ -68,6 +68,8 @@ Rewind the cursor's raw index and lean (and the trail history) so the far side o
 pub fn walk_plan(&mut self, video_start: u64, fps: u64, plan: &[u64], last_j: usize, dt_ms: f32,
                  f: impl FnMut(&mut FrameRenderer, usize, u64, &FramePose) -> bool) -> Option<FramePose>
 ```
+
+Resolves the clip dissolve track first (`self.clip_mix.resolve(&self.map, fps)`, `clipmix.md`): the windows open on PLAN indices, so the fps has to be known, and this walk is the only place that knows it. It is idempotent and costs one pass over the map's segments per walk. **A bare `step_camera` outside a walk therefore carries whatever the LAST walk resolved** - at a different fps, or none at all. The two callers that step without walking (`preview_track::preview_layout` and `render_edit`'s `#[ignore]`d bench sweep) read only `pose.scene` and `pose.cam`, so it costs them nothing, and `preview::compose::walk_to`'s empty-plan early return is a document with no frames to dissolve between. A future caller that wants `pose.clip_mix` has to walk.
 
 Warm up over the recording frames before the first kept one (each stepped at output time 0, so the camera settles into the state output frame 0 needs on the cursor's real pre-trim path), then step every output frame `j` of `plan` through `last_j` inclusive, calling `f(renderer, j, k, pose)` after each step; `f` returning false stops the walk. Snaps the cursor on the entries of `TimeMap::plan_boundaries(fps)`, taken once before the loop and tested with `binary_search(&j)` - the question asked on the PLAN, so a cut or a non-contiguous clip join snaps on the entry that opens it and a speed-span edge does not. Asking `crosses_boundary` on output ms, as this did, snapped one entry late wherever a segment's output length was fractional; the list also never contains 0, so no `j > 0` guard is needed. Returns the last pose stepped (`None` for an empty plan). The exporter decodes and composites inside `f`; the preview passes a no-op and takes the returned pose; `camera_track` collects a sample per call.
 

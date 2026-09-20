@@ -21,7 +21,7 @@ that briefly replaced this composition was vetoed by the owner on 2026-09-13 and
 range selection, Cut / Speed / Remove silences and the output-time readout; the background assets;
 the cut and speed inspectors.
 
-Anything derivable from `doc` is spread rather than carried as its own `SlotProps` field - the stage's share of that lives in `ShellStage.md`, and `Transport` does the same here with `outOf(p.map, p.timeMs)` and `outDurMs(p.map)`.
+Anything derivable from `doc` is spread rather than carried as its own `SlotProps` field - the stage's share of that lives in `ShellStage.md`, and `Transport` does the same here with `outOf(p.map, p.timeMs)` and `outDurMs(p.map)`. `Timeline` takes the same `p.map` too (Batch 4 T8, `Timeline.md`) - its Clips lane needs it for `clipOutMs`, and `ShellProps` already carried the one `TimeMap` every reader here needs, so no second field or a narrower "timeline slot" type was worth introducing for it.
 
 ### The AI review sheet passes through (M4 T4)
 

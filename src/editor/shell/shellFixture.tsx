@@ -78,6 +78,7 @@ export function shellProps(over: Partial<ShellProps>): ShellProps {
     range: null,
     setRange: noop,
     onDetectSilences: noop,
+    onSplit: noop,
     track: [],
     layout: null,
     layoutPresets: null,

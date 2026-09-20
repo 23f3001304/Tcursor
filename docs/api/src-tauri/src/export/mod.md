@@ -40,7 +40,7 @@ Defines two-panel scene geometry, resolves `LayoutId` presets into output-pixel 
 
 ## preview
 
-Single-frame preview engine: renders one composited frame at an arbitrary scrub position from `edit.json`, reusing `FrameRenderer` so the preview is byte-faithful to the export. Key items: `render_preview(paths, time_ms) -> Result<Vec<u8>>` (fast-forwards step_camera, seek-decodes screen + webcam, composites, PNG-encodes via ffmpeg); `preview_frame(folder, time_ms) -> Result<String, String>` (Tauri command wrapping render_preview at the doc's resolved aspect, downscaled to `PREVIEW_LONG_EDGE`, returns PNG data URL).
+Single-frame preview engine: renders one composited frame at an arbitrary scrub position from `edit.json`, reusing `FrameRenderer` so the preview is byte-faithful to the export. Key items: `render_preview(paths, time_ms) -> Result<Vec<u8>>` (fast-forwards step_camera, seek-decodes screen + webcam, composites, PNG-encodes via ffmpeg); `preview_frame(folder, out_ms) -> Result<String, String>` (Tauri command rendering the same frame through the warm cache at the doc's resolved aspect, downscaled to `PREVIEW_LONG_EDGE`, returns a JPEG data URL; it takes OUTPUT ms, where `render_preview` takes clip ms).
 
 ## remap
 

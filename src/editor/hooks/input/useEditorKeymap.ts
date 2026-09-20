@@ -12,6 +12,7 @@ export function useEditorKeymap(opts: {
   addZoom: () => Promise<void>;
   addSpotlight: () => Promise<void>;
   addText: (kind: TextKind) => Promise<void>;
+  splitAt: () => Promise<void>;
   onOverlay: () => void;
   modalOpen: boolean;
   shortcutsOpen: boolean;
@@ -27,6 +28,7 @@ export function useEditorKeymap(opts: {
     addZoom,
     addSpotlight,
     addText,
+    splitAt,
     onOverlay,
     modalOpen,
     shortcutsOpen,
@@ -71,6 +73,9 @@ export function useEditorKeymap(opts: {
           break;
         case "spotlight":
           void addSpotlight();
+          break;
+        case "split":
+          void splitAt();
           break;
         case "text":
           void addText("title");

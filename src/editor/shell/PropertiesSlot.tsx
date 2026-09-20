@@ -8,9 +8,11 @@ import { CutInspector } from "../inspectors/CutInspector";
 import { SpeedInspector } from "../inspectors/SpeedInspector";
 import { CaptionInspector } from "../inspectors/CaptionInspector";
 import { TextInspector } from "../inspectors/TextInspector";
+import { ClipInspector } from "../inspectors/ClipInspector";
 import type {
   CameraMove,
   Caption,
+  Clip,
   Cut,
   EditDoc,
   EffectRegion,
@@ -34,7 +36,8 @@ export type SelectedClip =
   | { kind: "cut"; cut: Cut }
   | { kind: "speed"; speed: Speed }
   | { kind: "caption"; caption: Caption }
-  | { kind: "text"; text: TextItem };
+  | { kind: "text"; text: TextItem }
+  | { kind: "clip"; clip: Clip };
 
 export function selectedClip(doc: EditDoc, sel: string | null): SelectedClip | null {
   if (!sel) return null;
@@ -54,6 +57,8 @@ export function selectedClip(doc: EditDoc, sel: string | null): SelectedClip | n
   if (caption) return { kind: "caption", caption };
   const text = doc.texts?.find((t) => t.id === sel);
   if (text) return { kind: "text", text };
+  const clip = doc.clips.find((c) => c.id === sel);
+  if (clip) return { kind: "clip", clip };
   return null;
 }
 
@@ -140,6 +145,16 @@ export function PropertiesSlot({ p }: { p: SlotProps }) {
             />
           ) : hit.kind === "text" ? (
             <TextInspector item={hit.text} dur={p.dur} onApply={p.applyOp} onClose={close} />
+          ) : hit.kind === "clip" ? (
+            <ClipInspector
+              clip={hit.clip}
+              clips={doc.clips}
+              map={p.map}
+              dur={p.dur}
+              motionEasing={doc.settings.motion.easing}
+              onApply={p.applyOp}
+              onClose={close}
+            />
           ) : (
             <SpeedInspector speed={hit.speed} dur={p.dur} onApply={p.applyOp} onClose={close} />
           )}

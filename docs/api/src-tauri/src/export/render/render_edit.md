@@ -18,6 +18,7 @@ pub(crate) struct EditState {
     pub texts: Vec<crate::edit::text::TextItem>,
     pub cam_moves: CameraMoveTrack,
     pub grade: Option<GradeParams>,
+    pub clip_mix: ClipMixTrack,
 }
 ```
 
@@ -26,6 +27,7 @@ Everything the renderer derives from `edit.json` that a zoom/spotlight/camera-mo
 - `captions: Vec<Caption>` - `doc.captions`, already moved onto the output clock by `remap_doc` along with each caption's own word timings. It sits on `EditState` rather than being read straight off the doc in `composite_at` so that a caption edit refreshes through exactly the path a zoom edit does - `reload_edit`, not a rebuild.
 - `texts: Vec<TextItem>` - `doc.texts`, the animated text items, carried for exactly the reason `captions` is: `remap_doc` has already moved them onto the output clock (so a text item inside a cut is already gone and one under a speed span has already been re-timed), and sitting on `EditState` means a text edit refreshes through `reload_edit` rather than forcing a renderer rebuild. Their LOOK needs no second field: the four styles are a fixed table in `export/fx/text/text_style.rs` and the only document-level input is `settings.ui.accent`, which `settings` already carries.
 - `cam_moves: CameraMoveTrack` - `CameraMoveTrack::from_doc(&doc.camera_moves)`; empty when the doc has no `camera_moves` (the default), which is the signal `FrameRenderer::step_camera` uses to leave the scene's camera panel untouched.
+- `clip_mix: ClipMixTrack` - the clip boundary cross-dissolve (`clipmix.md`), built from the RAW document's `clips` and carrying the curve `settings.motion.easing` names, parsed by `fromedit::easing_from` with `Easing::Smooth` as the fallback. *Why the raw doc and not `doc`:* `load` builds it between `TimeMap::build` and `remap_doc`, because `remap_doc` clears `clips` once the map has consumed them and there would be no `transition_in_ms` left to read. It arrives here with no windows resolved: those open on PLAN indices, so only a walk that knows the fps can fill them, and `walk_plan` does that once per walk.
 - `grade: Option<GradeParams>` - `export::grade::params_of(&settings.grade)`, the project's colour grade resolved to its eleven parameters. *Why resolved here and not per frame:* a grade is a doc SETTING and not a region, so it is the same for every frame of the export; resolving it once means the FX pass gets a value to copy rather than a preset table to look up sixty times a second, and `reload_edit` refreshes it for free along with everything else on this struct. `None` for a document that has never picked a look, which is what keeps such an export byte-identical to one from before the grade existed.
 
 ## EditState::load

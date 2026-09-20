@@ -114,15 +114,15 @@ See `FxU::lens_a`.
 ### FxU::mask
 
 ```rust
-pub mask: [[f32; 4]; 3 * MAX_MASKS],  // three vec4 per mask, eight masks
-pub grade: [[f32; 4]; 6],             // reserved for the colour grade parameters
+pub mask: [[f32; 4]; 3 * MAX_MASKS],  // 24 vec4: three per mask, eight masks
+pub grade: [[f32; 4]; 6],             // 6 vec4: the colour grade's eleven parameters
 ```
 
-Two blocks at the END of the struct, after the lens slots. `mask` is live: `build_fx_u` fills it through `pack_masks` and `fx_mask.wgsl` reads it. `grade` is live too (Batch 2b: see `FxU::grade`), filled through `pack_grade` and read by `fx_grade.wgsl`. They bought the parity features room to land one at a time, each through its own packing function, so neither had to edit this struct's shape or re-check its layout against the shader.
+Two blocks at the END of the struct, after the lens slots, and **both are live**: `build_fx_u` fills `mask` through `pack_masks` and `fx_mask.wgsl` reads it, and it fills `grade` through `pack_grade` and `fx_grade.wgsl` reads it (see `FxU::grade` for the grade's slot table). They bought the parity features room to land one at a time, each through its own packing function, so neither had to edit this struct's shape or re-check its layout against the shader - which is exactly what happened: the masks and the grade were built in parallel and each filled its own block.
 
 `the_mask_block_is_three_vec4_per_mask_and_the_grade_block_still_trails_it` pins their OFFSETS, not just the total size: `offset_of!(FxU, mask)` is `16 * (7 + MAX_HITS + 8)` and `offset_of!(FxU, grade)` is `16 * (7 + MAX_HITS + 8 + 3 * MAX_MASKS)`, so inserting or removing a field ANYWHERE ahead of them fails the test instead of silently sliding what each packing function writes. Size alone cannot see a field swapped for another of the same width. **Resizing `mask` moved `grade` 128 bytes later**, and the `fx.wgsl` struct was widened from `array<vec4<f32>, 16>` to `array<vec4<f32>, 24>` in the same commit for exactly that reason.
 
-*Why reserve rather than add later:* the uniform is two declarations that must agree byte for byte - this one and `struct FxU` in `fx.wgsl` - and the only thing checked across that seam is the bound buffer's SIZE. The FX bind group declares `min_binding_size: None` (`fx_gpu_pipeline.rs`), so nothing validates field ORDER: swap two `vec4`s on one side only and every GPU test still passes while the shader reads the wrong numbers. **Batch 2a and 2b must therefore pin their own packing offsets with tests** - a slot-by-slot assertion on what `build_fx_u` writes, next to these two - because no GPU test will catch a disagreement for them. Growing the tail once, with both sides moved together and the GPU tests green, costs nothing (the struct is 848 bytes against a 64 KiB uniform limit, and `fx_gpu.rs` sizes the buffer from `bytemuck::bytes_of(&u)`, so it follows the struct on its own); growing it twice more, concurrently, from two agents editing the same two files, is where the layouts drift apart.
+*Why reserve rather than add later:* the uniform is two declarations that must agree byte for byte - this one and `struct FxU` in `fx.wgsl` - and the only thing checked across that seam is the bound buffer's SIZE. The FX bind group declares `min_binding_size: None` (`fx_gpu_pipeline.rs`), so nothing validates field ORDER: swap two `vec4`s on one side only and every GPU test still passes while the shader reads the wrong numbers. **Each block therefore pins its own packing offsets with a test** - a slot-by-slot assertion on what `build_fx_u` writes, next to these two, one for `pack_masks` and one for `pack_grade` - because no GPU test will catch a disagreement for them. Growing the tail once, with both sides moved together and the GPU tests green, costs nothing (the struct is 61 vec4 - 7 head + `MAX_HITS` 16 + 8 (`e`, `cam` and the six lens slots) + 24 mask + 6 grade - so 976 bytes against a 64 KiB uniform limit, and `fx_gpu.rs` sizes the buffer from `bytemuck::bytes_of(&u)`, so it follows the struct on its own); growing it twice more, concurrently, from two agents editing the same two files, is where the layouts drift apart.
 
 WGSL's `array<vec4<f32>, N>` and `#[repr(C)]`'s `[[f32; 4]; N]` agree - 16-byte stride, no padding between elements - so the two arrays mirror across the seam like every other field here.
 
@@ -240,7 +240,7 @@ Packs a complete `FxState` into an `FxU` ready for GPU upload.
 
 ### Returns
 
-`FxU` - fully populated uniform; unused slots (no spotlight, no video FX, excess hits, and the reserved `mask`/`grade` blocks) are zero-initialized.
+`FxU` - fully populated uniform; unused slots (no spotlight, no video FX, excess hits, mask slots past the live ones, and the whole `grade` block on an ungraded project) are zero-initialized.
 
 ### Implementation
 
@@ -262,7 +262,7 @@ Packs a complete `FxState` into an `FxU` ready for GPU upload.
 - `spot_mode_id_and_tint_pack` - `Nebula` mode -> `d[0]=4.0`, time in `d[1]`, tint channel normalization verified.
 - `dim_camera_false_sets_keep_flag_and_cam_rect` - `Spot::dim_camera = false` -> `d[2] = 1.0`, `d[3]` equals `cam_radius`, `cam` equals `cam_rect` verbatim.
 - `dim_camera_true_clears_keep_flag` - `Spot::dim_camera = true` (today's default) -> `d[2] = 0.0`.
-- `the_reserved_mask_and_grade_blocks_are_zero_and_trail_the_lens_slots` - every reserved slot comes back zero, `size_of::<FxU>()` is `16 * (7 + MAX_HITS + 8 + 16 + 6)` bytes, and `offset_of!` puts `mask` at `16 * (7 + MAX_HITS + 8)` and `grade` 16 vec4 after it - the arithmetic pins the two blocks to the tail by position, so a field added, removed or reordered ahead of them (which would silently shift what the shader reads) fails the test rather than the pixels.
+- `the_mask_block_is_three_vec4_per_mask_and_the_grade_block_still_trails_it` - with no masks and no grade in the state every slot of both blocks comes back zero, `MAX_MASKS` is 8, `size_of::<FxU>()` is `16 * (7 + MAX_HITS + 8 + 3 * MAX_MASKS + 6)` = 976 bytes, and `offset_of!` puts `mask` at `16 * (7 + MAX_HITS + 8)` = 496 and `grade` `3 * MAX_MASKS` vec4 after it, at 880 - the arithmetic pins the two blocks to the tail by position, so a field added, removed or reordered ahead of them (which would silently shift what the shader reads) fails the test rather than the pixels.
 
 ## pack_grade
 

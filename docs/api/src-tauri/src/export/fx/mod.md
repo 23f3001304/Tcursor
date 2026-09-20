@@ -1,10 +1,10 @@
 # src-tauri/src/export/fx/mod.rs
 
-Submodule overviews for the `fx` group. Four of them are folders - `click`, `spot`, `lens` and `caption` - each holding one overlay's data model and its renderers; the files at this level are the ones every overlay shares: the per-frame state, the GPU uniform packing, and the two `FxRenderer` implementations.
+Submodule overviews for the `fx` group. Six of them are folders - `caption`, `click`, `lens`, `mask`, `spot` and `text` - each holding one overlay's data model and its renderers; the files at this level are the ones every overlay shares: the per-frame state, the GPU uniform packing, the one glyph blit and the two `FxRenderer` implementations.
 
-Four module aliases live here so callers outside `fx` keep the paths they had before the folders existed: `pub use self::lens as fx_lens`, `pub use self::lens::build as fx_lensbuild`, `pub use self::caption::captiondraw` and `pub use self::text::textdraw`. INVARIANT: they exist only for `export/cursor` and `export/render`; nothing inside `fx` may use them.
+Six module aliases live here so callers outside `fx` keep the paths they had before the folders existed: `pub use self::caption::captiondraw`, `pub use self::lens as fx_lens`, `pub use self::lens::build as fx_lensbuild`, `pub use self::mask::{fx_masks, maskdraw}` and `pub use self::text::textdraw`. INVARIANT: they exist only for `export/cursor` and `export/render`; nothing inside `fx` may use them.
 
-The group also carries the FX shader itself, which is not a Rust module and so has no doc page of its own: **`fx.wgsl` + `fx_clicks.wgsl`**, two files `fx_gpu::build_pipeline` concatenates (in that order) into ONE wgpu shader module. `fx.wgsl` owns the `FxU` uniform struct, the bindings, the `FX_*`/`SP_*`/`VF_*` id constants, the vertex stage, the noise/nebula helpers, the shockwave UV warp and chromatic dispersion (both of which have to run before the frame is sampled) and the spotlight/video-FX blending; `fx_clicks.wgsl` owns the shared click timing (`fx_ease`, `fx_alpha`), the coverage helpers and `clicks(base, px, oh, style, n)`, the single function `fs_main` calls for every click style. The click styles are the half that changes, so they are the half kept on its own; WGSL resolves module-scope names out of order, so the forward call is legal. See `fx_gpu.md`.
+The group also carries the FX shader itself, which is not a Rust module and so has no doc page of its own: **`fx.wgsl` + `fx_clicks.wgsl` + `fx_lens.wgsl` + `mask/fx_mask.wgsl` + `fx_grade.wgsl`**, five files `fx_gpu::build_pipeline` concatenates (in that order) into ONE wgpu shader module. `fx.wgsl` owns the `FxU` uniform struct, the bindings, the `FX_*`/`SP_*`/`VF_*` id constants, the vertex stage, the noise/nebula helpers, the shockwave UV warp and chromatic dispersion (both of which have to run before the frame is sampled) and the spotlight/video-FX blending; `fx_clicks.wgsl` owns the shared click timing (`fx_ease`, `fx_alpha`), the coverage helpers and `clicks(base, px, oh, style, n)`, the single function `fs_main` calls for every click style; `fx_lens.wgsl` owns the glass cursor material, `mask/fx_mask.wgsl` the three mask kinds and `fx_grade.wgsl` the colour grade. Everything that changes on its own schedule is kept in a file of its own; WGSL resolves module-scope names out of order, so `fs_main` calling `clicks`, `mask_fx` and `grade_fx` forward is legal. See `fx_gpu.md`.
 
 ## fx_state
 
@@ -16,15 +16,15 @@ Packs `FxState` into the `FxU` GPU uniform struct consumed by the FX shader, def
 
 ## fx_gpu
 
-GPU-backed `FxRenderer` that uploads the composited frame, runs the FX shader (`fx.wgsl` + `fx_clicks.wgsl`, concatenated into one module: spotlight, click effects, video FX), and reads processed pixels back into the caller's buffer. Key items: `GpuFx` struct, `GpuFx::new(ow, oh) -> Option<GpuFx>`, `GpuFx::apply(out, ow, oh, state)`.
+GPU-backed `FxRenderer` that uploads the composited frame, runs the FX shader (the five `.wgsl` files concatenated into one module: masks, the colour grade, video FX, spotlight, click effects and the cursor lens), and reads processed pixels back into the caller's buffer. Key items: `GpuFx` struct, `GpuFx::new(ow, oh) -> Option<GpuFx>`, `GpuFx::apply(out, ow, oh, state)`.
 
 ## fx_gpu_pipeline
 
-The wgpu objects `GpuFx` is built from, kept out of the renderer file: `build_pipeline` (bind-group layout + render pipeline, compiling the three `.wgsl` files as one module) and `r8_texture` (upload an R8 mask and return its view).
+The wgpu objects `GpuFx` is built from, kept out of the renderer file: `build_pipeline` (bind-group layout + render pipeline, compiling the five `.wgsl` files as one module) and `r8_texture` (upload an R8 mask and return its view).
 
 ## fxdraw
 
-CPU fallback `FxRenderer` that applies the full effect stack in layer order: video FX then spotlight then click effects. Key items: `CpuFx` (unit struct implementing `FxRenderer`), `CpuFx::apply(out, ow, oh, state)`.
+CPU fallback `FxRenderer` that applies the full effect stack in layer order: masks, then the colour grade, then video FX, then spotlight, then click effects, then the cursor lens - the order `fs_main` takes in `fx.wgsl`, step for step. Key items: `CpuFx` (unit struct implementing `FxRenderer`), `CpuFx::apply(out, ow, oh, state)`.
 
 ## glyph
 

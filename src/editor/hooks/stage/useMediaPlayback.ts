@@ -2,6 +2,7 @@ import { useEffect, useRef, type RefObject } from "react";
 
 export function useMediaPlayback({
   screenRef,
+  screenBRef,
   webcamRef,
   audioRef,
   playing,
@@ -10,9 +11,11 @@ export function useMediaPlayback({
   volume,
   audioSrc,
   timeMs,
+  preseekMs,
   playRef,
 }: {
   screenRef: RefObject<HTMLVideoElement | null>;
+  screenBRef: RefObject<HTMLVideoElement | null>;
   webcamRef: RefObject<HTMLVideoElement | null>;
   audioRef: RefObject<HTMLAudioElement | null>;
   playing: boolean;
@@ -21,6 +24,7 @@ export function useMediaPlayback({
   volume: number;
   audioSrc: string;
   timeMs: number;
+  preseekMs: number | null;
   playRef: RefObject<boolean>;
 }) {
   const timeRef = useRef(timeMs);
@@ -67,4 +71,12 @@ export function useMediaPlayback({
       av.currentTime = Math.max(0, timeMs / 1000);
     }
   }, [timeMs, playing, screenRef, webcamRef, audioRef, playRef]);
+
+  useEffect(() => {
+    const b = screenBRef.current;
+    if (!b || preseekMs === null) return;
+    const want = Math.max(0, preseekMs / 1000);
+    if (Math.abs(b.currentTime - want) > 0.05) b.currentTime = want;
+    b.pause();
+  }, [preseekMs, screenBRef]);
 }

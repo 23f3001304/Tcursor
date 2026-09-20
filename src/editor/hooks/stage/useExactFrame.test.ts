@@ -13,6 +13,12 @@ describe("exactKey", () => {
     expect(exactKey(1000, 1)).not.toBe(exactKey(1001, 1));
     expect(exactKey(1000, 1)).not.toBe(exactKey(1000, 2));
   });
+
+  it("keys the held frame on the output instant it was fetched for", () => {
+    expect(exactKey(4900, 7)).toBe("4900|7");
+    expect(exactKey(4900, 7)).not.toBe(exactKey(5000, 7));
+    expect(wantsExact(false, false, "f", "4900|7", held("5000|7"))).toBe(true);
+  });
 });
 
 describe("wantsExact", () => {

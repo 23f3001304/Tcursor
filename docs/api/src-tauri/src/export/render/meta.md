@@ -39,10 +39,12 @@ All information the export (or preview) loop needs to set up its raw decoders an
 
 ```rust
 pub struct FramePose { pub ev_t: u32, pub out_t: u32, pub scene: Scene, pub cur: FramePoint, pub cam: Camera,
-    pub mix: Option<SpanMix>, pub hold: Option<usize> }
+    pub mix: Option<SpanMix>, pub hold: Option<usize>, pub clip_mix: Option<ClipMix> }
 ```
 
 `mix` and `hold` are the display-switch cross-dissolve's two halves and are `None` on every frame of a take that never switched. `mix` says this frame is inside a switch and carries the rect to blend FROM plus the eased 0..1 weight of the new picture; `hold` (a span index) says THIS frame's decoded screen buffer is the one to latch, because the next output frame is already past the switch. See `render::spans`.
+
+`clip_mix` is the CLIP boundary's cross-dissolve, one level up and otherwise the same idea: `Some` only while a clip's `transition_in_ms` window is open, carrying the outgoing clip's index and the incoming clip's eased weight. `step_camera` fills it from the `ClipMixTrack` `walk_plan` resolved (`clipmix.md`); the exporter's frame loop reads it to blend its latched `Pipes::clip_held` into the decoded frame before compositing, and the paused preview reads it to decode the picture to blend from. `None` for a document with no clips, and for one whose clips carry no transition, which is what keeps such an export the export it was.
 
 The resolved camera and scene for one output frame, returned by `step_camera` and passed unchanged to `composite_at`. Grouping these values as a struct avoids passing them as separate arguments and lets the preview engine inspect the pose (e.g. to know zoom scale) without compositing.
 

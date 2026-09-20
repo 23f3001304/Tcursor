@@ -22,6 +22,7 @@ pub(crate) struct EditState {
     pub texts: Vec<crate::edit::text::TextItem>,
     pub cam_moves: CameraMoveTrack,
     pub grade: Option<crate::export::grade::GradeParams>,
+    pub clip_mix: crate::export::render::clipmix::ClipMixTrack,
 }
 
 impl EditState {
@@ -37,6 +38,13 @@ impl EditState {
     ) -> Self {
         let raw = crate::edit::seed::load_or_seed(paths);
         let map = TimeMap::build(&raw.trim, &raw.cuts, &raw.speed, &raw.clips, full_dur_ms);
+        let mut clip_mix = crate::export::render::clipmix::ClipMixTrack::new(
+            crate::export::render::fromedit::easing_from(
+                &raw.settings.motion.easing,
+                crate::export::types::Easing::Smooth,
+            ),
+        );
+        clip_mix.set_clips(raw.clips.clone());
         let doc = crate::edit::remap_doc::remap_doc(&raw, &map);
         let settings = doc.settings.clone();
         let cfg = settings.zoom.to_zoom_config();
@@ -86,6 +94,7 @@ impl EditState {
             texts: doc.texts.clone(),
             cam_moves,
             grade,
+            clip_mix,
         }
     }
 }
@@ -96,6 +105,32 @@ mod tests {
     use crate::export::settings::Resolution;
     use crate::export::types::Layout;
     use crate::session::paths::ProjectPaths;
+
+    #[test]
+    fn reload_edit_refreshes_every_field_edit_state_carries() {
+        let declared = include_str!("render_edit.rs");
+        let reload = include_str!("bg.rs");
+        let body = declared
+            .split_once("pub(crate) struct EditState {")
+            .expect("the EditState declaration")
+            .1
+            .split_once('}')
+            .expect("its closing brace")
+            .0;
+        let fields: Vec<&str> = body
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("pub "))
+            .filter_map(|l| l.split_once(':'))
+            .map(|(name, _)| name)
+            .collect();
+        assert_eq!(fields.len(), 11, "fields found: {fields:?}");
+        for f in fields {
+            assert!(
+                reload.contains(&format!("self.{f} = es.{f};")),
+                "reload_edit never copies {f}, so an edit to it would load on a cold build and then never refresh"
+            );
+        }
+    }
 
     fn sweep(r: &mut FrameRenderer, vs: u64) -> Vec<[u32; 5]> {
         r.reset_camera();

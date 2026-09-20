@@ -55,12 +55,23 @@ const DOC = {
       easing: "smooth",
     },
   ],
-  clips: [],
+  clips: [
+    { id: "cl0", src_in_ms: 0, src_out_ms: 4000, transition_in_ms: 0 },
+    { id: "cl1", src_in_ms: 4000, src_out_ms: 9000, transition_in_ms: 0 },
+  ],
   cuts: [{ id: "c0", start_ms: 1000, end_ms: 2500 }],
   speed: [{ id: "s0", start_ms: 3000, end_ms: 5000, factor: 2 }],
   aspect: "source",
   trim: { in_ms: 0, out_ms: 0 },
-  settings: { ai_model: "", cursor: {}, clickfx: {}, zoom: {}, appearance: {}, ui: {} },
+  settings: {
+    ai_model: "",
+    cursor: {},
+    clickfx: {},
+    zoom: {},
+    appearance: {},
+    ui: {},
+    motion: { preset: "soft", easing: "smooth", easing_out: "smooth" },
+  },
 } as unknown as EditDoc;
 
 let root: Root, container: HTMLDivElement;
@@ -101,6 +112,7 @@ describe("selectedClip (what the sidebar exists for)", () => {
     expect(selectedClip(DOC, "c0")).toEqual({ kind: "cut", cut: DOC.cuts[0] });
     expect(selectedClip(DOC, "s0")).toEqual({ kind: "speed", speed: DOC.speed[0] });
     expect(selectedClip(DOC, "t0")).toEqual({ kind: "text", text: DOC.texts[0] });
+    expect(selectedClip(DOC, "cl0")).toEqual({ kind: "clip", clip: DOC.clips[0] });
   });
 
   it("splits the one effects list by kind, so a mask is not a spotlight", () => {
@@ -147,5 +159,10 @@ describe("PropertiesSlot routing", () => {
     show(null);
     expect(q(".e-insp")).toBeNull();
     expect(container.textContent).toBe("");
+  });
+
+  it("shows the clip inspector for a selected clip", () => {
+    show("cl0");
+    expect(q(".e-ihead h2")?.textContent).toMatch(/^Clip /);
   });
 });

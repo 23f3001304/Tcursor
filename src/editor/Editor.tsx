@@ -105,6 +105,7 @@ export function Editor({ folder, onClose }: { folder: string; onClose: () => voi
     applyOp,
     addZoom: timeline.addZoom,
     addSpotlight: timeline.addSpotlight,
+    splitAt: timeline.splitAt,
     addText: timeline.addText,
     onOverlay: modals.toggleShortcuts,
     modalOpen,

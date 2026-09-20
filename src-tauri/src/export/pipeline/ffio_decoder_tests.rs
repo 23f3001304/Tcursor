@@ -164,3 +164,50 @@ fn crop_is_exact_and_comes_before_any_scale() {
         "no filter without crop or scale: {none:?}"
     );
 }
+
+#[test]
+fn a_seek_goes_in_before_the_input_and_nothing_else_moves() {
+    let plain = decode_args(
+        Path::new("v.mp4"),
+        60.0,
+        false,
+        None,
+        None,
+        None,
+        None,
+        "nv12",
+    );
+    let sought = decode_args(
+        Path::new("v.mp4"),
+        60.0,
+        false,
+        Some(4000),
+        None,
+        None,
+        None,
+        "nv12",
+    );
+    assert_eq!(
+        plain,
+        [
+            "-v",
+            "error",
+            "-hwaccel",
+            "auto",
+            "-i",
+            "v.mp4",
+            "-r",
+            "60.0000",
+            "-sws_flags",
+            "fast_bilinear",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "nv12",
+            "-"
+        ]
+    );
+    let mut want = plain.clone();
+    want.splice(4..4, ["-ss".to_string(), "4.0000".to_string()]);
+    assert_eq!(sought, want);
+}

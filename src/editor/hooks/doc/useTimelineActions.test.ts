@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { pickAddedCameraMoveId } from "./useTimelineActions";
-import type { CameraMove } from "../../../shared/edit";
+import { pickAddedCameraMoveId, runSplitAt } from "./useTimelineActions";
+import type { CameraMove, Clip, EditDoc, EditOp } from "../../../shared/edit";
 
 const kf = (id: string, t_ms: number): CameraMove => ({
   id,
@@ -37,5 +37,59 @@ describe("pickAddedCameraMoveId", () => {
 
   it("handles the first keyframe ever added (empty before)", () => {
     expect(pickAddedCameraMoveId([], [kf("k0", 1000)])).toBe("k0");
+  });
+});
+
+const clip = (id: string, src_in_ms: number, src_out_ms: number): Clip => ({
+  id,
+  src_in_ms,
+  src_out_ms,
+  transition_in_ms: 0,
+});
+
+describe("runSplitAt", () => {
+  it("selects the clip the split created, not the doc's last clip (split inside the first of three)", async () => {
+    const before = [clip("c0", 0, 1000), clip("c1", 1000, 2000), clip("c2", 2000, 3000)];
+    const after = [
+      clip("c0", 0, 500),
+      clip("new", 500, 1000),
+      clip("c1", 1000, 2000),
+      clip("c2", 2000, 3000),
+    ];
+    const ops: EditOp[] = [];
+    const sel: (string | null)[] = [];
+    const applyOp = async (op: EditOp): Promise<EditDoc | null> => {
+      ops.push(op);
+      return { clips: after } as unknown as EditDoc;
+    };
+    await runSplitAt(applyOp, 500.4, before, (id) => sel.push(id));
+    expect(ops).toEqual([{ op: "split_at", at_ms: 500 }]);
+    expect(sel).toEqual(["new"]);
+  });
+
+  it("selects the right-hand half on the first split of a clip-less document", async () => {
+    const after = [clip("a", 0, 3000), clip("b", 3000, 5000)];
+    const ops: EditOp[] = [];
+    const sel: (string | null)[] = [];
+    const applyOp = async (op: EditOp): Promise<EditDoc | null> => {
+      ops.push(op);
+      return { clips: after } as unknown as EditDoc;
+    };
+    await runSplitAt(applyOp, 3000, [], (id) => sel.push(id));
+    expect(ops).toEqual([{ op: "split_at", at_ms: 3000 }]);
+    expect(sel).toEqual(["b"]);
+  });
+
+  it("leaves the selection alone on a no-op split (a clip edge or outside every clip)", async () => {
+    const clips = [clip("c0", 0, 1000), clip("c1", 1000, 2000)];
+    const ops: EditOp[] = [];
+    const sel: (string | null)[] = [];
+    const applyOp = async (op: EditOp): Promise<EditDoc | null> => {
+      ops.push(op);
+      return { clips } as unknown as EditDoc;
+    };
+    await runSplitAt(applyOp, 1000, clips, (id) => sel.push(id));
+    expect(ops).toEqual([{ op: "split_at", at_ms: 1000 }]);
+    expect(sel).toEqual([]);
   });
 });

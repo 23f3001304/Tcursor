@@ -32,10 +32,10 @@ The end is clamped into the clip; the start is clamped at 0. Pure, so the fallba
 ## TransportTools
 
 ```tsx
-export function TransportTools({ locked, trimmed, onTrimIn, onTrimOut, onResetTrim, onAddZoom, onAddText, onAutoedit, aiRunning, exporting, timeMs, dur, clicks, range, setRange, onApply, onDetectSilences }): JSX.Element
+export function TransportTools({ locked, trimmed, onTrimIn, onTrimOut, onResetTrim, onAddZoom, onSplit, onAddText, onAutoedit, aiRunning, exporting, timeMs, dur, clicks, range, setRange, onApply, onDetectSilences }): JSX.Element
 ```
 
-Trim start/end to the playhead (the timeline edge handles do the same), a reset that appears once trimmed (Motion press spring), then a divider and the timeline tools: **Cut** (`IconCut`), **Speed 2x** (`IconPlayerTrackNext`), add a zoom, add a text item (`IconTypography`, `onAddText`, titled with its `(T)` shortcut and placed directly beside the zoom tool because the two are the same gesture - drop an element at the playhead - and Z and T are neighbours in the keymap), run the AI director. The wand is disabled while a run or an export is in progress so a double click cannot fire two interleaved reveals, and carries `data-director-anchor="wand"` for the director's fake pointer. `locked` is the transport's own `exporting || dur <= 0` and disables Cut and Speed too - neither is meaningful with no clip, and neither may change the doc mid-export.
+Trim start/end to the playhead (the timeline edge handles do the same), a reset that appears once trimmed (Motion press spring), then a divider and the timeline tools: **Cut** (`IconCut`), **Speed 2x** (`IconPlayerTrackNext`), add a zoom, **Split** (`IconScissors`, `onSplit`, titled with its `(B)` shortcut, Batch 4 T9 - sits directly beside the zoom tool because both are one-key, one-click ops at the playhead, the same reason Z and B are neighbours in the keymap), add a text item (`IconTypography`, `onAddText`, titled with its `(T)` shortcut and now placed beside Split rather than the zoom tool, since Split sits between them - Z, B and T stay a contiguous run of playhead tools in both the transport and the keymap), run the AI director. The wand is disabled while a run or an export is in progress so a double click cannot fire two interleaved reveals, and carries `data-director-anchor="wand"` for the director's fake pointer. `locked` is the transport's own `exporting || dur <= 0` and disables Cut, Speed and Split too - none is meaningful with no clip, and none may change the doc mid-export.
 
 ### Magnetic pull (micro-interaction pass, 2026-09-14)
 
@@ -55,6 +55,10 @@ Each carries `data-action="cut"` / `data-action="speed"` (the way the wand carri
 
 **Remove silences** (`IconEarOff`, `data-action="silences"`) sits between Speed and the zoom tool, next to the two manual ways of making a cut. It only calls `onDetectSilences` (`hooks/doc/useSilences.ts`): the scan, the one `add_cuts` and the toast live there, so the button touches neither the doc nor the range itself; disabled with `locked` like Cut and Speed.
 
+### Split (Batch 4 T9)
+
+`data-action="split"`, titled "Split at the playhead (B)", disabled with `locked` and its `TAP_SPRING` withheld the same way Cut/Speed/Silences are (`{...(locked ? {} : TAP_SPRING)}`) rather than the un-gated pattern the zoom and text tools still use - Split changes the clip list, so it follows the doc-mutating tools' disabled rule, not its two neighbours'. `onClick={onSplit}` is called unconditionally; the tool has no span to compute (unlike Cut/Speed) because a split only ever needs the one instant, `timeMs`, which the caller (`useTimelineActions.splitAt`) already has.
+
 ### Props
 
 - `timeMs: number` - clip time, where a range-less Cut or Speed starts. A plain prop rather than a ref: `Transport` re-renders every tick for its readout anyway, so there is no memo to protect here.
@@ -63,3 +67,4 @@ Each carries `data-action="cut"` / `data-action="speed"` (the way the wand carri
 - `range: Range | null` / `setRange` - the ruler's selection and the way to clear it.
 - `onApply` - the op sink (`Editor.tsx`'s `applyOp`), so Cut and Speed are one undo step each like every other edit.
 - `onDetectSilences` - Remove silences' callback, from `SlotProps`.
+- `onSplit: () => void` (Batch 4 T9) - Split's callback; `Transport` threads it straight through from its own prop of the same name.

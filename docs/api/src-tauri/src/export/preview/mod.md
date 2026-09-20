@@ -1,6 +1,8 @@
 # src-tauri/src/export/preview/mod.rs
 
-Single-frame preview engine + the warm renderer cache. Renders one composited output frame at an arbitrary scrub time T from `edit.json`, reusing `FrameRenderer` (render.rs) so the preview is byte-faithful to the export, and exposes the export background as an image. It also holds the wire encoders (`png_encode`, `jpeg_encode`, `base64_encode`) that turn a composited frame into a `data:` URL. The lightweight metadata commands the editor uses for smooth playback (camera curve, layout, clicks, proxy) live in `preview_track.rs`; both share the `with_warm` cache helper (in `session.rs`).
+Single-frame preview engine + the warm renderer cache. Renders one composited output frame at an arbitrary scrub instant from `edit.json`, reusing `FrameRenderer` (render.rs) so the preview is byte-faithful to the export, and exposes the export background as an image. It also holds the wire encoders (`png_encode`, `jpeg_encode`, `base64_encode`) that turn a composited frame into a `data:` URL. The lightweight metadata commands the editor uses for smooth playback (camera curve, layout, clicks, proxy) live in `preview_track.rs`; both share the `with_warm` cache helper (in `session.rs`).
+
+**The frame itself is next door.** `walk_to`, `decode_screen`, `clip_dissolve` and `composite_frame`, plus the `PreviewAt` clock the commands address a frame in and its resolver `at_instants`, moved to the sibling `compose.rs` in Batch 4 (clips) - see `compose.md`. This file keeps the commands, `build_renderer` and the encoders, imports `composite_frame`, and re-exports `PreviewAt` and `at_instants` so callers still spell them `crate::export::preview::PreviewAt`.
 
 **The warm renderer cache.** `Cached`, `PreviewSession` (with `has_webcam`), `with_warm` and `with_warm_app` live in the sibling `session.rs` - see `session.md`. `PreviewSession` and `with_warm_app` are re-exported from here so every preview command still imports them from `crate::export::preview`; `with_warm` itself is no longer re-exported, because since Batch D every command goes through `with_warm_app`, which resolves both `PreviewSession` and `Arc<Platform>` from the `AppHandle` the command already has. They live there because the lock-discipline rewrite (build and render outside the cache mutex; `has_webcam` off the mutex entirely) wanted its own unit tests, which live in `session_tests.rs`.
 
@@ -10,7 +12,9 @@ Single-frame preview engine + the warm renderer cache. Renders one composited ou
 pub fn render_preview(paths: &ProjectPaths, time_ms: u32, system: &dyn SystemPort) -> Result<Vec<u8>>
 ```
 
-Renders one composited frame at `time_ms` (uncached: builds a fresh renderer via `build_renderer`) and returns PNG bytes at the resolved preview size. Not currently called by any Tauri command (`preview_frame`, below, uses the warm cache instead) - kept as the uncached entry point.
+Renders one composited frame at `time_ms` (uncached: builds a fresh renderer via `build_renderer`) and returns PNG bytes at the resolved preview size. Not currently called by any Tauri command (`preview_frame`, below, uses the warm cache instead) - kept as the uncached entry point, and its one caller is `exporter.rs`'s `preview_frame_bench`.
+
+**It still takes CLIP ms**, where the command beside it moved to output time in Batch 4: it wraps its argument as `PreviewAt::Clip(time_ms)` and `at_instants` runs `out_of` on it, which is exactly what `walk_to` used to do for itself. The bench measures a decode at a source instant and has no editor timeline to speak from, so nothing about its call changed.
 
 ### Inputs (what, and why it is needed)
 
@@ -26,38 +30,36 @@ Renders one composited frame at `time_ms` (uncached: builds a fresh renderer via
 
 1. `build_renderer(paths, system)` calls `FrameRenderer::new(paths, Layout::default(), fps, Resolution::Source, Some(PREVIEW_LONG_EDGE), system)` - the doc's `aspect` is resolved against the true source dims then downscaled to the `PREVIEW_LONG_EDGE` (1280px) budget (`Layout::resolve`), so the preview frame always matches the export's aspect proportionally. `Resolution::Source` is a no-op here (the export resolution setting only applies to the export build).
 2. Compute `k_target = time_ms as u64 * OUT_FPS / 1000`. Fast-forward the camera sim by calling `step_camera` for every `j` in `0..=k_target` at `video_start + j * 1000 / OUT_FPS`, each with `OUT_STEP_MS` as the frame period (the exact 16.667ms, never the rounded timestamp delta - see `render/mod.md`). This must ascend because `CameraSim` and the cursor index only move forward. The last returned `FramePose` is the preview pose. Cost: arithmetic only, no I/O.
-3. Spawn a `RawDecoder` on `paths.video()` seeked to `time_ms` (the screen file's frame 0 is `video_start`, so `time_ms` is the right offset), read one frame into a `screen_bytes`-sized buffer; bail if the read hits EOF (time past end of video).
+3. Spawn a `RawDecoder` on `paths.video()` seeked to the source instant (the screen file's frame 0 is `video_start`, so it is the right offset), read one frame into a `screen_bytes`-sized buffer; bail if the read hits EOF (time past end of video).
 4. If `paths.webcam().exists()`, spawn a `RawDecoder` on the webcam seeked to `video_start + time_ms` (export pre-seeks the webcam by `video_start`, so its file-time is shifted) with `cover_scale = Some((webcam_w, webcam_h))` - the same SOURCE-aspect decode box the export uses (`render::meta::webcam_box`; each panel cover-crops it at composite time), so the preview and the export never disagree about the webcam's framing - read one frame; else `webcam = None`.
 
    **A webcam read failure here is deliberately NOT fatal to the frame.** Both EOF and a hard decode failure just leave the buffer as it was (and log a line): `webcam.webm` routinely ends before `video.mp4`, so an `-ss` past its end is an everyday scrub near the end of a clip, and failing the whole preview frame for it would make the last seconds of such a project un-scrubbable. This is the one place the honest-failure rule (`RawDecoder::classify_end`) is deliberately relaxed - a preview frame is not a deliverable, whereas the EXPORT surfaces the same failure as an `export-warning` and a screen failure as a hard `export-error`.
 5. Call `renderer.composite_at(&pose, &screen_buf, webcam_ref, &mut bgra)` to write a BGRA buffer into `bgra`.
 6. Call `png_encode(bgra, meta.out_w, meta.out_h)` to produce PNG bytes in-process via the `png` crate (no ffmpeg subprocess involved), at the renderer's resolved size.
 
-## walk_to
-
-```rust
-pub(crate) fn walk_to(r: &mut FrameRenderer, video_start: u64, time_ms: u32) -> FramePose
-```
-
-Step the camera along the renderer's frame plan up to the output frame that shows clip time `time_ms` (`map.out_of(time_ms)` converted to an output frame index), through `FrameRenderer::walk_plan` with a no-op body, so the one-shot preview frame's camera is exactly the export's at that frame. With everything cut there is no plan and the camera is stepped once at output time 0 instead.
+Steps 2 to 5 are `compose.rs`'s `composite_frame`; see `compose.md` for the pose walk, the dissolves and the webcam box.
 
 ## preview_frame
 
 ```rust
 #[tauri::command]
-pub async fn preview_frame(folder: String, time_ms: u32, app: tauri::AppHandle) -> Result<String, String>
+pub async fn preview_frame(folder: String, out_ms: u32, app: tauri::AppHandle) -> Result<String, String>
 ```
 
 Tauri IPC command: renders one preview frame (via the warm cache) and returns a JPEG data URL - the export's own frame at that instant. **Why it exists (owner ruling 2026-09-14: the export is the reference):** the stage shows this frame whenever playback pauses or a scrub settles, so what the owner looks at while editing IS a frame of the export, whatever the live canvas approximated a moment earlier.
 
+**It takes OUTPUT ms since Batch 4** (`PreviewAt::Out(out_ms)`), where it used to take clip ms. A clip list can reorder the recording, and after a reorder one source instant is shown twice while `out_of` answers with the first showing, so a playhead resting in the second one fetched the wrong frame: the wrong overlays, the wrong camera, the wrong dissolve. The stage already computes `tOut`, so it hands over the instant it actually wants and `at_instants` runs `clip_of` for the decoder - the identity inside a segment, so an unsplit project's paused frame does not move. The full argument is in `compose.md`.
+
+**Inside a clip dissolve the frame carries the blend.** When the pose's `clip_mix` is set, `compose.rs`'s `clip_dissolve` decodes the outgoing clip's latched frame and blends it under the incoming one through `screen_mix::blend_into` at the incoming clip's weight, the same primitive and the same alpha the export's frame loop uses, so a frame paused inside a dissolve window looks like the export's frame. The export holds that outgoing frame from its own walk; the preview renders one instant and holds nothing, so it pays one extra ffmpeg seek on the frames inside a window, at the instant `latched_ms` names rather than `clip_of(prev_out_ms)` (ruling B4-R16, argued in `compose.md`).
+
 **Off the main thread (Task 41 sweep correction).** `async fn` + `spawn_blocking`, same freeze mechanism as `ai::commands` (Task 40) and `thumbs.rs`/`preview_track.rs` (Task 41): `render_frame` calls `RawDecoder::spawn` (screen, and webcam when present) which shells out to `ffmpeg` and blocks on its stdout pipe until the seeked frame decodes - a real blocking subprocess call, not in-process math. An earlier T41 sweep incorrectly grouped this command with `camera_track`/`preview_layout`/`click_track` (`preview_track.rs`) as "pure math/cache reads" and left it sync - those three genuinely are pure math (no decode, see their own docs); this one is not. (Sweep-2 Task 1 has since converted those three too - not because their own bodies decode, but because the `with_warm` cold path underneath every one of them does.) Because `session: tauri::State<'_, PreviewSession>` can't be moved into `spawn_blocking` (its lifetime isn't `'static`), the command instead takes `app: tauri::AppHandle` (`'static`, `Clone`, `Send`) and re-derives the same managed-state handle inside the blocking closure via `app.state::<PreviewSession>()` (`tauri::Manager`).
 
-**Called by `useExactFrame`** (`src/editor/hooks/stage/useExactFrame.ts`, via `ipcPreview.ts`'s `previewFrame`) whenever the stage's playhead rests; it was uncalled from the Task 41 sweep until 2026-09-14 - the editor's M3 preview plays the recording natively via `<video>` (see `Editor.md`) rather than fetching per-frame PNGs, so nothing currently invokes this command. Converted anyway per "dead-or-not, it must not be a landmine" - a future caller (or a re-enabled `render_preview`-style flow) would otherwise silently reintroduce a main-thread freeze.
+**Called by `useExactFrame`** (`src/editor/hooks/stage/useExactFrame.ts`, via `previewFrame` in `src/shared/ipc/preview.ts`) whenever the stage's playhead rests: `wantsExact` asks for it once playback is paused, the draft flag is clear, and the folder and the rounded `outMs`/edit-generation key have changed, and the effect fetches after a `SETTLE_MS` (160 ms) debounce so a scrub in progress does not fire one request per tick. It was uncalled from the Task 41 sweep until 2026-09-14, back when the editor's M3 preview played the recording natively via `<video>` (see `Editor.md`) with no per-frame PNG fetch anywhere. It was converted to `spawn_blocking` anyway per "dead-or-not, it must not be a landmine", and Batch 4 gave it the live caller that guard was written for.
 
 ### Inputs (what, and why it is needed)
 
 - `folder: String` - absolute path to the project directory. *Why:* the frontend holds the folder path from `stopRecording`; it is the stable identity for a recording session across Tauri calls.
-- `time_ms: u32` - scrub position in ms. *Why:* the editor timeline drives this; the frontend passes the current playhead position.
+- `out_ms: u32` - scrub position in OUTPUT ms (`outMs` over the wire). *Why:* the editor timeline drives this, and it is the only clock that names one showing of a reordered instant; the frontend passes `tOut`, which its stage already has.
 - `app: tauri::AppHandle` - resolves the `PreviewSession` managed state from inside the `spawn_blocking` closure (see above).
 
 ### Returns
@@ -69,17 +71,9 @@ Tauri IPC command: renders one preview frame (via the warm cache) and returns a 
 The whole body runs inside `tauri::async_runtime::spawn_blocking(move || { ... })`, `.await`ed then `?`-unwrapped:
 
 1. `app.state::<PreviewSession>()` re-derives the managed-state handle.
-2. Via `with_warm`, call `composite_frame` at `time_ms` and the cached size, then `jpeg_encode`.
+2. Via `with_warm`, call `composite_frame` at `PreviewAt::Out(out_ms)` and the cached size, then `jpeg_encode`.
 3. Base64-encode the JPEG bytes with the local `base64_encode` helper (RFC 4648 alphabet, no line breaks).
 4. Prefix with `"data:image/jpeg;base64,"` and return.
-
-## decode_screen
-
-```rust
-fn decode_screen(paths: &ProjectPaths, meta: &RenderMeta, time_ms: u32, buf: &mut [u8]) -> Result<()>
-```
-
-Seek-decodes one screen frame at `time_ms` (clip time) into `buf` as nv12 at the renderer's own crop. Factored out because `composite_frame` now decodes up to TWO frames: the one at `time_ms`, and - only when `FramePose::mix` says this instant is inside a mid-take display switch - the frame at `SpanMix::hold_ms`, the last output frame before the switch. That second one is the picture the EXPORT latches and dissolves from, so the ghost image in a mid-transition preview frame is the export's own. A failure on the second decode drops the dissolve rather than failing the scrub; only the export treats a screen decode as a deliverable.
 
 ## preview_bg
 

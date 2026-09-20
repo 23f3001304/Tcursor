@@ -1,6 +1,6 @@
 # src-tauri/src/edit/ops/effects.rs
 
-Effect-region edit ops (add/update/remove), split out of `api.rs` so each file stays focused. It covers all four `EffectKind` variants - Spotlight, and the three masks Blur, Pixelate and Highlight - and carries the mask validation with them: `clamp_rect` holds a mask's canvas-fraction rect inside the canvas with a minimum size, `strength` is clamped to `STRENGTH_RANGE` and `roundness` to `0..0.5`, `add_effect` seeds a mask with `MASK_SEED_RECT` while a spotlight gets no rect at all, and a spotlight ignores rect/strength/roundness exactly as a mask ignores mode and radius. `api::apply` delegates the three effect-op variants here.
+Effect-region edit ops (add/update/remove), split out of `api.rs` so each file stays focused. It covers all four `EffectKind` variants - Spotlight, and the three masks Blur, Pixelate and Highlight - and carries the mask validation with them: `clamp_rect` holds a mask's canvas-fraction rect inside the canvas with a minimum size, `strength` is clamped to `STRENGTH_RANGE` and `roundness` to `0..0.5`, `apply_effect`'s `AddEffect` arm seeds a mask with `MASK_SEED_RECT` while a spotlight gets no rect at all, and a spotlight ignores rect/strength/roundness exactly as a mask ignores mode and radius. `api::apply` delegates the three effect-op variants here.
 
 ## apply_effect
 

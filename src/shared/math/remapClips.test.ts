@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildTimeMap, clipOf, clipOutMs, crossesBoundary, framePlan, outDurMs, outOf } from "./remap";
 import { clipsFixtureMap, fixtureMap, fixtureParts } from "./remap.fixture";
-import { planBoundaries } from "./remapPlan";
+import { clipSpans, planBoundaries } from "./remapPlan";
 
 const range = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
 
@@ -154,5 +154,51 @@ describe("TimeMap with clips (parity with export::remap clips_fixture)", () => {
     expect(one(500, 9000).plain).toBe(true);
     expect(one(500, 8000).plain).toBe(false);
     expect(one(6000, 2000).segments).toEqual([]);
+  });
+});
+
+describe("clipSpans (parity with export::remap_spans)", () => {
+  const trim = { in_ms: 500, out_ms: 9000 };
+  const clip = (id: string, a: number, b: number) => ({
+    id,
+    src_in_ms: a,
+    src_out_ms: b,
+    transition_in_ms: 0,
+  });
+  const plain = (clips: ReturnType<typeof clip>[]) => buildTimeMap(trim, [], [], clips, 10_000);
+
+  it("is one span over the whole plan with no clips", () => {
+    const m = fixtureMap();
+    expect(framePlan(m, 10)).toHaveLength(85);
+    expect(clipSpans(m, 10)).toEqual([{ clip: 0, planStart: 0, planLen: 85, firstK: 5 }]);
+  });
+
+  it("makes a split in order lossless", () => {
+    const whole = framePlan(plain([]), 10);
+    expect(whole).toHaveLength(86);
+    expect(framePlan(plain([clip("cl0", 500, 4000), clip("cl1", 4000, 9000)]), 10)).toEqual(whole);
+    expect(framePlan(plain([clip("cl0", 500, 4050), clip("cl1", 4050, 9000)]), 10)).toEqual(whole);
+    expect(clipSpans(plain([clip("cl0", 500, 4000), clip("cl1", 4000, 9000)]), 10)).toEqual([
+      { clip: 0, planStart: 0, planLen: 35, firstK: 5 },
+      { clip: 1, planStart: 35, planLen: 51, firstK: 40 },
+    ]);
+  });
+
+  it("keeps the frame count across a reorder", () => {
+    const m = plain([clip("cl0", 4000, 9000), clip("cl1", 500, 4000)]);
+    expect(framePlan(m, 10)).toHaveLength(86);
+    expect(clipSpans(m, 10)).toEqual([
+      { clip: 0, planStart: 0, planLen: 50, firstK: 40 },
+      { clip: 1, planStart: 50, planLen: 36, firstK: 5 },
+    ]);
+  });
+
+  it("lines the clips fixture's spans up with its seventy entry plan", () => {
+    const m = clipsFixtureMap();
+    expect(framePlan(m, 10)).toHaveLength(70);
+    expect(clipSpans(m, 10)).toEqual([
+      { clip: 0, planStart: 0, planLen: 49, firstK: 60 },
+      { clip: 1, planStart: 49, planLen: 21, firstK: 5 },
+    ]);
   });
 });

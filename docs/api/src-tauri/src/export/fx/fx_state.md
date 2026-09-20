@@ -242,6 +242,7 @@ Builds the FX state for one frame. Returns `None` when nothing is active so the 
 - `spotlight_hole_disabled_when_the_camera_panel_is_invisible` - `has_webcam: true` but `scene.camera.alpha <= 0.05` (the default disabled panel) also forces `dim_camera == true`.
 - `spotlight_hole_enabled_with_a_real_visible_webcam` - `has_webcam: true` AND `camera.alpha: 1.0` lets `dim_camera` follow the user's actual `spotlight_dim_camera` setting.
 - `SpotlightSim` region resolution (`spotlight_uses_per_region_fades`, `highest_layer_region_wins_style_not_first_match`, `spotlight_handoff_eases_alpha_instead_of_jump_maxing`) now lives in `spotlight_sim.rs`'s own test module - see `docs/api/src-tauri/src/export/fx/spot/spotlight_sim.md`.
+- `fx_state_tests.rs` keeps the fixtures (`scr`, `full_scene`, `fx`, `cam`, `down`) and the click tests, and declares three `#[path]` sibling modules over them, one per thing the pass carries that is not a click effect: `fx_state_mask_tests.rs` (`a_mask_survives_click_animations_being_switched_off`), `fx_state_spot_tests.rs` (the spotlight) and `fx_state_grade_tests.rs` (`a_grade_runs_with_click_animations_off_and_no_spotlight`, `no_grade_and_nothing_else_leaves_the_frame_alone`). The masks and the grade arrived from two parallel tracks and together took the single file past its 320-line budget; splitting by responsibility rather than shortening anything is the standing rule.
 
 ## FxRenderer
 

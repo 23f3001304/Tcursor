@@ -32,7 +32,7 @@ The map whose cut starts at a FRACTIONAL output time, for `playback.test.ts`: no
 export function clipsFixtureMap(): TimeMap
 ```
 
-The clips fixture (`export/remap_clips_tests.rs::clips_fixture`): the same cuts and spans, two clips in REVERSE source order, the trim ignored. Its pinned table, computed from the spec and checked by hand:
+The clips fixture (`export/remap_clips_tests.rs::clips_fixture`): the same cuts and spans, two clips in REVERSE source order, the trim ignored. Its pinned table, computed from the spec and checked by hand, labels each reader once for both sides of the mirror rather than twice, in its Rust spelling: `out_of` is `outOf`, `clip_of` is `clipOf`, `frame_plan` is `framePlan`, `crosses_boundary` is `crossesBoundary`, `clip_out_ms` is `clipOutMs` and `out_dur` is `outDurMs` on the TS side this page documents.
 
 ```
 clips (output order): A = (6000, 9000), B = (500, 4000); same cuts (1000-2000, 4000-4500),

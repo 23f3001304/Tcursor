@@ -1,6 +1,7 @@
 import { memo, useRef, useState } from "react";
 import type { EditDoc, EditOp, TextKind } from "../../shared/edit";
 import type { LayoutPresets } from "../../shared/ipc";
+import type { TimeMap } from "../../shared/math/remap";
 import { useTimelineLanes } from "./useTimelineLanes";
 import { Filmstrip } from "./lanes/Filmstrip";
 import { CutOverlay } from "./lanes/CutOverlay";
@@ -26,6 +27,7 @@ export const Timeline = memo(function Timeline({
   layoutPresets,
   range,
   setRange,
+  map,
 }: {
   doc: EditDoc;
   timeMs: number;
@@ -42,6 +44,7 @@ export const Timeline = memo(function Timeline({
   layoutPresets: LayoutPresets | null;
   range: Range | null;
   setRange: (r: Range | null) => void;
+  map: TimeMap;
 }) {
   const track = useRef<HTMLDivElement>(null);
   const scrubbing = useRef(false);
@@ -62,6 +65,7 @@ export const Timeline = memo(function Timeline({
     wavesReady,
     hasWebcam,
     layoutPresets,
+    map,
   });
 
   const { seekAt, scheduleSeek, flushSeek } = useSeek(dur, track, onSeek);

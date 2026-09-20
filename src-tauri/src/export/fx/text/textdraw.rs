@@ -1,15 +1,9 @@
 use crate::edit::text::TextItem;
 use crate::export::fx::glyph;
+use crate::export::fx::mask::rrect_sd;
 use crate::export::fx::text::textlayout::{texts_at, LaidText, PAD_X};
 
 const PLATE_RADIUS: f32 = 0.35;
-
-fn rrect_sd(x: f32, y: f32, mn: [f32; 2], mx: [f32; 2], r: f32) -> f32 {
-    let (cx, cy) = ((mn[0] + mx[0]) * 0.5, (mn[1] + mx[1]) * 0.5);
-    let (hx, hy) = ((mx[0] - mn[0]) * 0.5 - r, (mx[1] - mn[1]) * 0.5 - r);
-    let (qx, qy) = ((x - cx).abs() - hx, (y - cy).abs() - hy);
-    (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt() + qx.max(qy).min(0.0) - r
-}
 
 pub fn overlay(out: &mut [u8], ow: u32, oh: u32, items: &[TextItem], accent: [u8; 3], t_ms: u32) {
     if items.is_empty() {

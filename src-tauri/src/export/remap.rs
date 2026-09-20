@@ -262,4 +262,8 @@ pub(crate) mod tests;
 
 #[cfg(test)]
 #[path = "remap_clips_tests.rs"]
-mod clips_tests;
+pub(crate) mod clips_tests;
+
+#[path = "remap_spans.rs"]
+mod spans;
+pub use spans::ClipSpan;

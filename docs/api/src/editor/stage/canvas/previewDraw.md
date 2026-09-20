@@ -1,6 +1,6 @@
 # src/editor/stage/canvas/previewDraw.ts
 
-The three Canvas2D primitives `drawPreview` composites with: the once-per-panel alpha blit, the cover-crop draw and the rounded-rect path. Split back out of `previewCanvas.ts` - they are the drawing vocabulary, not the frame recipe, and every one of them mirrors a specific piece of the export's shader.
+The Canvas2D primitives `drawPreview` composites with: the once-per-panel alpha blit, the cover-crop draw and the rounded-rect path. Split back out of `previewCanvas.ts` - they are the drawing vocabulary, not the frame recipe, and every one of them mirrors a specific piece of the export's shader. `drawScreenPanel` at the end (Batch 4 T7) is the one composite draw here rather than a primitive: the screen panel moved out of `drawPreview` whole, so the clip dissolve is one branch inside one function instead of a second copy of the panel.
 
 ## paintPanel
 
@@ -53,3 +53,35 @@ export function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w
 ```
 
 Trace a rounded-rect path (radius clamped to half the shorter side), for the fill, clip and stroke of every panel.
+
+## ScreenPanelGeom
+
+```ts
+export interface ScreenPanelGeom {
+  dx: number; dy: number; dw: number; dh: number; r: number;
+  w: number; h: number; alpha: number; src: [number, number, number, number];
+}
+```
+
+Everything the screen panel needs for one frame, in one value: the panel rect and corner radius in canvas pixels, the canvas size `paintPanel`'s scratch layer is sized to, the layout's interpolated `screenAlpha`, and `src`, the active source span as a fraction of the RECORDED canvas. It is a struct rather than nine parameters because `drawPreview` resolves all nine in one place and hands them straight over.
+
+## ScreenMix
+
+```ts
+export interface ScreenMix { video: HTMLVideoElement; alpha: number }
+```
+
+The clip dissolve for one frame: the second hidden `<video>`, parked on the outgoing clip's tail, and the INCOMING clip's weight. `null` is the ordinary case and the one every document without a clip transition takes.
+
+## drawScreenPanel
+
+```ts
+export function drawScreenPanel(octx: CanvasRenderingContext2D, layer: HTMLCanvasElement,
+  g: ScreenPanelGeom, screen: HTMLVideoElement, mix: ScreenMix | null)
+```
+
+The screen panel's own draw, lifted out of `drawPreview` (Batch 4 T7) so the dissolve has somewhere to live: the drop shadow and the black backing once through `paintPanel`, then the video through the source span's crop, clipped to the rounded rect. With `mix` at `null` it is the block that used to sit inline, statement for statement, including its two guards (`videoWidth`/`videoHeight` above zero, `alpha` at least 0.004).
+
+**The dissolve.** With a `mix` whose video has decoded (`videoWidth > 0`), the OUTGOING frame is drawn first at full alpha and the incoming one over it at `mix.alpha`, both through the same source rect and into the same destination rect, inside the same clip. That is `alpha * cur + (1 - alpha) * prev` within the panel, which is exactly what `screen_mix::blend_into` computes on the nv12 planes in the export. The shadow and the black backing happen ONCE, under both, because they are the panel and not the picture; and only the SCREEN plane dissolves, matching the export, where the webcam panel and the background are untouched at a clip boundary. A `mix` whose element has not decoded yet draws the incoming frame alone at full alpha, which is the pre-dissolve picture rather than a black flash.
+
+Both elements carry the same `src` attribute (the one screen proxy), so `vw`/`vh` read off the incoming element frame the outgoing one correctly too.

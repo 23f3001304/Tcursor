@@ -18,6 +18,7 @@ import type {
 import type {
   Caption,
   CameraMove,
+  Clip,
   EditDoc,
   EditOp,
   EffectRegion,
@@ -43,6 +44,8 @@ export interface StageProps {
   clicks: ClickSample[];
   bg: StageBg;
   map: TimeMap;
+  clips: Clip[];
+  motionEasing: string;
   cursorSprites: CursorPackDto | null;
   cursorKinds: CursorKindSample[];
   cursorLayer: CursorLayerDto | null;
@@ -68,6 +71,7 @@ export interface StageProps {
   outline: [number, number, number, number] | null;
   camDraftRef: RefObject<CamPose | null>;
   onTime: (ms: number) => void;
+  onSeek: (ms: number) => void;
   onDuration: (ms: number) => void;
   onZoomAt: (x: number, y: number) => void;
   onAimAt: (x: number, y: number) => void;

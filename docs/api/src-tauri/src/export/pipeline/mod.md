@@ -86,10 +86,14 @@ Owns the screen decode thread's receiving end plus the last-delivered frame (`cu
 ## ScreenPipe::spawn
 
 ```rust
-pub fn spawn(video: &Path, screen_bytes: usize, crop: Option<(u32, u32)>, target_dims: Option<(u32, u32)>, depth: usize, out_fps: u64) -> Result<ScreenPipe>
+pub fn spawn(video: &Path, screen_bytes: usize, crop: Option<(u32, u32)>, target_dims: Option<(u32, u32)>, depth: usize, out_fps: u64, seek_ms: Option<u64>) -> Result<ScreenPipe>
 ```
 
-Spawns the screen `RawDecoder` at `out_fps` (no seek, `nv12` pixel format, optional `target_dims` scale) and its decode thread. The decoder is created here rather than inside the thread so spawn errors surface immediately to the caller. Passing `out_fps` (rather than a `0.0`/native rate, like `WebcamPipe::spawn` already did) rate-converts the decode to the export's output rate, so the composite loop's 1:1 pull stays correct even when `out_fps` differs from the capture rate.
+Spawns the screen `RawDecoder` at `out_fps` (`nv12` pixel format, optional `target_dims` scale, `seek_ms` handed straight to the decoder's `-ss`) and its decode thread. The decoder is created here rather than inside the thread so spawn errors surface immediately to the caller. Passing `out_fps` (rather than a `0.0`/native rate, like `WebcamPipe::spawn` already did) rate-converts the decode to the export's output rate, so the composite loop's 1:1 pull stays correct even when `out_fps` differs from the capture rate.
+
+**The seek rule.** The FIRST spawn of an export never seeks: `exporter::export` passes `None`, which is the command this pipe has always issued, decoding forward from frame 0. That is what makes a document with no clips export exactly what it exported before the clip list existed, by construction rather than by hope, and it costs nothing extra even when the first clip starts late, because the frames before it are the warm-up the plan cursor was already counting.
+
+Most exports never spawn a second one. A LATER spawn is `Pipes::rewind`'s, and since ruling B4-R14 the frame loop rewinds only where the plan goes BACKWARDS, which means only a reorder: a clip list that merely splits or edge-trims in output order is decoded straight through, exactly as a cut is (`plan_walk.md`). When a rewind does happen it passes `seek_ms = first_k * 1000 / out_fps`: an exact multiple of the output frame period, floored to whole milliseconds. `-ss` sits BEFORE `-i` (`ffio_decoder.md`), so ffmpeg seeks accurately and drops everything earlier, and the decoder's `-r` is an OUTPUT rate, so what comes out is a constant-rate stream whose frame `n` is source frame `first_k + n`. `PlanCursor::rebase(first_k)` then makes the cursor count that stream from `first_k`, and the pull stays 1:1. Measured on a real recording, the screen stream after such a seek is frame for frame the tail of the unseeked one, on and off a frame boundary; the WEBCAM's is not, which is the whole reason the rule is "backwards only" (`frame_loop.md`).
 
 ### Inputs
 
@@ -99,6 +103,7 @@ Spawns the screen `RawDecoder` at `out_fps` (no seek, `nv12` pixel format, optio
 - `target_dims: Option<(u32, u32)>` - optional scale target passed to the decoder (`None` = native size). *Why:* lets a caller decode straight to a smaller working size.*
 - `depth: usize` - sizes both the bounded channel and the recycled buffer pool. *Why:* provides backpressure so the decode thread stays a bounded number of frames ahead.*
 - `out_fps: u64` - the export's resolved output frame rate, passed to the decoder as `-r out_fps`. *Why:* forces ffmpeg to rate-convert the decode to the export's output rate rather than the source capture rate, so `next`'s 1:1-with-output-frames pull stays correct at any export fps (matches `WebcamPipe::spawn`'s existing `out_fps` parameter).*
+- `seek_ms: Option<u64>` - where the decode starts, in ms (`RawDecoder::spawn`'s `seek_ms`, an `-ss` before `-i`). *Why an Option rather than a 0:* `None` emits no `-ss` at all, which is a different command from `-ss 0.0000` and the one every export shipped before clips existed. See the seek rule above: `None` for the export's own first spawn, `Some(first_k * 1000 / out_fps)` for a rewind at a backwards clip join.*
 
 ### Returns
 
@@ -225,7 +230,7 @@ Top-level export orchestrator: calls `FrameRenderer::new`, spawns the screen/web
 
 ## plan_walk
 
-`PlanCursor`: the pure bookkeeping of feeding sequential decoders along a `TimeMap::frame_plan` (how many recording frames to decode before each output frame, 0 to re-use the held one).
+`PlanCursor`: the pure bookkeeping of feeding sequential decoders along a `TimeMap::frame_plan` (how many recording frames to decode before each output frame, 0 to re-use the held one), plus `ClipJoin`/`join_at` and `rebase`, which say where one clip hands over to the next, whether that handover needs a new decoder (only a backwards one does), and how the cursor counts from its seek.
 
 ## bg_pipe
 

@@ -13,6 +13,8 @@ const HIDDEN: CSSProperties = {
 
 export function StageMedia({
   screenRef,
+  screenBRef,
+  wantsScreenB,
   webcamRef,
   audioRef,
   src,
@@ -29,6 +31,8 @@ export function StageMedia({
   onWebcamSeeked,
 }: {
   screenRef: RefObject<HTMLVideoElement | null>;
+  screenBRef: RefObject<HTMLVideoElement | null>;
+  wantsScreenB: boolean;
   webcamRef: RefObject<HTMLVideoElement | null>;
   audioRef: RefObject<HTMLAudioElement | null>;
   src: string;
@@ -59,6 +63,17 @@ export function StageMedia({
           onEnded={onScreenEnded}
           onLoadedMetadata={onScreenLoadedMetadata}
           onError={onScreenError}
+        />
+      )}
+      {src && wantsScreenB && (
+        <video
+          ref={screenBRef}
+          src={src}
+          muted
+          playsInline
+          preload="auto"
+          style={HIDDEN}
+          onSeeked={onScreenSeeked}
         />
       )}
       {webcamSrc && (

@@ -1,0 +1,92 @@
+name: CI
+
+# Every pull request and every push to main runs the same gate a contributor runs locally
+# (CONTRIBUTING.md, "The gate"). Windows runners on purpose: the app is Windows only, and
+# prettier is configured for CRLF, which a Linux checkout would fail.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pr-rules:
+    name: PR rules (size, docs pages)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: The rules test themselves
+        run: node --test tools/ci/pr-rules.test.mjs
+      - name: Size limit and docs pages
+        env:
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: node tools/ci/pr-rules.mjs "origin/${{ github.base_ref }}"
+
+  web:
+    name: TypeScript (types, tests, format, budgets, docs)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Types
+        run: npx tsc --noEmit
+      - name: Tests
+        run: npx vitest run
+      - name: Format
+        run: npx prettier --check "src/**/*.{ts,tsx}"
+      - name: Line budgets
+        run: node tools/linecount.mjs --check
+      - name: Docs pages resolve to symbols
+        run: |
+          npm --prefix tools/docs-hover ci
+          npm --prefix tools/docs-hover run validate
+
+  rust:
+    name: Rust (format, build, tests)
+    runs-on: windows-latest
+    env:
+      LIBCLANG_PATH: C:\Program Files\LLVM\bin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Format
+        working-directory: src-tauri
+        run: cargo fmt --check
+      - name: Vulkan SDK (whisper.cpp builds its GPU backend with glslc)
+        uses: humbletim/install-vulkan-sdk@v1.2
+        with:
+          version: 1.4.357.0
+          cache: true
+      - name: FFmpeg resources
+        shell: pwsh
+        run: ./tools/ci/fetch-ffmpeg.ps1
+      - name: Frontend dist (the Tauri build script embeds it)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          if (-not (Test-Path dist/index.html)) { Set-Content dist/index.html "<!doctype html><title>ci</title>" }
+      - name: Build
+        working-directory: src-tauri
+        run: cargo build --tests
+      - name: Tests
+        working-directory: src-tauri
+        run: cargo test

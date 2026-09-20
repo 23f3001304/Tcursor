@@ -181,15 +181,17 @@ export const clickTrack = (folder: string) => invoke<ClickSample[]>("click_track
 ## previewFrame
 
 ```ts
-export const previewFrame = (folder: string, timeMs: number) => invoke<string>("preview_frame", { folder, timeMs })
+export const previewFrame = (folder: string, outMs: number) => invoke<string>("preview_frame", { folder, outMs })
 ```
 
-The export's own composited frame at `timeMs` (clip time) as a JPEG data URL, from the warm Rust renderer (`export::preview::preview_frame`). Called by `useExactFrame` whenever the stage's playhead rests, so the frame being judged is a frame of the export.
+The export's own composited frame at `outMs` (output time) as a JPEG data URL, from the warm Rust renderer (`export::preview::preview_frame`). Called by `useExactFrame` whenever the stage's playhead rests, so the frame being judged is a frame of the export - including, inside a clip dissolve, the outgoing clip blended under the incoming one.
+
+**Output time, not clip time, since Batch 4 (clips).** A clip list can reorder the recording, and one source instant can then be shown twice; the backend's `out_of` answers with the first showing, so a playhead resting in the second one used to be handed the wrong frame. `useExactFrame` passes `tOut`, which the stage computes for every tick anyway, and the backend runs `clip_of` to find the source instant to decode. Inside a segment that round trip is the identity, so an unsplit project asks for exactly the frame it always did.
 
 ### Inputs
 
 - `folder` (`string`) - project directory.
-- `timeMs` (`number`) - the instant, clip time, whole milliseconds.
+- `outMs` (`number`) - the instant, OUTPUT time, whole milliseconds.
 
 ## previewBg
 

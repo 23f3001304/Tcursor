@@ -36,7 +36,7 @@ export function drawPreview(
   screen: HTMLVideoElement, webcam: HTMLVideoElement | null, cam: DrawCam,
   layout: PreviewLayout | null, bg: StageBgState | null, now: number,
   offscreen: HTMLCanvasElement, layer: HTMLCanvasElement,
-  bgTimeMs?: number
+  bgTimeMs?: number, mix: ScreenMix | null = null
 ): PreviewGeom | null
 ```
 
@@ -61,6 +61,7 @@ Composites the background, the screen panel and the webcam panel onto `ctx` (a `
 - `now: number` - current output time (ms). *Why:* the background's time when `bgTimeMs` is omitted (see `DrawCam`'s note above). The click track and the cursor read it too, but from `drawCursorLayer` now, not here.
 - `offscreen: HTMLCanvasElement` - a reusable buffer canvas the caller owns (resized here to `w`x`h` if needed). *Why:* the background+screen composite must exist as one image before the whole-frame crop can read a sub-rect of it; owning this in the caller (`useCompositeLoop`) avoids allocating a new canvas every frame.
 - `layer: HTMLCanvasElement` - a second reusable buffer the caller owns, distinct from `offscreen`. *Why:* `paintPanel` (below) composites a part-transparent panel into this and blits it ONCE, so a panel mid-cross-fade is not composited layer-by-layer. Only resized/drawn on the frames a transition is actually running.
+- `mix: ScreenMix | null` (Batch 4 T7) - the clip dissolve for this frame: the second hidden `<video>` parked on the outgoing clip's tail and the incoming clip's weight, or `null`. Passed straight to `drawScreenPanel` and read nowhere else here, so a document with no clip transition draws exactly the pixels it drew before. The caller (`compositeFrame.ts`) builds it from `clipMixAt` at the same `tOut` it hands `bgTimeMs`; see `../clips/clipDissolve.md`.
 
 ### Returns
 
@@ -69,12 +70,12 @@ A `PreviewGeom` (see above), or `null` when `offscreen` has no 2D context - the 
 ### Implementation
 
 1. Resolve the screen rect (`dx,dy,dw,dh,r`) from `layout` (or an inset fallback).
-2. On `offscreen`: paint the background (image or gradient), then draw the screen video's *full current frame* into the screen rect, clipped to a rounded rect with a drop shadow - through `paintPanel` at the layout's interpolated `screenAlpha`. No zoom crop happens here.
+2. On `offscreen`: paint the background (image or gradient), then `drawScreenPanel` (`previewDraw.md`) draws the screen video's *full current frame* into the screen rect, clipped to a rounded rect with a drop shadow - through `paintPanel` at the layout's interpolated `screenAlpha`, and with the outgoing clip's frame under it when `mix` is non-`null`. No zoom crop happens here. *Why the panel is a call and not the block it used to be:* the dissolve needs two draws inside one clip, and a second copy of the shadow, the backing and the crop arithmetic in a dissolve-only branch is the way those two drift apart.
 3. Compute the whole-frame zoom crop `(cx0, cy0, cw, ch)` from `cam.scale` and the panel-local `cam.cx`/`cam.cy`, clamped into `[0, w]`x`[0, h]` - the same math as the export's `coordmap::crop`.
 4. `ctx.drawImage(offscreen, cx0, cy0, cw, ch, 0, 0, w, h)` - crop+resize the *entire* offscreen buffer onto the visible canvas in one call.
 5. Draw the webcam PiP on `ctx` through `paintPanel` at the layout's interpolated `camAlpha` (rounded rect from `layout.cam`; the bottom-right-circle fallback applies only when there is NO `layout` at all - a layout that exists and simply hides the webcam, `screen_only` or the static `preview_layout` before presets land, must draw nothing rather than that hardcoded bubble) - unzoomed, on top of the zoomed result. When `layout.cam`'s ring width (`cam[5]`, a fraction of output width) is `> 0`, also stroke the export ring/border: a band `ringPx` wide in `ring_color` (`cam[6..9]`, RGB 0..255), traced just inside the panel edge to match `shader.wgsl`/`compositor.rs`'s inside-only SDF band - achieved by stroking a path inset by `ringPx/2` with `lineWidth = ringPx`, so the centered stroke's outer half lands on the true edge and its inner half sits `ringPx` further in.
 6. Return the `PreviewGeom`: `panel`, `crop`, `src`, `screenAlpha` and `hasVideo` as resolved above.
 
 #
-- The drawing primitives it is built from (`paintPanel`, `coverDraw`, `roundRect`) live in `previewDraw.ts`, and are re-exported from here so importers keep one entry point.
+- The drawing primitives it is built from (`paintPanel`, `coverDraw`, `roundRect`) live in `previewDraw.ts`, and are re-exported from here so importers keep one entry point. `drawScreenPanel` and the `ScreenMix` type join them for the same reason.
 - `drawCursorLayer`, the cursor's own layer, moved out to the sibling `cursorLayer.ts` (`cursorLayer.md`) so the seam between the panels and the cursor has a real gap for Batch 2's mask and grade to land in.

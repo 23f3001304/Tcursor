@@ -72,12 +72,6 @@ The plate's corner radius as a fraction of the MAIN font size, clamped in `fill_
 
 A fraction of the font size rather than of the plate: the radius then reads as a property of the type, so a two-line plate and a one-line plate have the same corner and look like the same component at different heights.
 
-## rrect_sd
+**The rounded corner is the app's one rounded corner.** The plate is shaped by `crate::export::fx::mask::rrect_sd`, imported at the top of this file rather than defined in it: the signed distance to a rounded rectangle, negative inside, zero on the edge, positive outside, which `fill_rect` turns into coverage as `clamp01(0.5 - sd)` and so antialiases the corners over roughly one pixel. See `../mask/rrect.md`.
 
-```rust
-fn rrect_sd(x: f32, y: f32, mn: [f32; 2], mx: [f32; 2], r: f32) -> f32
-```
-
-The signed distance to a rounded rectangle: negative inside, zero on the edge, positive outside. `fill_rect` turns it into coverage as `clamp01(0.5 - sd)`, which antialiases the corners over roughly one pixel.
-
-**This copy is deliberately temporary.** Track 2a of the same batch publishes `crate::export::fx::mask::rrect_sd` with a character-for-character identical body, and the two tracks ran in parallel worktrees where neither could see the other's module. The Shared file ledger's last row is the contract: at integration the controller DELETES this private copy, imports the mask module's, and re-runs `cargo test --lib textdraw`. Every test in this file passing unchanged is the proof the two bodies had not drifted. If one fails instead, the bodies HAD drifted and that is a bug to open, not to paper over.
+Track 2c wrote a private copy of that body while the three Batch 2 tracks ran in parallel worktrees, where neither could see the other's module; the Shared file ledger's last row made the controller delete it at integration and import this one. Every test in this file passed unchanged across that deletion, which is the proof the two bodies had never drifted.

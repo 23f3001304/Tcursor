@@ -42,3 +42,11 @@ __pycache__/
 
 # agent worktrees for parallel feature tracks
 .worktrees/
+
+# internal planning notes (specs, plans): kept on the maintainer's machine, not published
+docs/superpowers/
+
+# internal audit write-ups: kept on the maintainer's machine, not published
+docs/codebase-cleanup-audit.md
+docs/cross-platform-architecture.md
+docs/readability-and-system-improvements.md

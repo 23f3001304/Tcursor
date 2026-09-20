@@ -1,8 +1,10 @@
 # src/editor/stage/transport/Transport.tsx
 
-The transport bar rendered between the Stage and the Timeline. Left: Trim In/Out buttons that cut the clip straight to the playhead, a Reset button that appears only once trimmed, then a divider plus add-zoom / AI-autoedit tools. Center: skip-to-start / play-pause / skip-to-end and the time readout. Right: an aspect-ratio chip, a preview-quality chip, the view-mode control (`ViewPicker`), and mute + a real volume flyout. This file is now the bar's contract and its assembly only: the three clusters it composes are [TransportTools](TransportTools.md) (left), [PlaybackGroup](PlaybackGroup.md) (centre) and [OutputGroup](OutputGroup.md) (right), each owning its own markup, its own local state and its own notes. The only thing computed here is `locked`, which all three read.
+The transport bar rendered between the Stage and the Timeline. Left: Trim In/Out buttons that cut the clip straight to the playhead, a Reset button that appears only once trimmed, then a divider plus add-zoom / split / add-text / AI-autoedit tools. Center: skip-to-start / play-pause / skip-to-end and the time readout. Right: an aspect-ratio chip, a preview-quality chip, the view-mode control (`ViewPicker`), and mute + a real volume flyout. This file is now the bar's contract and its assembly only: the three clusters it composes are [TransportTools](TransportTools.md) (left), [PlaybackGroup](PlaybackGroup.md) (centre) and [OutputGroup](OutputGroup.md) (right), each owning its own markup, its own local state and its own notes. The only thing computed here is `locked`, which all three read.
 
 ## Transport
+
+**Split at the playhead (Batch 4 T9).** `onSplit: () => void`, threaded straight through to `TransportTools` exactly as `onAddZoom` is. `ClassicShell` supplies `p.onSplit`, which `model/shellProps.ts` builds as `() => void timeline.splitAt()` - a voided rename of `useTimelineActions`' `splitAt` rather than a bare spread, because the tool wants a plain synchronous click handler under its own name (`shellProps.md`).
 
 **Add a text item (Batch 2c).** `onAddText: () => void`, threaded straight through to `TransportTools` exactly as `onAddZoom` is. It takes no kind here on purpose: `ClassicShell` closes over the default (`() => p.addText("title")`), so the transport stays a bar of one-click tools and the four-way choice lives where there is room for it, in the Effects panel's Add pills.
 
@@ -13,7 +15,7 @@ The transport bar rendered between the Stage and the Timeline. Left: Trim In/Out
 ```tsx
 export const Transport: React.MemoExoticComponent<(props: {
   timeMs: number; dur: number; playing: boolean; onPlay: () => void; onSeek: (ms: number) => void;
-  onAddZoom: () => void; onAddText: () => void; onAutoedit: () => void; aiRunning: boolean; exporting: boolean;
+  onAddZoom: () => void; onSplit: () => void; onAddText: () => void; onAutoedit: () => void; aiRunning: boolean; exporting: boolean;
   trimmed: boolean; onTrimIn: () => void; onTrimOut: () => void; onResetTrim: () => void;
   aspect: Aspect; onAspect: (aspect: Aspect) => void;
   quality: number; onQuality: () => void;
@@ -30,6 +32,7 @@ Renders the transport bar. `React.memo`'d (render hygiene pass) - `timeMs` still
 - `playing: boolean` / `onPlay: () => void` - play/pause state and toggle. *Behavior owned by the caller:* `Editor.tsx`'s `onPlay` snaps the playhead forward to the trim-in point when starting playback from outside the trim range (see `resolveTrim`).
 - `onSeek: (ms: number) => void` - called with `0` (skip-to-start) or `dur` (skip-to-end).
 - `onAddZoom: () => void` - adds a zoom at the playhead.
+- `onSplit: () => void` (Batch 4 T9) - splits the clip at the playhead.
 - `onAutoedit: () => void` - runs the AI auto-director.
 - `aiRunning: boolean` - whether an AI director run is in flight (`Editor`'s `running` state); disables the wand button so a double click (or the wand plus a keyboard trigger) can't start a second interleaved reveal. `Editor`'s `onRun` also re-entrancy-guards itself as a backstop.
 - `exporting: boolean` (Task 36) - whether an export pipeline is running (`Editor`'s lifted `exporting` state, the same one `TopBar` reads). Combined with `dur <= 0` into a local `locked` flag that disables Play, Trim In/Out/Reset, and the aspect chip - none of them should change what's rendering mid-export, and none are meaningful with no clip loaded yet. Also now disables the AI-director wand directly (bug-sweep-2 Task 8, L3 - see the wand's own note below): previously only `aiRunning` gated it, so nothing actually stopped a director run from starting mid-export.

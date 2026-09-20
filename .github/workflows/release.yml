@@ -1,70 +1,101 @@
 name: Release
 
+# A tag v* builds the three installers from that exact commit on a clean GitHub runner and
+# opens a DRAFT release with them, so every published binary can be traced to public source.
+# A maintainer reviews the draft and publishes it by hand. Tags with a dash (v0.1.0-rc.1)
+# become pre-releases. Run it by hand (workflow_dispatch) to get the artifacts without a release.
+
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
 
 permissions:
-  contents: write # create the GitHub Release
+  contents: write
 
 jobs:
   windows:
     runs-on: windows-latest
+    env:
+      LIBCLANG_PATH: C:\Program Files\LLVM\bin
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
+          cache: npm
 
       - uses: dtolnay/rust-toolchain@stable
 
-      # ffmpeg + ffprobe ship as Tauri resources but aren't committed. Provide them here
-      # (download a pinned build and drop the two exes into src-tauri/resources/).
-      - name: Provide ffmpeg resources
+      - name: Vulkan SDK (whisper.cpp builds its GPU backend with glslc)
+        uses: humbletim/install-vulkan-sdk@v1.2
+        with:
+          version: 1.4.357.0
+          cache: true
+
+      - name: FFmpeg resources (pinned by version and SHA-256)
         shell: pwsh
-        run: |
-          if (-not (Test-Path src-tauri/resources/ffmpeg.exe) -or -not (Test-Path src-tauri/resources/ffprobe.exe)) {
-            throw "Add a step to fetch ffmpeg.exe + ffprobe.exe into src-tauri/resources/ (e.g. a pinned gyan.dev release)."
-          }
+        run: ./tools/ci/fetch-ffmpeg.ps1
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Build installers (app + NSIS + MSI + branded Setup)
+      - name: Build installers (app, NSIS, MSI, branded Setup)
         shell: pwsh
         run: ./setup/build.ps1
 
-      # --- Code signing: enable after SignPath Foundation approval (signpath.io/open-source). ---
-      # Store SIGNPATH_API_TOKEN as a secret and SIGNPATH_ORG_ID as a variable, then uncomment.
-      # - name: Sign installers with SignPath
-      #   if: ${{ vars.SIGNPATH_ORG_ID != '' }}
-      #   uses: signpath/github-action-submit-signing-request@v1
-      #   with:
-      #     api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-      #     organization-id: ${{ vars.SIGNPATH_ORG_ID }}
-      #     project-slug: tcursor
-      #     signing-policy-slug: release-signing
-      #     github-artifact-id: ${{ steps.artifacts.outputs.artifact-id }}
-      #     wait-for-completion: true
-      #     output-artifact-directory: signed
+      # The Rust target dir is C:/tct (src-tauri/.cargo/config.toml keeps whisper's shader
+      # build under the Windows path limit), so the bundles are there, not under src-tauri/target.
+      - name: Collect installers and checksums
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item setup/dist/TCursorSetup.exe out/
+          Copy-Item C:/tct/release/bundle/nsis/*-setup.exe out/
+          Copy-Item C:/tct/release/bundle/msi/*.msi out/
+          Get-ChildItem out -File | ForEach-Object {
+            "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
+          } | Set-Content out/SHA256SUMS.txt
+          Get-Content out/SHA256SUMS.txt
 
       - name: Upload build artifacts
         id: artifacts
         uses: actions/upload-artifact@v4
         with:
           name: tcursor-installers
-          path: |
-            setup/dist/TCursorSetup.exe
-            src-tauri/target/release/bundle/nsis/*-setup.exe
-            src-tauri/target/release/bundle/msi/*.msi
+          path: out/*
+          if-no-files-found: error
 
-      - name: Publish GitHub Release
+      # Code signing: switched on by setting the repository VARIABLE SIGNPATH_ORG_ID and the
+      # SECRET SIGNPATH_API_TOKEN after SignPath Foundation approves the project
+      # (src-tauri/installer/SIGNING.md). Until then this step is skipped and the release is unsigned.
+      - name: Sign installers with SignPath
+        if: ${{ vars.SIGNPATH_ORG_ID != '' }}
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORG_ID }}
+          project-slug: tcursor
+          signing-policy-slug: release-signing
+          github-artifact-id: ${{ steps.artifacts.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
+
+      - name: Prefer the signed installers when there are any
+        if: ${{ vars.SIGNPATH_ORG_ID != '' }}
+        shell: pwsh
+        run: |
+          Copy-Item signed/* out/ -Force
+          Get-ChildItem out -File -Exclude SHA256SUMS.txt | ForEach-Object {
+            "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
+          } | Set-Content out/SHA256SUMS.txt
+
+      - name: Draft the GitHub release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            setup/dist/TCursorSetup.exe
-            src-tauri/target/release/bundle/nsis/*-setup.exe
-            src-tauri/target/release/bundle/msi/*.msi
+          draft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          files: out/*

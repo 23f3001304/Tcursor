@@ -71,8 +71,8 @@ export const clickTrack = (folder: string) => invoke<ClickSample[]>("click_track
 
 export const previewBg = (folder: string) => invoke<string>("preview_bg", { folder });
 
-export const previewFrame = (folder: string, timeMs: number) =>
-  invoke<string>("preview_frame", { folder, timeMs });
+export const previewFrame = (folder: string, outMs: number) =>
+  invoke<string>("preview_frame", { folder, outMs });
 
 export interface GradientStops {
   from: [number, number, number];

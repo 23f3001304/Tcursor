@@ -181,3 +181,11 @@ Steps 2 and 3 are one expression in the code, because exposure and the channel g
 - `the_identity_grade_resolves_to_no_parameters_at_all` - the default and preset None resolve to `None`; a bent knob on None does not.
 - `picking_a_preset_seeds_the_three_stored_numbers_from_its_row` - four spot checks of `seed_of` against spec 3.2's table.
 - `the_stored_numbers_win_over_the_preset_row` - a Noir with all three stored numbers bent keeps Noir's saturation of zero.
+
+## gradedraw
+
+```rust
+pub mod gradedraw;
+```
+
+The group's one submodule, and the only thing in the tree that runs `apply_px` over a whole buffer: `draw_grade(out, ow, oh, params)`, the CPU path's per-pixel loop over a BGRA frame, called from `fxdraw::CpuFx::apply` as the second of its six stages. It is a leaf - no other module declares one here, which is why this file is a flat list of constants and functions rather than the overview page `mask/mod.md` is. See `grade/gradedraw.md`.

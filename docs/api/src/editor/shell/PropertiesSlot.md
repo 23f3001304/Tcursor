@@ -14,7 +14,8 @@ export type SelectedClip =
   | { kind: "cut"; cut: Cut }
   | { kind: "speed"; speed: Speed }
   | { kind: "caption"; caption: Caption }
-  | { kind: "text"; text: TextItem };
+  | { kind: "text"; text: TextItem }
+  | { kind: "clip"; clip: Clip };
 ```
 
 What one selection resolves to: the lane it belongs to, plus the clip itself, already typed. The
@@ -29,6 +30,10 @@ pass wants the Text lane's own orchid in the inspector too, `"text"` joins `Insp
 share the FX lane and its accent. They are two members here because they open two different
 inspectors, which is the one thing about them that genuinely differs.
 
+`"clip"` (Batch 4) is the last member and the last rung `selectedClip` tries. A clip's own id is
+`cl0`, `cl1`, ... - the `cl` prefix is what keeps it from ever colliding with a cut's `c0`, `c1`,
+... even though both are single letters away from each other and both read off the same document.
+
 ## selectedClip
 
 ```ts
@@ -36,11 +41,18 @@ export function selectedClip(doc: EditDoc, sel: string | null): SelectedClip | n
 ```
 
 The selection-to-inspector ladder, as a pure function: zoom / effect / layout segment / camera move
-/ cut / speed span / caption / text item, in that order, by id. The effect rung splits on `isMask`: one
+/ cut / speed span / caption / text item / clip, in that order, by id. The effect rung splits on `isMask`: one
 `doc.effects.find` and then `isMask(effect) ? { kind: "mask" } : { kind: "fx" }`, rather than two
 searches of the same list (cut and speed from the time remap, T7; caption from M5 and text from Batch 2, both read through `?.` because a doc fetched before Rust's serde default has been through it may carry no such key at all). `null` for no
 selection, for an empty string, and for a **stale** id that matches nothing - so deleting the
 selected clip reads as "nothing is selected" rather than as "an inspector that failed to load".
+
+**Clip is the last rung, on purpose (Batch 4).** `doc.clips.find` runs only after every other lane
+has said no, so a `cl0`-style id is never mistaken for anything else and nothing above it pays for
+a list it does not need to search. The order does not depend on the `cl`/`c` prefixes not
+colliding - a `sel` of `"c0"` matches the cut `find` first regardless, several rungs before the
+clip one runs - but the prefixes are still kept apart so a reader scanning a raw id can tell the
+two lanes apart on sight.
 
 **This is also the sidebar's existence test.** `ClassicShell` mounts the properties aside exactly
 while this returns non-null and unmounts it otherwise, and this file renders exactly what it

@@ -8,6 +8,8 @@ const GROUPS: { name: string; keys: { keys: string; label: string }[] }[] = [
       { keys: "Space", label: "Play / Pause" },
       { keys: "Z", label: "Add zoom" },
       { keys: "S", label: "Add spotlight" },
+      { keys: "B", label: "Split at the playhead" },
+      { keys: "T", label: "Add text" },
       { keys: "Shift+drag", label: "Choose a range on the ruler" },
       { keys: "Del", label: "Remove selected" },
       { keys: "Esc", label: "Deselect" },

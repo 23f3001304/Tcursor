@@ -1,9 +1,31 @@
 import { useCallback, type RefObject } from "react";
-import type { CameraMove, EditDoc, EditOp, MaskKind, TextKind } from "../../../shared/edit";
+import type { CameraMove, Clip, EditDoc, EditOp, MaskKind, TextKind } from "../../../shared/edit";
+
+function addedSince<T extends { id: string }>(before: T[], after: T[]): T[] {
+  const beforeIds = new Set(before.map((x) => x.id));
+  return after.filter((x) => !beforeIds.has(x.id));
+}
 
 export function pickAddedCameraMoveId(before: CameraMove[], after: CameraMove[]): string | null {
-  const beforeIds = new Set(before.map((m) => m.id));
-  return after.find((m) => !beforeIds.has(m.id))?.id ?? null;
+  return addedSince(before, after)[0]?.id ?? null;
+}
+
+export function pickSplitClipId(before: Clip[], after: Clip[], atMs: number): string | null {
+  const created = addedSince(before, after);
+  if (created.length <= 1) return created[0]?.id ?? null;
+  return (created.find((c) => c.src_in_ms === atMs) ?? created[created.length - 1]).id;
+}
+
+export async function runSplitAt(
+  applyOp: (op: EditOp) => Promise<EditDoc | null>,
+  atMs: number,
+  clipsBefore: Clip[],
+  setSel: (id: string | null) => void,
+): Promise<void> {
+  const at_ms = Math.round(atMs);
+  const d = await applyOp({ op: "split_at", at_ms });
+  const id = d && pickSplitClipId(clipsBefore, d.clips, at_ms);
+  if (id) setSel(id);
 }
 
 export function useTimelineActions(
@@ -67,5 +89,9 @@ export function useTimelineActions(
     },
     [applyOp, timeMsRef, setSel, setPlaying],
   );
-  return { addZoom, addSpotlight, addMask, addCameraMove, addText, zoomAt };
+  const splitAt = useCallback(
+    () => runSplitAt(applyOp, timeMsRef.current, docRef.current?.clips ?? [], setSel),
+    [applyOp, timeMsRef, docRef, setSel],
+  );
+  return { addZoom, addSpotlight, addMask, addCameraMove, addText, zoomAt, splitAt };
 }

@@ -75,7 +75,9 @@ Returns the box to draw and the grip handler. `box` is `maskDraws` run over the 
 
 **One `update_effect` on release, not one per move.** The drag is local state until `pointerup`, so it is ONE undo step and one document write rather than one per frame of the drag. `pastDragThreshold` gates the commit, so a click that merely selects the box writes nothing at all.
 
-**The identity camera is deliberate.** The hook is passed `{ cx: 0.5, cy: 0.5, scale: 1 }` rather than the live camera, because the stage's canvas ALREADY shows the camera's crop; applying the camera a second time here would double it and the box would drift away from the mask under any zoom. If the owner's look pass finds the box lagging the picture during a live zoom, the fix is to pass `camAt(trackRef.current, tOut)` here and change nothing else.
+**The `layout` and `cam` arguments are the PAINTER's, not the props'.** `useStageMask` resolves them through `maskFrameAt`, the same `camAt` + `layoutAt` + `frameCamLayout` composition `drawCompositeFrame` runs before its own `maskDraws` call. Passing anything else makes the box a second projection that has to be kept in step with the first by hand.
+
+*This page used to argue the opposite* - that an identity camera was deliberate because "the canvas already shows the camera's crop". It does not: `maskDraws` takes the mask rect in SOURCE fractions and `fxFrameGeometry` uses `cam.scale`/`cam.cx`/`cam.cy` to derive the crop it maps them through, exactly as the painter's call does. With an identity camera the box was out by the live zoom factor, and so was the drag, because `onHandleDown` reads its pixels-per-fraction out of the same geometry: the box tracked the pointer correctly in its own wrong space while the blur moved by the zoom.
 
 ### Used by
 

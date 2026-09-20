@@ -86,6 +86,7 @@ export function buildShellProps(a: {
     ...cb,
     ...arrange,
     ...timeline,
+    onSplit: () => void timeline.splitAt(),
     ...trim,
     aiError: ai.error,
     aiRun: ai.aiRun,

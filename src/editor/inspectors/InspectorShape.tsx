@@ -11,7 +11,7 @@ export const secText = (ms: number) => `${(Math.max(0, ms) / 1000).toFixed(2)}s`
 
 export const spanRange = (startMs: number, endMs: number) => `${secText(startMs)} to ${secText(endMs)}`;
 
-export type InspectorKind = "zoom" | "fx" | "layout" | "cam" | "cut" | "speed" | "caption";
+export type InspectorKind = "zoom" | "fx" | "layout" | "cam" | "cut" | "speed" | "caption" | "clip";
 
 export function InspectorShell({ kind, children }: { kind: InspectorKind; children: ReactNode }) {
   return <div className={`e-panel e-insp e-insp-${kind}`}>{children}</div>;

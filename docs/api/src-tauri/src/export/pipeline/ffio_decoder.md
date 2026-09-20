@@ -106,6 +106,8 @@ fn decode_args(video: &Path, rate: f64, input_rate: bool, seek_ms: Option<u64>, 
 
 Pure builder for `RawDecoder::spawn`'s ffmpeg arg list - no process spawn, so the `-r`/`-vf`/`-pix_fmt` selection is unit-testable directly. Mirrors the exact arg order the command used to be built inline: `-v error -hwaccel auto`, optional `-ss seek_ms/1000.0`, optional input `-r rate` (`input_rate == true`), `-i video`, optional output `-r rate` (`input_rate == false`), `-sws_flags fast_bilinear`, then one `-vf` built from up to two parts joined by a comma: `crop=w:h:0:0` first when `crop` is set, then either `scale=w:h:flags=fast_bilinear` (`target_dims`) or `scale=W:H:force_original_aspect_ratio=increase,crop=W:H` (`cover_scale`); no `-vf` at all when none of the three is set. Then `-f rawvideo -pix_fmt <pix_fmt>`, `-` (stdout). NOTE: `flags` is a `scale` option, NOT a `crop` option - putting it on `crop` makes newer ffmpeg reject the whole filtergraph ("Option not found"), which silently zeroes the webcam decode and drops the camera from every export; the global `-sws_flags fast_bilinear` already covers the scale.
 
+`-ss` lands BEFORE `-i`, which is what makes it an accurate seek that also resets the output timestamps, and it lands there whatever `input_rate` says, so a seeked decode at an OUTPUT rate reads `-ss t -i video -r rate`: ffmpeg drops everything before `t` and then resamples what is left onto the rate grid, so frame `n` off the pipe is the source frame `n` ticks after `t`. A `None` emits nothing at all, which is a different command from `-ss 0.0000` and the one the export's un-seeked screen decode has always issued. The caller is responsible for choosing a `t` the grid agrees with: `ScreenPipe::spawn`'s per-clip callers quantise it to the output frame period (`first_k * 1000 / out_fps`, `mod.md`) so the seek lands exactly on the frame the plan asks for rather than between two of them.
+
 ### Inputs
 
 Same as `RawDecoder::spawn` minus `frame_bytes` (that field is stored on `RawDecoder`, not needed to build the ffmpeg args).
@@ -122,6 +124,7 @@ Same as `RawDecoder::spawn` minus `frame_bytes` (that field is stored on `RawDec
 - `cover_scale_emits_the_boxs_own_w_h` - a non-square box (`Some((448, 252))`) emits `scale=448:252:force_original_aspect_ratio=increase,crop=448:252`. The box itself now comes from `render::meta::webcam_box` (the SOURCE video's aspect, one box for the whole export) rather than from any one panel; per-panel framing happens in the compositors.
 - `cover_scale_of_equal_dims_is_the_old_square_filter` - `Some((420, 420))` emits the byte-identical filter the square-only version did.
 - `crop_is_exact_and_comes_before_any_scale` - `crop: Some((1696, 954))` alone emits `crop=1696:954:0:0`; with `target_dims` too the crop comes first (`crop=1696:954:0:0,scale=848:477:flags=fast_bilinear`); with nothing set there is no `-vf`.
+- `a_seek_goes_in_before_the_input_and_nothing_else_moves` - the screen decode's own shape is pinned as a whole argv, and `seek_ms: Some(4000)` splices `-ss 4.0000` in at index 4, between `-hwaccel auto` and `-i`, leaving every other argument where it was. The pin is what a per-clip respawn rests on, since a `-ss` that drifted after `-i` would stop being an accurate seek.
 
 ## RawDecoder::read_frame
 

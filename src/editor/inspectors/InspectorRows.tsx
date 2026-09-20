@@ -12,12 +12,14 @@ export function TimingRow({
   startMs,
   endMs,
   durMs,
+  minSpanMs = 0,
   onStart,
   onEnd,
 }: {
   startMs: number;
   endMs: number;
   durMs: number;
+  minSpanMs?: number;
   onStart: (ms: number) => void;
   onEnd: (ms: number) => void;
 }) {
@@ -27,7 +29,7 @@ export function TimingRow({
         <span className="e-fl">Start</span>
         <NumberField
           min={0}
-          max={secOf(endMs)}
+          max={secOf(endMs - minSpanMs)}
           value={secOf(startMs)}
           onChange={(v) => onStart(Math.round(v * 1000))}
         />
@@ -35,7 +37,7 @@ export function TimingRow({
       <label className="e-field">
         <span className="e-fl">End</span>
         <NumberField
-          min={secOf(startMs)}
+          min={secOf(startMs + minSpanMs)}
           max={secOf(durMs)}
           value={secOf(endMs)}
           onChange={(v) => onEnd(Math.round(v * 1000))}

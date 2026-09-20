@@ -6,6 +6,7 @@ import {
   IconCut,
   IconEarOff,
   IconPlayerTrackNext,
+  IconScissors,
   IconTypography,
   IconWand,
   IconX,
@@ -41,6 +42,7 @@ export function TransportTools({
   onTrimOut,
   onResetTrim,
   onAddZoom,
+  onSplit,
   onAddText,
   onAutoedit,
   aiRunning,
@@ -59,6 +61,7 @@ export function TransportTools({
   onTrimOut: () => void;
   onResetTrim: () => void;
   onAddZoom: () => void;
+  onSplit: () => void;
   onAddText: () => void;
   onAutoedit: () => void;
   aiRunning: boolean;
@@ -150,6 +153,16 @@ export function TransportTools({
       </motion.button>
       <motion.button className="e-tg" title="Add a zoom region here (Z)" onClick={onAddZoom} {...TAP_SPRING}>
         <IconZoomIn size={16} />
+      </motion.button>
+      <motion.button
+        className="e-tg"
+        disabled={locked}
+        data-action="split"
+        title="Split at the playhead (B)"
+        onClick={onSplit}
+        {...(locked ? {} : TAP_SPRING)}
+      >
+        <IconScissors size={16} />
       </motion.button>
       <motion.button
         className="e-tg"

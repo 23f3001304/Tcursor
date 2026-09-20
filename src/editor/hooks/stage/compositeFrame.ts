@@ -3,6 +3,7 @@ import { camAt } from "../../stage/camera/camera";
 import { activeCamDraft, frameCamLayout } from "../../stage/camera/frameCam";
 import { drawCursorLayer } from "../../stage/canvas/cursorLayer";
 import { drawPreview } from "../../stage/canvas/previewCanvas";
+import { clipMixAt } from "../../stage/clips/clipDissolve";
 import { gradeCanvas } from "../../stage/grade/gradePass";
 import { drawOverlays } from "../../stage/fx/overlayDraw";
 import { drawMasks } from "../../stage/mask/maskDraw";
@@ -88,6 +89,9 @@ export function drawCompositeFrame(
     cur.tiltDeg = tiltFromCam(s.tiltRef.current, cam.curx, cam.cury, aspect, dtOut, cs.tilt);
     if (!s.offscreenRef.current) s.offscreenRef.current = document.createElement("canvas");
     if (!s.layerRef.current) s.layerRef.current = document.createElement("canvas");
+    const cm = clipMixAt(r.dissolvesRef.current, tOut, r.motionEasingRef.current);
+    const b = r.screenBRef.current;
+    const mix = cm && b ? { video: b, alpha: cm.alpha } : null;
     const geom = drawPreview(
       ctx,
       c.width,
@@ -101,6 +105,7 @@ export function drawCompositeFrame(
       s.offscreenRef.current,
       s.layerRef.current,
       tOut,
+      mix,
     );
     drawMasks(
       ctx,
@@ -131,7 +136,7 @@ export function drawCompositeFrame(
     }
     drawOverlays(ctx, c, r, s, t, tOut, frameLayout, cam);
     const ex = r.exactRef.current;
-    if (!play && ex && ex.key === exactKey(t, r.editGenRef.current))
+    if (!play && ex && ex.key === exactKey(tOut, r.editGenRef.current))
       ctx.drawImage(ex.img, 0, 0, c.width, c.height);
   } catch (e) {
     if (import.meta.env.DEV) console.error("drawPreview", e);

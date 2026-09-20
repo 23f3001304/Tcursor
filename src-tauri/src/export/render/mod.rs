@@ -52,6 +52,7 @@ pub struct FrameRenderer {
     events_ms: u64,
     video_start: u64,
     map: crate::export::remap::TimeMap,
+    clip_mix: clipmix::ClipMixTrack,
     full_dur_ms: u32,
     grade: Option<crate::export::grade::GradeParams>,
 }
@@ -189,6 +190,7 @@ impl FrameRenderer {
                 events_ms,
                 video_start,
                 map: es.map,
+                clip_mix: es.clip_mix,
                 full_dur_ms,
                 grade: es.grade,
             },
@@ -203,6 +205,7 @@ mod fx_step;
 mod step;
 
 pub mod bg;
+pub mod clipmix;
 pub mod fromedit;
 pub mod render_edit;
 

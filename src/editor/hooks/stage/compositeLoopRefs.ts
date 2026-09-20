@@ -16,6 +16,7 @@ import type {
 import type { Caption, CameraMove, EffectRegion, LayoutSeg, TextItem, Zoom } from "../../../shared/edit";
 import type { CamPose } from "../../stage/camera/cameraMoves";
 import type { StageBgState } from "../../stage/canvas/stageBg";
+import type { ClipDissolve } from "../../stage/clips/clipDissolve";
 import type { SpotlightSimState } from "../../stage/fx/spotlightPreview";
 import type { TimeMap } from "../../../shared/math/remap";
 import type { ExactFrame } from "./useExactFrame";
@@ -23,12 +24,14 @@ import type { CursorSpritesState } from "./useCursorSprites";
 
 export interface CompositeLoopRefs {
   screenRef: RefObject<HTMLVideoElement | null>;
+  screenBRef: RefObject<HTMLVideoElement | null>;
   webcamRef: RefObject<HTMLVideoElement | null>;
   audioRef: RefObject<HTMLAudioElement | null>;
   canvasRef: RefObject<HTMLCanvasElement | null>;
   playRef: RefObject<boolean>;
   timeRef: RefObject<number>;
   onTimeRef: RefObject<(ms: number) => void>;
+  onSeekRef: RefObject<(ms: number) => void>;
   trackRef: RefObject<CamSample[]>;
   layoutRef: RefObject<PreviewLayout | null>;
   layoutPresetsRef: RefObject<LayoutPresets | null>;
@@ -54,6 +57,8 @@ export interface CompositeLoopRefs {
   bgRef: RefObject<StageBgState | null>;
   spotSimRef: RefObject<SpotlightSimState>;
   mapRef: RefObject<TimeMap>;
+  dissolvesRef: RefObject<ClipDissolve[]>;
+  motionEasingRef: RefObject<string>;
   exactRef: RefObject<ExactFrame | null>;
   editGenRef: RefObject<number>;
 }

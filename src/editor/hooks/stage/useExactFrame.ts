@@ -8,8 +8,8 @@ export interface ExactFrame {
 
 export const SETTLE_MS = 160;
 
-export function exactKey(timeMs: number, editGen: number): string {
-  return `${Math.max(0, Math.round(timeMs))}|${editGen}`;
+export function exactKey(outMs: number, editGen: number): string {
+  return `${Math.max(0, Math.round(outMs))}|${editGen}`;
 }
 
 export function wantsExact(
@@ -25,14 +25,14 @@ export function wantsExact(
 export function useExactFrame({
   folder,
   playing,
-  timeMs,
+  outMs,
   draft,
   dirtyRef,
   deps,
 }: {
   folder: string;
   playing: boolean;
-  timeMs: number;
+  outMs: number;
   draft: boolean;
   dirtyRef: RefObject<boolean>;
   deps: unknown[];
@@ -44,11 +44,11 @@ export function useExactFrame({
   const exactRef = useRef<ExactFrame | null>(null);
 
   useEffect(() => {
-    const key = exactKey(timeMs, editGen);
+    const key = exactKey(outMs, editGen);
     if (!wantsExact(playing, draft, folder, key, exactRef.current)) return;
     let live = true;
     const timer = setTimeout(() => {
-      previewFrame(folder, Math.max(0, Math.round(timeMs)))
+      previewFrame(folder, Math.max(0, Math.round(outMs)))
         .then((url) => {
           if (!live) return;
           const img = new Image();
@@ -65,7 +65,7 @@ export function useExactFrame({
       live = false;
       clearTimeout(timer);
     };
-  }, [folder, playing, timeMs, draft, editGen]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [folder, playing, outMs, draft, editGen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { exactRef, editGenRef };
 }

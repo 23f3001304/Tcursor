@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { outOf } from "../../../shared/math/remap";
 import { isCutJump, playbackAction } from "../../stage/transport/playback";
+import { clipTick, needsOutClock } from "../../stage/transport/outClock";
 import { newSpotlightSimState } from "../../stage/fx/spotlightPreview";
 import { resetTilt } from "../../stage/cursor/cursorTilt";
 import type { CompositeLoopRefs } from "./compositeLoopRefs";
@@ -15,6 +16,7 @@ export function useCompositeLoop(refs: CompositeLoopRefs) {
     playRef,
     timeRef,
     onTimeRef,
+    onSeekRef,
     trailRef,
     dirtyRef,
     spotSimRef,
@@ -23,6 +25,8 @@ export function useCompositeLoop(refs: CompositeLoopRefs) {
   const lastReportRef = useRef(0);
   const lastFrameTRef = useRef(0);
   const lastOutTRef = useRef(0);
+  const outClockRef = useRef(0);
+  const lastMapRef = useRef(mapRef.current);
   const scratch = useRef(newFrameScratch()).current;
 
   useEffect(() => {
@@ -32,14 +36,21 @@ export function useCompositeLoop(refs: CompositeLoopRefs) {
         c = canvasRef.current,
         play = playRef.current;
       const map = mapRef.current;
-      const cut = sv && play ? playbackAction(map, sv.currentTime * 1000).seekTo : null;
+      const outMode = needsOutClock(map);
+      const remapped = map !== lastMapRef.current;
+      lastMapRef.current = map;
+      if (!play || !outMode || remapped)
+        outClockRef.current = outOf(map, play && sv ? sv.currentTime * 1000 : timeRef.current);
+      const step = outMode && sv && play ? clipTick(map, outClockRef.current, sv.currentTime * 1000) : null;
+      if (step) outClockRef.current = step.tOut;
+      const cut = step ? step.seekTo : sv && play ? playbackAction(map, sv.currentTime * 1000).seekTo : null;
       if (cut !== null) {
         for (const m of [sv, webcamRef.current, audioRef.current]) if (m) m.currentTime = cut / 1000;
       }
       if (sv && c && cut === null && (play || dirtyRef.current)) {
         dirtyRef.current = false;
-        const t = play ? sv.currentTime * 1000 : timeRef.current;
-        const tOut = outOf(map, t);
+        const t = step ? step.t : play ? sv.currentTime * 1000 : timeRef.current;
+        const tOut = step ? Math.round(step.tOut) : outOf(map, t);
         if (play) {
           const rate = playbackAction(map, t).rate;
           for (const m of [sv, webcamRef.current, audioRef.current])
@@ -57,7 +68,8 @@ export function useCompositeLoop(refs: CompositeLoopRefs) {
         lastFrameTRef.current = t;
         lastOutTRef.current = tOut;
         if (play) {
-          if (t < lastReportRef.current || t - lastReportRef.current >= 60) {
+          if (step?.ended) onSeekRef.current(step.t);
+          else if (t < lastReportRef.current || t - lastReportRef.current >= 60) {
             onTimeRef.current(t);
             lastReportRef.current = t;
           }

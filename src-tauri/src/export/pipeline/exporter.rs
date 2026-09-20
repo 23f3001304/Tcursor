@@ -74,6 +74,7 @@ pub fn export(
         None,
         depth,
         out_fps,
+        None,
     )?;
     let wpipe = if paths.webcam().exists() {
         Some(WebcamPipe::spawn(
@@ -106,6 +107,8 @@ pub fn export(
         wc_fail: None,
         wc_frames: 0,
         held: None,
+        clip_held: None,
+        mix_scratch: Vec::new(),
     };
 
     let map = r.time_map().clone();
@@ -113,18 +116,32 @@ pub fn export(
     if plan.is_empty() {
         return Err(anyhow!("everything is cut - there is nothing to export"));
     }
+    let spans = map.clip_spans(out_fps);
     let total_out = plan.len() as u64;
-    eprintln!("[EXPORT] Starting export for {:?} (target {}x{} @ {}FPS, total_frames={}, {} kept segment(s) of {}ms)",
-        paths.folder, out_w, out_h, out_fps, total_out, map.segments().len(), meta.video_end - meta.video_start);
+    eprintln!("[EXPORT] Starting export for {:?} (target {}x{} @ {}FPS, total_frames={}, {} kept segment(s) in {} clip(s) of {}ms)",
+        paths.folder, out_w, out_h, out_fps, total_out, map.segments().len(), spans.len(), meta.video_end - meta.video_start);
     let export_start = std::time::Instant::now();
     let clock = frame_loop::Clock {
         video_start: meta.video_start,
         out_fps,
     };
+    let dec = frame_loop::ClipDecode {
+        video: paths.video(),
+        webcam: paths.webcam().exists().then(|| paths.webcam()),
+        screen_bytes,
+        screen_crop: meta.screen_crop,
+        wc_dims,
+        wc_bytes,
+        depth,
+        sw: meta.sw,
+        sh: meta.sh,
+    };
     let (sent, timing) = frame_loop::run(
         &mut r,
         &mut pipes,
         &plan,
+        &spans,
+        &dec,
         &paths.video(),
         &clock,
         (out_w, out_h),
@@ -140,6 +157,8 @@ pub fn export(
         mut wc_fail,
         wc_frames,
         held: _,
+        clip_held: _,
+        mix_scratch: _,
     } = pipes;
     let had_webcam = wpipe.is_some();
     if let (Some(w), Some((buf, _, _))) = (wpipe.as_ref(), last_webcam) {
@@ -172,7 +191,7 @@ pub fn export(
         timing.comp,
         timing.send,
     );
-    let trim_in_q = plan[0] * 1000 / out_fps;
+    let trim_in_q = crate::export::pipeline::audio_segments::audio_origin_q(&plan, out_fps);
     let shift = |a: Option<u64>| audio_shift_ms(a, meta.video_start, trim_in_q);
     let mic_shift = shift(meta.tl.mic_ms) + meta.audio_offset_ms as i64;
     let out_dur_ms = (sent * 1000) / out_fps;

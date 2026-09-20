@@ -1,4 +1,4 @@
-import { useRef, type RefObject } from "react";
+import { useMemo, useRef, type RefObject } from "react";
 import { newSpotlightSimState, type SpotlightSimState } from "./fx/spotlightPreview";
 import { useStageInvalidation } from "./useStageInvalidation";
 import type { StageBgState } from "./canvas/stageBg";
@@ -9,12 +9,14 @@ import { useExactFrame } from "../hooks/stage/useExactFrame";
 import { useCursorSprites } from "../hooks/stage/useCursorSprites";
 import { useMediaPlayback } from "../hooks/stage/useMediaPlayback";
 import { useSyncRefs } from "../hooks/stage/useSyncRefs";
+import { clipDissolves, preseekAt } from "./clips/clipDissolve";
 import { outOf } from "../../shared/math/remap";
 import { stageCursor } from "./stageCursor";
 import type { StageProps } from "./stageProps";
 
 export interface StageElements {
   screen: RefObject<HTMLVideoElement | null>;
+  screenB: RefObject<HTMLVideoElement | null>;
   webcam: RefObject<HTMLVideoElement | null>;
   audio: RefObject<HTMLAudioElement | null>;
   canvas: RefObject<HTMLCanvasElement | null>;
@@ -25,28 +27,24 @@ export function useStageEngine(p: StageProps, el: StageElements, canvasW: number
   const dirtyRef = useRef(true);
   const { captured, plainOs, effCursor } = stageCursor(p.cursor, p.osCursorInVideo, p.cursorLayer);
   const tOut = outOf(p.map, p.timeMs);
-  const mapRef = useRef(p.map);
-  mapRef.current = p.map;
-  const {
-    playRef,
-    timeRef,
-    onTimeRef,
-    trackRef,
-    layoutRef,
-    clicksRef,
-    effectsRef,
-    clickfxRef,
-    gradeRef,
-    captionsRef,
-    textsRef,
-    capStyleRef,
-    accentRef,
-    kindsRef,
-    cursorRef,
-  } = useSyncRefs({
+  const arrange = useArrangeDrag({
+    seg: p.arrangeSeg,
+    presets: p.layoutPresets,
+    canvasRef: el.canvas,
+    canvasW,
+    canvasH,
+    dirtyRef,
+    onApply: p.onApply,
+  });
+  const arranging = p.arrangeSeg !== null;
+  const mask = useStageMask(p, canvasW, canvasH, tOut, dirtyRef, arranging);
+  const dissolves = useMemo(() => clipDissolves(p.map, p.clips), [p.map, p.clips]);
+  const preseekMs = useMemo(() => preseekAt(dissolves, p.map, tOut), [dissolves, p.map, tOut]);
+  const refs = useSyncRefs({
     playing: p.playing,
     timeMs: p.timeMs,
     onTime: p.onTime,
+    onSeek: p.onSeek,
     track: p.track,
     layout: p.layout,
     clicks: p.clicks,
@@ -59,30 +57,16 @@ export function useStageEngine(p: StageProps, el: StageElements, canvasW: number
     accent: p.accent,
     cursorKinds: plainOs ? [] : p.cursorKinds,
     cursor: effCursor,
+    layoutPresets: arrange.presets,
+    layoutSegs: p.layoutSegs,
+    cameraMoves: p.cameraMoves,
+    zooms: p.zooms,
+    zoomSettings: p.zoomSettings,
+    arranging,
+    map: p.map,
+    dissolves,
+    motionEasing: p.motionEasing,
   });
-  const arrange = useArrangeDrag({
-    seg: p.arrangeSeg,
-    presets: p.layoutPresets,
-    canvasRef: el.canvas,
-    canvasW,
-    canvasH,
-    dirtyRef,
-    onApply: p.onApply,
-  });
-  const arranging = p.arrangeSeg !== null;
-  const mask = useStageMask(p, canvasW, canvasH, tOut, dirtyRef, arranging);
-  const arrangingRef = useRef(arranging);
-  arrangingRef.current = arranging;
-  const layoutPresetsRef = useRef(arrange.presets);
-  layoutPresetsRef.current = arrange.presets;
-  const layoutSegsRef = useRef(p.layoutSegs);
-  layoutSegsRef.current = p.layoutSegs;
-  const cameraMovesRef = useRef(p.cameraMoves);
-  cameraMovesRef.current = p.cameraMoves;
-  const zoomsRef = useRef(p.zooms);
-  zoomsRef.current = p.zooms;
-  const zoomSettingsRef = useRef(p.zoomSettings);
-  zoomSettingsRef.current = p.zoomSettings;
   const trailRef = useRef<[number, number][]>([]);
   const spritesRef = useCursorSprites(p.cursorSprites, captured, () => {
     dirtyRef.current = true;
@@ -119,13 +103,14 @@ export function useStageEngine(p: StageProps, el: StageElements, canvasW: number
     effects: p.effects,
     spotSimRef,
     timeMs: tOut,
-    playRef,
+    playRef: refs.playRef,
     camDraftRef: p.camDraftRef,
     drawDeps: [p.timeMs, p.playing, ...sceneDeps],
   });
 
   useMediaPlayback({
     screenRef: el.screen,
+    screenBRef: el.screenB,
     webcamRef: el.webcam,
     audioRef: el.audio,
     playing: p.playing,
@@ -134,50 +119,31 @@ export function useStageEngine(p: StageProps, el: StageElements, canvasW: number
     volume: p.volume,
     audioSrc: p.audioSrc,
     timeMs: p.timeMs,
-    playRef,
+    preseekMs,
+    playRef: refs.playRef,
   });
   const exact = useExactFrame({
     folder: p.folder,
     playing: p.playing,
-    timeMs: p.timeMs,
+    outMs: tOut,
     draft: p.moveMode || arranging,
     dirtyRef,
     deps: [...sceneDeps, p.moveMode, p.bg],
   });
 
   useCompositeLoop({
+    ...refs,
     screenRef: el.screen,
+    screenBRef: el.screenB,
     webcamRef: el.webcam,
     audioRef: el.audio,
     canvasRef: el.canvas,
-    playRef,
-    timeRef,
-    onTimeRef,
-    trackRef,
-    layoutRef,
-    layoutPresetsRef,
-    layoutSegsRef,
-    cameraMovesRef,
-    zoomsRef,
-    zoomSettingsRef,
     dragPoseRef: p.camDraftRef,
-    arrangingRef,
-    clicksRef,
-    effectsRef,
-    clickfxRef,
-    gradeRef,
-    kindsRef,
-    cursorRef,
-    captionsRef,
-    textsRef,
-    capStyleRef,
-    accentRef,
     spritesRef,
     trailRef,
     dirtyRef,
     bgRef: bgImg,
     spotSimRef,
-    mapRef,
     exactRef: exact.exactRef,
     editGenRef: exact.editGenRef,
   });
@@ -188,11 +154,12 @@ export function useStageEngine(p: StageProps, el: StageElements, canvasW: number
     mask,
     dirtyRef,
     tOut,
-    mapRef,
-    layoutRef,
-    trackRef,
-    timeRef,
-    playRef,
-    onTimeRef,
+    wantsScreenB: dissolves.length > 0,
+    mapRef: refs.mapRef,
+    layoutRef: refs.layoutRef,
+    trackRef: refs.trackRef,
+    timeRef: refs.timeRef,
+    playRef: refs.playRef,
+    onTimeRef: refs.onTimeRef,
   };
 }

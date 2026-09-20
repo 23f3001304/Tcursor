@@ -52,6 +52,7 @@ function Harness() {
     addZoom: async () => {},
     addSpotlight: async () => {},
     addText: async () => {},
+    splitAt: async () => {},
     onOverlay: () => {},
     modalOpen: false,
     shortcutsOpen: false,

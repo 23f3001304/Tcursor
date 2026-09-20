@@ -102,7 +102,7 @@ pub fn crosses_boundary(&self, prev_out_ms: u32, out_ms: u32) -> bool
 
 Whether the OUTPUT times `prev_out_ms` and `out_ms` are separated by a splice: the segments containing them (`seg_of_out`, the first segment whose output range has not ended) are `a` and `b` with `a < b`, and some join between them is non-contiguous (`segs[i].clip_end != segs[i + 1].clip_start`). That covers a cut and a clip join in one rule; a speed-span edge or a clip join that happens to be contiguous in source time is not a boundary, and neither is a backwards step or a pair inside one segment. A trim edge is never one either: `seg_of_out` is `None` outside the mapped range, so the trim's own edges are the ends of the output, not interior joins. Replaces `crosses_cut`, which asked the same question on the recording clock.
 
-The predicate for a caller holding two OUTPUT times and no plan - Batch 4's preview loop. `FrameRenderer::walk_plan` no longer asks it: a walk along `frame_plan` holds plan indices, and `plan_boundaries` answers on those, without the rounding that lands this rule an entry late on a segment whose output length is fractional.
+The predicate for a caller holding two OUTPUT times and no plan - though none exists today on either side of the mirror. `FrameRenderer::walk_plan` doesn't ask it: a walk along `frame_plan` holds plan indices, and `plan_boundaries` answers on those, without the rounding that lands this rule an entry late on a segment whose output length is fractional. The preview's own transport doesn't ask it either: a multi-clip document steps by segment in TS's `clipTick` (`src/editor/stage/transport/outClock.ts`) and a single-clip one seeks through `playbackAction`, neither taking two output times to a boundary predicate. `crosses_boundary` is kept as the pinned definition of two output instants separated by a splice regardless; whether it stays is the owner's call.
 
 ## TimeMap::clip_out_ms
 
@@ -120,6 +120,8 @@ pub fn frame_bounds(&self, i: usize, fps: u64) -> Option<(u64, u64)>
 
 The inclusive recording-frame index range of segment `i` at `fps`. The first segment floors its start (`k = clip_start * fps / 1000`) and the last floors its end, exactly today's trim semantics; an edge that meets a cut is exact: `ceil(start)` and `ceil(end) - 1`, so precisely the frames whose time lies inside the cut are removed. `None` when the range is empty at this frame rate.
 
+Once `build` emits clips in output order (Batch 1), the edges this floors ARE the first surviving clip's start and the last surviving clip's end, not merely the trim's. That is why splitting one clip into two reproduces the unsplit plan exactly, and why a reorder always duplicates the splice frame but keeps the unsplit frame COUNT only when the take's start and end are equally aligned to a frame, both exactly on one or both off it alike: the pinned fixture (`clip_spans`, 86 and 86) has `500 ms` and `9000 ms` both land on a 10 fps frame exactly, the same take started at `517 ms` instead loses its own first frame and is one SHORTER reordered (85), and a 2507 ms take at 60 fps, aligned only at its start, has nothing to drop against the duplicated splice frame and is one LONGER reordered (152 against 151) (`clip_spans`, `docs/api/src-tauri/src/export/remap_spans.md`).
+
 ## TimeMap::frame_plan
 
 ```rust
@@ -129,6 +131,8 @@ pub fn frame_plan(&self, fps: u64) -> Vec<u64>
 For every output frame `j`, the recording frame it shows: within a segment with bounds `(k_start, k_end)` there are `floor((k_end - k_start) / factor) + 1` output frames, the `i`-th showing `k_start + floor(i * factor)`. A factor above 1 skips frames, one below 1 repeats them. The exporter walks this with `pipeline::plan_walk::PlanCursor`; `preview::render_frame` and `camera_track` walk the same plan so the preview's camera is the export's.
 
 Monotone non-decreasing for a doc with no clips (or with clips in source order), which is what lets the exporter's decoders only ever advance. A REORDERED clip list breaks that: the plan is each clip's own plan concatenated, so it steps backwards at a clip join (the two-clip fixture ends its first clip at 89 and opens its second at 5). Batch 4's per-clip decoder is what consumes a plan like that; nothing seeds a reordered doc until then.
+
+Read per clip by `clip_spans` (`remap_spans.rs`, `docs/api/src-tauri/src/export/remap_spans.md`), which groups this same sequence into one span per adjacent run of a segment's `clip`.
 
 ## TimeMap::plan_boundaries
 
@@ -140,6 +144,6 @@ The ascending `frame_plan` indices at which a segment opens that is NOT contiguo
 
 `last_end` is the `clip_end` of the last segment that PRODUCED at least one entry, not of the last segment: one with no frames at this rate (`frame_bounds` is `None`) contributes nothing and does not touch it, so the join is judged between the segments that are actually in the plan. Index 0 is never pushed (`last_end` is `None` until a segment has produced entries), so `walk_plan` needs no `j > 0` guard.
 
-Keyed on the PLAN rather than on the output clock, which is the whole difference from `crosses_boundary`. A segment whose output length is fractional puts its join between two whole output milliseconds - 0..1533 at 2x ends at 766.5 ms while `ms(23)` is 766 - so `crosses_boundary(ms(j - 1), ms(j))` fired at j = 24 where the segment's first entry is j = 23. `snap_cursor` resets the cursor smoother and its trail, so the entry it fires on IS the picture: one entry late is one visibly wrong frame.
+Keyed on the PLAN rather than on the output clock, which is the whole difference from `crosses_boundary`. A segment whose output length is fractional only puts its join between two whole output milliseconds when the next segment is NOT contiguous with it: `remap_clips_tests.rs`'s `fractional` fixture ends a 0..1533 speed span at 2x at output 766.5 ms and runs straight into the untouched rest of the clip, so the two segments still meet at clip time 1533 and `plan_boundaries(30)` is rightly empty on it. With a cut of 1533..2000 in place of that untouched rest the join stops being contiguous: the new segment's first entry lands at plan index 23, while `ms(23)` (`23 * 1000 / 30`) is 766, half a millisecond short of the true 766.5, so `crosses_boundary(ms(j - 1), ms(j))` answered false there and only fired at j = 24, one entry late. `snap_cursor` resets the cursor smoother and its trail, so the entry it fires on IS the picture: one entry late is one visibly wrong frame.
 
 A cut shorter than one frame still gets an index. A cut of 1003..1015 at 30 fps removes no plan entry at all (the plan is `0..=300`, exactly what it would be with no cut), yet the segments meet 1003 to 1015, so index 31 - the second segment's first entry - is a boundary and the cursor snaps there. That is intended: the splice is real even when no frame was dropped, and a smoother or a trail carried across it reads as the cursor sliding on its own.

@@ -49,12 +49,13 @@ impl ScreenPipe {
         target_dims: Option<(u32, u32)>,
         depth: usize,
         out_fps: u64,
+        seek_ms: Option<u64>,
     ) -> Result<ScreenPipe> {
         let dec = RawDecoder::spawn(
             video,
             out_fps as f64,
             false,
-            None,
+            seek_ms,
             crop,
             None,
             target_dims,

@@ -145,6 +145,7 @@
    so the later rule wins on an element carrying both, and a default declared after these would
    quietly repaint every lane grey. */
 .e-lanerows, .e-lanelabelrow { --lane-accent: var(--e-mut); }
+.e-lane-clips { --lane-accent: var(--e-clip); }
 .e-lane-time { --lane-accent: var(--e-speed); }
 .e-lane-zoom { --lane-accent: var(--e-zoom); }
 .e-lane-fx { --lane-accent: var(--e-fx); }
@@ -178,7 +179,7 @@
    INTO the exact same computed color instead of the stale `--e-surface` they used to reference,
    which no longer matches this pill's own fill. The pill stays --e-raised-based, a plane ABOVE the
    lane band's 5% tint, so a pill still reads as an object sitting on its lane. */
-.e-zblk, .e-fxblk, .e-layblk, .e-spdblk, .e-capblk, .e-textblk { position: absolute; top: 0; height: var(--e-row-h);
+.e-zblk, .e-fxblk, .e-layblk, .e-spdblk, .e-capblk, .e-textblk, .e-clipblk { position: absolute; top: 0; height: var(--e-row-h);
   border-radius: calc(7px * var(--e-density)); cursor: grab;
   overflow: hidden; display: flex; align-items: stretch; user-select: none; touch-action: none;
   --pill-fill: color-mix(in srgb, var(--pill-accent) 12%, var(--e-raised));
@@ -191,11 +192,11 @@
 /* The Text lane's pill. `--e-text` is the palette's one orchid, added with this lane: text sits
    between FX and Captions in the stack and had to be legible against both an amber and a blue. */
 .e-textblk { --pill-accent: var(--e-text); }
-.e-zblk.drag, .e-fxblk.drag, .e-layblk.drag, .e-spdblk.drag, .e-capblk.drag, .e-textblk.drag { cursor: grabbing;
+.e-zblk.drag, .e-fxblk.drag, .e-layblk.drag, .e-spdblk.drag, .e-capblk.drag, .e-textblk.drag, .e-clipblk.drag { cursor: grabbing;
   box-shadow: var(--e-inset-hi), var(--e-shadow-2); }
 /* Selected = an accent-tinted border (mixed into --e-line-strong, not a flat accent) + the
    popover-depth shadow - replaces the old per-lane colored outline+glow trio. */
-.e-zblk.sel, .e-fxblk.sel, .e-layblk.sel, .e-spdblk.sel, .e-capblk.sel, .e-textblk.sel { transform: translateY(-1px);
+.e-zblk.sel, .e-fxblk.sel, .e-layblk.sel, .e-spdblk.sel, .e-capblk.sel, .e-textblk.sel, .e-clipblk.sel { transform: translateY(-1px);
   --pill-fill: color-mix(in srgb, var(--pill-accent) 24%, var(--e-raised));
   border-color: color-mix(in srgb, var(--pill-accent) 35%, var(--e-line-strong));
   box-shadow: var(--e-inset-hi), var(--e-shadow-2); }
@@ -208,9 +209,9 @@
    every pill now stays at z-index auto (stack level 0, below `.e-trimdim`), exactly as it did
    before this whole fix existed; the bump only exists for the moment a user is actually about to
    grab (or is dragging) a handle, which is also the only moment it needs to win the race. */
-.e-zblk:hover, .e-fxblk:hover, .e-layblk:hover, .e-spdblk:hover, .e-capblk:hover, .e-textblk:hover,
-.e-zblk.sel, .e-fxblk.sel, .e-layblk.sel, .e-spdblk.sel, .e-capblk.sel, .e-textblk.sel,
-.e-zblk.drag, .e-fxblk.drag, .e-layblk.drag, .e-spdblk.drag, .e-capblk.drag, .e-textblk.drag { z-index: 7; }
+.e-zblk:hover, .e-fxblk:hover, .e-layblk:hover, .e-spdblk:hover, .e-capblk:hover, .e-textblk:hover, .e-clipblk:hover,
+.e-zblk.sel, .e-fxblk.sel, .e-layblk.sel, .e-spdblk.sel, .e-capblk.sel, .e-textblk.sel, .e-clipblk.sel,
+.e-zblk.drag, .e-fxblk.drag, .e-layblk.drag, .e-spdblk.drag, .e-capblk.drag, .e-textblk.drag, .e-clipblk.drag { z-index: 7; }
 /* --e-fg on the pill's own 12%-accent-over---e-raised fill: whichever accent is furthest from the
    ground it is mixed into, the fill stays within one step of --e-raised, so the label clears 12:1
    on every lane in the dark theme and 14.7:1 in the light one. */
@@ -229,7 +230,7 @@
    viewport, so it reacts as the SAME pill's live drag-resize crosses the threshold. `min-width`
    keeps a short region's hit target (drag body + both edge handles) usable even at near-zero
    duration, where the percentage width alone would shrink to a few px. */
-.e-zblk, .e-fxblk, .e-layblk, .e-spdblk, .e-capblk, .e-textblk { container-type: inline-size; min-width: 18px; }
+.e-zblk, .e-fxblk, .e-layblk, .e-spdblk, .e-capblk, .e-textblk, .e-clipblk { container-type: inline-size; min-width: 18px; }
 /* 46px, not 34: the label is a glyph plus "2.5x", about 44px, and between 34 and 44 it was drawn
    and cut in half by the block's own overflow (owner's screenshot, 2026-09-14). Whole or gone. */
 @container (max-width: 46px) { .e-zlabel { display: none; } }
@@ -291,6 +292,17 @@
    the palette was missing (`--e-speed`) so the lane reads apart from Zoom/FX/Layout at a glance. */
 .e-timerow { position: relative; height: var(--e-row-h); }
 .e-spdblk { --pill-accent: var(--e-speed); }
+/* Clips lane (ClipLane.tsx): one pill per clip, on the recording's own clock like every other
+   lane, numbered by its place in the export. The left ramp is the dissolve INTO this clip
+   (`--fin`, the same mechanism the Layout lane's transitions use); a hard cut is 0% and therefore
+   invisible. The accent is the one neutral in the palette, because a clip is the material itself
+   rather than an effect laid over it. */
+.e-cliprow { position: relative; height: var(--e-row-h); }
+.e-clipblk { --pill-accent: var(--e-clip); }
+.e-clipblk::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: var(--fin, 0%);
+  pointer-events: none; z-index: 0;
+  background: linear-gradient(to right, var(--pill-fill), rgba(0,0,0,0)); }
+.e-clipblk > * { position: relative; z-index: 1; }
 /* Cut spans (CutOverlay.tsx): the time a cut removes, hatched across the whole track stack. A
    PATTERN fill, not chrome decoration - the same exemption `.e-trimdim` takes - 45-degree 1px
    --e-dim stripes at 18% over a 40% --e-bg scrim, and no border at rest. The 1px accent edges

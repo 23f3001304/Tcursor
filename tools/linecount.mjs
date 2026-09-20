@@ -1,5 +1,6 @@
-// Reports every source file over its kind's line budget. Report only: exit 0 always.
-// Usage: node tools/linecount.mjs [--all]   (--all lists every file with its budget)
+// Reports every source file over its kind's line budget. It only reports (exit 0) unless --check
+// is given, which is what CI passes: then any file over its budget fails the run (exit 1).
+// Usage: node tools/linecount.mjs [--all] [--check]   (--all lists every file with its budget)
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
@@ -55,3 +56,4 @@ over.sort((a, b) => b.lines - a.lines);
 for (const o of over) console.log(`OVER ${String(o.lines).padStart(4)} > ${o.budget}  ${o.rel}`);
 const counts = Object.entries(totals).map(([k, n]) => `${k} ${n}`).join(", ");
 console.log(`${over.length} file(s) over budget (${counts}); exempt: ${[...EXEMPT].join(", ")}`);
+if (process.argv.includes("--check") && over.length > 0) process.exit(1);

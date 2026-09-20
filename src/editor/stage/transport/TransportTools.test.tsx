@@ -15,22 +15,26 @@ const CLICKS: ClickSample[] = [
 let ops: EditOp[] = [];
 let ranges: (Range | null)[] = [];
 let silences = 0;
+let splits = 0;
 let root: Root, container: HTMLDivElement;
 
 const click = (action: string) =>
   act(() => {
     container.querySelector<HTMLElement>(`[data-action="${action}"]`)?.click();
   });
-const mount = (range: Range | null, timeMs: number, clicks: ClickSample[]) =>
+const mount = (range: Range | null, timeMs: number, clicks: ClickSample[], opts: { locked?: boolean } = {}) =>
   act(() => {
     root.render(
       <TransportTools
-        locked={false}
+        locked={opts.locked ?? false}
         trimmed={false}
         onTrimIn={() => {}}
         onTrimOut={() => {}}
         onResetTrim={() => {}}
         onAddZoom={() => {}}
+        onSplit={() => {
+          splits += 1;
+        }}
         onAddText={() => {}}
         onAutoedit={() => {}}
         aiRunning={false}
@@ -56,6 +60,7 @@ beforeEach(() => {
   ops = [];
   ranges = [];
   silences = 0;
+  splits = 0;
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -128,5 +133,20 @@ describe("Remove silences", () => {
     expect(silences).toBe(1);
     expect(ops).toEqual([]);
     expect(ranges).toEqual([]);
+  });
+});
+
+describe("the split tool", () => {
+  it("splits at the playhead and says so", () => {
+    mount(null, 4000, []);
+    const btn = container.querySelector<HTMLButtonElement>('[data-action="split"]');
+    expect(btn?.getAttribute("title")).toBe("Split at the playhead (B)");
+    click("split");
+    expect(splits).toBe(1);
+  });
+
+  it("does not split while the editor is locked", () => {
+    mount(null, 0, [], { locked: true });
+    expect(container.querySelector('[data-action="split"]')?.hasAttribute("disabled")).toBe(true);
   });
 });

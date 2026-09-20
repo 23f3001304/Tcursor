@@ -22,6 +22,10 @@ impl FxRenderer for CpuFx {
 }
 
 #[cfg(test)]
+#[path = "fx_seam_tests.rs"]
+mod seam_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::export::fx::fx_state::{FxHit, FxRenderer, FxState, Spot};

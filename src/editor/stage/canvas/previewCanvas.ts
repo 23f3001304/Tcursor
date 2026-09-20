@@ -1,9 +1,10 @@
 import type { PreviewLayout } from "../../../shared/ipc";
 import { FULL_SRC } from "./sourceSpans";
 import { drawBackground, type StageBgState } from "./stageBg";
-import { coverDraw, paintPanel, roundRect } from "./previewDraw";
+import { coverDraw, drawScreenPanel, paintPanel, roundRect, type ScreenMix } from "./previewDraw";
 
-export { coverDraw, paintPanel, roundRect };
+export { coverDraw, drawScreenPanel, paintPanel, roundRect };
+export type { ScreenMix };
 
 export interface DrawCam {
   scale: number;
@@ -34,6 +35,7 @@ export function drawPreview(
   offscreen: HTMLCanvasElement,
   layer: HTMLCanvasElement,
   bgTimeMs?: number,
+  mix: ScreenMix | null = null,
 ): PreviewGeom | null {
   if (offscreen.width !== w) offscreen.width = w;
   if (offscreen.height !== h) offscreen.height = h;
@@ -58,27 +60,11 @@ export function drawPreview(
     r = Math.min(dw, dh) * 0.018 + 6;
   }
 
-  const vw = screen.videoWidth,
-    vh = screen.videoHeight;
   const screenAlpha = layout?.screenAlpha ?? 1;
   const src = layout?.src ?? FULL_SRC;
-  if (vw > 0 && vh > 0 && screenAlpha >= 0.004) {
-    paintPanel(octx, screenAlpha, layer, w, h, (c) => {
-      c.save();
-      c.shadowColor = "rgba(0,0,0,.5)";
-      c.shadowBlur = 34;
-      c.shadowOffsetY = 14;
-      roundRect(c, dx, dy, dw, dh, r);
-      c.fillStyle = "#000";
-      c.fill();
-      c.restore();
-      c.save();
-      roundRect(c, dx, dy, dw, dh, r);
-      c.clip();
-      c.drawImage(screen, src[0] * vw, src[1] * vh, src[2] * vw, src[3] * vh, dx, dy, dw, dh);
-      c.restore();
-    });
-  }
+  drawScreenPanel(octx, layer, { dx, dy, dw, dh, r, w, h, alpha: screenAlpha, src }, screen, mix);
+  const vw = screen.videoWidth,
+    vh = screen.videoHeight;
 
   const scale = Math.max(cam.scale, 0.01);
   const cw = Math.max(1, w / scale),

@@ -13,6 +13,7 @@ export const Timeline: React.MemoExoticComponent<(props: {
   hasWebcam: boolean;
   layoutPresets: LayoutPresets | null;
   range: Range | null; setRange: (r: Range | null) => void;
+  map: TimeMap;
 }) => JSX.Element>
 ```
 
@@ -33,6 +34,7 @@ Renders the ruler, filmstrip, labeled track stack, and spring-animated playhead.
 - `hasWebcam: boolean` - `hasWebcamSignal(layout)` (`../model/editorData.ts`), passed straight through to `CameraLane` (see its own doc) to gate the empty-lane hint off for a webcam-less recording.
 - `range: [number, number] | null` / `setRange` (time remap, T7) - the ruler's Shift+drag selection in clip ms, owned by `Editor.tsx` and threaded through `SlotProps`. The timeline only DRAWS it (`RangeOverlay`) and lets the ruler edit it; the transport's Cut and Speed are what act on it. See `useRangeSelect.md`.
 - `layoutPresets: LayoutPresets | null` (T34 L4) - the Layout lane's thumbnail source: `useLayoutLaneRegions` (`LayoutLane.tsx`) resolves each layout pill's own panels through it (`resolvedPanelsFor`, T34 L2) so its pill can draw a small schematic of what it actually looks like, not just its preset's name. `null` until `useEditorData`'s first `previewLayouts` fetch lands - every pill falls back to a plain aspect-ratio icon until then (`LayoutLane.tsx`).
+- `map: TimeMap` (Batch 4 T8) - forwarded straight into `useTimelineLanes`, which is the only thing that reads it (the Clips lane's `clipOutMs` label). `ClassicShell.tsx` passes the same `p.map` `Transport` already reads for its output-time readout, so this file adds no new source of truth, only a new consumer of the existing one.
 
 ### Behavior
 

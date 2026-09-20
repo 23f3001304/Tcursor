@@ -1,20 +1,24 @@
 use super::*;
+use crate::export::fx::fx_masks::MaskDraw;
 use crate::export::fx::fx_state::{FxHit, Spot};
 use crate::export::fx::fxdraw::CpuFx;
+use crate::export::grade::{params_of, seed_of, GradeParams};
+use crate::settings::grade::{GradePreset, GradeSettings};
 use crate::settings::model::{ClickFxStyle, SpotlightMode};
 
-fn both(st: &FxState, w: u32, h: u32) -> Option<(Vec<u8>, Vec<u8>)> {
+fn both_on(base: &[u8], st: &FxState, w: u32, h: u32) -> Option<(Vec<u8>, Vec<u8>)> {
     let Some(g) = GpuFx::new(w, h) else {
         eprintln!("fx_gpu_tests: SKIPPED - no wgpu adapter on this machine");
         return None;
     };
-    let (mut a, mut b) = (
-        vec![90u8; (w * h * 4) as usize],
-        vec![90u8; (w * h * 4) as usize],
-    );
+    let (mut a, mut b) = (base.to_vec(), base.to_vec());
     g.apply(&mut a, w, h, st);
     CpuFx.apply(&mut b, w, h, st);
     Some((a, b))
+}
+
+fn both(st: &FxState, w: u32, h: u32) -> Option<(Vec<u8>, Vec<u8>)> {
+    both_on(&vec![90u8; (w * h * 4) as usize], st, w, h)
 }
 
 fn added(base: u8, buf: &[u8]) -> i64 {
@@ -157,4 +161,74 @@ fn spotlight_dims_corner_more_than_center() {
         out[0] < out[((32 * w + 32) * 4) as usize],
         "GPU spotlight: corner dimmer than center"
     );
+}
+
+fn ramp(w: u32, h: u32) -> Vec<u8> {
+    let mut v = vec![255u8; (w * h * 4) as usize];
+    for y in 0..h {
+        for x in 0..w {
+            let i = ((y * w + x) * 4) as usize;
+            v[i] = (x * 2) as u8;
+            v[i + 1] = (y * 2) as u8;
+            v[i + 2] = (x + y) as u8;
+        }
+    }
+    v
+}
+
+fn seeded(p: GradePreset) -> GradeParams {
+    let (exposure, contrast, vignette) = seed_of(p);
+    params_of(&GradeSettings {
+        preset: p,
+        exposure,
+        contrast,
+        vignette,
+    })
+    .unwrap()
+}
+
+fn centred(kind: u32, amount_px: f32) -> MaskDraw {
+    MaskDraw {
+        mn: [32.0, 32.0],
+        mx: [96.0, 96.0],
+        r: 0.0,
+        feather_px: 1.0,
+        amount_px,
+        dim: 0.6,
+        kind,
+        alpha: 1.0,
+    }
+}
+
+#[test]
+fn the_mask_and_grade_stages_agree_between_the_gpu_and_the_cpu() {
+    let (w, h) = (128u32, 128u32);
+    for (kind, amount_px, preset) in [
+        (3u32, 0.0f32, GradePreset::Noir),
+        (2, 9.0, GradePreset::Cinematic),
+    ] {
+        let st = FxState {
+            masks: vec![centred(kind, amount_px)],
+            grade: Some(seeded(preset)),
+            ..Default::default()
+        };
+        let Some((gpu, cpu)) = both_on(&ramp(w, h), &st, w, h) else {
+            return;
+        };
+        let (mut worst, mut at) = (0i32, 0usize);
+        for i in (0..gpu.len()).filter(|i| i % 4 != 3) {
+            let d = (gpu[i] as i32 - cpu[i] as i32).abs();
+            if d > worst {
+                (worst, at) = (d, i);
+            }
+        }
+        assert!(
+            worst <= 3,
+            "mask kind {kind} under {preset:?}: {worst} of 255 apart at ({}, {}), gpu {} vs cpu {}",
+            (at / 4) as u32 % w,
+            (at / 4) as u32 / w,
+            gpu[at],
+            cpu[at]
+        );
+    }
 }

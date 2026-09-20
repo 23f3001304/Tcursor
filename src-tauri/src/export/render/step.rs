@@ -61,6 +61,7 @@ impl FrameRenderer {
                 target_scale,
             );
         }
+        let clip_mix = self.clip_mix.at(out_t);
         FramePose {
             ev_t,
             out_t,
@@ -69,6 +70,7 @@ impl FrameRenderer {
             cam,
             mix,
             hold,
+            clip_mix,
         }
     }
 
@@ -82,6 +84,7 @@ impl FrameRenderer {
         mut f: impl FnMut(&mut FrameRenderer, usize, u64, &FramePose) -> bool,
     ) -> Option<FramePose> {
         let snaps = self.map.plan_boundaries(fps);
+        self.clip_mix.resolve(&self.map, fps);
         let ms = |k: u64| k * 1000 / fps;
         for k in 0..plan.first().copied().unwrap_or(0) {
             self.step_camera(video_start + ms(k), 0, dt_ms);

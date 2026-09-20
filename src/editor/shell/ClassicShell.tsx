@@ -118,6 +118,7 @@ export function ClassicShell(p: ShellProps) {
         onPlay={p.onPlayToggle}
         onSeek={p.onSeek}
         onAddZoom={p.addZoom}
+        onSplit={p.onSplit}
         onAddText={() => p.addText("title")}
         onAutoedit={p.onRun}
         aiRunning={p.running}
@@ -156,6 +157,7 @@ export function ClassicShell(p: ShellProps) {
         layoutPresets={p.layoutPresets}
         range={p.range}
         setRange={p.setRange}
+        map={p.map}
       />
     </>
   );

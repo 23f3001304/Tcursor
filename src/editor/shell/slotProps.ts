@@ -108,6 +108,7 @@ export interface SlotProps {
   onTrimOut: () => void;
   onResetTrim: () => void;
   onDetectSilences: () => void;
+  onSplit: () => void;
 }
 
 export type ShellProps = Omit<SlotProps, "onTab"> & {

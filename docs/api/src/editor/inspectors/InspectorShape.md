@@ -89,8 +89,10 @@ where every other derived number in a panel already lives.
 ## InspectorKind
 
 ```ts
-export type InspectorKind = "zoom" | "fx" | "layout" | "cam" | "cut" | "speed" | "caption";
+export type InspectorKind = "zoom" | "fx" | "layout" | "cam" | "cut" | "speed" | "caption" | "clip";
 ```
+
+`"clip"` is Batch 4's append (`ClipInspector.md`): a plain grey accent (`--e-clip`, the Clips lane's own token, the palette's one neutral - a clip is the recording's own material, not an effect over it). `"text"` is the one `SelectedClip` kind that is NOT a member here; see `PropertiesSlot.md`.
 
 ## InspectorShell
 
@@ -100,7 +102,7 @@ export function InspectorShell({ kind, children }: { kind: InspectorKind; childr
 
 The panel root: `.e-panel .e-insp .e-insp-<kind>`. The kind class carries **one** thing, the
 `--insp-accent` custom property, set to that clip's own timeline lane color (`--e-zoom`, `--e-fx`,
-`--e-layout`, `--e-cam`, `--e-speed`; a cut has no lane color and takes `--e-mut`, and a caption takes `--e-wave`, the editor's one audio hue). Every accented
+`--e-layout`, `--e-cam`, `--e-speed`, `--e-clip`; a cut has no lane color and takes `--e-mut`, and a caption takes `--e-wave`, the editor's one audio hue). Every accented
 thing inside - the header dot, the segmented row's tick, the aim toggle's active tint, the curve
 handles - reads that one variable, so the panel and the pill it edits agree and no inspector has
 two accents.

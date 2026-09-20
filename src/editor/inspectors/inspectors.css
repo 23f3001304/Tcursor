@@ -20,6 +20,7 @@
 .e-insp-cut { --insp-accent: var(--e-mut); }
 /* Captions take the wave hue, the editor's one audio colour - a caption is what the audio said. */
 .e-insp-caption { --insp-accent: var(--e-wave); }
+.e-insp-clip { --insp-accent: var(--e-clip); }
 
 /* ---- Header ---------------------------------------------------------------------------------
    Row one is the identity: the lane dot, the name, then two ghost icons. Row two is the span, in

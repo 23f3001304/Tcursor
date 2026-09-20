@@ -105,8 +105,3 @@ export function gradeCanvas(ctx: CanvasRenderingContext2D, c: HTMLCanvasElement,
   ctx.restore();
   return true;
 }
-
-export function resetGradePassForTests() {
-  held = null;
-  failed = false;
-}

@@ -20,6 +20,8 @@ export function ShellStage({ p }: { p: ShellProps }) {
         clicks={p.clicks}
         bg={p.bg}
         map={p.map}
+        clips={p.doc.clips}
+        motionEasing={p.doc.settings.motion.easing}
         cursorSprites={p.cursorSpr}
         cursorKinds={p.cursorKnd}
         cursorLayer={p.cursorLyr}
@@ -45,6 +47,7 @@ export function ShellStage({ p }: { p: ShellProps }) {
         outline={p.stageOutline}
         camDraftRef={p.camDraftRef}
         onTime={p.onTime}
+        onSeek={p.onSeek}
         onDuration={p.onDuration}
         onZoomAt={p.zoomAt}
         onAimAt={p.aimAt}

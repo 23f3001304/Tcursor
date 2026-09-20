@@ -20,6 +20,7 @@ const DEFAULT_CANVAS: [number, number] = [1280, 720];
 
 export const Stage = memo(function Stage(p: StageProps) {
   const screen = useRef<HTMLVideoElement>(null);
+  const screenB = useRef<HTMLVideoElement>(null);
   const webcam = useRef<HTMLVideoElement>(null);
   const audio = useRef<HTMLAudioElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -33,13 +34,14 @@ export const Stage = memo(function Stage(p: StageProps) {
     mask,
     dirtyRef,
     tOut,
+    wantsScreenB,
     mapRef,
     layoutRef,
     trackRef,
     timeRef,
     playRef,
     onTimeRef,
-  } = useStageEngine(p, { screen, webcam, audio, canvas }, canvasW, canvasH);
+  } = useStageEngine(p, { screen, screenB, webcam, audio, canvas }, canvasW, canvasH);
 
   const { onCanvasClick, reticle, aimDrag, onReticleDown } = useStagePointer({
     canvasRef: canvas,
@@ -146,6 +148,8 @@ export const Stage = memo(function Stage(p: StageProps) {
         )}
         <StageMedia
           screenRef={screen}
+          screenBRef={screenB}
+          wantsScreenB={wantsScreenB}
           webcamRef={webcam}
           audioRef={audio}
           src={p.src}

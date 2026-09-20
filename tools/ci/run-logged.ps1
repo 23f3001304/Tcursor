@@ -15,8 +15,9 @@ $code = $LASTEXITCODE
 if ($code -eq 0) { exit 0 }
 
 $signal = '^\s*(error(\[E\d+\])?:|error TS\d+|CMake Error|Could NOT find|LINK : fatal|.*: fatal error |' +
-  'test .+ \.\.\. FAILED|---- .+ ----|thread .+ panicked|failures:|FAIL |AssertionError|(left|right):)'
-$lines = @(Get-Content $log)
+  'test .+ \.\.\. FAILED|---- .+ ----|thread .+ panicked|failures:|FAIL |AssertionError|(left|right):|' +
+  'Error\b|Exception:|failed to |npm error)'
+$lines = @(Get-Content $log | ForEach-Object { $_ -replace "`e\[[0-9;]*m", "" })
 $keep = [System.Collections.Generic.List[string]]::new()
 for ($i = 0; $i -lt $lines.Count -and $keep.Count -lt 60; $i++) {
   if ($lines[$i] -notmatch $signal) { continue }

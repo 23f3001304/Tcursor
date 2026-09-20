@@ -39,9 +39,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # run-logged.ps1 repeats the failing lines as an annotation on the run.
       - name: Build installers (app, NSIS, MSI, branded Setup)
         shell: pwsh
-        run: ./setup/build.ps1
+        run: ./tools/ci/run-logged.ps1 -Title "Installer build" -Command "pwsh -NoProfile -File setup/build.ps1"
 
       # The Rust target dir is C:/tct (src-tauri/.cargo/config.toml keeps whisper's shader
       # build under the Windows path limit), so the bundles are there, not under src-tauri/target.

@@ -82,6 +82,20 @@ let added: TextKind[];
 const pills = () => [...container.querySelectorAll<HTMLElement>(".e-libpill")];
 const named = (name: string) => pills().find((p) => p.querySelector(".e-libname")?.textContent === name);
 
+const NODE_FS = "node:fs";
+const fs = (await import(NODE_FS)) as { readFileSync(p: string, enc: "utf8"): string };
+const node = globalThis as unknown as { process: { cwd(): string } };
+const PANELS_CSS = fs.readFileSync(
+  `${node.process.cwd().replace(/\\/g, "/")}/src/editor/panels/panels.css`,
+  "utf8",
+);
+
+const listLayoutSelector = () => {
+  const rules = [...PANELS_CSS.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^{}]*)\}/g)];
+  const rule = rules.find((r) => r[1].includes(".e-libpill") && /position:\s*static/.test(r[2]));
+  return rule ? rule[1].trim() : "";
+};
+
 beforeEach(() => {
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -125,5 +139,12 @@ describe("EffectPills", () => {
       named("Big Stat")!.dispatchEvent(ev);
     });
     expect(setData).toHaveBeenCalledWith("text/plain", "text:stat");
+  });
+
+  it("lays every pill out in the list, whatever lane class it carries", () => {
+    const selector = listLayoutSelector();
+    expect(selector, "no rule takes .e-libpill out of the lane's absolute positioning").not.toBe("");
+    const floating = pills().filter((p) => !p.matches(selector));
+    expect(floating.map((p) => p.querySelector(".e-libname")?.textContent)).toEqual([]);
   });
 });

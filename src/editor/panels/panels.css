@@ -174,14 +174,17 @@
    The one place a panel row carries a lane colour, because these four ARE the timeline's four
    pill kinds. No border: the 3px left edge in the lane's own accent is the identity. Native HTML5
    drag rules out Motion here (EffectPills.tsx's comment), so the hover lift is a plain CSS
-   transition. The two-class selector beats the shared `.e-zblk,.e-fxblk,.e-layblk` rule. */
-.e-zblk.e-libpill, .e-fxblk.e-libpill, .e-layblk.e-libpill, .e-spdblk.e-libpill, .e-camkfpill.e-libpill {
+   transition. `.e-libgrid > .e-libpill` beats the timeline's shared one-class lane rule
+   (`position: absolute; top: 0`) whatever lane class the pill carries, so a new pill kind needs
+   no entry here. It used to name each lane class, and the Text pills, which it did not name,
+   stacked in the window's top-left corner. */
+.e-libgrid > .e-libpill {
   position: static; width: 100%; height: auto; box-sizing: border-box;
   padding: calc(9px * var(--e-density)) calc(11px * var(--e-density));
   display: flex; align-items: center; gap: 10px; cursor: grab; text-align: left; border: none;
   box-shadow: var(--e-inset-hi);
   transition: transform .14s ease, box-shadow .14s ease; }
-.e-zblk.e-libpill:hover, .e-fxblk.e-libpill:hover, .e-layblk.e-libpill:hover, .e-spdblk.e-libpill:hover, .e-camkfpill.e-libpill:hover {
+.e-libgrid > .e-libpill:hover {
   transform: translateY(-1px);
   box-shadow: var(--e-inset-hi), var(--e-shadow-1); }
 .e-libgrid { display: flex; flex-direction: column; gap: 6px; }

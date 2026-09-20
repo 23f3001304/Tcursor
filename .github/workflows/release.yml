@@ -28,6 +28,11 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # A release says what changed: no CHANGELOG.md section for the tagged version, no build.
+      - name: The changelog has a section for this version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: node tools/ci/release-notes.mjs "${{ github.ref_name }}" --check
+
       - name: Vulkan SDK (whisper.cpp builds its GPU backend with glslc; pinned by version and SHA-256)
         shell: pwsh
         run: ./tools/ci/install-vulkan-sdk.ps1
@@ -90,10 +95,21 @@ jobs:
             "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
           } | Set-Content out/SHA256SUMS.txt
 
+      # The description: what TCursor is, the version's CHANGELOG.md section, how to install
+      # (with the SmartScreen note while the build is unsigned) and the checksums of these files.
+      - name: Release notes (what changed, install help, checksums)
+        id: notes
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          SIGNED: ${{ vars.SIGNPATH_ORG_ID != '' }}
+        run: node tools/ci/release-notes.mjs "${{ github.ref_name }}" out/SHA256SUMS.txt RELEASE_NOTES.md
+
       - name: Draft the GitHub release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v3
         with:
+          name: ${{ steps.notes.outputs.title }}
+          body_path: RELEASE_NOTES.md
           draft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true

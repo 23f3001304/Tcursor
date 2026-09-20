@@ -56,6 +56,8 @@ jobs:
         run: npx prettier --check "src/**/*.{ts,tsx}"
       - name: Line budgets
         run: node tools/linecount.mjs --check
+      - name: CI tooling tests (pull request rules, release notes)
+        run: node --test tools/ci/pr-rules.test.mjs tools/ci/release-notes.test.mjs
       - name: Docs pages resolve to symbols
         run: |
           npm --prefix tools/docs-hover ci

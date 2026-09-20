@@ -83,7 +83,7 @@ Some tests pin numbers that existing projects depend on: the camera's jank finge
 
 ## Releases and code signing
 
-A maintainer tags `v<version>` on `main`. The Release workflow builds the installers from that exact commit on a clean GitHub runner and opens a draft release with their SHA-256 sums; a maintainer reviews the draft and publishes it. Nobody uploads a locally built binary. The code signing policy is in the README.
+What changed is written in `CHANGELOG.md`, under a `## <version>` heading, in the same pull request as a change users will notice or at the latest before tagging. A maintainer then tags `v<version>` on `main` with an annotated tag whose message says what the release is. The Release workflow refuses a tag whose version has no changelog section, builds the installers from that exact commit on a clean GitHub runner, and opens a draft release whose description is that section plus install help and the files' SHA-256 sums (`tools/ci/release-notes.mjs`); a maintainer reviews the draft and publishes it. A tag with a dash (`v0.2.0-rc.1`) is a pre-release and uses the section of the version it is a candidate for. Nobody uploads a locally built binary. The code signing policy is in the README.
 
 ## Reporting a problem
 

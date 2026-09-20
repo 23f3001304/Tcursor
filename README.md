@@ -10,7 +10,8 @@ muxing and proxies.
 
 Download `TCursorSetup.exe` from the [Releases](../../releases) page and run it. Every release is
 built from its tagged commit by the [Release workflow](.github/workflows/release.yml) on a clean
-GitHub runner, and ships with a `SHA256SUMS.txt` you can check the download against.
+GitHub runner, and ships with a `SHA256SUMS.txt` you can check the download against. What changed in
+each version is in [CHANGELOG.md](CHANGELOG.md), and every release's description repeats its section.
 
 > The installers are not code-signed yet, so Windows SmartScreen shows "Windows protected your PC".
 > Click **More info**, then **Run anyway**. TCursor uses the SignPath Foundation for code signing
